@@ -12,7 +12,17 @@ import { EditorState, type Extension } from '@codemirror/state';
 import type { EditorView as EditorViewType } from '@codemirror/view';
 import { EditorView, keymap, placeholder as placeholderExt } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
-import { onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue';
+
+import type { MentionCandidate, MentionTable } from '@/lib/comment-mention';
+import { isImeKeydown } from '@/lib/ime-keydown-guard';
+import {
+  mentionExtensions,
+  nameTableOf,
+  openMentionPicker as openPicker,
+  resolveMentionAutocompleteTooltipParent,
+  setMentionNames,
+} from '@/lib/comment-mention-extensions';
 
 /**
  * markdown 用の CodeMirror 6 エディタ。
@@ -37,12 +47,21 @@ const props = withDefaults(
     minHeightClass?: string;
     /** スクリーンリーダー向けのラベル。role=textbox の名前になる */
     ariaLabel?: string;
+    /**
+     * `@` で出すメンションの候補。渡した時だけメンションを扱う（印を札に描き、`@` で補完し、
+     * コピー・貼り付けで札を保つ。コメントの入力欄と同じ拡張）。省略すれば素の markdown 入力欄。
+     */
+    candidates?: readonly MentionCandidate[];
+    /** 本文に出る印の id から引ける表示情報（API の `mentions`）。`candidates` を渡した時だけ使う */
+    mentions?: MentionTable;
   }>(),
   {
     placeholder: '',
     disabled: false,
     minHeightClass: 'min-h-28',
     ariaLabel: undefined,
+    candidates: undefined,
+    mentions: () => ({}),
   },
 );
 
@@ -58,6 +77,7 @@ const host = useTemplateRef<HTMLDivElement>('host');
 const view = ref<EditorView | null>(null);
 /** 直近に自分が emit した値。v-model の往復で state を作り直さないための照合用 */
 let lastEmitted: string | null = null;
+let mentionTooltipParent: HTMLElement | null = null;
 /**
  * 破棄中フラグ。EditorView.destroy() はフォーカス中の DOM を外すため blur が飛ぶ。
  * これを素通しすると、呼び出し側が「blur = 確定」にしている場合に
@@ -76,14 +96,32 @@ const highlightStyle = HighlightStyle.define([
   { tag: tags.strong, color: 'var(--foreground)', fontWeight: '600' },
   { tag: tags.emphasis, fontStyle: 'italic' },
   { tag: tags.strikethrough, textDecoration: 'line-through' },
-  { tag: tags.link, color: 'var(--primary)', textDecoration: 'underline' },
-  { tag: tags.url, color: 'var(--primary)' },
-  { tag: tags.monospace, color: 'var(--primary)' },
+  { tag: tags.link, color: 'var(--link)', textDecoration: 'underline' },
+  { tag: tags.url, color: 'var(--link)' },
+  { tag: tags.monospace, color: 'var(--link)' },
   { tag: tags.quote, color: 'var(--muted-foreground)' },
   { tag: tags.list, color: 'var(--muted-foreground)' },
   { tag: tags.processingInstruction, color: 'var(--muted-foreground)' },
   { tag: tags.contentSeparator, color: 'var(--muted-foreground)' },
 ]);
+
+/** 印の id を札の字へ引く表。候補（選んだばかりの者）を先に、API の表で上書きする。 */
+const nameTable = computed<MentionTable>(() =>
+  nameTableOf(props.candidates ?? [], props.mentions ?? {}),
+);
+
+const CODE_NODES = new Set(['FencedCode', 'CodeBlock', 'CodeText', 'InlineCode']);
+
+/** 位置が markdown のコード（コードブロック・インラインコード）の中か。中の `<@id>` は札にしない。 */
+function inCode(state: EditorState, pos: number): boolean {
+  let node = syntaxTree(state).resolveInner(pos, 1);
+  for (;;) {
+    if (CODE_NODES.has(node.name)) return true;
+    const parent = node.parent;
+    if (!parent) return false;
+    node = parent;
+  }
+}
 
 /** 器 (Tailwind) に配色と枠を任せ、CodeMirror 側は寸法と余白だけ持つ */
 const theme = EditorView.theme({
@@ -103,6 +141,12 @@ const theme = EditorView.theme({
     backgroundColor: 'color-mix(in oklab, var(--primary) 25%, transparent)',
   },
   '&.cm-focused .cm-cursor': { borderLeftColor: 'var(--foreground)' },
+  // 候補の箱は編集器の外（body か dialog）に置くので、器の字の大きさ（text-base、md 以上は text-sm）を
+  // 引き継がない。編集器の中に置いていた時と同じ大きさを、ここで与える
+  '.cm-tooltip.cm-tooltip-autocomplete': { fontSize: '1rem', lineHeight: '1.5rem' },
+  '@media (min-width: 48rem)': {
+    '.cm-tooltip.cm-tooltip-autocomplete': { fontSize: '0.875rem', lineHeight: '1.25rem' },
+  },
 });
 
 /**
@@ -159,8 +203,20 @@ function tabIndents(view: EditorViewType): boolean {
  * その間の履歴やカーソルは捨ててよいため、機構を増やさない。
  */
 function extensions(): Extension[] {
+  if (!mentionTooltipParent) {
+    throw new Error('MarkdownEditor: mentionTooltipParent is unset');
+  }
   return [
     history(),
+    ...(props.candidates
+      ? mentionExtensions({
+          tooltipParent: mentionTooltipParent,
+          candidates: () => props.candidates ?? [],
+          names: nameTable.value,
+          disabled: () => props.disabled,
+          inCode,
+        })
+      : []),
     // Escape は呼び出し側 (編集の取り消し) に渡すため CodeMirror の既定に載せない
     keymap.of([
       // 既定より先に置く (先に登録した束が優先される)
@@ -202,7 +258,8 @@ function extensions(): Extension[] {
         return false;
       },
       keydown: (event) => {
-        emit('keydown', event);
+        // 変換中のキーは全体のガード（ime-keydown-guard）がここだけ通すので、呼び出し側へ渡さない
+        if (!isImeKeydown(event)) emit('keydown', event);
         return false;
       },
     }),
@@ -217,6 +274,7 @@ function extensions(): Extension[] {
 
 onMounted(() => {
   if (!host.value) return;
+  mentionTooltipParent = resolveMentionAutocompleteTooltipParent(host.value);
   view.value = new EditorView({
     state: EditorState.create({ doc: props.modelValue, extensions: extensions() }),
     parent: host.value,
@@ -243,6 +301,11 @@ watch(
   },
 );
 
+// 引き表（API の表・候補）が替わったら札の字を引き直す
+watch(nameTable, (table) => {
+  if (view.value && props.candidates) setMentionNames(view.value as EditorViewType, table);
+});
+
 // disabled / placeholder の変更は state ごと作り直す (上のコメントの理由)
 watch(
   () => [props.disabled, props.placeholder],
@@ -258,7 +321,13 @@ function focus() {
   view.value?.focus();
 }
 
-defineExpose({ focus });
+/** `@` を打って候補を開く。`candidates` を渡した時だけ効く */
+function openMentionPicker() {
+  if (!view.value || props.disabled || !props.candidates) return;
+  openPicker(view.value as EditorViewType);
+}
+
+defineExpose({ focus, openMentionPicker });
 </script>
 
 <template>

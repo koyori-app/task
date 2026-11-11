@@ -1,12 +1,25 @@
 <!-- https://vike.dev/Head -->
 
 <template>
-  <link rel="icon" :href="logoUrl" />
+  <link
+    v-for="favicon in FAVICONS"
+    :key="favicon.href"
+    rel="icon"
+    type="image/png"
+    :sizes="favicon.sizes"
+    :href="favicon.href"
+  />
+  <link rel="manifest" :href="MANIFEST_PATH" />
+  <meta name="theme-color" :content="PWA_THEME_COLOR" />
+  <link rel="apple-touch-icon" :href="PWA_ICONS.appleTouch" />
+  <meta name="apple-mobile-web-app-title" content="task" />
 </template>
 
 <script setup lang="ts">
 import '@/assets/css/tailwind.css';
-import logoUrl from '../assets/logo.svg';
+import { emojiFontBootScript } from '@/lib/emoji-font';
+import { FAVICONS, MANIFEST_PATH, PWA_ICONS, PWA_THEME_COLOR } from '@/lib/pwa/app-manifest';
+import { usePreferencesStore } from '@/stores/preferences';
 import { useHead } from '@unhead/vue';
 import { usePageContext } from 'vike-vue/usePageContext';
 
@@ -45,6 +58,14 @@ useHead({
     { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
     { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
   ],
-  script: [...umamiScripts],
+  script: [
+    // 環境設定で選んだ絵文字の字を、body を描く前に html へ当てる（最初の一瞬の入れ替わりを防ぐ）
+    {
+      key: 'emoji-font',
+      innerHTML: emojiFontBootScript(usePreferencesStore.$id),
+      tagPriority: 'critical',
+    },
+    ...umamiScripts,
+  ],
 });
 </script>

@@ -5,7 +5,7 @@
 # ステージを省略すると最後の production になるので、開発用は target を明示すること。
 #
 # ── 起動手順（配布用イメージでも同じ）─────────────────────────────
-#   1. /app/run-migration.sh   … migration up + UNIQUE INDEX 4 件の DROP
+#   1. /app/run-migration.sh   … migration up + UNIQUE INDEX 2 件の DROP
 #   2. /app/backend            … サーバー起動（既定の CMD）
 #
 # 手順 1 を飛ばして /app/migration up だけで済ませると backend は起動しない。
@@ -68,6 +68,9 @@ FROM debian:bookworm-slim AS runtime-base
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates postgresql-client \
     && rm -rf /var/lib/apt/lists/*
+
+# anyhow のエラーにスタックトレースを記録する。Sentry へ送るスタックトレースの元になる
+ENV RUST_LIB_BACKTRACE=1
 
 # root では動かさない
 RUN useradd --system --create-home --uid 10001 app

@@ -1,5 +1,7 @@
 # E2E Notes
 
+Specs run on Chromium, Desktop Safari (`webkit`) and iPhone (`mobile-safari`). To run one target with its authenticated specs: `pnpm test --project=webkit --project=webkit-authenticated`.
+
 E2e PostgreSQL URLs resolve through a single precedence chain shared by TypeScript (`e2e/env.ts`) and shell (`e2e/scripts/resolve-database-url.sh`):
 
 1. `E2E_DATABASE_URL` or `DATABASE_URL` from the process environment

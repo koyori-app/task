@@ -1,16 +1,7 @@
 <script setup lang="ts">
 import { PhTrash } from '@phosphor-icons/vue';
-import { computed, ref } from 'vue';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
+import { computed, ref, watch } from 'vue';
+import { Button, ConfirmDialog, Field, Input, Picker, Textarea } from '@koyori-app/ui-vue';
 import { useCreateReviewMutation } from '@/lib/api-vue-query';
 import { SEVERITIES, SEVERITY_LABELS, type FindingSeverity } from '@/lib/review-findings';
 
@@ -22,7 +13,7 @@ const props = defineProps<{
   nextRound: number;
 }>();
 
-const emit = defineEmits<{ created: []; cancel: [] }>();
+const emit = defineEmits<{ created: []; cancel: []; 'dirty-change': [dirty: boolean] }>();
 
 type StagedFinding = {
   severity: FindingSeverity;
@@ -33,6 +24,7 @@ type StagedFinding = {
 };
 
 const createReview = useCreateReviewMutation();
+const severityItems = SEVERITIES.map((value) => ({ value, label: SEVERITY_LABELS[value] }));
 
 const headSha = ref('');
 const summary = ref('');
@@ -66,7 +58,37 @@ const headShaError = computed(() =>
     ? null
     : '40 桁の commit SHA を入力してください（git rev-parse HEAD）。',
 );
-const canCommit = computed(() => COMMIT_SHA.test(headSha.value.trim()));
+/** 入力欄に書いたまま「下書きに追加」されていない指摘（確定しても送られない） */
+const hasPendingInput = computed(
+  () => draft.value.title.trim() !== '' || draft.value.body.trim() !== '',
+);
+/** 捨てると失われる下書き（積んだ指摘、入力中の指摘、総評） */
+const hasDraft = computed(
+  () =>
+    staged.value.length > 0 ||
+    summary.value.trim() !== '' ||
+    hasPendingInput.value ||
+    draft.value.file.trim() !== '' ||
+    draft.value.line.trim() !== '',
+);
+watch(hasDraft, (dirty) => emit('dirty-change', dirty));
+
+const pendingInputMessage =
+  '入力欄の指摘がまだ下書きに追加されていません。「下書きに追加」で積むか、入力を消してから確定してください。';
+const canCommit = computed(() => COMMIT_SHA.test(headSha.value.trim()) && !hasPendingInput.value);
+
+const confirmingCancel = ref(false);
+function requestCancel() {
+  if (hasDraft.value) {
+    confirmingCancel.value = true;
+    return;
+  }
+  emit('cancel');
+}
+function confirmCancel() {
+  confirmingCancel.value = false;
+  emit('cancel');
+}
 
 function addToDraft() {
   draftError.value = null;
@@ -125,32 +147,28 @@ async function commit() {
       <p class="text-muted-foreground text-xs">下書き · 確定するまでサーバーには作られません</p>
     </div>
 
-    <div class="flex flex-col gap-1.5">
-      <label for="composer-head" class="text-sm font-medium">レビュー対象の head SHA</label>
+    <Field
+      id="composer-head"
+      label="レビュー対象の head SHA"
+      description="40 桁の commit SHA（git rev-parse HEAD）"
+      :error="headShaError ?? ''"
+    >
       <Input
-        id="composer-head"
-        v-model="headSha"
         placeholder="60cdd7795f94fa4e4148ce996c2efb4c363e3f5e"
-        class="font-mono"
-        :aria-invalid="headShaError !== null"
+        class="[&_input]:font-mono"
+        :value="headSha"
+        :on-value-change="(v: string) => (headSha = v)"
       />
-      <p v-if="headShaError" class="text-destructive text-xs" data-testid="head-sha-error">
-        {{ headShaError }}
-      </p>
-      <p v-else class="text-muted-foreground text-xs">
-        40 桁の commit SHA（<code>git rev-parse HEAD</code>）
-      </p>
-    </div>
+    </Field>
 
-    <div class="flex flex-col gap-1.5">
-      <label for="composer-summary" class="text-sm font-medium">総評</label>
+    <Field id="composer-summary" label="総評">
       <Textarea
-        id="composer-summary"
-        v-model="summary"
-        rows="2"
+        :rows="2"
         placeholder="具体的な不具合は見つからなかった"
+        :value="summary"
+        :on-value-change="(v: string) => (summary = v)"
       />
-    </div>
+    </Field>
 
     <!-- 下書きに積んだ指摘 -->
     <div v-if="staged.length > 0" class="flex flex-col gap-2">
@@ -171,11 +189,10 @@ async function commit() {
           <Button
             type="button"
             variant="ghost"
-            size="sm"
-            :aria-label="`下書きから「${finding.title}」を外す`"
+            :ariaLabel="`下書きから「${finding.title}」を外す`"
             @click="removeStaged(index)"
           >
-            <PhTrash class="size-4" />
+            <template #icon><PhTrash class="size-4" /></template>
           </Button>
         </li>
       </ul>
@@ -185,47 +202,67 @@ async function commit() {
     <div class="flex flex-col gap-2 rounded-md border p-3">
       <div class="flex flex-wrap gap-2">
         <div class="w-[130px]">
-          <label for="draft-severity" class="mb-1.5 block text-xs font-medium">重大度</label>
-          <Select
-            :model-value="draft.severity"
-            @update:model-value="(v) => (draft.severity = v as FindingSeverity)"
-          >
-            <SelectTrigger id="draft-severity" size="sm" class="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="severity in SEVERITIES" :key="severity" :value="severity">
-                {{ SEVERITY_LABELS[severity] }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
+          <Field id="draft-severity" label="重大度">
+            <Picker
+              label="重大度"
+              :searchable="false"
+              :items="severityItems"
+              :selected-values="[draft.severity]"
+              :on-selection-change="
+                (values: string[]) => (draft.severity = values[0] as FindingSeverity)
+              "
+            />
+          </Field>
         </div>
         <div class="min-w-[200px] flex-1">
           <label for="draft-title" class="mb-1.5 block text-xs font-medium">タイトル</label>
-          <Input id="draft-title" v-model="draft.title" placeholder="1 行の要約" />
+          <Input
+            id="draft-title"
+            placeholder="1 行の要約"
+            :value="draft.title"
+            :on-value-change="(v: string) => (draft.title = v)"
+          />
         </div>
       </div>
 
       <div class="flex flex-wrap gap-2">
         <div class="min-w-[200px] flex-1">
           <label for="draft-file" class="mb-1.5 block text-xs font-medium">ファイル（任意）</label>
-          <Input id="draft-file" v-model="draft.file" placeholder="src/App.vue" class="font-mono" />
+          <Input
+            id="draft-file"
+            placeholder="src/App.vue"
+            class="[&_input]:font-mono"
+            :value="draft.file"
+            :on-value-change="(v: string) => (draft.file = v)"
+          />
         </div>
         <div class="w-[110px]">
           <label for="draft-line" class="mb-1.5 block text-xs font-medium">行（任意）</label>
-          <Input id="draft-line" v-model="draft.line" inputmode="numeric" placeholder="42" />
+          <Input
+            id="draft-line"
+            input-mode="numeric"
+            placeholder="42"
+            :value="draft.line"
+            :on-value-change="(v: string) => (draft.line = v)"
+          />
         </div>
       </div>
 
       <div>
         <label for="draft-body" class="mb-1.5 block text-xs font-medium">本文</label>
-        <Textarea id="draft-body" v-model="draft.body" rows="3" placeholder="再現条件と根拠" />
+        <Textarea
+          id="draft-body"
+          :rows="3"
+          placeholder="再現条件と根拠"
+          :value="draft.body"
+          :on-value-change="(v: string) => (draft.body = v)"
+        />
       </div>
 
       <p v-if="draftError" role="alert" class="text-destructive text-sm">{{ draftError }}</p>
 
       <div>
-        <Button type="button" variant="outline" size="sm" @click="addToDraft">下書きに追加</Button>
+        <Button type="button" variant="tertiary" label="下書きに追加" @click="addToDraft" />
       </div>
     </div>
 
@@ -237,18 +274,37 @@ async function commit() {
       }}
     </p>
 
+    <p v-if="hasPendingInput" role="alert" class="text-destructive text-sm">
+      {{ pendingInputMessage }}
+    </p>
+
     <p v-if="submitError" role="alert" class="text-destructive text-sm">{{ submitError }}</p>
 
     <div class="flex gap-2">
       <Button
         type="button"
         :disabled="!canCommit || createReview.isPending.value"
-        :title="canCommit ? undefined : '40 桁の commit SHA を入力してください'"
+        :title="
+          hasPendingInput
+            ? pendingInputMessage
+            : canCommit
+              ? undefined
+              : '40 桁の commit SHA を入力してください'
+        "
+        :label="createReview.isPending.value ? '確定中…' : `確定（${staged.length} 件）`"
         @click="commit"
-      >
-        {{ createReview.isPending.value ? '確定中…' : `確定（${staged.length} 件）` }}
-      </Button>
-      <Button type="button" variant="outline" @click="emit('cancel')">キャンセル</Button>
+      />
+      <Button type="button" variant="tertiary" label="キャンセル" @click="requestCancel" />
     </div>
+
+    <ConfirmDialog
+      :open="confirmingCancel"
+      title="下書きを破棄しますか？"
+      message="入力中の指摘と下書きに積んだ指摘は、サーバーに作られていないため失われます。"
+      confirm-label="破棄する"
+      destructive
+      :on-confirm="confirmCancel"
+      :on-cancel="() => (confirmingCancel = false)"
+    />
   </div>
 </template>

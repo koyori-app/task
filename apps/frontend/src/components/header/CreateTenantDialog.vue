@@ -1,24 +1,15 @@
 <script setup lang="ts">
 import { useForm } from '@tanstack/vue-form';
 import { type } from 'arktype';
-import { ref, watch } from 'vue';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+import { ref, useId, watch } from 'vue';
+import { Button, Dialog, Field, Input, Textarea } from '@koyori-app/ui-vue';
 import { useTenantStore } from '@/stores/tenant';
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ 'update:open': [open: boolean] }>();
+// 閉じた Dialog も DOM に残るため、送信ボタンを結ぶ form の id と、ラベル・説明・エラーを結ぶ
+// Field の id はインスタンスごとに分ける
+const formId = useId();
 const store = useTenantStore();
 const submitError = ref<string | null>(null);
 const displayIdEdited = ref(false);
@@ -63,10 +54,6 @@ const form = useForm({
   },
 });
 
-function onOpenChange(open: boolean) {
-  emit('update:open', open);
-}
-
 watch(
   () => props.open,
   (open) => {
@@ -80,104 +67,103 @@ watch(
 </script>
 
 <template>
-  <Dialog v-if="open" :open="true" @update:open="onOpenChange">
-    <DialogContent class="max-w-lg" :show-close-button="false">
-      <DialogHeader>
-        <DialogTitle>テナントを作成</DialogTitle>
-        <DialogDescription>
-          新しいワークスペースの名前と表示IDを入力してください。
-        </DialogDescription>
-      </DialogHeader>
-      <form class="space-y-4" @submit.prevent="form.handleSubmit">
-        <FieldGroup>
+  <div class="contents [--koyori-dialog-width:32rem]">
+    <Dialog
+      :open="open"
+      title="テナントを作成"
+      description="新しいワークスペースの名前と表示IDを入力してください。"
+      :on-close="() => emit('update:open', false)"
+    >
+      <form :id="formId" class="space-y-4" @submit.prevent="form.handleSubmit">
+        <div class="flex flex-col gap-6">
           <form.Field name="name">
             <template #default="{ field }">
-              <Field>
-                <FieldLabel :for="field.name">名前</FieldLabel>
+              <Field
+                :id="`${formId}-${field.name}`"
+                label="名前"
+                :error="
+                  field.state.meta.isTouched && field.state.meta.errors.length
+                    ? '名前は必須です'
+                    : ''
+                "
+              >
                 <Input
-                  :id="field.name"
-                  autofocus
-                  :model-value="field.state.value"
-                  @blur="field.handleBlur"
-                  @update:model-value="
-                    (v) => {
-                      const name = String(v);
+                  :value="field.state.value"
+                  :on-blur="field.handleBlur"
+                  :on-value-change="
+                    (name: string) => {
                       field.handleChange(name);
                       if (!displayIdEdited) form.setFieldValue('display_id', slugify(name));
                     }
                   "
                 />
-                <FieldError v-if="field.state.meta.isTouched && field.state.meta.errors.length"
-                  >名前は必須です</FieldError
-                >
               </Field>
             </template>
           </form.Field>
           <form.Field name="display_id">
             <template #default="{ field }">
-              <Field>
-                <FieldLabel :for="field.name">表示ID</FieldLabel>
+              <Field
+                :id="`${formId}-${field.name}`"
+                label="表示ID"
+                description="英小文字・数字・ハイフンのみ"
+                :error="
+                  field.state.meta.isTouched && field.state.meta.errors.length
+                    ? '有効な表示IDを入力してください'
+                    : ''
+                "
+              >
                 <Input
-                  :id="field.name"
-                  :model-value="field.state.value"
-                  aria-describedby="display-id-help"
-                  @blur="field.handleBlur"
-                  @update:model-value="
-                    (v) => {
+                  :value="field.state.value"
+                  :on-blur="field.handleBlur"
+                  :on-value-change="
+                    (v: string) => {
                       displayIdEdited = true;
-                      field.handleChange(String(v).toLowerCase());
+                      field.handleChange(v.toLowerCase());
                     }
                   "
                 />
-                <p id="display-id-help" class="text-xs text-muted-foreground">
-                  英小文字・数字・ハイフンのみ
-                </p>
-                <FieldError v-if="field.state.meta.isTouched && field.state.meta.errors.length"
-                  >有効な表示IDを入力してください</FieldError
-                >
               </Field>
             </template>
           </form.Field>
           <form.Field name="description">
             <template #default="{ field }">
-              <Field>
-                <FieldLabel :for="field.name">説明（任意）</FieldLabel>
-                <Textarea
-                  :id="field.name"
-                  :model-value="field.state.value"
-                  @update:model-value="(v) => field.handleChange(String(v))"
-                />
+              <Field :id="`${formId}-${field.name}`" label="説明（任意）">
+                <Textarea :value="field.state.value" :on-value-change="field.handleChange" />
               </Field>
             </template>
           </form.Field>
           <form.Field name="icon_url">
             <template #default="{ field }">
-              <Field>
-                <FieldLabel :for="field.name">アイコンURL（任意）</FieldLabel>
+              <Field :id="`${formId}-${field.name}`" label="アイコンURL（任意）">
                 <Input
-                  :id="field.name"
                   type="url"
-                  :model-value="field.state.value"
-                  @update:model-value="(v) => field.handleChange(String(v))"
+                  :value="field.state.value"
+                  :on-value-change="field.handleChange"
                 />
               </Field>
             </template>
           </form.Field>
-        </FieldGroup>
+        </div>
         <p v-if="submitError" role="alert" class="text-sm text-destructive">{{ submitError }}</p>
-        <DialogFooter>
-          <DialogClose as-child>
-            <Button type="button" variant="outline">キャンセル</Button>
-          </DialogClose>
-          <form.Subscribe>
-            <template #default="{ canSubmit, isSubmitting }">
-              <Button type="submit" :disabled="!canSubmit || isSubmitting">
-                {{ isSubmitting ? '作成中…' : '作成' }}
-              </Button>
-            </template>
-          </form.Subscribe>
-        </DialogFooter>
       </form>
-    </DialogContent>
-  </Dialog>
+      <template #actions>
+        <Button
+          type="button"
+          variant="tertiary"
+          label="キャンセル"
+          @click="emit('update:open', false)"
+        />
+        <form.Subscribe>
+          <template #default="{ canSubmit, isSubmitting }">
+            <Button
+              type="submit"
+              :form="formId"
+              :disabled="!canSubmit || isSubmitting"
+              :label="isSubmitting ? '作成中…' : '作成'"
+            />
+          </template>
+        </form.Subscribe>
+      </template>
+    </Dialog>
+  </div>
 </template>

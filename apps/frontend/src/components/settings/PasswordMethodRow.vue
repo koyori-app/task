@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import { PhLockKey, PhWarning } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
-import { Button } from '@/components/ui/button';
-import { Field, FieldError, FieldLabel } from '@/components/ui/field';
+import { Button, Field, PasswordInput } from '@koyori-app/ui-vue';
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
-import PasswordInput from '@/components/auth/PasswordInput.vue';
 import PasswordStrengthBar from '@/components/auth/PasswordStrengthBar.vue';
 import { usePasswordStrength } from '@/composables/usePasswordStrength';
 import { usePasswordChangeMutation, useSetPasswordMutation } from '@/lib/api-vue-query';
@@ -138,9 +136,7 @@ async function onSubmit() {
           {{ hasPassword ? email : 'OAuth 連携のみでサインインしています' }}
         </p>
       </div>
-      <Button type="button" variant="outline" size="sm" @click="toggle">
-        {{ actionLabel }}
-      </Button>
+      <Button type="button" variant="tertiary" :label="actionLabel" @click="toggle" />
     </div>
 
     <div v-if="isOpen" class="px-4 pb-4 md:pl-16">
@@ -154,36 +150,53 @@ async function onSubmit() {
         class="flex max-w-md flex-col gap-4"
         @submit="onSubmit"
       >
-        <Field v-if="mode === 'change'">
-          <FieldLabel for="password-current">現在のパスワード</FieldLabel>
-          <PasswordInput id="password-current" v-model="current" autocomplete="current-password" />
-          <FieldError v-if="shownErrors.current">{{ shownErrors.current }}</FieldError>
+        <Field
+          v-if="mode === 'change'"
+          id="password-current"
+          label="現在のパスワード"
+          :error="shownErrors.current"
+        >
+          <PasswordInput
+            autocomplete="current-password"
+            :value="current"
+            :on-value-change="(v: string) => (current = v)"
+          />
         </Field>
 
-        <Field>
-          <FieldLabel for="password-next">
-            {{ mode === 'set' ? 'パスワード' : '新しいパスワード' }}
-          </FieldLabel>
-          <PasswordInput id="password-next" v-model="next" autocomplete="new-password" />
+        <Field
+          id="password-next"
+          :label="mode === 'set' ? 'パスワード' : '新しいパスワード'"
+          :error="shownErrors.next"
+        >
+          <PasswordInput
+            autocomplete="new-password"
+            :value="next"
+            :on-value-change="(v: string) => (next = v)"
+          />
           <PasswordStrengthBar v-if="next.length > 0" :strength="strength" />
-          <FieldError v-if="shownErrors.next">{{ shownErrors.next }}</FieldError>
         </Field>
 
-        <Field>
-          <FieldLabel for="password-confirm">
-            {{ mode === 'set' ? 'パスワード（確認）' : '新しいパスワード（確認）' }}
-          </FieldLabel>
-          <PasswordInput id="password-confirm" v-model="confirm" autocomplete="new-password" />
-          <FieldError v-if="shownErrors.confirm">{{ shownErrors.confirm }}</FieldError>
+        <Field
+          id="password-confirm"
+          :label="mode === 'set' ? 'パスワード（確認）' : '新しいパスワード（確認）'"
+          :error="shownErrors.confirm"
+        >
+          <PasswordInput
+            autocomplete="new-password"
+            :value="confirm"
+            :on-value-change="(v: string) => (confirm = v)"
+          />
         </Field>
 
         <p v-if="submitError" role="alert" class="text-destructive text-sm">{{ submitError }}</p>
 
         <div class="flex gap-2">
-          <Button type="submit" :disabled="isSubmitting || !isHydrated">
-            {{ isSubmitting ? '保存中…' : submitLabel }}
-          </Button>
-          <Button type="button" variant="outline" @click="reset">キャンセル</Button>
+          <Button
+            type="submit"
+            :disabled="isSubmitting || !isHydrated"
+            :label="isSubmitting ? '保存中…' : submitLabel"
+          />
+          <Button type="button" variant="tertiary" label="キャンセル" @click="reset" />
         </div>
       </HydrationSafeForm>
     </div>

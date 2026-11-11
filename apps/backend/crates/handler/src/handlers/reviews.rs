@@ -220,6 +220,7 @@ pub async fn create_review(
     // これが無いと別リポジトリの同番 PR が同じ PR として続く（仕様 §3）
     let repo = service::reviews::current_repo(&txn, project_id).await?;
     let round = service::reviews::next_round(&txn, project_id, &repo, payload.pr_number).await?;
+    service::reviews::ensure_pull_request_row(&txn, project_id, &repo, payload.pr_number).await?;
     let now = chrono::Utc::now();
 
     let review = reviews::ActiveModel {
@@ -453,7 +454,7 @@ pub async fn get_review_summary(
         counts: counts
             .into_iter()
             .map(|(severity, state, count)| SeverityStateCount {
-                severity,
+                severity: severity.into(),
                 state: state.into(),
                 count,
             })
@@ -469,7 +470,7 @@ pub async fn get_review_summary(
         // レビューが 1 件も無い PR を「可」にしない。件数だけで見ると未レビューの PR が
         // 0 件として通り、マージ前ゲートとして最も危ない誤りになる（仕様 §5）
         mergeable: rounds > 0 && blocking == 0,
-        gate,
+        gate: gate.into(),
     }))
 }
 

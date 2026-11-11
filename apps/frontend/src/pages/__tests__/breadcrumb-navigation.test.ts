@@ -102,9 +102,15 @@ beforeEach(() => {
         [`${projectBase}/statuses`, [status]],
         [`${projectBase}/labels`, []],
         [`${projectBase}/assignable-users`, []],
+        // タスク詳細の「似ているタスク」。認可は search と同じ（ReadTask）
+        [`${projectBase}/tasks/similar`, { tasks: [] }],
         ...[parent, child].flatMap((task): [string, unknown][] => [
           [`${projectBase}/tasks/ENG-${task.seq_id}`, task],
           [`${projectBase}/tasks/ENG-${task.seq_id}/attachments`, { attachments: [] }],
+          [
+            `${projectBase}/tasks/ENG-${task.seq_id}/forge`,
+            { pull_requests: [], commits: [], branches: [] },
+          ],
           [
             `${projectBase}/tasks/ENG-${task.seq_id}/relations`,
             {

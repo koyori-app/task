@@ -3,7 +3,7 @@ use sea_orm_migration::prelude::*;
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
-/// コミットとタスクのリンク（docs/features/tasks/9.github-tasks.md §2 / §3 のうちコミット分）。
+/// コミットとタスクのリンク（docs/dev/features/tasks/github-tasks/index.md の「データ」のうちコミット分）。
 /// PR 実体（forge_pull_requests）に依存する表は PR 連携で足す。
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {

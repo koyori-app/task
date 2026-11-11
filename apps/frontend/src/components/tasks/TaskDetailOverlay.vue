@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import TaskDetailPane from '@/components/tasks/TaskDetailPane.vue';
+import { X } from '@lucide/vue';
+import { Button, Dialog } from '@koyori-app/ui-vue';
+import TaskDetailPane, { type TaskRefLink } from '@/components/tasks/TaskDetailPane.vue';
 import {
   shouldKeepOverlayOnEscape,
   shouldKeepOverlayOnPointerDownOutside,
 } from '@/components/tasks/overlay-dismiss-guard';
 
 /**
- * List 表示のタスク詳細。分割ビューではなくページに重ねて出す。
+ * タスク一覧の List 表示とカレンダーのタスク詳細。分割ビューではなくページに重ねて出す。
  *
  * 中身は分割ビューと同じ {@link TaskDetailPane}（＝ useTaskDetail + TaskDetailHub）で、
  * 器だけを差し替える。タイトルの変更はここでしかできない導線なので、詳細の機能は
@@ -24,34 +25,55 @@ defineProps<{
 const emit = defineEmits<{
   'update:open': [value: boolean];
   'open-task': [task: import('@/generated/api').components['schemas']['TaskResponse']];
+  'open-task-ref': [ref: TaskRefLink];
 }>();
 
-// 入力途中・IME 変換中・入れ子の <dialog> の間は閉じない（下書きを器ごと消さない）
-function onEscapeKeyDown(event: KeyboardEvent) {
-  if (shouldKeepOverlayOnEscape(event)) event.preventDefault();
+// 入力途中・IME 変換中は Esc で閉じない（下書きを器ごと消さない）。
+// koyori の Dialog は Esc を dialog の cancel で受けて onClose を呼ぶが、onClose に event は来ない。
+// そこで keydown の既定動作を止めて cancel そのものを起こさせない（cancel を止めるだけだと、
+// Chromium は操作を挟まない 2 回目の Esc の cancel を止めさせずに閉じてしまう）
+function onKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && shouldKeepOverlayOnEscape(event)) event.preventDefault();
 }
 
-// 1 回目は入力欄の blur だけ起こし、2 回目で閉じる
-function onPointerDownOutside(event: Event) {
-  if (shouldKeepOverlayOnPointerDownOutside(document.activeElement)) event.preventDefault();
+// 背景の pointerdown（と止めなかった Esc）で呼ばれる。pointerdown の時点ではまだ入力欄に
+// フォーカスがあるので、1 回目は入力欄の blur だけ起こし、2 回目で閉じる
+function onClose() {
+  if (shouldKeepOverlayOnPointerDownOutside(document.activeElement)) return;
+  emit('update:open', false);
 }
 </script>
 
 <template>
-  <Dialog :open="open" @update:open="(value) => emit('update:open', value)">
-    <DialogContent
-      class="flex h-[calc(100vh-3rem)] max-w-[70rem] flex-col gap-0 overflow-hidden p-0 sm:max-w-[70rem]"
-      @escape-key-down="onEscapeKeyDown"
-      @pointer-down-outside="onPointerDownOutside"
-    >
-      <!-- Dialog はアクセシブルな名前を要求する。見出しは詳細側が出すので視覚的には隠す -->
-      <DialogTitle class="sr-only">タスクの詳細</DialogTitle>
+  <div
+    class="contents [--koyori-dialog-width:70rem] [--koyori-dialog-height:calc(100vh-3rem)]"
+    @keydown="onKeydown"
+  >
+    <!-- 見出しは詳細側が出すので、title は plain で視覚的に隠れてダイアログの名前にだけ残る -->
+    <Dialog :open="open" title="タスクの詳細" plain :on-close="onClose">
       <!--
-        v-if を付けない。閉じるとき即座に中身を消すと、Dialog の退場アニメーションが
-        空の箱で再生される。ダイアログが閉じ切れば reka-ui が DOM ごと外すので、
-        閉じている間にペインが動き続けることはない。
+        koyori の Dialog は閉じても DOM に残る（退場アニメーションも無い）。閉じている間に
+        ペインが動き続けないよう、v-if で中身を外す
       -->
+      <!--
+        閉じるボタンは器が描く。ペインの header は読み込み中・失敗・見つからない時には出ないので、
+        そこに置くと削除済み・権限の無いタスクを開いたときに閉じる手段が Esc と背景だけになる。
+        Hub の header 右端の pr-12 がこの置き場で、header の高さ（h-12）に縦位置を揃える。
+        dialog 自体が位置指定の基準になる。明示操作なので、下書きがあっても 1 回で閉じる
+      -->
+      <div v-if="open" class="absolute top-0 right-2 z-10 flex h-12 items-center">
+        <Button
+          type="button"
+          variant="ghost"
+          ariaLabel="詳細を閉じる"
+          title="閉じる"
+          @click="emit('update:open', false)"
+        >
+          <template #icon><X class="size-4" /></template>
+        </Button>
+      </div>
       <TaskDetailPane
+        v-if="open"
         layout="page"
         :show-close-button="false"
         :tenant-display-id="tenantDisplayId"
@@ -59,7 +81,8 @@ function onPointerDownOutside(event: Event) {
         :task-id="taskId"
         @close="emit('update:open', false)"
         @open-task="emit('open-task', $event)"
+        @open-task-ref="emit('open-task-ref', $event)"
       />
-    </DialogContent>
-  </Dialog>
+    </Dialog>
+  </div>
 </template>

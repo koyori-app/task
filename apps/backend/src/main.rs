@@ -3,17 +3,7 @@ use backend::{AppState, server::run, utils::smtp::SmtpClient};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let settings = backend::settings::load_settings()?;
-    let _guard = if let Some(ref sentry_dsn) = settings.sentry_dsn {
-        Some(sentry::init(sentry::ClientOptions {
-            dsn: Some(sentry_dsn.parse()?),
-            release: sentry::release_name!(),
-            // 本番既定は false。必要時のみ環境変数で opt-in 推奨
-            send_default_pii: false,
-            ..Default::default()
-        }))
-    } else {
-        None
-    };
+    let _guard = backend::observability::client_options(&settings)?.map(sentry::init);
     let db = sea_orm::Database::connect(&settings.database_url).await?;
     db.get_schema_registry("entity::*").sync(&db).await?;
 
@@ -43,6 +33,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         backend::jobs::setup_password_reset_email_storage(&pg_pool, &settings).await?;
     let already_registered_email_storage =
         backend::jobs::setup_already_registered_email_storage(&pg_pool, &settings).await?;
+    let tenant_invitation_email_storage =
+        backend::jobs::setup_tenant_invitation_email_storage(&pg_pool, &settings).await?;
     let review_summary_storage =
         backend::jobs::setup_review_summary_storage(&pg_pool, &settings).await?;
 
@@ -96,6 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         github_issue_sync_storage,
         password_reset_email_storage,
         already_registered_email_storage,
+        tenant_invitation_email_storage,
         review_summary_storage,
         storage,
         drive_config,

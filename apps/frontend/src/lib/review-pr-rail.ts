@@ -3,6 +3,10 @@ import type { ReviewedPullRequest } from '@/lib/review-findings';
 
 type OAuthConnectionItem = components['schemas']['OAuthConnectionItem'];
 
+/** PR 一覧の状態（ホスト上の PR の状態）の絞り込み。`all` は絞らない。 */
+export const PR_STATE_FILTERS = ['all', 'open', 'merged', 'closed', 'unknown'] as const;
+export type PrStateFilter = (typeof PR_STATE_FILTERS)[number];
+
 /** PR 一覧の 1 ページの件数。 */
 export const PR_PAGE_SIZE = 10;
 
@@ -32,18 +36,20 @@ export function isMyPullRequest(pr: ReviewedPullRequest, login: string | null): 
 }
 
 /**
- * 検索と「自分の PR だけ」を当てた一覧（ページ分割の前の全件）。
+ * 検索・「自分の PR だけ」・状態を当てた一覧（ページ分割の前の全件）。
  * 検索は番号・タイトルの部分一致で、先頭の `#` は無視する。`mineLogin` が null なら作成者で絞らない。
  */
 export function filterPullRequests(
   list: readonly ReviewedPullRequest[],
   query: string,
   mineLogin: string | null,
+  state: PrStateFilter = 'all',
 ): ReviewedPullRequest[] {
   const q = query.trim().toLowerCase().replace(/^#/, '');
   return list.filter(
     (pr) =>
       (mineLogin === null || isMyPullRequest(pr, mineLogin)) &&
+      (state === 'all' || pr.state === state) &&
       (q === '' ||
         String(pr.pr_number).includes(q) ||
         (pr.pr_title ?? '').toLowerCase().includes(q)),

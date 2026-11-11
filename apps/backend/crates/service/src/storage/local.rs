@@ -42,7 +42,7 @@ impl StorageBackend for LocalStorageBackend {
         &self,
         key: &str,
         mut stream: ByteStream,
-        content_length: u64,
+        content_length: Option<u64>,
         _mime: &str,
     ) -> Result<(), StorageError> {
         let path = self.resolve_path(key)?;
@@ -61,10 +61,12 @@ impl StorageBackend for LocalStorageBackend {
         }
         writer.flush().await?;
 
-        if content_length > 0 && written != content_length {
+        if let Some(expected) = content_length
+            && written != expected
+        {
             let _ = tokio::fs::remove_file(&path).await;
             return Err(StorageError::SizeMismatch {
-                expected: content_length,
+                expected,
                 actual: written,
             });
         }
@@ -83,7 +85,10 @@ impl StorageBackend for LocalStorageBackend {
 
     async fn get_stream(&self, key: &str) -> Result<ByteStream, StorageError> {
         let path = self.resolve_path(key)?;
-        let file = File::open(&path).await?;
+        let file = File::open(&path).await.map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => StorageError::NotFound,
+            _ => StorageError::Io(e),
+        })?;
         let stream = ReaderStream::new(file).map(|res| res.map_err(StorageError::from));
         Ok(Box::pin(stream))
     }

@@ -2,16 +2,7 @@
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhPlus } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Button, Dialog, Skeleton } from '@koyori-app/ui-vue';
 import WebhookFormDialog from '@/components/projects/WebhookFormDialog.vue';
 import {
   webhookErrorMessage,
@@ -168,10 +159,10 @@ function openDelete(webhook: WebhookResponse) {
   deleteTarget.value = webhook;
 }
 
-function onDeleteOpenChange(open: boolean) {
+function onDeleteClose() {
   // 削除リクエスト進行中はダイアログを閉じない（結果の見逃し防止）
-  if (!open && deleteMutation.isPending.value) return;
-  if (!open) deleteTarget.value = null;
+  if (deleteMutation.isPending.value) return;
+  deleteTarget.value = null;
 }
 
 async function confirmDelete() {
@@ -202,18 +193,14 @@ async function confirmDelete() {
           タスク・コメント・レビューのイベントを外部の URL へ送ります
         </p>
       </div>
-      <Button type="button" variant="outline" class="shrink-0" @click="openCreate">
-        <PhPlus class="size-4" />
-        追加
+      <Button type="button" variant="tertiary" class="shrink-0" label="追加" @click="openCreate">
+        <template #icon><PhPlus class="size-4" /></template>
       </Button>
     </div>
 
     <p v-if="actionError" role="alert" class="mb-4 text-sm text-destructive">{{ actionError }}</p>
 
-    <div v-if="webhooksQuery.isPending.value" class="flex flex-col gap-2">
-      <Skeleton class="h-16 w-full" />
-      <Skeleton class="h-16 w-full" />
-    </div>
+    <Skeleton v-if="webhooksQuery.isPending.value" :lines="2" height="4rem" />
 
     <p v-else-if="listError" role="alert" class="text-sm text-destructive">{{ listError }}</p>
 
@@ -268,39 +255,36 @@ async function confirmDelete() {
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              :aria-expanded="expandedId === webhook.id"
+              label="配信履歴"
+              :ariaExpanded="expandedId === webhook.id"
+              :ariaControls="`webhook-deliveries-${webhook.id}`"
               @click="toggleDeliveries(webhook)"
-            >
-              配信履歴
-            </Button>
-            <Button type="button" variant="ghost" size="sm" @click="openEdit(webhook)">
-              編集
-            </Button>
+            />
+            <Button type="button" variant="ghost" label="編集" @click="openEdit(webhook)" />
             <Button
               type="button"
               variant="ghost"
-              size="sm"
               :disabled="updateMutation.isPending.value"
+              :label="webhook.is_active ? '無効にする' : '有効にする'"
               @click="toggleActive(webhook)"
-            >
-              {{ webhook.is_active ? '無効にする' : '有効にする' }}
-            </Button>
+            />
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              class="text-destructive hover:text-destructive"
+              class="text-(--koyori-color-danger)"
+              label="削除"
               @click="openDelete(webhook)"
-            >
-              削除
-            </Button>
+            />
           </div>
         </div>
 
         <!-- 配信履歴 -->
-        <div v-if="expandedId === webhook.id" class="mt-3 rounded-md border bg-muted/30 p-3">
-          <Skeleton v-if="deliveriesQuery.isPending.value" class="h-10 w-full" />
+        <div
+          v-if="expandedId === webhook.id"
+          :id="`webhook-deliveries-${webhook.id}`"
+          class="mt-3 rounded-md border bg-muted/30 p-3"
+        >
+          <Skeleton v-if="deliveriesQuery.isPending.value" height="2.5rem" />
           <p v-else-if="deliveriesError" role="alert" class="text-sm text-destructive">
             {{ deliveriesError }}
           </p>
@@ -324,14 +308,12 @@ async function confirmDelete() {
                 >
                 <Button
                   type="button"
-                  variant="outline"
-                  size="sm"
-                  class="ml-auto h-7"
+                  variant="tertiary"
+                  class="ml-auto"
                   :disabled="redeliverMutation.isPending.value"
+                  label="再送"
                   @click="redeliver(webhook.id, delivery)"
-                >
-                  再送
-                </Button>
+                />
               </div>
               <p
                 v-if="!delivery.delivered_at && !delivery.next_attempt_at && delivery.last_error"
@@ -359,35 +341,33 @@ async function confirmDelete() {
       @close="isFormOpen = false"
     />
 
-    <Dialog v-if="deleteTarget" :open="true" @update:open="onDeleteOpenChange">
-      <DialogContent class="max-w-md" :show-close-button="false">
-        <DialogHeader>
-          <DialogTitle>Webhook を削除しますか？</DialogTitle>
-          <DialogDescription>
-            <span class="break-all font-mono">{{ deleteTarget.url }}</span>
-            への送信をやめ、配信履歴も削除します。この操作は取り消せません。
-          </DialogDescription>
-        </DialogHeader>
-        <p v-if="deleteError" role="alert" class="text-sm text-destructive">{{ deleteError }}</p>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            :disabled="deleteMutation.isPending.value"
-            @click="deleteTarget = null"
-          >
-            キャンセル
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            :disabled="deleteMutation.isPending.value"
-            @click="confirmDelete"
-          >
-            {{ deleteMutation.isPending.value ? '削除中…' : '削除する' }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
+    <Dialog
+      :open="deleteTarget !== null"
+      title="Webhook を削除しますか？"
+      :description="
+        deleteTarget
+          ? `${deleteTarget.url} への送信をやめ、配信履歴も削除します。この操作は取り消せません。`
+          : ''
+      "
+      :on-close="onDeleteClose"
+    >
+      <p v-if="deleteError" role="alert" class="text-sm text-destructive">{{ deleteError }}</p>
+      <template #actions>
+        <Button
+          type="button"
+          variant="tertiary"
+          :disabled="deleteMutation.isPending.value"
+          label="キャンセル"
+          @click="deleteTarget = null"
+        />
+        <Button
+          type="button"
+          variant="danger"
+          :disabled="deleteMutation.isPending.value"
+          :label="deleteMutation.isPending.value ? '削除中…' : '削除する'"
+          @click="confirmDelete"
+        />
+      </template>
     </Dialog>
   </div>
 </template>

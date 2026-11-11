@@ -157,6 +157,13 @@ fn notification_summary(kind: &str, payload: Option<&serde_json::Map<String, Val
             as_text(payload.get("to")),
         ),
         "assigned" => as_text(payload.get("assigned_by")),
+        "pr_merged" => format!(
+            "{}/{}#{} {}",
+            as_text(payload.get("repo_owner")),
+            as_text(payload.get("repo_name")),
+            as_text(payload.get("number")),
+            as_text(payload.get("title")),
+        ),
         // 畳み方を決めていない種別は、payload をそのまま 1 行で出す
         _ => serde_json::to_string(payload).unwrap_or_default(),
     }
@@ -293,7 +300,7 @@ mod tests {
     fn keeps_the_payload_of_a_notification_type_without_a_summary() {
         let line = human(json!({
             "id": "n-3",
-            "notification_type": "pr_merged",
+            "notification_type": "deadline_soon",
             "task": null,
             "payload": { "pr_number": null, "merged_by": "yupix" },
             "read_at": null,
@@ -301,10 +308,29 @@ mod tests {
         }));
         // payload の項目の並びは serde_json の持ち方次第なので、行の形と中身だけ見る
         assert!(
-            line.starts_with("n-3\t未読\t2026-05-27T10:00:00Z\tpr_merged\t\t{"),
+            line.starts_with("n-3\t未読\t2026-05-27T10:00:00Z\tdeadline_soon\t\t{"),
             "{line}"
         );
         assert!(line.contains("\"merged_by\":\"yupix\""), "{line}");
+    }
+
+    #[test]
+    fn folds_a_pr_merged_notification_into_repository_and_title() {
+        let line = human(json!({
+            "id": "n-4",
+            "notification_type": "pr_merged",
+            "task": { "seq_id": 7, "title": "OAuth" },
+            "payload": {
+                "number": 87, "title": "feat: OAuth", "html_url": "https://github.com/acme/api/pull/87",
+                "repo_owner": "acme", "repo_name": "api",
+            },
+            "read_at": null,
+            "created_at": "2026-05-27T10:00:00Z",
+        }));
+        assert_eq!(
+            line,
+            "n-4\t未読\t2026-05-27T10:00:00Z\tpr_merged\t#7 OAuth\tacme/api#87 feat: OAuth"
+        );
     }
 
     #[test]

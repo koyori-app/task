@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
+use crate::or_unknown::OrUnknown;
 use entity::{personal_tokens, scopes::Scope, scopes::ScopeList};
 
 #[derive(Validate, Debug, Deserialize, ToSchema)]
@@ -57,11 +58,15 @@ pub struct PersonalTokenIdentityResponse {
     #[schema(value_type = String, format = "uuid")]
     pub user_id: Uuid,
     pub username: String,
+    #[serde(default = "crate::users::default_account_kind")]
+    #[schema(required = false)]
+    pub account_kind: String,
     /// この PAT がバインドされたテナント。鍵だけ渡された自動化クライアントが
     /// 行き先（/v1/tenants/{id}/... の {id}）を自力で知るための欄
     #[schema(value_type = String, format = "uuid")]
     pub tenant_id: Uuid,
-    pub scopes: ScopeList,
+    #[schema(inline)]
+    pub scopes: Vec<OrUnknown<Scope>>,
     #[schema(value_type = Vec<String>, format = "uuid", nullable)]
     pub allowed_project_ids: Option<Vec<Uuid>>,
     #[schema(value_type = String, format = "date-time", nullable)]
@@ -130,5 +135,18 @@ impl CreatePersonalTokenResponse {
             user_id: metadata.user_id,
             scopes: metadata.scopes,
         })
+    }
+}
+
+#[cfg(test)]
+mod legacy_identity_tests {
+    #[test]
+    fn legacy_pat_identity_defaults_to_human() {
+        let identity: super::PersonalTokenIdentityResponse = serde_json::from_value(serde_json::json!({
+            "id": sea_orm::prelude::Uuid::new_v4(), "name": "legacy", "user_id": sea_orm::prelude::Uuid::new_v4(),
+            "username": "legacy", "tenant_id": sea_orm::prelude::Uuid::new_v4(), "scopes": ["read:task"],
+            "allowed_project_ids": null, "expires_at": null
+        })).expect("legacy PAT identity");
+        assert_eq!(identity.account_kind, "human");
     }
 }

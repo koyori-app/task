@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LoadErrorState from '@/components/LoadErrorState.vue';
 import { Loader2 } from '@lucide/vue';
 import { useQuery } from '@tanstack/vue-query';
 import { computed } from 'vue';
@@ -15,6 +16,7 @@ const {
   isTenantNotFound,
   isResolving: isTenantResolving,
   isError: isTenantResolveError,
+  tenantsQuery,
 } = useResolvedTenantId(tenantDisplayId);
 const projectKey = computed(() => String(pageContext.routeParams.projectKey ?? ''));
 const {
@@ -22,6 +24,7 @@ const {
   isProjectNotFound,
   isResolving: isProjectResolving,
   isError: isProjectResolveError,
+  projectsQuery,
 } = useResolvedProjectId(tenantId, projectKey);
 
 const labelsQuery = useQuery(
@@ -38,6 +41,12 @@ const isInitialLoading = computed(
 const isError = computed(
   () => isTenantResolveError.value || isProjectResolveError.value || labelsQuery.isError.value,
 );
+
+function retryFailed() {
+  if (isTenantResolveError.value) void tenantsQuery.refetch();
+  if (isProjectResolveError.value) void projectsQuery.refetch();
+  if (labelsQuery.isError.value) void labelsQuery.refetch();
+}
 </script>
 
 <template>
@@ -52,12 +61,11 @@ const isError = computed(
         </div>
       </div>
 
-      <div
+      <LoadErrorState
         v-else-if="isError"
-        class="rounded-md border border-destructive/30 bg-destructive/10 p-4"
-      >
-        <p class="text-destructive">Failed to fetch labels</p>
-      </div>
+        message="ラベルの読み込みに失敗しました"
+        @retry="retryFailed"
+      />
 
       <div v-else-if="isTenantNotFound" class="py-8 text-center">
         <p class="text-muted-foreground">Tenant not found</p>
@@ -98,7 +106,7 @@ const isError = computed(
                   :href="label.icon_url"
                   target="_blank"
                   rel="noopener noreferrer"
-                  class="text-xs text-primary hover:underline"
+                  class="text-xs text-link hover:underline"
                 >
                   View Icon
                 </a>

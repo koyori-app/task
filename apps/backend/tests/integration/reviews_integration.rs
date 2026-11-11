@@ -1,3 +1,18 @@
+// 受け入れ条件（docs/dev/features/review-findings/index.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
+// - 正常系: 一括起票、一覧、fixed、verified が通る
+// - 指摘ゼロのラウンド、同一 PR への 2 ラウンド目（R2 として新しいラウンドになる）
+// - ラウンドの採番: 同じ PR へ同時にラウンドを確定しても `round` が重複しない
+// - リポジトリの同定: 連携を別リポジトリへ差し替えると、同じ PR 番号でも R1 から始まり、旧リポジトリのラウンドは一覧・集計に混ざらない
+// - マージ可否: レビューが 1 件も無い PR は「可」にならない（対照: 指摘ゼロのラウンドが 1 件あれば「可」）。集計は最新ラウンドの `head_sha` を返す
+// - 取り下げの代行: 作成者がテナントの利用者でなくなった指摘は、テナントオーナーが `rejected` にできる（対照: 作成者が在籍しているうちは、オーナーでも代行できない）
+// - 代行の痕跡: 集計に「オーナー代行での棄却 n 件」が残り、遷移履歴に代行者が残る。同じ指摘を `rejected → open → rejected` と往復させても件数は 1 のまま
+// - 拒否系: 他テナント 404 / fixed 宣言者本人による verified の拒否（対照: 別レビュワーなら成功）/ 読み取り API の PR 番号が 0 以下
+// - 取り下げの主体: 他人が出した指摘は、空のラウンドを確定して「レビュー側」を名乗っても `rejected` にできない（対照: 出した本人は取り下げられる。同じ空ラウンドの作成者でも `verified` は行える）
+// - 繰り延べ: deferred で通常タスクが同プロジェクトに起票されリンクされる。deferred → open で自動起票タスクがクローズされる
+// - 繰り延べの重大度制約: High / Medium を deferred にしようとすると拒否され、マージ可否が「可」に変わらない（対照: Low / Nit は成功し、通常タスクが起票される）
+// - 繰り延べの往復: deferred → open → deferred で同じ `deferred_task_id` が再オープンされる。対照: リンク先のタスクを削除してから再繰り延べするとリンクが差し替わり、削除済みタスクが復活しない
+// - 戻り遷移: fixed → open の差し戻しはレビュー側のみ（レビュー側でない利用者は 403、対照: レビュワーは成功）。verified からの遷移はすべて拒否（終端）
+
 use crate::common::TestApp;
 use axum::http::StatusCode;
 use entity::scopes::Scope;
@@ -1032,6 +1047,58 @@ async fn a_pull_request_without_any_round_is_not_mergeable() {
     )
     .await;
     assert_eq!(summary["repository"], "acme/app");
+
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+/// PR 一覧の `blocking_fixed` は High / Medium かつ fixed だけを数え、`blocking` /
+/// `unresolved` は従来どおり open / fixing / fixed を数える（TASK-302）。
+#[tokio::test]
+async fn pull_request_list_separates_fixed_blocking_findings() {
+    let mut fx = setup().await;
+    fx.login(&fx.reviewer.clone()).await;
+    // 731: High / Medium がすべて fixed（Low の fixed は blocking_fixed に入らない）
+    let (_, high_fixed) = submit_round(&fx, 731, "high", "fixed の High").await;
+    let (_, medium_fixed) = submit_round(&fx, 731, "medium", "fixed の Medium").await;
+    let (_, low_fixed) = submit_round(&fx, 731, "low", "fixed の Low").await;
+    // 732: fixed と open が混ざる
+    let (_, mixed_fixed) = submit_round(&fx, 732, "high", "fixed の High").await;
+    submit_round(&fx, 732, "medium", "open の Medium").await;
+    // 733: 着手中（fixing）だけ
+    let (_, fixing) = submit_round(&fx, 733, "high", "fixing の High").await;
+
+    fx.login(&fx.developer.clone()).await;
+    for id in [&high_fixed, &medium_fixed, &low_fixed, &mixed_fixed] {
+        assert_eq!(transition(&fx, id, "fixed").await.status(), StatusCode::OK);
+    }
+    assert_eq!(
+        transition(&fx, &fixing, "fixing").await.status(),
+        StatusCode::OK
+    );
+
+    let prs = json(
+        fx.app
+            .get_with_session(&format!("{}/pull-requests", fx.reviews_path()))
+            .await,
+    )
+    .await;
+    let row = |pr: i32| {
+        prs.as_array()
+            .expect("array")
+            .iter()
+            .find(|row| row["pr_number"] == pr)
+            .unwrap_or_else(|| panic!("PR {pr} が一覧にある: {prs}"))
+            .clone()
+    };
+    for (pr, unresolved, blocking, blocking_fixed) in
+        [(731, 3, 2, 2), (732, 2, 2, 1), (733, 1, 1, 0)]
+    {
+        let row = row(pr);
+        assert_eq!(row["unresolved"], unresolved, "PR {pr}: {row}");
+        assert_eq!(row["blocking"], blocking, "PR {pr}: {row}");
+        assert_eq!(row["blocking_fixed"], blocking_fixed, "PR {pr}: {row}");
+    }
 
     fx.app.cleanup_user(fx.reviewer.id).await;
     fx.app.cleanup_user(fx.developer.id).await;

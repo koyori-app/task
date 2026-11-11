@@ -2,24 +2,11 @@
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhPlus } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import UserAvatar from '@/components/UserAvatar.vue';
+import UserSelector from '@/components/users/UserSelector.vue';
+import { Button, Dialog, Field, Picker } from '@koyori-app/ui-vue';
 import { LIST_PROJECTS_PATH, apiClient, useMeQuery } from '@/lib/api-vue-query';
+import { rolesForAccount } from '@/lib/bot-roles';
 import type { components } from '@/generated/api';
 
 type ProjectMemberResponse = components['schemas']['ProjectMemberResponse'];
@@ -35,10 +22,6 @@ const ROLES: { value: ProjectRole; label: string; description: string }[] = [
   { value: 'Member', label: 'メンバー', description: 'プロジェクトに参加して作業する' },
   { value: 'Viewer', label: '閲覧者', description: 'プロジェクトを閲覧する' },
 ];
-
-function roleLabel(role: ProjectRole) {
-  return ROLES.find((r) => r.value === role)?.label ?? role;
-}
 
 const props = defineProps<{
   tenantId: string;
@@ -73,7 +56,7 @@ const tenantMembersQuery = useQuery(
 const members = computed<ProjectMemberResponse[]>(() => membersQuery.data.value ?? []);
 const tenantMembers = computed<TenantMemberResponse[]>(() => tenantMembersQuery.data.value ?? []);
 
-/** 一覧・追加・変更・削除はプロジェクト管理者（またはオーナー）専用。 */
+/** 一覧・追加・変更・削除はプロジェクト管理者（またはテナントオーナー・入れるテナント管理者）専用。 */
 const isForbidden = computed(
   () =>
     (membersQuery.error.value as { response?: { status?: number } } | null)?.response?.status ===
@@ -91,6 +74,16 @@ const candidates = computed(() => {
   const existing = new Set(members.value.map((m) => m.user_id));
   return tenantMembers.value.filter((tm) => !existing.has(tm.user_id));
 });
+
+/** UserSelector に渡す形（テナントメンバーの行から利用者を引く）。 */
+const candidateUsers = computed(() =>
+  candidates.value.map((candidate) => ({
+    id: candidate.user_id,
+    username: candidate.user.username,
+    account_kind: candidate.user.account_kind,
+    avatar_url: candidate.user.avatar_url ?? null,
+  })),
+);
 
 const addMutation = apiClient.useMutation('post', MEMBERS_PATH);
 const updateMutation = apiClient.useMutation('put', MEMBER_PATH);
@@ -127,6 +120,19 @@ function errorStatus(e: unknown): number | undefined {
 
 const selectedUserId = ref<string | null>(null);
 const selectedRole = ref<ProjectRole>('Member');
+// 選んだ人が BOT なら Admin を選べない（選んであれば Member へ戻す）
+const addRoles = computed(() =>
+  rolesForAccount(
+    ROLES,
+    candidateUsers.value.find((user) => user.id === selectedUserId.value)?.account_kind,
+  ),
+);
+function selectUser(userId: string | null) {
+  selectedUserId.value = userId;
+  if (!addRoles.value.some((role) => role.value === selectedRole.value)) {
+    selectedRole.value = 'Member';
+  }
+}
 const addError = ref<string | null>(null);
 
 async function onAdd() {
@@ -191,10 +197,24 @@ function openRemove(member: ProjectMemberResponse) {
   removeTarget.value = member;
 }
 
-function onRemoveOpenChange(open: boolean) {
+// 警告も説明に含める。説明（aria-describedby）に入れないと、開いたときに読み上げられない
+const removeDescription = computed(() => {
+  const target = removeTarget.value;
+  if (!target) return '';
+  return [
+    `「${target.user.username}」をこのプロジェクトから外します。担当タスクの割り当ては残りますが、ウォッチしていたタスクの通知は解除されます。`,
+    members.value.length === 1 &&
+      'これが最後のメンバーです。外すとメンバー指定が無くなり、このプロジェクトはテナントメンバー全員が開けるようになります。',
+    isSelf(target) && '自分をこのプロジェクトから外します。以後この設定画面は開けなくなります。',
+  ]
+    .filter(Boolean)
+    .join('');
+});
+
+function onRemoveClose() {
   // 削除リクエスト進行中はダイアログを閉じない（結果の見逃し防止）
-  if (!open && removeMutation.isPending.value) return;
-  if (!open) removeTarget.value = null;
+  if (removeMutation.isPending.value) return;
+  removeTarget.value = null;
 }
 
 async function confirmRemove() {
@@ -220,10 +240,6 @@ async function confirmRemove() {
         : 'メンバーを削除できませんでした。';
   }
 }
-
-function initials(username: string) {
-  return username.slice(0, 1).toUpperCase();
-}
 </script>
 
 <template>
@@ -239,7 +255,7 @@ function initials(username: string) {
     <p v-if="membersQuery.isPending.value" class="text-sm text-muted-foreground">読み込み中…</p>
 
     <p v-else-if="isForbidden" class="text-sm text-muted-foreground">
-      メンバーを管理できるのは、テナントオーナーとこのプロジェクトの管理者だけです。
+      メンバーを管理できるのは、テナントオーナー・テナント管理者とこのプロジェクトの管理者だけです。
     </p>
 
     <p v-else-if="membersQuery.isError.value" role="alert" class="text-sm text-destructive">
@@ -249,51 +265,38 @@ function initials(username: string) {
     <template v-else>
       <!-- 追加フォーム -->
       <div class="mb-5 flex flex-wrap items-end gap-2">
-        <div class="min-w-[220px] flex-1">
-          <label for="member-candidate" class="mb-1.5 block text-sm font-medium">
-            テナントメンバーから追加
-          </label>
-          <Select
-            :model-value="selectedUserId ?? undefined"
-            @update:model-value="(v) => (selectedUserId = v == null ? null : String(v))"
-          >
-            <SelectTrigger id="member-candidate" class="w-full">
-              <SelectValue placeholder="利用者を選択" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem
-                v-for="candidate in candidates"
-                :key="candidate.user_id"
-                :value="candidate.user_id"
-              >
-                {{ candidate.user.username }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div class="w-[140px]">
-          <label for="member-role" class="mb-1.5 block text-sm font-medium">ロール</label>
-          <Select
-            :model-value="selectedRole"
-            @update:model-value="(v) => (selectedRole = v as ProjectRole)"
-          >
-            <SelectTrigger id="member-role" class="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="role in ROLES" :key="role.value" :value="role.value">
-                {{ role.label }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        <Field id="member-candidate" label="テナントメンバーから追加" class="min-w-[220px] flex-1">
+          <UserSelector
+            label="テナントメンバーから追加"
+            :users="candidateUsers"
+            :model-value="selectedUserId ? [selectedUserId] : []"
+            :multiple="false"
+            :state="{
+              loading: tenantMembersQuery.isPending.value,
+              error: tenantMembersQuery.isError.value,
+            }"
+            search-label="テナントメンバーを検索"
+            empty-text="追加できるテナントメンバーがいません。"
+            no-match-text="一致するテナントメンバーがいません"
+            @update:model-value="(ids) => selectUser(ids[0] ?? null)"
+          />
+        </Field>
+        <Field id="member-role" label="ロール" class="w-[140px]">
+          <Picker
+            label="ロール"
+            :searchable="false"
+            :items="addRoles"
+            :selected-values="[selectedRole]"
+            :on-selection-change="(values: string[]) => (selectedRole = values[0] as ProjectRole)"
+          />
+        </Field>
         <Button
           type="button"
           :disabled="!selectedUserId || addMutation.isPending.value"
+          :label="addMutation.isPending.value ? '追加中…' : '追加'"
           @click="onAdd"
         >
-          <PhPlus class="size-4" />
-          {{ addMutation.isPending.value ? '追加中…' : '追加' }}
+          <template #icon><PhPlus class="size-4" /></template>
         </Button>
       </div>
       <p
@@ -325,92 +328,58 @@ function initials(username: string) {
           :key="member.id"
           class="flex items-center gap-3 border-b px-3.5 py-2.5 last:border-b-0"
         >
-          <Avatar class="size-8">
-            <AvatarImage
-              v-if="member.user.avatar_url"
-              :src="member.user.avatar_url"
-              :alt="member.user.username"
-            />
-            <AvatarFallback class="bg-muted text-xs text-muted-foreground">
-              {{ initials(member.user.username) }}
-            </AvatarFallback>
-          </Avatar>
+          <UserAvatar :user="member.user" size="xl" />
           <span class="min-w-0 flex-1 truncate text-sm font-medium">
             {{ member.user.username }}
           </span>
-          <Select
-            :model-value="member.role"
+          <!-- 一覧の overflow-hidden に切られないよう、一覧はトップレイヤーに出す -->
+          <Picker
+            :label="`${member.user.username} のロール`"
+            class="w-[130px]"
+            top-layer
+            :searchable="false"
             :disabled="updateMutation.isPending.value"
-            @update:model-value="(v) => onRoleChange(member, v as ProjectRole)"
-          >
-            <SelectTrigger
-              class="w-[130px]"
-              :aria-label="`${member.user.username} のロール`"
-              size="sm"
-            >
-              <SelectValue>{{ roleLabel(member.role) }}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="role in ROLES" :key="role.value" :value="role.value">
-                <span class="flex flex-col">
-                  <span>{{ role.label }}</span>
-                  <span class="text-xs text-muted-foreground">{{ role.description }}</span>
-                </span>
-              </SelectItem>
-            </SelectContent>
-          </Select>
+            :items="rolesForAccount(ROLES, member.user.account_kind)"
+            :selected-values="[member.role]"
+            :on-selection-change="
+              (values: string[]) => onRoleChange(member, values[0] as ProjectRole)
+            "
+          />
           <Button
             type="button"
             variant="ghost"
-            size="sm"
-            class="text-destructive hover:text-destructive"
-            :aria-label="`メンバー「${member.user.username}」を削除`"
+            class="text-(--koyori-color-danger)"
+            :ariaLabel="`メンバー「${member.user.username}」を削除`"
+            label="削除"
             @click="openRemove(member)"
-          >
-            削除
-          </Button>
+          />
         </li>
       </ul>
     </template>
 
-    <Dialog v-if="removeTarget" :open="true" @update:open="onRemoveOpenChange">
-      <DialogContent class="max-w-md" :show-close-button="false">
-        <DialogHeader>
-          <DialogTitle>メンバーを削除しますか？</DialogTitle>
-          <DialogDescription>
-            <span class="block">
-              「{{ removeTarget.user.username }}」をこのプロジェクトから外します。
-              担当タスクの割り当ては残りますが、ウォッチしていたタスクの通知は解除されます。
-            </span>
-            <span v-if="members.length === 1" class="mt-2 block text-destructive">
-              これが最後のメンバーです。外すとメンバー指定が無くなり、このプロジェクトは
-              テナントメンバー全員が開けるようになります。
-            </span>
-            <span v-if="isSelf(removeTarget)" class="mt-2 block text-destructive">
-              自分をこのプロジェクトから外します。以後この設定画面は開けなくなります。
-            </span>
-          </DialogDescription>
-        </DialogHeader>
-        <p v-if="removeError" role="alert" class="text-sm text-destructive">{{ removeError }}</p>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            :disabled="removeMutation.isPending.value"
-            @click="removeTarget = null"
-          >
-            キャンセル
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            :disabled="removeMutation.isPending.value"
-            @click="confirmRemove"
-          >
-            {{ removeMutation.isPending.value ? '削除中…' : '削除する' }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
+    <Dialog
+      :open="removeTarget !== null"
+      title="メンバーを削除しますか？"
+      :description="removeDescription"
+      :on-close="onRemoveClose"
+    >
+      <p v-if="removeError" role="alert" class="text-sm text-destructive">{{ removeError }}</p>
+      <template #actions>
+        <Button
+          type="button"
+          variant="tertiary"
+          :disabled="removeMutation.isPending.value"
+          label="キャンセル"
+          @click="removeTarget = null"
+        />
+        <Button
+          type="button"
+          variant="danger"
+          :disabled="removeMutation.isPending.value"
+          :label="removeMutation.isPending.value ? '削除中…' : '削除する'"
+          @click="confirmRemove"
+        />
+      </template>
     </Dialog>
   </div>
 </template>

@@ -1,25 +1,10 @@
 <script setup lang="ts">
-import {
-  PhSealCheck,
-  PhBell,
-  PhCaretUpDown,
-  PhCreditCard,
-  PhSignOut,
-  PhSparkle,
-} from '@phosphor-icons/vue';
-
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { Dropdown, type DropdownSection } from '@koyori-app/ui-vue';
+import { navigate } from 'vike/client/router';
 import { computed } from 'vue';
-import { avatarInitials } from '@/lib/initials';
+
+import UserAvatar from '@/components/UserAvatar.vue';
+import { useInstallPrompt } from '@/lib/pwa/install-prompt';
 
 const props = defineProps<{
   user: {
@@ -30,66 +15,39 @@ const props = defineProps<{
   onLogout?: () => void | Promise<void>;
 }>();
 
-const initials = computed(() => avatarInitials(props.user.name));
+const avatarUser = computed(() => ({ name: props.user.name, avatar_url: props.user.avatar }));
+
+// ブラウザが install を差し出した時だけ出る（iOS の Safari などでは出ない）。
+const { canInstall, promptInstall } = useInstallPrompt();
+
+const sections = computed<DropdownSection[]>(() => [
+  { heading: props.user.email, items: [{ value: 'upgrade', label: 'Upgrade to Pro' }] },
+  {
+    items: [
+      { value: 'account', label: 'Account' },
+      { value: 'billing', label: 'Billing' },
+      { value: 'notifications', label: 'Notifications' },
+    ],
+  },
+  ...(canInstall.value ? [{ items: [{ value: 'install', label: 'Install app' }] }] : []),
+  { items: [{ value: 'logout', label: 'Log out', destructive: true }] },
+]);
+
+function onSelect(value: string) {
+  if (value === 'account') void navigate('/settings/profile');
+  else if (value === 'install') void promptInstall();
+  else if (value === 'logout') void props.onLogout?.();
+}
 </script>
 
 <template>
-  <DropdownMenu>
-    <DropdownMenuTrigger as-child>
-      <button
-        type="button"
-        class="flex max-w-45 items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm hover:bg-accent data-[state=open]:bg-accent"
-      >
-        <Avatar class="size-6 rounded-md">
-          <AvatarImage :src="user.avatar" :alt="user.name" />
-          <AvatarFallback class="rounded-md text-xs">{{ initials }}</AvatarFallback>
-        </Avatar>
-        <span class="truncate font-medium">{{ user.name }}</span>
-        <PhCaretUpDown class="size-4 shrink-0 text-muted-foreground" />
-      </button>
-    </DropdownMenuTrigger>
-    <DropdownMenuContent class="min-w-56 rounded-lg" side="bottom" align="end" :side-offset="4">
-      <DropdownMenuLabel class="p-0 font-normal">
-        <div class="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-          <Avatar class="h-8 w-8 rounded-lg">
-            <AvatarImage :src="user.avatar" :alt="user.name" />
-            <AvatarFallback class="rounded-lg">{{ initials }}</AvatarFallback>
-          </Avatar>
-          <div class="grid flex-1 text-left text-sm leading-tight">
-            <span class="truncate font-semibold">{{ user.name }}</span>
-            <span class="truncate text-xs">{{ user.email }}</span>
-          </div>
-        </div>
-      </DropdownMenuLabel>
-      <DropdownMenuSeparator />
-      <DropdownMenuGroup>
-        <DropdownMenuItem>
-          <PhSparkle />
-          Upgrade to Pro
-        </DropdownMenuItem>
-      </DropdownMenuGroup>
-      <DropdownMenuSeparator />
-      <DropdownMenuGroup>
-        <DropdownMenuItem as-child>
-          <a href="/settings/profile">
-            <PhSealCheck />
-            Account
-          </a>
-        </DropdownMenuItem>
-        <DropdownMenuItem>
-          <PhCreditCard />
-          Billing
-        </DropdownMenuItem>
-        <DropdownMenuItem>
-          <PhBell />
-          Notifications
-        </DropdownMenuItem>
-      </DropdownMenuGroup>
-      <DropdownMenuSeparator />
-      <DropdownMenuItem @click="onLogout?.()">
-        <PhSignOut />
-        Log out
-      </DropdownMenuItem>
-    </DropdownMenuContent>
-  </DropdownMenu>
+  <Dropdown :label="user.name" :items="sections" :on-select="onSelect">
+    <template #trigger>
+      <span class="flex max-w-45 items-center gap-2 text-left">
+        <UserAvatar :user="avatarUser" size="md" shape="md" />
+        <!-- 狭い幅では右端で切れるのでアバターだけにする。名前は Dropdown の label で読ませる -->
+        <span class="truncate font-medium max-md:hidden">{{ user.name }}</span>
+      </span>
+    </template>
+  </Dropdown>
 </template>

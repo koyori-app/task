@@ -15,14 +15,21 @@ import {
 import type { components } from '@/generated/api';
 import type { TenantUuid } from '@/lib/api-ids';
 import { fetchClient, useMeQuery } from '@/lib/api-vue-query';
-import { taskDetailHref, taskListHref, PRIORITY_CONFIG } from '@/lib/task-display';
+import { taskDetailHref, taskListHref, taskSeqKey, PRIORITY_CONFIG } from '@/lib/task-display';
 import { activityActor, activityText, relativeTime } from '@/lib/task-activity';
 import { useNow } from '@/composables/useNow';
 import { useHydrated } from '@/composables/useHydrated';
-import { Button } from '@/components/ui/button';
+import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts';
+import { Button } from '@koyori-app/ui-vue';
+import UserAvatar from '@/components/UserAvatar.vue';
 import DashboardCreateTask from './DashboardCreateTask.vue';
+import DashboardProjectsEmpty from './DashboardProjectsEmpty.vue';
 
-const props = defineProps<{ tenantId: TenantUuid; tenantSlug: string }>();
+const props = defineProps<{
+  tenantId: TenantUuid;
+  tenantSlug: string;
+  canCreateProject?: boolean;
+}>();
 const DASHBOARD_PATH = '/v1/tenants/{tenant_id}/users/me/dashboard' as const;
 const MY_TASKS_PATH = '/v1/tenants/{tenant_id}/users/me/tasks' as const;
 const TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}' as const;
@@ -40,6 +47,7 @@ const pageSize = 5;
 const createOpen = ref(false);
 const pending = ref<string[]>([]);
 const mutationError = ref('');
+const createdTask = ref<{ key: string; href: string } | null>(null);
 const now = useNow();
 const hydrated = useHydrated();
 const me = useMeQuery();
@@ -74,6 +82,12 @@ const query = useQuery({
 });
 const data = computed(() => query.data.value);
 const projects = computed(() => data.value?.projects.filter((p) => !p.project.is_personal) ?? []);
+const canCreate = computed(() => !!data.value?.projects.length && !query.isError.value);
+useKeyboardShortcuts({
+  t: () => {
+    if (canCreate.value) createOpen.value = true;
+  },
+});
 const dateLabel = computed(() =>
   now.value.toLocaleDateString('ja-JP', { month: 'long', day: 'numeric', weekday: 'long' }),
 );
@@ -109,7 +123,7 @@ const stats = computed(() => [
     note: '期限を確認しましょう',
     icon: Clock3,
     filter: 'overdue' as const,
-    tone: 'text-red-600 dark:text-red-400',
+    tone: 'text-destructive',
   },
   {
     label: '未完了',
@@ -156,6 +170,19 @@ function deadline(task: DashboardTask['task']) {
     overdue: !!date && date < today.value,
   };
 }
+function onCreated(
+  task: components['schemas']['TaskDetailResponse'],
+  project: components['schemas']['ProjectResponse'],
+) {
+  createdTask.value = {
+    key: taskSeqKey(project.key, task.seq_id),
+    href: taskDetailHref(props.tenantSlug, project.key, task.seq_id),
+  };
+  void refresh();
+}
+watch(createOpen, (open) => {
+  if (open) createdTask.value = null;
+});
 async function refresh() {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: ['get', DASHBOARD_PATH] }),
@@ -211,11 +238,13 @@ async function complete(item: DashboardTask) {
         </p>
       </div>
       <Button
-        class="shrink-0 gap-1.5 max-sm:px-2 max-sm:text-xs"
-        :disabled="!data?.projects.length || query.isError.value"
+        class="shrink-0"
+        :disabled="!canCreate"
+        label="タスクを作成"
         @click="createOpen = true"
-        ><Plus class="size-4" />タスクを作成</Button
       >
+        <template #icon><Plus class="size-4" /></template>
+      </Button>
     </div>
 
     <div
@@ -225,12 +254,11 @@ async function complete(item: DashboardTask) {
     >
       <p class="text-sm text-destructive">ダッシュボードを取得できませんでした。</p>
       <Button
-        variant="outline"
-        size="sm"
+        variant="tertiary"
         :disabled="query.isFetching.value"
+        label="再試行"
         @click="query.refetch()"
-        >再試行</Button
-      >
+      />
     </div>
     <div
       v-if="!data && !query.isError.value"
@@ -240,6 +268,11 @@ async function complete(item: DashboardTask) {
       <Loader2 class="mx-auto mb-3 size-5 animate-spin" />読み込み中…
     </div>
     <template v-if="data">
+      <DashboardProjectsEmpty
+        v-if="!data.projects.length"
+        :tenant-slug="tenantSlug"
+        :can-create-project="!!canCreateProject"
+      />
       <section class="mb-8 grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="自分のタスクの概要">
         <component
           :is="stat.filter ? 'button' : 'div'"
@@ -292,6 +325,12 @@ async function complete(item: DashboardTask) {
           </div>
           <p v-if="mutationError" role="alert" class="mt-3 text-xs text-destructive">
             {{ mutationError }}
+          </p>
+          <p v-if="createdTask" role="status" class="mt-3 text-xs text-muted-foreground">
+            <a :href="createdTask.href" class="font-medium text-foreground hover:underline">{{
+              createdTask.key
+            }}</a>
+            を作成しました
           </p>
           <p
             v-if="query.isPlaceholderData.value"
@@ -349,7 +388,7 @@ async function complete(item: DashboardTask) {
                   class="mb-1 block rounded bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800 dark:bg-amber-950 dark:text-amber-300"
                   >優先度 {{ PRIORITY_CONFIG[item.task.priority].label }}</span
                 >
-                <span :class="deadline(item.task).overdue && 'text-red-600 dark:text-red-400'">{{
+                <span :class="deadline(item.task).overdue && 'text-destructive'">{{
                   deadline(item.task).text
                 }}</span>
               </div>
@@ -365,12 +404,12 @@ async function complete(item: DashboardTask) {
           <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
             <Button
               variant="ghost"
-              size="sm"
-              class="h-auto gap-1 p-0 text-xs text-muted-foreground"
               :disabled="!data.projects.length"
+              label="タスクを追加"
               @click="createOpen = true"
-              ><Plus class="size-3.5" />タスクを追加</Button
             >
+              <template #icon><Plus class="size-3.5" /></template>
+            </Button>
             <div
               class="flex items-center gap-3 text-[11px] text-muted-foreground"
               aria-live="polite"
@@ -384,19 +423,17 @@ async function complete(item: DashboardTask) {
               <Button
                 v-if="offset > 0"
                 :disabled="query.isPlaceholderData.value"
-                variant="outline"
-                size="sm"
+                variant="tertiary"
+                label="前へ"
                 @click="offset = Math.max(0, offset - pageSize)"
-                >前へ</Button
-              >
+              />
               <Button
                 v-if="offset + pageSize < data.total"
                 :disabled="query.isPlaceholderData.value"
-                variant="outline"
-                size="sm"
+                variant="tertiary"
+                label="次へ"
                 @click="offset += pageSize"
-                >次へ</Button
-              >
+              />
             </div>
           </div>
           <p class="mt-3 text-[11px] text-muted-foreground">
@@ -450,11 +487,14 @@ async function complete(item: DashboardTask) {
                 :key="item.activity.id"
                 class="flex items-start gap-2.5"
               >
-                <span
+                <UserAvatar
+                  :user="{
+                    name: activityActor(item.activity),
+                    account_kind: item.activity.user?.account_kind,
+                  }"
+                  size="md"
                   aria-hidden="true"
-                  class="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] text-muted-foreground"
-                  >{{ Array.from(activityActor(item.activity))[0] }}</span
-                >
+                />
                 <div class="min-w-0 text-[11px] leading-relaxed text-muted-foreground">
                   <p class="break-words">
                     {{ activityActor(item.activity) }}が{{ activityText(item.activity) }}
@@ -532,7 +572,8 @@ async function complete(item: DashboardTask) {
         v-model:open="createOpen"
         :tenant-id="tenantId"
         :projects="data.projects.map((p) => p.project)"
-        @created="refresh"
+        :current-user-id="me.data.value?.id"
+        @created="onCreated"
       />
     </template>
   </div>

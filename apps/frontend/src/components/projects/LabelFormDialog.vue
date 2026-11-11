@@ -2,19 +2,8 @@
 import { useForm } from '@tanstack/vue-form';
 import { type } from 'arktype';
 import { useQueryClient } from '@tanstack/vue-query';
-import { computed, ref } from 'vue';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Field, FieldError, FieldLabel } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+import { computed, ref, useId } from 'vue';
+import { Button, Dialog, Field, Input, Textarea } from '@koyori-app/ui-vue';
 import { apiClient } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
 
@@ -49,6 +38,8 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{ close: [] }>();
+// 閉じた Dialog も DOM に残るため、送信ボタンを結ぶ form の id はインスタンスごとに分ける
+const formId = useId();
 
 const queryClient = useQueryClient();
 const submitError = ref<string | null>(null);
@@ -108,110 +99,107 @@ const form = useForm({
   },
 });
 
-function onOpenChange(open: boolean) {
+function onClose() {
   // 保存リクエスト進行中はダイアログを閉じない（結果の見逃し防止）
-  if (!open && isPending.value) return;
-  if (!open) emit('close');
+  if (isPending.value) return;
+  emit('close');
 }
 </script>
 
 <template>
-  <Dialog :open="true" @update:open="onOpenChange">
-    <DialogContent class="max-w-md">
-      <DialogHeader>
-        <DialogTitle>{{ label ? 'ラベルを編集' : 'ラベルを作成' }}</DialogTitle>
-        <DialogDescription>タスクの分類に使う名前・色・説明を設定します。</DialogDescription>
-      </DialogHeader>
+  <Dialog
+    :open="true"
+    :title="label ? 'ラベルを編集' : 'ラベルを作成'"
+    description="タスクの分類に使う名前・色・説明を設定します。"
+    :on-close="onClose"
+  >
+    <form :id="formId" class="flex flex-col gap-4" @submit.prevent="form.handleSubmit">
+      <form.Field name="name">
+        <template #default="{ field }">
+          <Field
+            id="label-name"
+            label="名前"
+            :error="field.state.meta.errors.length ? '名前は 1〜100 文字で入力してください' : ''"
+          >
+            <Input
+              placeholder="bug"
+              :value="field.state.value"
+              :on-value-change="field.handleChange"
+              :on-blur="field.handleBlur"
+            />
+          </Field>
+        </template>
+      </form.Field>
 
-      <form class="flex flex-col gap-4" @submit.prevent="form.handleSubmit">
-        <form.Field name="name">
-          <template #default="{ field }">
-            <Field>
-              <FieldLabel for="label-name">名前</FieldLabel>
-              <Input
-                id="label-name"
-                placeholder="bug"
-                :model-value="field.state.value"
-                @blur="field.handleBlur"
-                @update:model-value="(v) => field.handleChange(String(v))"
+      <form.Field name="color">
+        <template #default="{ field }">
+          <Field
+            id="label-color"
+            label="色"
+            :error="field.state.meta.errors.length ? '色は #RRGGBB 形式で入力してください' : ''"
+          >
+            <div class="flex flex-wrap items-center gap-1.5" role="group" aria-label="色プリセット">
+              <button
+                v-for="preset in LABEL_COLOR_PRESETS"
+                :key="preset"
+                type="button"
+                class="size-6 rounded-full border"
+                :class="
+                  field.state.value.toLowerCase() === preset
+                    ? 'ring-2 ring-ring ring-offset-2 ring-offset-background'
+                    : ''
+                "
+                :style="{ backgroundColor: preset }"
+                :aria-label="`色 ${preset}`"
+                :aria-pressed="field.state.value.toLowerCase() === preset"
+                @click="field.handleChange(preset)"
               />
-              <FieldError v-if="field.state.meta.errors.length"
-                >名前は 1〜100 文字で入力してください</FieldError
-              >
-            </Field>
-          </template>
-        </form.Field>
+            </div>
+            <!-- 文字数は送信時に COLOR_PATTERN で検証する -->
+            <Input
+              class="max-w-[120px] [&_input]:font-mono"
+              :value="field.state.value"
+              :on-value-change="field.handleChange"
+              :on-blur="field.handleBlur"
+            />
+          </Field>
+        </template>
+      </form.Field>
 
-        <form.Field name="color">
-          <template #default="{ field }">
-            <Field>
-              <FieldLabel for="label-color">色</FieldLabel>
-              <div
-                class="flex flex-wrap items-center gap-1.5"
-                role="group"
-                aria-label="色プリセット"
-              >
-                <button
-                  v-for="preset in LABEL_COLOR_PRESETS"
-                  :key="preset"
-                  type="button"
-                  class="size-6 rounded-full border"
-                  :class="
-                    field.state.value.toLowerCase() === preset
-                      ? 'ring-2 ring-ring ring-offset-2 ring-offset-background'
-                      : ''
-                  "
-                  :style="{ backgroundColor: preset }"
-                  :aria-label="`色 ${preset}`"
-                  :aria-pressed="field.state.value.toLowerCase() === preset"
-                  @click="field.handleChange(preset)"
-                />
-              </div>
-              <Input
-                id="label-color"
-                class="max-w-[120px] font-mono"
-                maxlength="7"
-                :model-value="field.state.value"
-                @blur="field.handleBlur"
-                @update:model-value="(v) => field.handleChange(String(v))"
-              />
-              <FieldError v-if="field.state.meta.errors.length"
-                >色は #RRGGBB 形式で入力してください</FieldError
-              >
-            </Field>
-          </template>
-        </form.Field>
+      <form.Field name="description">
+        <template #default="{ field }">
+          <Field id="label-description" label="説明">
+            <Textarea
+              :rows="2"
+              placeholder="このラベルの用途（任意）"
+              :value="field.state.value"
+              :on-value-change="field.handleChange"
+            />
+          </Field>
+        </template>
+      </form.Field>
 
-        <form.Field name="description">
-          <template #default="{ field }">
-            <Field>
-              <FieldLabel for="label-description">説明</FieldLabel>
-              <Textarea
-                id="label-description"
-                rows="2"
-                placeholder="このラベルの用途（任意）"
-                :model-value="field.state.value"
-                @update:model-value="(v) => field.handleChange(String(v))"
-              />
-            </Field>
-          </template>
-        </form.Field>
+      <p v-if="submitError" role="alert" class="text-sm text-destructive">{{ submitError }}</p>
+    </form>
 
-        <p v-if="submitError" role="alert" class="text-sm text-destructive">{{ submitError }}</p>
-
-        <DialogFooter>
-          <Button type="button" variant="outline" :disabled="isPending" @click="emit('close')">
-            キャンセル
-          </Button>
-          <form.Subscribe>
-            <template #default="{ canSubmit, isSubmitting }">
-              <Button type="submit" :disabled="!canSubmit || isSubmitting || isPending">
-                {{ isSubmitting || isPending ? '保存中…' : label ? '変更を保存' : 'ラベルを作成' }}
-              </Button>
-            </template>
-          </form.Subscribe>
-        </DialogFooter>
-      </form>
-    </DialogContent>
+    <template #actions>
+      <Button
+        type="button"
+        variant="tertiary"
+        :disabled="isPending"
+        label="キャンセル"
+        @click="emit('close')"
+      />
+      <form.Subscribe>
+        <template #default="{ canSubmit, isSubmitting }">
+          <Button
+            type="submit"
+            :form="formId"
+            :disabled="!canSubmit || isSubmitting || isPending"
+            :label="isSubmitting || isPending ? '保存中…' : label ? '変更を保存' : 'ラベルを作成'"
+          />
+        </template>
+      </form.Subscribe>
+    </template>
   </Dialog>
 </template>

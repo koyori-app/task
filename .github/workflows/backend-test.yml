@@ -50,8 +50,9 @@ jobs:
           --health-retries 5
 
     env:
-      DATABASE_URL: postgresql://test:test@localhost:5432/test
-      REDIS_URL: redis://localhost:6379
+      # 統合テストのハーネスは試験用と明示した名だけを読む（tests/common/mod.rs）
+      TEST_DATABASE_URL: postgresql://test:test@localhost:5432/test
+      TEST_REDIS_URL: redis://localhost:6379
       SMTP_HOST: localhost
       SMTP_PORT: "587"
       SMTP_USERNAME: test
@@ -81,7 +82,7 @@ jobs:
         run: sudo apt-get install -y mold
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: apps/backend -> target
           # キャッシュは main だけが書く。PR ごとに保存すると 10 GB の上限で main の分が追い出され、
@@ -89,7 +90,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2.87.24
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-nextest
 

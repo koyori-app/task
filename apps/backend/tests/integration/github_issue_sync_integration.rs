@@ -858,4 +858,116 @@ async fn github_issue_sync_suite() {
 
         app.cleanup_user(owner.id).await;
     }
+
+    // 9. GET /tasks/{id}/forge の issue — 取り込み元と同期した開閉状態を返し、リンクが無ければ null
+    {
+        let owner = app.insert_user(false, false).await;
+        let tp = app.insert_tenant_project(owner.id).await;
+        let (todo_id, _) = seed_statuses(&app, tp.project_id).await;
+        let integration = insert_integration(&app, tp.project_id, owner.id).await;
+        import_project(
+            &app.state.db,
+            &app.state.http_client,
+            &github,
+            tp.project_id,
+        )
+        .await
+        .expect("import");
+        let rows = project_tasks(&app, tp.project_id).await;
+        let (open_task, closed_task) = (&rows[0], &rows[1]);
+
+        app.login_session(&owner.email, &owner.password).await;
+        let get_issue = |task_id: Uuid| {
+            let path = format!(
+                "/v1/tenants/{}/projects/{}/tasks/{task_id}/forge",
+                tp.tenant_id, tp.project_id
+            );
+            let app = &app;
+            async move {
+                let response = app.get_with_session(&path).await;
+                assert_eq!(response.status(), StatusCode::OK);
+                let body: serde_json::Value = response.json().await.expect("forge response");
+                body["issue"].clone()
+            }
+        };
+
+        let issue = get_issue(open_task.id).await;
+        assert_eq!(issue["host"], "github");
+        assert_eq!(issue["repo_owner"], REPO_OWNER);
+        assert_eq!(issue["repo_name"], REPO_NAME);
+        assert_eq!(issue["number"], 1);
+        assert_eq!(
+            issue["html_url"],
+            "https://github.com/acme/backend/issues/1"
+        );
+        assert_eq!(issue["state"], "open");
+        assert_eq!(issue["pending_push"], false);
+        let synced_at = |issue: &serde_json::Value| {
+            issue["last_synced_at"]
+                .as_str()
+                .expect("last_synced_at")
+                .parse::<chrono::DateTime<chrono::Utc>>()
+                .expect("rfc3339")
+        };
+        let imported_at = synced_at(&issue);
+        assert_eq!(
+            get_issue(closed_task.id).await["state"],
+            "closed",
+            "closed で取り込んだ Issue は closed"
+        );
+
+        // Issue のクローズを webhook で同期すると closed になる
+        apply_issue_event(
+            &app.state.db,
+            tp.project_id,
+            &serde_json::json!({
+                "action": "closed",
+                "issue": issue_json(1, "ログインできない", Some("再現手順"), "closed", T_EVENT),
+            }),
+        )
+        .await
+        .expect("apply closed event");
+        let issue = get_issue(open_task.id).await;
+        assert_eq!(issue["state"], "closed");
+        let applied_at = synced_at(&issue);
+        assert!(applied_at > imported_at, "webhook の適用で最終同期が進む");
+
+        // タスク側で開き直すと反映待ちになり、書き戻した後は open になる
+        // （書き戻しの跳ね返りはウォーターマークで捨てられるので、書き戻し側で控える）
+        let task = project_tasks(&app, tp.project_id).await.remove(0);
+        let mut active: tasks::ActiveModel = task.clone().into();
+        active.status_id = Set(todo_id);
+        active.update(&app.state.db).await.expect("reopen task");
+        mark_pending_push(&app.state.db, task.id)
+            .await
+            .expect("mark pending");
+        let issue = get_issue(task.id).await;
+        assert_eq!(issue["pending_push"], true);
+        assert_eq!(
+            synced_at(&issue),
+            applied_at,
+            "タスクの編集で反映待ちが立っても、同期していないので最終同期は進まない"
+        );
+        assert_eq!(
+            issue["state"], "closed",
+            "書き戻すまでは GitHub 側の状態のまま"
+        );
+        push_task(&app.state.db, &app.state.http_client, &github, task.id)
+            .await
+            .expect("push reopened");
+        let issue = get_issue(task.id).await;
+        assert_eq!(issue["pending_push"], false);
+        assert_eq!(issue["state"], "open");
+        assert!(synced_at(&issue) > applied_at, "書き戻しで最終同期が進む");
+
+        // 連携を解除するとリンクごと消え、取り込んでいないタスクと同じく null
+        github_integrations::Entity::delete_by_id(integration.id)
+            .exec(&app.state.db)
+            .await
+            .expect("delete integration");
+        assert!(get_issue(task.id).await.is_null());
+
+        app.reset_session_client();
+        app.cleanup_user(owner.id).await;
+    }
 }

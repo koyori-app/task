@@ -1,5 +1,13 @@
 //! Koyori Desktop の認証（Authorization Code + PKCE → Device Token）と端末管理。
-//! 規則は apps/backend/docs/personal-access-tokens-authz.md の「Desktop 認証」。
+//! 規則は docs/dev/design/personal-access-tokens-authz.md の「Desktop 認証」。
+//!
+//! テストケースの一覧（docs/dev/design/personal-access-tokens-authz.md から移した）:
+//! - 発行、交換、Bearer で通知一覧が 200。code の再利用・verifier 不一致・TTL 超過は 401
+//! - 2FA 途中のセッション・PAT・Device Token での発行は 403。PAT 管理・テナント作成は 403
+//! - `GET /v1/auth/me` は Device Token で 200、PAT で 403。`PATCH /v1/auth/me` は Device Token・PAT で 403、
+//!   無効なトークンで 401
+//! - 失効後・`sessions_revoked_at` 更新後・期限切れは 401。他人の端末の失効は 404。
+//!   交換のエンドポイントは上限を越えると 429
 
 use crate::common::{TestApp, TestUser, insert_tenant};
 use axum::http::StatusCode;
@@ -333,6 +341,7 @@ async fn bearer_cannot_issue_code() {
 
 /// Desktop のアカウント表示: Device Token で自分のプロフィールを読める（401 だと Desktop は
 /// トークン失効とみなしてログアウトする）。PAT は 403、更新はセッション専用のまま。
+/// 更新を有効な Bearer で叩いたときも、認証方式の不一致なので 401 ではなく 403。
 #[tokio::test]
 async fn device_token_can_read_own_profile_but_not_edit_it() {
     let mut app = TestApp::new().await;
@@ -358,14 +367,34 @@ async fn device_token_can_read_own_profile_but_not_edit_it() {
         StatusCode::FORBIDDEN
     );
 
-    let res = reqwest::Client::new()
-        .patch(format!("{}/v1/auth/me", app.base_url()))
-        .bearer_auth(&device)
-        .json(&serde_json::json!({ "bio": "desk" }))
-        .send()
-        .await
-        .expect("update me with device token");
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    let patch_me = |token: &str| {
+        reqwest::Client::new()
+            .patch(format!("{}/v1/auth/me", app.base_url()))
+            .bearer_auth(token)
+            .json(&serde_json::json!({ "bio": "desk" }))
+            .send()
+    };
+    assert_eq!(
+        patch_me(&device).await.expect("device").status(),
+        StatusCode::FORBIDDEN,
+        "有効な Device Token は 403（401 だと Desktop がログアウトする）"
+    );
+    assert_eq!(
+        patch_me(&pat).await.expect("pat").status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        patch_me("kdt_not_a_real_token")
+            .await
+            .expect("invalid")
+            .status(),
+        StatusCode::UNAUTHORIZED,
+        "無効なトークンは 401 のまま"
+    );
+    let res = app
+        .patch_json_with_session("/v1/auth/me", serde_json::json!({ "bio": "web" }))
+        .await;
+    assert_eq!(res.status(), StatusCode::OK, "セッションなら更新できる");
 
     app.cleanup_user(user.id).await;
 }

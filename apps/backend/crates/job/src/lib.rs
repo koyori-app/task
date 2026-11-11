@@ -1,12 +1,16 @@
 //! Apalis バックグラウンドジョブ
 
 pub mod already_registered_email;
+pub mod deadline_soon;
+pub mod failure_report;
 pub mod github_issue_sync;
 pub mod github_webhook;
 pub mod notification_email;
 pub mod notification_retention;
 pub mod password_reset_email;
 pub mod review_summary;
+pub mod supervise;
+pub mod tenant_invitation_email;
 pub mod verification_email;
 pub mod webhook_delivery;
 
@@ -21,6 +25,7 @@ pub use github_issue_sync::{GithubIssueSyncJob, GithubIssueSyncStorage};
 pub use github_webhook::{GithubWebhookJob, GithubWebhookStorage};
 pub use password_reset_email::{PasswordResetEmailJob, PasswordResetEmailStorage};
 pub use review_summary::{ReviewSummaryJob, ReviewSummaryStorage};
+pub use tenant_invitation_email::{TenantInvitationEmailJob, TenantInvitationEmailStorage};
 pub use verification_email::{
     MAX_RETRIES, QUEUE_NAME, VerificationEmailJob, VerificationEmailStorage,
 };
@@ -39,6 +44,8 @@ pub struct JobState {
     /// ワーカーへ `AppState` を渡すと job → handler の循環になるので、
     /// 必要な依存はここに足す
     pub review_summary_storage: Arc<review_summary::ReviewSummaryStorage>,
+    /// マージでタスクを自動完了したとき、取り込み元 Issue への書き戻しを積むために持つ
+    pub github_issue_sync_storage: Arc<github_issue_sync::GithubIssueSyncStorage>,
     /// 切り詰められた push の続きのジョブを、投入の鍵（受信記録）と同じトランザクションで
     /// 積むために持つ。storage 経由では別接続になり、鍵とジョブが一緒に確定しない。
     pub pg_pool: PgPool,
@@ -48,7 +55,12 @@ pub struct JobState {
 }
 
 pub async fn setup_pool(database_url: &str) -> Result<PgPool, anyhow::Error> {
-    Ok(PgPool::connect(database_url).await?)
+    // 通常時の予算: ワーカー 7 本の LISTEN が 1 本ずつ常時占有し、残り 9 本を heartbeat・poll・
+    // 孤児回収・ハンドラーからの投入が共有する。世代交代中は旧リスナーの接続が UNLISTEN まで残る
+    Ok(sqlx::postgres::PgPoolOptions::new()
+        .max_connections(16)
+        .connect(database_url)
+        .await?)
 }
 
 pub async fn setup_verification_email_storage(
@@ -91,4 +103,11 @@ pub async fn setup_already_registered_email_storage(
     settings: &Settings,
 ) -> Result<Arc<AlreadyRegisteredEmailStorage>, anyhow::Error> {
     already_registered_email::setup(pool, settings).await
+}
+
+pub async fn setup_tenant_invitation_email_storage(
+    pool: &PgPool,
+    settings: &Settings,
+) -> Result<Arc<TenantInvitationEmailStorage>, anyhow::Error> {
+    tenant_invitation_email::setup(pool, settings).await
 }

@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 300" role="img" aria-label="ドライブ画面の配置">
+  <style>
+    :root { --bg:#ffffff; --panel:#f4f4f5; --line:#a1a1aa; --text:#27272a; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#18181b; --panel:#27272a; --line:#71717a; --text:#f4f4f5; } }
+    text { fill:var(--text); font:13px system-ui, sans-serif; }
+    .box { fill:var(--panel); stroke:var(--line); }
+  </style>
+  <rect x="1" y="1" width="638" height="298" rx="6" fill="var(--bg)" stroke="var(--line)"/>
+  <text x="16" y="26">ドライブ &gt; フォルダA &gt; サブフォルダB</text>
+  <line x1="1" y1="40" x2="639" y2="40" stroke="var(--line)"/>
+  <line x1="170" y1="40" x2="170" y2="299" stroke="var(--line)"/>
+  <rect class="box" x="14" y="54" width="142" height="30" rx="4"/>
+  <text x="26" y="74">+ 新しいフォルダ</text>
+  <text x="16" y="112">ドライブ</text>
+  <text x="32" y="136">フォルダA</text>
+  <text x="32" y="160">フォルダB</text>
+  <rect class="box" x="186" y="54" width="438" height="30" rx="4"/>
+  <text x="198" y="74">ファイル検索</text>
+  <rect class="box" x="186" y="98" width="120" height="30" rx="4"/>
+  <text x="200" y="118">アップロード</text>
+  <rect class="box" x="504" y="98" width="120" height="30" rx="4"/>
+  <text x="516" y="118">リスト / グリッド</text>
+  <rect class="box" x="186" y="146" width="130" height="50" rx="4"/>
+  <text x="200" y="176">フォルダA</text>
+  <rect class="box" x="330" y="146" width="130" height="50" rx="4"/>
+  <text x="344" y="176">フォルダB</text>
+  <rect class="box" x="186" y="210" width="130" height="50" rx="4"/>
+  <text x="200" y="240">report.pdf</text>
+  <rect class="box" x="330" y="210" width="130" height="50" rx="4"/>
+  <text x="344" y="240">image.png</text>
+</svg>

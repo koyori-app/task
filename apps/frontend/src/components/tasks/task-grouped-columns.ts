@@ -29,6 +29,14 @@ export type TaskGroup = {
  * ステータス列は持たない。グループがステータスそのものなので列にすると重複し、
  * 変更はタスク名の左の丸から行う（参照デザイン）。
  * 担当者は複数付くので、アバター 3 つ＋「+N」が収まる幅を取る。
+ *
+ * 列を並べるのは一覧（`@container`）の幅が 48rem（`@3xl`）以上のときだけ。
+ * 狭いときは列を持たず、行の中で 2 段に積む（TaskGroupedRow）。画面幅で分けると、
+ * サイドバーを開いた横持ちのように、画面は広いのに一覧が狭い場合を拾えない。
  */
 export const TASK_ROW_GRID =
-  'grid min-w-[42rem] grid-cols-[minmax(0,1fr)_7rem_7rem_6rem_4rem] items-center';
+  'grid grid-cols-1 items-start @3xl:grid-cols-[minmax(0,1fr)_7rem_7rem_6rem_4rem]';
+
+/** 列の見出し。列を並べないときは出さない（並べ替えはツールバーのメニューへ移る） */
+export const TASK_HEADER_GRID =
+  'hidden items-center @3xl:grid @3xl:grid-cols-[minmax(0,1fr)_7rem_7rem_6rem_4rem]';

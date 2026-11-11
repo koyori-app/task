@@ -64,6 +64,25 @@ const jsonResponse = (data: unknown, status = 200) =>
     headers: { 'Content-Type': 'application/json' },
   });
 
+const sampleInvitations = [
+  {
+    id: '00000000-0000-0000-0000-0000000000a1',
+    tenant_id: TENANT_UUID,
+    email: 'new.hire@example.com',
+    role: 'Member',
+    expires_at: '2999-01-08T00:00:00Z',
+    created_at: '2999-01-01T00:00:00Z',
+  },
+  {
+    id: '00000000-0000-0000-0000-0000000000a2',
+    tenant_id: TENANT_UUID,
+    email: 'contractor@example.com',
+    role: 'Viewer',
+    expires_at: '2000-01-08T00:00:00Z',
+    created_at: '2000-01-01T00:00:00Z',
+  },
+];
+
 type MockOptions = {
   members?: typeof sampleMembers;
   me?: { id: string; username: string };
@@ -82,6 +101,7 @@ function mockFetch(overrides: MockOptions = {}) {
       const url = typeof req === 'string' ? req : req.url;
       const method = typeof req === 'string' ? 'GET' : req.method;
       const pathname = new URL(url, 'http://localhost').pathname;
+      if (method === 'GET' && pathname.endsWith('/bots')) return jsonResponse([]);
 
       if (/\/v1\/tenants\/?$/.test(pathname) && method === 'GET') {
         return jsonResponse([sampleTenant]);
@@ -89,6 +109,13 @@ function mockFetch(overrides: MockOptions = {}) {
       if (pathname.includes('/v1/auth/me')) {
         const currentUser = overrides.me ?? { id: OWNER_ID, username: 'shadcn' };
         return jsonResponse({ ...currentUser, avatar_url: null });
+      }
+      if (pathname.endsWith('/invitations') && method === 'GET') {
+        return jsonResponse(sampleInvitations);
+      }
+      if (pathname.endsWith('/invitations') && method === 'POST') {
+        const body = await (req as Request).json();
+        return jsonResponse({ ...sampleInvitations[0], ...body }, 201);
       }
       if (pathname.endsWith('/members') && method === 'GET') {
         if (overrides.hangMembers) return new Promise<Response>(() => {});
@@ -169,7 +196,7 @@ const meta = {
     docs: {
       description: {
         component:
-          'テナント設定のメンバーページ。owner は API の synthetic row と、旧レスポンス向けの本人情報 fallback で表示する。招待は未実装で、一覧・ロール変更・除外は tenant_members API に繋いでいる。',
+          'テナント設定のメンバーページ。owner は API の synthetic row と、旧レスポンス向けの本人情報 fallback で表示する。一覧・ロール変更・除外は tenant_members API、招待の送信・保留中の一覧・再送・取り消しは tenant_invitations API に繋いでいる。',
       },
     },
   },
@@ -191,11 +218,11 @@ export const Default: Story = {
 
     // オーナーはロールを変えられず、外せもしない
     await expect(canvas.getByText('オーナー')).toBeInTheDocument();
-    await expect(canvas.queryByLabelText('shadcnのロール')).not.toBeInTheDocument();
+    await expect(canvas.queryByRole('button', { name: /^shadcnのロール/ })).not.toBeInTheDocument();
     await expect(canvas.queryByLabelText('shadcnを外す')).not.toBeInTheDocument();
 
     // オーナー以外は操作できる
-    await expect(canvas.getByLabelText('rei.tanakaのロール')).toBeInTheDocument();
+    await expect(canvas.getByRole('button', { name: /^rei\.tanakaのロール/ })).toBeInTheDocument();
     await expect(canvas.getByLabelText('rei.tanakaを外す')).toBeInTheDocument();
   },
 };
@@ -208,7 +235,7 @@ export const ChangeRole: Story = {
     const page = within(canvasElement.ownerDocument.body);
     const user = userEvent.setup();
 
-    await user.click(await canvas.findByLabelText('daisuke.satoのロール'));
+    await user.click(await canvas.findByRole('button', { name: /^daisuke\.satoのロール/ }));
     await user.click(await page.findByRole('option', { name: /Viewer/ }));
 
     const put = (fetchSpy!.mock.calls as [Request | string][])
@@ -228,6 +255,11 @@ export const RemoveMember: Story = {
     const user = userEvent.setup();
 
     await user.click(await canvas.findByLabelText('asuka.kobayashiを外す'));
+    // 確認ダイアログを経てから送る
+    await expect(
+      canvas.findByRole('dialog', { name: 'メンバーを外しますか？' }),
+    ).resolves.toBeVisible();
+    await user.click(canvas.getByRole('button', { name: '外す' }));
 
     await waitFor(() => expect(canvas.queryByText('asuka.kobayashi')).not.toBeInTheDocument());
     const del = (fetchSpy!.mock.calls as [Request | string][])
@@ -247,7 +279,7 @@ export const RoleChangeError: Story = {
     const page = within(canvasElement.ownerDocument.body);
     const user = userEvent.setup();
 
-    await user.click(await canvas.findByLabelText('rei.tanakaのロール'));
+    await user.click(await canvas.findByRole('button', { name: /^rei\.tanakaのロール/ }));
     await user.click(await page.findByRole('option', { name: /^Member/ }));
 
     await expect(canvas.findByText('ロールを変更できませんでした。')).resolves.toBeInTheDocument();
@@ -260,8 +292,13 @@ export const RemoveError: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(await canvas.findByLabelText('daisuke.satoを外す'));
+    await userEvent.click(await canvas.findByRole('button', { name: '外す' }));
 
-    await expect(canvas.findByText('メンバーを外せませんでした。')).resolves.toBeInTheDocument();
+    // 失敗はダイアログの中に出し、ダイアログは閉じない
+    const dialog = await canvas.findByRole('dialog', { name: 'メンバーを外しますか？' });
+    await expect(
+      within(dialog).findByText('メンバーを外せませんでした。'),
+    ).resolves.toBeInTheDocument();
   },
 };
 
@@ -287,9 +324,36 @@ export const MemberReadOnly: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.findByLabelText('rei.tanakaのロール')).resolves.toBeDisabled();
+    await expect(
+      canvas.findByRole('button', { name: /^rei\.tanakaのロール/ }),
+    ).resolves.toBeDisabled();
     await expect(canvas.findByLabelText('rei.tanakaを外す')).resolves.toBeDisabled();
-    await expect(canvas.getByRole('button', { name: '招待' })).toBeDisabled();
+    // 招待は管理者だけの操作なので、欄ごと出さない
+    await expect(canvas.queryByRole('button', { name: '招待' })).not.toBeInTheDocument();
+  },
+};
+
+export const Invite: Story = {
+  name: '招待を送る（保留中の一覧つき）',
+  beforeEach: mockFetch(),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+
+    await expect(canvas.findByText('new.hire@example.com')).resolves.toBeInTheDocument();
+    await expect(canvas.getByText('期限切れ')).toBeInTheDocument();
+
+    await user.type(canvas.getByLabelText('招待するメールアドレス'), 'someone@example.com');
+    await user.click(canvas.getByRole('button', { name: '招待' }));
+
+    await expect(
+      canvas.findByText('someone@example.com に招待を送りました。'),
+    ).resolves.toBeInTheDocument();
+    const post = (fetchSpy!.mock.calls as [Request | string][])
+      .map(([req]) => req)
+      .filter((req): req is Request => typeof req !== 'string')
+      .find((req) => req.method === 'POST' && req.url.endsWith('/invitations'));
+    await expect(post).toBeTruthy();
   },
 };
 

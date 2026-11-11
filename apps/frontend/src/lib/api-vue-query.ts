@@ -1,6 +1,6 @@
-import createFetchClient from 'openapi-fetch';
+import createFetchClient, { type Middleware } from 'openapi-fetch';
 import { createClient } from '@koyori-app/openapi-vue-query';
-import { computed, toValue, type MaybeRefOrGetter } from 'vue';
+import { computed, ref, toValue, type MaybeRefOrGetter } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
 import type { paths } from '@/generated/api';
 import type { ProjectUuid, TenantUuid } from '@/lib/api-ids';
@@ -18,6 +18,58 @@ export const fetchClient = createFetchClient<paths>({
   fetch: (req: Request) => globalThis.fetch(req),
   credentials: 'include',
 });
+
+/** セッション切れを伝えてから /signin へ送るまでの待ち時間。 */
+export const SESSION_EXPIRED_REDIRECT_DELAY_MS = 2_000;
+
+/** 操作中の 401 でセッション切れを検知したか。レイアウトが「セッションが切れました」を出す。 */
+export const sessionExpired = ref(false);
+
+/**
+ * 操作中の API が「セッションが無い」401 を返したら、表示を出して /signin へ送る。
+ * ログイン失敗（invalid-credentials / invalid-2fa-code）や、/me 自身（useAuthSession が扱う）は
+ * 本文で区別して対象外にする。
+ */
+export const sessionExpiredMiddleware: Middleware = {
+  async onResponse({ request, response }) {
+    if (response.status !== 401) return undefined;
+    if (new URL(request.url).pathname.endsWith('/v1/auth/me')) return undefined;
+    const body = (await response
+      .clone()
+      .json()
+      .catch(() => null)) as { message?: unknown } | null;
+    if (body?.message !== 'unauthorized') return undefined;
+    if (typeof window === 'undefined' || sessionExpired.value) return undefined;
+    // /auth/2fa は 401 を自分で「セッション切れ」として見せる
+    if (['/signin', '/signup', '/auth/2fa'].includes(window.location.pathname)) return undefined;
+    sessionExpired.value = true;
+    setTimeout(() => window.location.assign('/signin'), SESSION_EXPIRED_REDIRECT_DELAY_MS);
+    return undefined;
+  },
+};
+
+fetchClient.use(sessionExpiredMiddleware);
+
+/** HTTP 状態。応答が無い（通信断）なら undefined。 */
+export function queryErrorStatus(error: unknown): number | undefined {
+  return (error as { response?: Response } | null)?.response?.status;
+}
+
+/**
+ * /v1/auth/me の失敗がセッションの拒否か（401: 未ログイン / 403: 停止中・2FA の途中）。
+ * 通信の失敗や 5xx はセッションの有無を示さない。
+ */
+export function isSessionRejected(error: unknown): boolean {
+  const status = queryErrorStatus(error);
+  return status === 401 || status === 403;
+}
+
+/** /me の再試行。拒否は確定なので再試行せず、5xx・通信断だけ 2 回まで。 */
+export const ME_RETRY_COUNT = 2;
+export function meRetry(failureCount: number, error: unknown): boolean {
+  return !isSessionRejected(error) && failureCount < ME_RETRY_COUNT;
+}
+export const meRetryDelay = (attempt: number) => Math.min(1000 * 2 ** attempt, 10_000);
 
 /** Typed TanStack Vue Query helpers for task OpenAPI paths. */
 export const apiClient = createClient<paths>(fetchClient);
@@ -115,10 +167,47 @@ export function useAssignableUsersQuery(
   );
 }
 
+const USER_PROFILE_PATH = '/v1/tenants/{tenant_id}/users/{user_id}' as const;
+
+/**
+ * テナント内の利用者のプロフィール。見つからなければ `null`。
+ *
+ * テナントに関わらない利用者も 404 で返る（存在を明かさない）。
+ * それ以外の失敗は `status` を付けて投げる（閲覧者が客分なら 403）。
+ */
+export function useUserProfileQuery(
+  tenantId: MaybeRefOrGetter<TenantUuid | null | undefined>,
+  userId: MaybeRefOrGetter<string>,
+) {
+  return useQuery(
+    computed(() => {
+      const tenantUuid = toValue(tenantId);
+      const userUuid = toValue(userId);
+      // 非 null は enabled で担保する（未解決のうちは問い合わせない）
+      const params = { params: { path: { tenant_id: tenantUuid!, user_id: userUuid } } };
+      return {
+        queryKey: ['get', USER_PROFILE_PATH, params],
+        queryFn: async ({ signal }: { signal: AbortSignal }) => {
+          const { data, error, response } = await fetchClient.GET(USER_PROFILE_PATH, {
+            ...params,
+            signal,
+          });
+          if (response.status === 404) return null;
+          if (error) throw Object.assign(new Error(error.message), { status: response.status });
+          return data;
+        },
+        enabled: !!tenantUuid && !!userUuid,
+        retry: false,
+      };
+    }),
+  );
+}
+
 export function useMeQuery(options?: { enabled?: MaybeRefOrGetter<boolean> }) {
   return apiClient.useQuery('get', '/v1/auth/me', undefined, {
     staleTime: AUTH_ME_STALE_TIME_MS,
-    retry: false,
+    retry: meRetry,
+    retryDelay: meRetryDelay,
     ...(options?.enabled !== undefined ? { enabled: options.enabled } : {}),
   });
 }
@@ -279,6 +368,18 @@ export function useLoginMutation() {
   return apiClient.useMutation('post', '/v1/auth/login');
 }
 
+export function useTotpSetupMutation() {
+  return apiClient.useMutation('post', '/v1/auth/2fa/totp/setup');
+}
+
+export function useTotpVerifySetupMutation() {
+  return apiClient.useMutation('post', '/v1/auth/2fa/totp/verify-setup');
+}
+
+export function useVerifyTwoFactorMutation() {
+  return apiClient.useMutation('post', '/v1/auth/2fa/verify');
+}
+
 export function useRegisterMutation() {
   return apiClient.useMutation('post', '/v1/auth/register');
 }
@@ -340,6 +441,88 @@ export function useSetPasswordMutation() {
 export function usePasswordChangeMutation() {
   return apiClient.useMutation('post', '/v1/auth/password/change');
 }
+
+export const DRIVE_FOLDERS_PATH = '/v1/tenants/{tenant_id}/drive/folders' as const;
+export const DRIVE_FILES_PATH = '/v1/tenants/{tenant_id}/drive/files' as const;
+export const DRIVE_FILE_PATH = '/v1/tenants/{tenant_id}/drive/files/{id}' as const;
+export const DRIVE_FILE_CONTENT_UPDATE_PATH =
+  '/v1/tenants/{tenant_id}/drive/files/{id}/content' as const;
+export const DRIVE_FILE_TASKS_PATH = '/v1/tenants/{tenant_id}/drive/files/{id}/tasks' as const;
+export const DRIVE_FILE_CONTENT_PATH = '/v1/drive/files/{id}/content' as const;
+
+/** ドキュメント一覧の取得件数（API の上限）。 */
+export const DOCUMENT_LIST_LIMIT = 200;
+
+/** プロジェクトのルートフォルダ（ドキュメント置き場）。呼び出し側は先頭 1 件を使う。 */
+export const projectRootFoldersQueryOptions = (
+  tenantId: TenantUuid | null | undefined,
+  projectId: ProjectUuid | null | undefined,
+) =>
+  apiClient.queryOptions('get', DRIVE_FOLDERS_PATH, {
+    params: {
+      path: { tenant_id: tenantId ?? '' },
+      query: { project_id: projectId ?? '', root_only: true },
+    },
+  });
+
+/** ルートフォルダ直下の `.md`（名前順）。`q` はファイル名の部分一致。 */
+export const projectDocumentsQueryOptions = (
+  tenantId: TenantUuid | null | undefined,
+  folderId: string | null | undefined,
+  q: string,
+) =>
+  apiClient.queryOptions('get', DRIVE_FILES_PATH, {
+    params: {
+      path: { tenant_id: tenantId ?? '' },
+      query: {
+        folder_id: folderId ?? '',
+        mime_type: 'text/markdown',
+        sort: 'name_asc',
+        limit: DOCUMENT_LIST_LIMIT,
+        ...(q ? { q } : {}),
+      },
+    },
+  });
+
+export const driveFileQueryOptions = (tenantId: TenantUuid | null | undefined, fileId: string) =>
+  apiClient.queryOptions('get', DRIVE_FILE_PATH, {
+    params: { path: { tenant_id: tenantId ?? '', id: fileId } },
+  });
+
+export const driveFileTasksQueryOptions = (
+  tenantId: TenantUuid | null | undefined,
+  fileId: string,
+) =>
+  apiClient.queryOptions('get', DRIVE_FILE_TASKS_PATH, {
+    params: { path: { tenant_id: tenantId ?? '', id: fileId } },
+  });
+
+/**
+ * ファイル本文（テキスト）。配信は `Last-Modified` 付きで `Cache-Control` が無く、
+ * ブラウザが経験則で古い本文を返しうるので、毎回 `ETag` で確かめさせる（`no-cache`）。
+ */
+export type DriveFileContent = {
+  body: string;
+  /** 本文と同じ応答の `ETag`。`If-Match` はこれに結び付ける（メタデータの ETag は別取得で食い違いうる） */
+  etag: string | null;
+};
+
+export const driveFileContentQueryOptions = (fileId: string) => {
+  const init = { params: { path: { id: fileId } } };
+  return {
+    queryKey: ['get', DRIVE_FILE_CONTENT_PATH, init] as const,
+    queryFn: async ({ signal }: { signal: AbortSignal }): Promise<DriveFileContent> => {
+      const { data, error, response } = await fetchClient.GET(DRIVE_FILE_CONTENT_PATH, {
+        ...init,
+        parseAs: 'text',
+        cache: 'no-cache',
+        signal,
+      });
+      if (error !== undefined) throw error;
+      return { body: data, etag: response.headers.get('ETag') };
+    },
+  };
+};
 
 export function createTestApiClient(fetchImpl: (input: Request) => Promise<Response>) {
   return createClient<paths>(

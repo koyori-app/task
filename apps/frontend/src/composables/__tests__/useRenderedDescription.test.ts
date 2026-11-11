@@ -5,6 +5,7 @@ import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
 
 import { useRenderedDescription, RENDER_DESCRIPTION_PATH } from '../useRenderedDescription';
 
+const TENANT = 'acme';
 const TASK_UUID = '11111111-2222-3333-4444-555555555555';
 const DESCRIPTION = '# 見出し';
 
@@ -20,7 +21,7 @@ describe('useRenderedDescription', () => {
   function mountHost(description: string | null = DESCRIPTION) {
     const Host = defineComponent({
       setup() {
-        rendered = useRenderedDescription(TASK_UUID, description);
+        rendered = useRenderedDescription(TENANT, TASK_UUID, description);
         return () => null;
       },
     });

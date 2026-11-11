@@ -1,3 +1,5 @@
+use axum::extract::DefaultBodyLimit;
+use tower_http::limit::RequestBodyLimitLayer;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
@@ -15,6 +17,15 @@ pub fn routes() -> OpenApiRouter<AppState> {
             crate::handlers::auth::me,
             crate::handlers::auth::update_me
         ))
+        .merge(
+            // 本文上限はアバターのルートにだけ掛ける。axum 既定の 2MB 上限は外して二重にしない
+            OpenApiRouter::new()
+                .routes(routes!(crate::handlers::auth::upload_avatar))
+                .layer(DefaultBodyLimit::disable())
+                .layer(RequestBodyLimitLayer::new(
+                    crate::handlers::auth::AVATAR_BODY_LIMIT,
+                )),
+        )
         .routes(routes!(crate::handlers::oauth::list_providers))
         .routes(routes!(crate::handlers::oauth::oauth_start))
         .routes(routes!(crate::handlers::oauth::oauth_callback))

@@ -130,6 +130,20 @@ function getBundleVisualizerPlugins() {
 
 // More info at: https://storybook.js.org/docs/next/writing-tests/integrations/vitest-addon
 
+// SSR の依存を dist/server に同梱すると、tr46 の require('punycode/')（npm の punycode を指す書き方）が
+// バンドル後に node:punycode/ になり、bun が「そんな組み込みは無い」と落ちる。
+// 組み込みの node:punycode で同じ API が使えるので、出力の文字列だけ直す。
+function punycodeBuiltinPlugin() {
+  return {
+    name: 'punycode-builtin',
+    renderChunk(code: string) {
+      return code.includes('"node:punycode/"')
+        ? code.replaceAll('"node:punycode/"', '"node:punycode"')
+        : null;
+    },
+  };
+}
+
 export default defineConfig({
   // Standalone build UI (vite build). Embedded client uses +onCreateApp inject.
   plugins: [
@@ -139,6 +153,7 @@ export default defineConfig({
     ...(buildEnv.VUE_DEVTOOLS ? [VueDevTools({ appendTo: /\/src\/pages\/\+Layout\.vue/ })] : []),
     ...(buildEnv.VITE_INSPECT ? [Inspect({ build: false })] : []),
     vike(),
+    punycodeBuiltinPlugin(),
     ...(sentryPlugin ? [sentryPlugin] : []),
     tailwindcss(),
     vue(),
@@ -155,7 +170,7 @@ export default defineConfig({
     ],
   },
   optimizeDeps: {
-    include: ['vue', 'reka-ui', '@lucide/vue', '@phosphor-icons/vue'],
+    include: ['vue', '@lucide/vue', '@phosphor-icons/vue'],
   },
   server: {
     proxy: {
@@ -174,19 +189,16 @@ export default defineConfig({
     allowedHosts: ['localhost', '127.0.0.1', ...(coderAllowedHost ? [coderAllowedHost] : [])],
   },
   ssr: {
-    noExternal: ['@zxcvbn-ts/core', '@zxcvbn-ts/language-common', '@zxcvbn-ts/language-ja'],
+    // SSR の依存を dist/server に同梱し、配布イメージに node_modules を積まずに済ませる
+    // （apps/frontend/Dockerfile）。@zxcvbn-ts は以前から同梱していた
+    noExternal: true,
+    // jsdom は __dirname 相対で default-stylesheet.css 等を読むので同梱できない。
+    // isomorphic-dompurify ごと外部に残し、Dockerfile がその閉包だけを node_modules に置く。
+    // starry-night は実行時に vscode-oniguruma の onig.wasm を node_modules から読むので、同じく外部に残す
+    external: ['isomorphic-dompurify', '@wooorm/starry-night'],
   },
   build: {
     sourcemap: buildEnv.ANALYZE || process.env.NODE_ENV !== 'production',
-    rollupOptions: {
-      output: {
-        manualChunks(id: string) {
-          if (id.includes('reka-ui') || id.includes('@floating-ui')) {
-            return 'vendor-reka';
-          }
-        },
-      },
-    },
   },
   test: {
     maxWorkers: 4,
@@ -200,16 +212,19 @@ export default defineConfig({
         '**/*.story.{ts,tsx,js,jsx}',
         '**/.storybook/**',
         'storybook-static/**',
-        'src/components/ui/**',
-        'src/components/originui/**',
         'src/generated/**',
       ],
     },
     projects: [
       {
+        // vitest 5 から inline の project は root の設定を受け継ぐ（extends の既定が true になった）。
+        // unit は happy-dom で組むため、root の vike や tailwind の plugin を持ち込まず、これまでどおり
+        // 自前の plugin と alias だけで組む
+        extends: false,
         plugins: [vue()],
         resolve: {
           alias: {
+            '@/sentry.browser.config': path.resolve(dirname, 'sentry.browser.config.ts'),
             '#': path.resolve(dirname, 'server'),
             '@': path.resolve(dirname, 'src'),
           },
@@ -256,8 +271,6 @@ export default defineConfig({
     trailingComma: 'all',
     ignorePatterns: [
       'content/**/*.md',
-      'src/components/ui/**',
-      'src/components/originui/**',
       // renderDescription の事前生成 fixture (toMatchFileSnapshot)。整形すると
       // レンダラ出力とのバイト一致が壊れ drift 検査が偽陽性で落ちる
       'src/lib/kfm-story-fixtures/rendered/**',

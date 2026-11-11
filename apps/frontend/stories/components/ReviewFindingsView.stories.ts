@@ -115,6 +115,7 @@ const morePullRequests = Array.from({ length: 11 }, (_, i) => ({
   unresolved: 0,
   blocking: 0,
   last_reviewed_at: '2026-08-20T10:00:00Z',
+  state: (['merged', 'closed', 'unknown'] as const)[i % 3],
 }));
 
 function mockFetch(overrides: { empty?: boolean; manyPrs?: boolean; github?: boolean } = {}) {
@@ -145,6 +146,7 @@ function mockFetch(overrides: { empty?: boolean; manyPrs?: boolean; github?: boo
             unresolved: findings.filter((f) => f.state === 'open' || f.state === 'fixed').length,
             blocking: blocking(),
             last_reviewed_at: '2026-08-25T10:12:00Z',
+            state: 'open',
           },
           ...(overrides.manyPrs ? morePullRequests : []),
         ]);
@@ -320,6 +322,18 @@ export const PullRequestRail: Story = {
   },
 };
 
+export const PullRequestStates: Story = {
+  name: 'PR の状態バッジ',
+  beforeEach: mockFetch({ manyPrs: true }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const badges = await canvas.findAllByTestId('pr-state');
+    await expect(badges.map((b) => b.textContent?.trim())).toEqual(
+      expect.arrayContaining(['Open', 'Merged', 'Closed', '状態不明']),
+    );
+  },
+};
+
 export const SelfVerificationBlocked: Story = {
   name: '自分の修正は自分で確認できない',
   beforeEach: mockFetch(),
@@ -367,7 +381,9 @@ export const RoundComposer: Story = {
     // 短縮 SHA も確定できない。API は 40 桁しか受け付けず、通してしまうと
     // そのラウンドは鮮度の照合が永久に一致しなくなる
     await user.type(canvas.getByLabelText('レビュー対象の head SHA'), '9f4e7b2c1a08');
-    await expect(canvas.findByTestId('head-sha-error')).resolves.toBeInTheDocument();
+    await expect(
+      canvas.findByText('40 桁の commit SHA を入力してください（git rev-parse HEAD）。'),
+    ).resolves.toBeInTheDocument();
     await expect(canvas.getByRole('button', { name: /確定/ })).toBeDisabled();
 
     await user.clear(canvas.getByLabelText('レビュー対象の head SHA'));

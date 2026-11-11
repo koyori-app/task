@@ -139,6 +139,8 @@ impl OAuthProvider for OidcProvider {
 /// provider slug に対応する実装を返す。
 ///
 /// `instance_url` は `gitlab_selfhosted` のみで必要（他のプロバイダーでは無視される）。
+/// `gitlab_selfhosted` は、運用者の許可の一覧（[`OAuthSettings::gitlab_selfhosted_instance`]）に
+/// 在る instance だけを解決する。
 pub fn resolve_provider(
     provider_slug: &str,
     settings: &OAuthSettings,
@@ -150,7 +152,10 @@ pub fn resolve_provider(
         "gitlab_selfhosted" => {
             let base = instance_url
                 .ok_or_else(|| anyhow::anyhow!("instance_url is required for gitlab_selfhosted"))?;
-            Ok(Box::new(GitlabSelfHostedProvider::new(base)?))
+            let instance = settings.gitlab_selfhosted_instance(base).ok_or_else(|| {
+                anyhow::anyhow!("gitlab_selfhosted instance is not in the allowlist")
+            })?;
+            Ok(Box::new(GitlabSelfHostedProvider::new(&instance.url)?))
         }
         "google" => Ok(Box::new(GoogleProvider)),
         "oidc" => {
@@ -167,9 +172,11 @@ pub fn resolve_provider(
     }
 }
 
+/// provider の client の資格情報。`gitlab_selfhosted` は許可の一覧に在る instance のものを返す。
 pub fn get_credentials(
     provider_slug: &str,
     settings: &OAuthSettings,
+    instance_url: Option<&str>,
 ) -> Result<ProviderConfig, Error> {
     match provider_slug {
         "github" => settings
@@ -180,10 +187,10 @@ pub fn get_credentials(
             .gitlab
             .clone()
             .ok_or_else(|| anyhow::anyhow!("gitlab provider not configured")),
-        "gitlab_selfhosted" => settings
-            .gitlab_selfhosted
-            .clone()
-            .ok_or_else(|| anyhow::anyhow!("gitlab_selfhosted provider not configured")),
+        "gitlab_selfhosted" => instance_url
+            .and_then(|url| settings.gitlab_selfhosted_instance(url))
+            .map(|instance| instance.credentials.clone())
+            .ok_or_else(|| anyhow::anyhow!("gitlab_selfhosted instance is not in the allowlist")),
         "google" => settings
             .google
             .clone()
@@ -215,7 +222,7 @@ mod tests {
             default_redirect_path: "/dashboard".into(),
             github: None,
             gitlab: None,
-            gitlab_selfhosted: None,
+            gitlab_selfhosted_instances: Vec::new(),
             google: None,
             oidc: None,
             github_app: None,
@@ -255,6 +262,48 @@ mod tests {
         assert!(
             resolve_provider("gitlab_selfhosted", &settings(), Some("https://10.0.0.5")).is_err()
         );
+    }
+
+    fn settings_with_instance(url: &str, client_id: &str) -> OAuthSettings {
+        OAuthSettings {
+            gitlab_selfhosted_instances: vec![super::super::settings::GitlabSelfHostedInstance {
+                url: url.to_string(),
+                credentials: ProviderConfig {
+                    client_id: client_id.to_string(),
+                    client_secret: format!("{client_id}-secret"),
+                },
+            }],
+            ..settings()
+        }
+    }
+
+    #[test]
+    fn self_hosted_resolves_only_allowlisted_instances() {
+        let s = settings_with_instance("http://localhost:8080", "listed");
+        assert!(resolve_provider("gitlab_selfhosted", &s, Some("http://LOCALHOST:8080/")).is_ok());
+        assert!(resolve_provider("gitlab_selfhosted", &s, Some("http://localhost:8081")).is_err());
+        // 一覧が空なら、どの instance も解決しない
+        assert!(
+            resolve_provider(
+                "gitlab_selfhosted",
+                &settings(),
+                Some("http://localhost:8080")
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn self_hosted_credentials_follow_the_instance() {
+        let s = settings_with_instance("http://localhost:8080", "listed");
+        assert_eq!(
+            get_credentials("gitlab_selfhosted", &s, Some("http://localhost:8080"))
+                .unwrap()
+                .client_id,
+            "listed"
+        );
+        assert!(get_credentials("gitlab_selfhosted", &s, Some("http://localhost:8081")).is_err());
+        assert!(get_credentials("gitlab_selfhosted", &s, None).is_err());
     }
 
     #[test]

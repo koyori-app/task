@@ -1,10 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
 import { expect, fn, userEvent, within } from 'storybook/test';
+import { Sidebar } from '@koyori-app/ui-vue';
 import type { components } from '@/generated/api';
 import NavProjects from '@/components/sidebar/NavProjects.vue';
 
 type ProjectNavItem = components['schemas']['ProjectResponse'];
-import { SidebarProvider } from '@/components/ui/sidebar';
 
 const tenantSlug = 'acme';
 const retry = fn();
@@ -38,10 +38,12 @@ type StoryState = {
   projects: ProjectNavItem[];
   loading?: boolean;
   error?: boolean;
+  /** アイコンだけの表示（広い画面で畳んだサイドバー） */
+  rail?: boolean;
 };
 
 const renderWithState = (state: StoryState) => () => ({
-  components: { SidebarProvider, NavProjects },
+  components: { Sidebar, NavProjects },
   setup() {
     function onRetry() {
       retry();
@@ -50,15 +52,17 @@ const renderWithState = (state: StoryState) => () => ({
     return { tenantSlug, onRetry, state };
   },
   template: `
-    <SidebarProvider class="min-h-0 w-80 p-4">
-      <NavProjects
-        :tenant-slug="tenantSlug"
-        :projects="state.projects"
-        :loading="state.loading ?? false"
-        :error="state.error ?? false"
-        @retry="onRetry"
-      />
-    </SidebarProvider>
+    <div class="flex h-[480px] p-4">
+      <Sidebar label="ナビゲーション" :rail="state.rail ?? false">
+        <NavProjects
+          :tenant-slug="tenantSlug"
+          :projects="state.projects"
+          :loading="state.loading ?? false"
+          :error="state.error ?? false"
+          @retry="onRetry"
+        />
+      </Sidebar>
+    </div>
   `,
 });
 
@@ -93,6 +97,20 @@ export const ProjectList: Story = {
   },
 };
 
+/**
+ * レール（アイコンだけ）では Accordion の見出しのアイコンだけが残る。
+ * アイコンの無いプロジェクトは頭文字を丸で出す。
+ */
+export const Rail: Story = {
+  render: renderWithState({ projects, rail: true }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    // 名前は見た目から消えても読み上げには残る
+    await expect(canvas.getByRole('button', { name: 'Design Engineering' })).toBeInTheDocument();
+    await expect(canvas.getByText('D')).toBeVisible();
+  },
+};
+
 export const Loading: Story = {
   render: renderWithState({ projects: [], loading: true }),
   play: async ({ canvasElement }) => {
@@ -106,7 +124,7 @@ export const Empty: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByText('プロジェクトはまだありません。')).toBeInTheDocument();
-    // グループの「+」と空状態カードのボタンの2つが並存する
+    // 見出し横の「+」と空状態カードのボタンの2つが並存する
     const createButtons = canvas.getAllByRole('button', { name: /プロジェクトを作成/ });
     await expect(createButtons.length).toBe(2);
   },

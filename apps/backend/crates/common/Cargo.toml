@@ -14,6 +14,8 @@ redis = { workspace = true }
 redis_pool = { workspace = true }
 regex = { workspace = true }
 sea-orm = { workspace = true }
+# CLI もこのクレートに依存する。既定 feature の transport（native-tls）を入れると musl ビルドが壊れる
+sentry = { version = "0.48.2", default-features = false, features = ["anyhow"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -22,3 +24,6 @@ url = { workspace = true }
 utoipa = { workspace = true }
 validator = { workspace = true }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
+
+[dev-dependencies]
+sentry = { version = "0.48.2", default-features = false, features = ["anyhow", "test"] }

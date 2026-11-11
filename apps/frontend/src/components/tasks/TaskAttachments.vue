@@ -3,7 +3,7 @@ import { Download, Paperclip, X } from '@lucide/vue';
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import type { components } from '@/generated/api';
 import { fetchClient } from '@/lib/api-vue-query';
 
@@ -304,13 +304,12 @@ async function removeAttachment(attachmentId: string) {
       <h2 class="text-sm font-semibold">添付ファイル</h2>
       <Button
         type="button"
-        variant="outline"
-        size="sm"
+        variant="tertiary"
         :disabled="uploading || !!pendingForTask"
+        :label="uploading ? 'アップロード中…' : 'ファイルを添付'"
         @click="input?.click()"
       >
-        <Paperclip class="mr-1 size-4" aria-hidden="true" />
-        {{ uploading ? 'アップロード中…' : 'ファイルを添付' }}
+        <template #icon><Paperclip class="size-4" aria-hidden="true" /></template>
       </Button>
       <input
         ref="input"
@@ -324,9 +323,13 @@ async function removeAttachment(attachmentId: string) {
     <p v-if="errorMessage" role="alert" class="text-sm text-destructive">{{ errorMessage }}</p>
     <div v-if="pendingForTask" class="flex items-center gap-2 text-sm">
       <span>{{ pendingForTask.name }} はアップロード済みです</span>
-      <Button type="button" variant="outline" size="sm" :disabled="uploading" @click="retryAttach"
-        >紐付けを再試行</Button
-      >
+      <Button
+        type="button"
+        variant="tertiary"
+        :disabled="uploading"
+        label="紐付けを再試行"
+        @click="retryAttach"
+      />
     </div>
 
     <p v-if="attachmentsQuery.isLoading.value" class="text-sm text-muted-foreground">読み込み中…</p>
@@ -335,9 +338,7 @@ async function removeAttachment(attachmentId: string) {
       class="flex items-center gap-2 text-sm text-destructive"
     >
       添付ファイルを読み込めませんでした
-      <Button type="button" variant="outline" size="sm" @click="attachmentsQuery.refetch()"
-        >再試行</Button
-      >
+      <Button type="button" variant="tertiary" label="再試行" @click="attachmentsQuery.refetch()" />
     </div>
     <ul v-else-if="attachmentsQuery.data.value?.length" class="space-y-1">
       <li
@@ -348,7 +349,7 @@ async function removeAttachment(attachmentId: string) {
         <button
           v-if="previewType(attachment)"
           type="button"
-          class="min-w-0 flex-1 truncate text-left text-primary underline"
+          class="min-w-0 flex-1 truncate text-left text-link underline"
           :title="`${attachment.name} をプレビュー`"
           @click="openPreview(attachment)"
         >
@@ -357,7 +358,7 @@ async function removeAttachment(attachmentId: string) {
         <a
           v-else
           :href="`${apiBase}${attachment.url}`"
-          class="min-w-0 flex-1 truncate text-primary underline"
+          class="min-w-0 flex-1 truncate text-link underline"
           :title="attachment.name"
           >{{ attachment.name }}</a
         >
@@ -374,13 +375,12 @@ async function removeAttachment(attachmentId: string) {
         <Button
           type="button"
           variant="ghost"
-          size="icon"
-          class="size-7 shrink-0"
-          :aria-label="`${attachment.name} の添付を解除`"
+          class="shrink-0"
+          :ariaLabel="`${attachment.name} の添付を解除`"
           :disabled="removingId === attachment.id"
           @click="removeAttachment(attachment.id)"
         >
-          <X class="size-4" aria-hidden="true" />
+          <template #icon><X class="size-4" aria-hidden="true" /></template>
         </Button>
       </li>
     </ul>
@@ -398,17 +398,16 @@ async function removeAttachment(attachmentId: string) {
           <a
             v-if="previewFile"
             :href="`${apiBase}${previewFile.url}`"
-            class="text-sm text-primary underline"
+            class="text-sm text-link underline"
             >ダウンロード</a
           >
           <Button
             type="button"
             variant="ghost"
-            size="icon"
-            aria-label="プレビューを閉じる"
+            ariaLabel="プレビューを閉じる"
             @click="closePreview"
           >
-            <X class="size-4" aria-hidden="true" />
+            <template #icon><X class="size-4" aria-hidden="true" /></template>
           </Button>
         </div>
       </div>

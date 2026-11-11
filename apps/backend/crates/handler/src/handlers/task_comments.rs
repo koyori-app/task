@@ -34,19 +34,6 @@ struct ActivityCursor {
     id: Uuid,
 }
 
-/// コメントの投稿者。名前が引けない場合も表示は続けたいので `unknown` へ倒す。
-fn comment_user(map: &HashMap<Uuid, (String, Option<String>)>, user_id: Uuid) -> CommentUser {
-    let (name, avatar_url) = map
-        .get(&user_id)
-        .cloned()
-        .unwrap_or_else(|| ("unknown".into(), None));
-    CommentUser {
-        id: user_id,
-        name,
-        avatar_url,
-    }
-}
-
 fn comment_body(model: &task_comments::Model) -> Option<String> {
     if model.deleted_at.is_some() {
         None
@@ -89,7 +76,7 @@ pub async fn list_comments(
 
     let user_ids: Vec<Uuid> = all.iter().map(|c| c.user_id).collect();
     // 名前とアイコンをまとめて引く（コメント一覧が両方を出す）
-    let users_map: HashMap<Uuid, (String, Option<String>)> = if user_ids.is_empty() {
+    let users_map: HashMap<Uuid, (String, Option<String>, String)> = if user_ids.is_empty() {
         HashMap::new()
     } else {
         users::Entity::find()
@@ -97,8 +84,30 @@ pub async fn list_comments(
             .all(&state.db)
             .await?
             .into_iter()
-            .map(|u| (u.id, (u.username, u.avatar_url)))
+            .map(|u| (u.id, (u.username, u.avatar_url, u.account_kind)))
             .collect()
+    };
+
+    // 本文のメンション印（`<@利用者ID>`）の名前・アイコン・退会や対象外かを、一度の問い合わせで引く。
+    // 削除済みのコメントの本文は返さぬので、そこに出る印も引かない
+    let mentions = service::mentions::resolve_in_bodies(
+        &state.db,
+        project_id,
+        all.iter()
+            .filter(|c| c.deleted_at.is_none())
+            .map(|c| c.body.as_str()),
+    )
+    .await?;
+
+    // リアクションもタスク単位で一度に引く（コメントごとに引くと N+1 になる）
+    let mut reactions =
+        service::reactions::summaries_for_comments(&state.db, task.id, auth.user_id).await?;
+    // 削除済みコメントのリアクションは見せない（本文と同じ扱い）
+    let mut reactions_of = |comment: &task_comments::Model| {
+        reactions
+            .remove(&comment.id)
+            .filter(|_| comment.deleted_at.is_none())
+            .unwrap_or_default()
     };
 
     let mut top_level: Vec<task_comments::Model> = Vec::new();
@@ -127,26 +136,28 @@ pub async fn list_comments(
                 .into_iter()
                 .map(|reply| CommentReply {
                     id: reply.id,
-                    user: comment_user(&users_map, reply.user_id),
+                    user: CommentUser::from_lookup(&users_map, reply.user_id),
                     body: comment_body(&reply),
                     created_at: reply.created_at.with_timezone(&Utc),
                     updated_at: reply.updated_at.with_timezone(&Utc),
                     is_deleted: reply.deleted_at.is_some(),
+                    reactions: reactions_of(&reply),
                 })
                 .collect();
             CommentThread {
                 id: parent.id,
-                user: comment_user(&users_map, parent.user_id),
+                user: CommentUser::from_lookup(&users_map, parent.user_id),
                 body: comment_body(&parent),
                 replies,
                 created_at: parent.created_at.with_timezone(&Utc),
                 updated_at: parent.updated_at.with_timezone(&Utc),
                 is_deleted: parent.deleted_at.is_some(),
+                reactions: reactions_of(&parent),
             }
         })
         .collect();
 
-    Ok(Json(CommentListResponse { comments }))
+    Ok(Json(CommentListResponse { comments, mentions }))
 }
 
 #[axum::debug_handler]
@@ -241,6 +252,9 @@ pub async fn create_comment(
         .one(&txn)
         .await?
         .ok_or_else(|| anyhow::anyhow!("comment author {} has no user row", auth.user_id))?;
+    // メンション印（`<@利用者ID>`）を `@今の名` に戻してから外（webhook）へ出す。印は id を含むので生では出さぬ
+    let mentions =
+        service::mentions::resolve_in_bodies(&txn, project_id, [comment.body.as_str()]).await?;
     service::webhooks::emit(
         &txn,
         project_id,
@@ -248,13 +262,19 @@ pub async fn create_comment(
         service::webhooks::EVENT_COMMENT_CREATED,
         serde_json::json!({
             "task": { "id": task.id, "seq_id": task.seq_id, "title": &task.title },
-            "comment": { "id": comment.id, "author": author.username, "body": &comment.body },
+            "comment": {
+                "id": comment.id,
+                "author": author.username,
+                "body": payload::mentions::to_plain(&comment.body, &mentions),
+            },
         }),
     )
     .await?;
     txn.commit().await?;
 
-    Ok((StatusCode::CREATED, Json(comment.into())))
+    let mut response: TaskCommentResponse = comment.into();
+    response.mentions = mentions;
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 #[axum::debug_handler]
@@ -334,7 +354,11 @@ pub async fn update_comment(
     )
     .await?;
     txn.commit().await?;
-    Ok(Json(updated.into()))
+    let mut response: TaskCommentResponse = updated.into();
+    response.mentions =
+        service::mentions::resolve_in_bodies(&state.db, project_id, [response.body.as_str()])
+            .await?;
+    Ok(Json(response))
 }
 
 #[axum::debug_handler]
@@ -471,7 +495,7 @@ pub async fn list_activities(
     };
 
     let user_ids: Vec<Uuid> = rows.iter().filter_map(|a| a.user_id).collect();
-    let users_map: HashMap<Uuid, String> = if user_ids.is_empty() {
+    let users_map: HashMap<Uuid, (String, String)> = if user_ids.is_empty() {
         HashMap::new()
     } else {
         users::Entity::find()
@@ -479,7 +503,7 @@ pub async fn list_activities(
             .all(&state.db)
             .await?
             .into_iter()
-            .map(|u| (u.id, u.username))
+            .map(|u| (u.id, (u.username, u.account_kind)))
             .collect()
     };
 
@@ -488,9 +512,13 @@ pub async fn list_activities(
         .map(|row| {
             let user = row.user_id.map(|uid| ActivityUser {
                 id: uid,
+                account_kind: users_map
+                    .get(&uid)
+                    .map(|u| u.1.clone())
+                    .unwrap_or_else(|| "human".into()),
                 name: users_map
                     .get(&uid)
-                    .cloned()
+                    .map(|u| u.0.clone())
                     .unwrap_or_else(|| "unknown".into()),
             });
             ActivityItem {

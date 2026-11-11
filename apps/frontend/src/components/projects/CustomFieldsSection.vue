@@ -3,26 +3,8 @@ import { useForm } from '@tanstack/vue-form';
 import { type } from 'arktype';
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { PhPencilSimple, PhPlus, PhTrash } from '@phosphor-icons/vue';
-import { computed, ref } from 'vue';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Field, FieldError, FieldLabel } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
+import { computed, ref, useId } from 'vue';
+import { Button, Dialog, Field, Input, Picker, Textarea } from '@koyori-app/ui-vue';
 import {
   CUSTOM_FIELD_TYPES,
   customFieldTypeMeta,
@@ -43,6 +25,8 @@ const props = defineProps<{
   tenantId: string;
   projectId: string;
 }>();
+// 閉じた Dialog も DOM に残るため、送信ボタンを結ぶ form の id はインスタンスごとに分ける
+const formId = useId();
 
 const queryClient = useQueryClient();
 
@@ -166,10 +150,10 @@ function openEdit(field: CustomFieldResponse) {
   isFormOpen.value = true;
 }
 
-function onFormOpenChange(open: boolean) {
+function onFormClose() {
   // 保存リクエスト進行中はダイアログを閉じない（結果の見逃し防止）
-  if (!open && isSaving.value) return;
-  isFormOpen.value = open;
+  if (isSaving.value) return;
+  isFormOpen.value = false;
 }
 
 function openDelete(field: CustomFieldResponse) {
@@ -177,9 +161,9 @@ function openDelete(field: CustomFieldResponse) {
   deleteTarget.value = field;
 }
 
-function onDeleteOpenChange(open: boolean) {
-  if (!open && deleteMutation.isPending.value) return;
-  if (!open) deleteTarget.value = null;
+function onDeleteClose() {
+  if (deleteMutation.isPending.value) return;
+  deleteTarget.value = null;
 }
 
 async function confirmDelete() {
@@ -204,9 +188,14 @@ async function confirmDelete() {
   <div>
     <div class="mb-5 flex items-center justify-between gap-4 border-b pb-4">
       <h2 class="text-xl font-semibold">カスタムフィールド</h2>
-      <Button type="button" variant="outline" class="shrink-0" @click="openAdd">
-        <PhPlus class="size-4" />
-        フィールドを追加
+      <Button
+        type="button"
+        variant="tertiary"
+        class="shrink-0"
+        label="フィールドを追加"
+        @click="openAdd"
+      >
+        <template #icon><PhPlus class="size-4" /></template>
       </Button>
     </div>
     <p class="mb-4 text-sm text-muted-foreground">
@@ -257,128 +246,121 @@ async function confirmDelete() {
     </ul>
 
     <!-- 追加・編集ダイアログ -->
-    <Dialog v-if="isFormOpen" :open="true" @update:open="onFormOpenChange">
-      <DialogContent class="max-w-md">
-        <DialogHeader>
-          <DialogTitle>{{ editingField ? 'フィールドを編集' : 'フィールドを追加' }}</DialogTitle>
-          <DialogDescription>
-            {{
-              editingField
-                ? '名前を変更できます。型は変更できません。'
-                : 'タスクに表示されるフィールドの名前と型を設定します。'
-            }}
-          </DialogDescription>
-        </DialogHeader>
-        <form class="flex flex-col gap-4" @submit.prevent="form.handleSubmit">
-          <form.Field name="name">
-            <template #default="{ field }">
-              <Field>
-                <FieldLabel :for="field.name">名前</FieldLabel>
-                <Input
-                  :id="field.name"
-                  placeholder="例: 見積もり"
-                  :model-value="field.state.value"
-                  @blur="field.handleBlur"
-                  @update:model-value="(v) => field.handleChange(String(v))"
-                />
-                <FieldError v-if="field.state.meta.isTouched && field.state.meta.errors.length"
-                  >名前は 1〜100 文字で入力してください</FieldError
-                >
-              </Field>
-            </template>
-          </form.Field>
-
-          <!-- 型は作成時のみ選択可（PATCH で変更できないため編集時は非表示） -->
-          <form.Field v-if="!editingField" name="fieldType">
-            <template #default="{ field }">
-              <Field>
-                <FieldLabel for="custom-field-type">型</FieldLabel>
-                <Select
-                  :model-value="field.state.value"
-                  @update:model-value="(v) => field.handleChange(v as CustomFieldType)"
-                >
-                  <SelectTrigger id="custom-field-type" class="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem v-for="t in CUSTOM_FIELD_TYPES" :key="t.value" :value="t.value">
-                      {{ t.label }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-            </template>
-          </form.Field>
-
-          <!-- 選択肢は select 型なら作成・編集とも表示・更新できる -->
-          <form.Field v-if="formFieldType === 'select'" name="optionsText">
-            <template #default="{ field }">
-              <Field>
-                <FieldLabel :for="field.name">選択肢（1行に1つ）</FieldLabel>
-                <Textarea
-                  :id="field.name"
-                  rows="4"
-                  placeholder="高&#10;中&#10;低"
-                  :model-value="field.state.value"
-                  @update:model-value="(v) => field.handleChange(String(v))"
-                />
-              </Field>
-            </template>
-          </form.Field>
-
-          <p v-if="formError" role="alert" class="text-sm text-destructive">{{ formError }}</p>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              :disabled="isSaving"
-              @click="onFormOpenChange(false)"
+    <Dialog
+      :open="isFormOpen"
+      :title="editingField ? 'フィールドを編集' : 'フィールドを追加'"
+      :description="
+        editingField
+          ? '名前を変更できます。型は変更できません。'
+          : 'タスクに表示されるフィールドの名前と型を設定します。'
+      "
+      :on-close="onFormClose"
+    >
+      <form :id="formId" class="flex flex-col gap-4" @submit.prevent="form.handleSubmit">
+        <form.Field name="name">
+          <template #default="{ field }">
+            <Field
+              :id="field.name"
+              label="名前"
+              :error="
+                field.state.meta.isTouched && field.state.meta.errors.length
+                  ? '名前は 1〜100 文字で入力してください'
+                  : ''
+              "
             >
-              キャンセル
-            </Button>
-            <form.Subscribe>
-              <template #default="{ canSubmit, isSubmitting }">
-                <Button type="submit" :disabled="!canSubmit || isSubmitting || isSaving">
-                  {{ submitLabel }}
-                </Button>
-              </template>
-            </form.Subscribe>
-          </DialogFooter>
-        </form>
-      </DialogContent>
+              <Input
+                placeholder="例: 見積もり"
+                :value="field.state.value"
+                :on-value-change="field.handleChange"
+                :on-blur="field.handleBlur"
+              />
+            </Field>
+          </template>
+        </form.Field>
+
+        <!-- 型は作成時のみ選択可（PATCH で変更できないため編集時は非表示） -->
+        <form.Field v-if="!editingField" name="fieldType">
+          <template #default="{ field }">
+            <Field id="custom-field-type" label="型">
+              <Picker
+                top-layer
+                label="型"
+                :searchable="false"
+                :items="CUSTOM_FIELD_TYPES"
+                :selected-values="[field.state.value]"
+                :on-selection-change="
+                  (values: string[]) => field.handleChange(values[0] as CustomFieldType)
+                "
+              />
+            </Field>
+          </template>
+        </form.Field>
+
+        <!-- 選択肢は select 型なら作成・編集とも表示・更新できる -->
+        <form.Field v-if="formFieldType === 'select'" name="optionsText">
+          <template #default="{ field }">
+            <Field :id="field.name" label="選択肢（1行に1つ）">
+              <Textarea
+                :rows="4"
+                placeholder="高&#10;中&#10;低"
+                :value="field.state.value"
+                :on-value-change="field.handleChange"
+              />
+            </Field>
+          </template>
+        </form.Field>
+
+        <p v-if="formError" role="alert" class="text-sm text-destructive">{{ formError }}</p>
+      </form>
+      <template #actions>
+        <Button
+          type="button"
+          variant="tertiary"
+          :disabled="isSaving"
+          label="キャンセル"
+          @click="onFormClose"
+        />
+        <form.Subscribe>
+          <template #default="{ canSubmit, isSubmitting }">
+            <Button
+              type="submit"
+              :form="formId"
+              :disabled="!canSubmit || isSubmitting || isSaving"
+              :label="submitLabel"
+            />
+          </template>
+        </form.Subscribe>
+      </template>
     </Dialog>
 
     <!-- 削除確認ダイアログ -->
-    <Dialog v-if="deleteTarget" :open="true" @update:open="onDeleteOpenChange">
-      <DialogContent class="max-w-md" :show-close-button="false">
-        <DialogHeader>
-          <DialogTitle>カスタムフィールドを削除しますか？</DialogTitle>
-          <DialogDescription>
-            「{{
-              deleteTarget?.name
-            }}」を削除します。タスクに設定された値も失われます。この操作は取り消せません。
-          </DialogDescription>
-        </DialogHeader>
-        <p v-if="deleteError" role="alert" class="text-sm text-destructive">{{ deleteError }}</p>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            :disabled="deleteMutation.isPending.value"
-            @click="onDeleteOpenChange(false)"
-          >
-            キャンセル
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            :disabled="deleteMutation.isPending.value"
-            @click="confirmDelete"
-          >
-            {{ deleteMutation.isPending.value ? '削除中…' : '削除する' }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
+    <Dialog
+      :open="deleteTarget !== null"
+      title="カスタムフィールドを削除しますか？"
+      :description="
+        deleteTarget
+          ? `「${deleteTarget.name}」を削除します。タスクに設定された値も失われます。この操作は取り消せません。`
+          : ''
+      "
+      :on-close="onDeleteClose"
+    >
+      <p v-if="deleteError" role="alert" class="text-sm text-destructive">{{ deleteError }}</p>
+      <template #actions>
+        <Button
+          type="button"
+          variant="tertiary"
+          :disabled="deleteMutation.isPending.value"
+          label="キャンセル"
+          @click="onDeleteClose"
+        />
+        <Button
+          type="button"
+          variant="danger"
+          :disabled="deleteMutation.isPending.value"
+          :label="deleteMutation.isPending.value ? '削除中…' : '削除する'"
+          @click="confirmDelete"
+        />
+      </template>
     </Dialog>
   </div>
 </template>

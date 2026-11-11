@@ -29,6 +29,27 @@ pub struct GithubUserToken {
     pub github_user_id: i64,
 }
 
+/// `user_ids` のうち GitHub App 連携のある人の GitHub ユーザー ID。連携の無い人は含めない。
+///
+/// トークンは使わない（期限切れでも更新しない）。誰が GitHub 上のどのアカウントかを
+/// 照らし合わせるだけのときに使う。
+pub async fn github_app_user_ids(
+    db: &DatabaseConnection,
+    user_ids: &[Uuid],
+) -> Result<Vec<i64>, anyhow::Error> {
+    let rows: Vec<String> = oauth_connections::Entity::find()
+        .filter(oauth_connections::Column::UserId.is_in(user_ids.iter().copied()))
+        .filter(oauth_connections::Column::Provider.eq(GITHUB_APP_PROVIDER))
+        .select_only()
+        .column(oauth_connections::Column::ProviderUserId)
+        .into_tuple()
+        .all(db)
+        .await?;
+    rows.iter()
+        .map(|id| id.parse().map_err(anyhow::Error::from))
+        .collect()
+}
+
 /// `user_id` の GitHub App 連携からトークンを取り出す。連携が無ければ `Ok(None)`。
 ///
 /// 期限が近ければリフレッシュトークンで更新し、回転した新しいトークンを保存し直す。
@@ -79,7 +100,7 @@ pub async fn github_app_user_token(
             .ok_or_else(|| anyhow::anyhow!("github_app token expired and has no refresh token"))?,
     )?;
     let endpoints = GithubAppProvider.endpoints(http).await?;
-    let credentials = get_credentials(GITHUB_APP_PROVIDER, settings)?;
+    let credentials = get_credentials(GITHUB_APP_PROVIDER, settings, None)?;
     let token = refresh_access_token(http, &endpoints, &credentials, &refresh_token).await?;
 
     let mut active: oauth_connections::ActiveModel = connection.into();

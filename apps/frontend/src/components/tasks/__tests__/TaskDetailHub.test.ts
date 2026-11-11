@@ -2,8 +2,9 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
-import { nextTick } from 'vue';
+import { config, enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
+import { QueryClient, useQuery, VueQueryPlugin } from '@tanstack/vue-query';
+import { defineComponent, nextTick } from 'vue';
 import type { components } from '@/generated/api';
 
 /*
@@ -16,10 +17,14 @@ vi.mock('@/components/markdown/MarkdownEditor.vue', async () => ({
   default: (await import('@/components/markdown/__tests__/markdown-editor-stub')).default,
 }));
 
+import { ConfirmDialog } from '@koyori-app/ui-vue';
 import TaskDetailHub from '../TaskDetailHub.vue';
 import { PRIORITY_CONFIG } from '@/lib/task-display';
 
 enableAutoUnmount(afterEach);
+
+// 読み込み失敗の再試行（失敗した query の refetch）が QueryClient を使う
+config.global.plugins = [[VueQueryPlugin, { queryClient: new QueryClient() }]];
 
 type TaskDetail = components['schemas']['TaskDetailResponse'];
 
@@ -27,6 +32,7 @@ const task: TaskDetail = {
   assignees: [],
   created_at: '2026-07-16T00:00:00Z',
   custom_field_values: [],
+  reactions: [],
   id: 'task-id',
   is_archived: false,
   labels: [],
@@ -100,26 +106,16 @@ describe('TaskDetailHub', () => {
   /**
    * 優先度は表示だけで変更できなかった（作成時にしか決められなかった）。
    * 選び直しを emit する。ステータスと同じピル + メニュー（参照デザイン）なので、
-   * native select ではなくメニュー項目を押して確かめる。
+   * native select ではなくメニュー項目を押して確かめる。項目は閉じていても DOM にある。
    */
   function mountWithPriorityMenu(extra: Record<string, unknown> = {}) {
     return mount(TaskDetailHub, {
       props: { task, projectKey: 'TEST', statuses: [], statusId: task.status_id, ...extra },
-      global: {
-        stubs: {
-          DropdownMenu: { template: '<div><slot /></div>' },
-          DropdownMenuTrigger: { template: '<div><slot /></div>' },
-          DropdownMenuContent: { template: '<div><slot /></div>' },
-          DropdownMenuItem: { template: '<button type="button"><slot /></button>' },
-          DropdownMenuCheckboxItem: {
-            props: ['modelValue', 'disabled'],
-            emits: ['update:modelValue'],
-            template:
-              '<button type="button" data-menu-item :disabled="disabled" @click="$emit(\'update:modelValue\', true)"><slot /></button>',
-          },
-        },
-      },
     });
+  }
+
+  function priorityItems(wrapper: ReturnType<typeof mountWithPriorityMenu>) {
+    return wrapper.get('[role="menu"][aria-label="優先度"]').findAll('[role="menuitemradio"]');
   }
 
   it('優先度を選び直すと change:priority を emit する', async () => {
@@ -129,7 +125,7 @@ describe('TaskDetailHub', () => {
       PRIORITY_CONFIG.Medium.label,
     );
 
-    const items = wrapper.findAll('[data-menu-item]');
+    const items = priorityItems(wrapper);
     const high = items.find((item) => item.text().includes(PRIORITY_CONFIG.High.label));
     expect(high).toBeDefined();
     await high!.trigger('click');
@@ -137,10 +133,28 @@ describe('TaskDetailHub', () => {
     expect(wrapper.emitted('change:priority')).toEqual([['High']]);
   });
 
+  it('優先度の色は旗だけに載せ、文字には載せない', () => {
+    const wrapper = mountWithPriorityMenu();
+
+    expect(wrapper.html()).not.toContain('--priority-color');
+    const flag = wrapper.get('button[aria-label="優先度"] svg');
+    expect(flag.attributes('style')).toContain('color: #eab308');
+  });
+
+  it('本文のスクロール領域で切れないよう、メニューはどれもトップレイヤーに出す', () => {
+    const wrapper = mountWithPriorityMenu({ statuses, projectLabels: [featureLabel] });
+
+    const triggers = wrapper.findAll('button[aria-haspopup="menu"]');
+    expect(triggers.length).toBeGreaterThanOrEqual(3);
+    for (const trigger of triggers) {
+      expect(trigger.element.closest('[data-menu-top-layer]'), trigger.text()).not.toBeNull();
+    }
+  });
+
   it('優先度の選択肢は表示できる優先度をすべて出す', () => {
     const wrapper = mountWithPriorityMenu();
 
-    const labels = wrapper.findAll('[data-menu-item]').map((item) => item.text());
+    const labels = priorityItems(wrapper).map((item) => item.text());
     expect(labels).toEqual(Object.values(PRIORITY_CONFIG).map((config) => config.label));
   });
 
@@ -149,10 +163,16 @@ describe('TaskDetailHub', () => {
 
     expect(wrapper.get('button[aria-label="優先度"]').attributes('disabled')).toBeDefined();
     expect(
-      wrapper
-        .findAll('[data-menu-item]')
-        .every((item) => item.attributes('disabled') !== undefined),
+      priorityItems(wrapper).every((item) => item.attributes('aria-disabled') === 'true'),
     ).toBe(true);
+  });
+
+  // TASK-484: スペースのない URL が右端で切れた。flex の子は min-w-0 が無いと折り返さない
+  it('タイトルは幅に収まらなくても折り返す', () => {
+    const classes = mountWithPriorityMenu().get('h1').classes();
+
+    expect(classes).toContain('min-w-0');
+    expect(classes).toContain('break-words');
   });
 
   /** happy-dom の既定に clipboard があるとは限らないので、都度 stub を据える */
@@ -294,6 +314,39 @@ describe('TaskDetailHub', () => {
     expect(notices[0]!.text()).toBe('保存しました');
   });
 
+  it.each(['status_id', 'priority', 'labels'] as const)(
+    '%s の保存が確定したら「保存しました」を出す',
+    (savedField) => {
+      const wrapper = mount(TaskDetailHub, {
+        props: { task, projectKey: 'TEST', statuses: [], statusId: task.status_id, savedField },
+      });
+
+      const notices = wrapper.findAll('[role="status"]');
+      expect(notices).toHaveLength(1);
+      expect(notices[0]!.text()).toBe('保存しました');
+    },
+  );
+
+  it.each([
+    ['status_id', 'statusError'],
+    ['priority', 'priorityError'],
+    ['labels', 'labelsError'],
+  ] as const)('%s の失敗があれば「保存しました」は出さず失敗だけ出す', (savedField, errorProp) => {
+    const wrapper = mount(TaskDetailHub, {
+      props: {
+        task,
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+        savedField,
+        [errorProp]: '更新に失敗しました',
+      },
+    });
+
+    expect(wrapper.text()).not.toContain('保存しました');
+    expect(wrapper.text()).toContain('更新に失敗しました');
+  });
+
   it('同じフィールドの失敗があれば「保存しました」は出さず失敗を出す', () => {
     const wrapper = mount(TaskDetailHub, {
       props: {
@@ -326,6 +379,29 @@ describe('TaskDetailHub', () => {
     await deadlineInput.trigger('blur');
 
     expect(wrapper.emitted('save:soft_deadline')).toEqual([['2026-08-23']]);
+  });
+
+  it('開始予定日は日付文字列のまま送り、期限より後なら送らずに警告する', async () => {
+    const wrapper = mount(TaskDetailHub, {
+      props: {
+        task: { ...task, soft_deadline: '2026-08-20T00:00:00.000Z', planned_start_on: null },
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+      },
+    });
+
+    await wrapper.get('button[aria-label="開始予定日を編集"]').trigger('click');
+    const input = wrapper.get('input[aria-label="開始予定日"]');
+    await input.setValue('2026-08-21');
+    await input.trigger('blur');
+    expect(wrapper.emitted('save:planned_start_on')).toBeUndefined();
+    expect(wrapper.text()).toContain('開始予定日が期限より後になっています');
+
+    // 期限ちょうどは通す
+    await input.setValue('2026-08-20');
+    await input.trigger('blur');
+    expect(wrapper.emitted('save:planned_start_on')).toEqual([['2026-08-20']]);
   });
 
   it('does not save an empty progress value as zero percent', async () => {
@@ -362,7 +438,9 @@ describe('TaskDetailHub', () => {
     });
 
     await wrapper.get('button[aria-label="タスク操作"]').trigger('click');
-    const deleteItem = document.body.querySelector('[data-slot="dropdown-menu-item"]');
+    const deleteItem = document.body.querySelector(
+      '[role="menu"][aria-label="タスク操作"] [role="menuitem"]',
+    );
     expect(deleteItem?.textContent).toContain('削除');
     deleteItem?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
@@ -398,7 +476,7 @@ describe('TaskDetailHub', () => {
     });
 
     await wrapper.get('button[aria-label="ラベルを編集"]').trigger('click');
-    const items = document.body.querySelectorAll('[data-slot="dropdown-menu-checkbox-item"]');
+    const items = document.body.querySelectorAll('[role="menuitemcheckbox"]');
     const featureItem = Array.from(items).find((el) => el.textContent?.includes('feature'));
     expect(featureItem).toBeDefined();
     featureItem?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -439,9 +517,9 @@ describe('TaskDetailHub', () => {
     });
 
     await wrapper.get('button[aria-label="ラベルを編集"]').trigger('click');
-    const items = document.body.querySelectorAll('[data-slot="dropdown-menu-checkbox-item"]');
+    const items = document.body.querySelectorAll('[role="menuitemcheckbox"]');
     expect(items.length).toBe(1);
-    expect(items[0].getAttribute('data-disabled')).not.toBeNull();
+    expect(items[0].getAttribute('aria-disabled')).toBe('true');
     wrapper.unmount();
   });
 
@@ -472,7 +550,7 @@ describe('TaskDetailHub', () => {
     });
 
     await wrapper.get('button[aria-label="ラベルを編集"]').trigger('click');
-    const items = document.body.querySelectorAll('[data-slot="dropdown-menu-checkbox-item"]');
+    const items = document.body.querySelectorAll('[role="menuitemcheckbox"]');
     const bugItem = Array.from(items).find((el) => el.textContent?.includes('bug'));
     expect(bugItem).toBeDefined();
     bugItem?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -499,7 +577,7 @@ describe('TaskDetailHub', () => {
     });
 
     await wrapper.get('button[aria-label="ラベルを編集"]').trigger('click');
-    const items = document.body.querySelectorAll('[data-slot="dropdown-menu-checkbox-item"]');
+    const items = document.body.querySelectorAll('[role="menuitemcheckbox"]');
     const featureItem = Array.from(items).find((el) => el.textContent?.includes('feature'));
     expect(featureItem).toBeDefined();
     featureItem?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -509,6 +587,176 @@ describe('TaskDetailHub', () => {
       [['label-bug', 'label-stale', 'label-feature']],
     ]);
     wrapper.unmount();
+  });
+});
+
+/*
+ * 保存は emit した直後に編集器を閉じ、失敗は親が fieldErrors で返す。以前は失敗すると
+ * 入力した下書きがどこにも残らず、書き直すしかなかった（TASK-250）。
+ */
+describe('TaskDetailHub の保存に失敗した下書き', () => {
+  const FAILED = '更新に失敗しました';
+
+  function mountHub() {
+    return mount(TaskDetailHub, {
+      props: { task, projectKey: 'TEST', statuses: [], statusId: task.status_id },
+    });
+  }
+
+  function resumeButton(wrapper: ReturnType<typeof mountHub>) {
+    return wrapper.findAll('button').find((button) => button.text() === '編集を再開');
+  }
+
+  async function resume(wrapper: ReturnType<typeof mountHub>) {
+    const button = resumeButton(wrapper);
+    expect(button, '「編集を再開」が無い').toBeDefined();
+    await button!.trigger('click');
+  }
+
+  function titleInput(wrapper: ReturnType<typeof mountHub>) {
+    return wrapper.get('input[aria-label="タイトル"]');
+  }
+
+  async function saveTitle(wrapper: ReturnType<typeof mountHub>, value: string) {
+    await wrapper.get('h1').trigger('click');
+    await titleInput(wrapper).setValue(value);
+    await titleInput(wrapper).trigger('blur');
+  }
+
+  it('タイトルの保存に失敗したら、編集を再開すると入力した値が入っている', async () => {
+    const wrapper = mountHub();
+    await saveTitle(wrapper, '書きかけのタイトル');
+    expect(wrapper.emitted('save:title')).toEqual([['書きかけのタイトル']]);
+    expect(wrapper.find('input[aria-label="タイトル"]').exists()).toBe(false);
+
+    await wrapper.setProps({ fieldErrors: { title: FAILED } });
+    await resume(wrapper);
+
+    expect((titleInput(wrapper).element as HTMLInputElement).value).toBe('書きかけのタイトル');
+  });
+
+  it('説明の保存に失敗したら、編集を再開すると入力した値が入っている', async () => {
+    const wrapper = mountHub();
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '説明を追加')!
+      .trigger('click');
+    const textarea = wrapper.get('textarea[aria-label="説明"]');
+    await textarea.setValue('書きかけの説明');
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '保存')!
+      .trigger('click');
+    expect(wrapper.emitted('save:description')).toEqual([['書きかけの説明']]);
+
+    await wrapper.setProps({ fieldErrors: { description: FAILED } });
+    await resume(wrapper);
+
+    const reopened = wrapper.get('textarea[aria-label="説明"]');
+    expect((reopened.element as HTMLTextAreaElement).value).toBe('書きかけの説明');
+  });
+
+  it('保存し直しも失敗したら、新しく入力した値から再開できる', async () => {
+    const wrapper = mountHub();
+    await saveTitle(wrapper, '一度目');
+    await wrapper.setProps({ fieldErrors: { title: FAILED } });
+    await resume(wrapper);
+    await titleInput(wrapper).setValue('二度目');
+    await titleInput(wrapper).trigger('blur');
+
+    // 親は保存を始めると失敗表示を消し、また失敗すると立て直す
+    await wrapper.setProps({ fieldErrors: {} });
+    await wrapper.setProps({ fieldErrors: { title: FAILED } });
+    await resume(wrapper);
+
+    expect((titleInput(wrapper).element as HTMLInputElement).value).toBe('二度目');
+  });
+
+  it('保存し直して成功したら下書きは捨て、次に開くと task の値が入っている', async () => {
+    const wrapper = mountHub();
+    await saveTitle(wrapper, '一度目');
+    await wrapper.setProps({ fieldErrors: { title: FAILED } });
+    await resume(wrapper);
+    await titleInput(wrapper).setValue('二度目');
+    await titleInput(wrapper).trigger('blur');
+    expect(wrapper.emitted('save:title')).toEqual([['一度目'], ['二度目']]);
+
+    await wrapper.setProps({ fieldErrors: {}, task: { ...task, title: '二度目' } });
+    expect(resumeButton(wrapper)).toBeUndefined();
+    expect(wrapper.text()).not.toContain(FAILED);
+
+    await wrapper.get('h1').trigger('click');
+    expect((titleInput(wrapper).element as HTMLInputElement).value).toBe('二度目');
+  });
+
+  it('Esc で取り消したら下書きを残さない', async () => {
+    const wrapper = mountHub();
+    await wrapper.get('h1').trigger('click');
+    await titleInput(wrapper).setValue('取り消す');
+    await titleInput(wrapper).trigger('keydown', { key: 'Escape' });
+
+    expect(wrapper.emitted('save:title')).toBeUndefined();
+    expect(wrapper.find('input[aria-label="タイトル"]').exists()).toBe(false);
+    expect(resumeButton(wrapper)).toBeUndefined();
+    expect(wrapper.text()).not.toContain(FAILED);
+  });
+
+  it('失敗後に再開した編集を Esc で取り消したら、その下書きも捨てる', async () => {
+    const wrapper = mountHub();
+    await saveTitle(wrapper, '書きかけ');
+    await wrapper.setProps({ fieldErrors: { title: FAILED } });
+    await resume(wrapper);
+    await titleInput(wrapper).trigger('keydown', { key: 'Escape' });
+
+    expect(resumeButton(wrapper)).toBeUndefined();
+    await wrapper.get('h1').trigger('click');
+    expect((titleInput(wrapper).element as HTMLInputElement).value).toBe(task.title);
+  });
+
+  // 「クリア」は失う入力が無いので再開ボタンを出さない。前に成功した下書きで出してもいけない
+  it('説明の保存に成功したあと「クリア」で失敗しても、前の値で編集を再開させない', async () => {
+    const wrapper = mountHub();
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '説明を追加')!
+      .trigger('click');
+    const textarea = wrapper.get('textarea[aria-label="説明"]');
+    await textarea.setValue('成功した説明');
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '保存')!
+      .trigger('click');
+    await wrapper.setProps({ fieldErrors: {}, task: { ...task, description: '成功した説明' } });
+
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '成功した説明')!
+      .trigger('click');
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'クリア')!
+      .trigger('click');
+    // クリアは確認を挟む
+    (wrapper.findAllComponents(ConfirmDialog)[1]!.props('onConfirm') as () => void)();
+    await nextTick();
+    expect(wrapper.emitted('save:description')).toEqual([['成功した説明'], [null]]);
+
+    await wrapper.setProps({ fieldErrors: { description: FAILED } });
+    expect(wrapper.text()).toContain(FAILED);
+    expect(resumeButton(wrapper)).toBeUndefined();
+  });
+
+  // 分割ビューのペインは別のタスクへ移っても同じインスタンスで、失敗表示も残りうる
+  it('別のタスクへ移ったら、前のタスクの下書きを出さない', async () => {
+    const wrapper = mountHub();
+    await saveTitle(wrapper, '前のタスクの下書き');
+    await wrapper.setProps({ fieldErrors: { title: FAILED } });
+
+    await wrapper.setProps({ task: { ...task, id: 'other-task', title: '別のタスク' } });
+
+    expect(resumeButton(wrapper)).toBeUndefined();
+    await wrapper.get('h1').trigger('click');
+    expect((titleInput(wrapper).element as HTMLInputElement).value).toBe('別のタスク');
   });
 });
 
@@ -550,6 +798,49 @@ describe('TaskDetailHub description KFM 表示', () => {
     expect(wrapper.find('strong').exists()).toBe(false);
     // 生テキスト中のタグ断片も要素化されない (v-html へ流れていない)
     expect(wrapper.find('em').exists()).toBe(false);
+  });
+
+  it('プレーン表示ではメンションの印を札と同じ字（@今の名）にし、id を出さない', () => {
+    const alice = '11111111-1111-4111-8111-111111111111';
+    const former = '22222222-2222-4222-8222-222222222222';
+    const wrapper = mount(TaskDetailHub, {
+      props: {
+        task: {
+          ...task,
+          description: `見て <@${alice}> と <@${former}> へ`,
+          mentions: {
+            [alice]: { status: 'member', name: 'alice' },
+            // 外れた者でも名前が引ければ名で出る
+            [former]: { status: 'outside', name: 'former' },
+          },
+        },
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+      },
+    });
+
+    const text = wrapper.get('p.whitespace-pre-wrap').text();
+    expect(text).toBe('見て @alice と @former へ');
+    expect(text).not.toContain(alice);
+    expect(text).not.toContain('<@');
+  });
+
+  it('既存の素の @username はそのまま描く（札にも別の字にもしない）', () => {
+    const wrapper = mount(TaskDetailHub, {
+      props: {
+        task: {
+          ...task,
+          description: '@alice さん bob@example.com',
+          mentions: {},
+        },
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+      },
+    });
+
+    expect(wrapper.get('p.whitespace-pre-wrap').text()).toBe('@alice さん bob@example.com');
   });
 
   it('KFM 表示中は鉛筆ボタンから編集へ入り、textarea には生テキストが入る', async () => {
@@ -689,6 +980,13 @@ describe('TaskDetailHub の担当者', () => {
     expect(picker.get('button').attributes('disabled')).toBeDefined();
   });
 
+  it('ピッカーの一覧は本文のスクロール領域で切れないようトップレイヤーに出す', () => {
+    const wrapper = mountWithAssignee({});
+
+    const picker = wrapper.findComponent({ name: 'TaskAssigneePicker' });
+    expect(picker.get('button').element.closest('[data-menu-top-layer]')).not.toBeNull();
+  });
+
   it('更新の失敗をその場に出す', () => {
     const wrapper = mountWithAssignee({ assigneeError: '更新に失敗しました' });
 
@@ -700,5 +998,214 @@ describe('TaskDetailHub の担当者', () => {
 
     const picker = wrapper.findComponent({ name: 'TaskAssigneePicker' });
     expect(picker.get('button').attributes('disabled')).toBeUndefined();
+  });
+});
+
+describe('TaskDetailHub の期限の表示', () => {
+  const pastDeadlines = {
+    ...task,
+    soft_deadline: '2026-07-10T00:00:00',
+    hard_deadline: '2026-07-11T00:00:00',
+  };
+
+  function mountWithStatus(statusId: string, completedAt: string | null = null) {
+    return mount(TaskDetailHub, {
+      props: {
+        task: { ...pastDeadlines, completed_at: completedAt },
+        projectKey: 'TEST',
+        statuses,
+        statusId,
+      },
+    });
+  }
+
+  function buttonByText(wrapper: ReturnType<typeof mountWithStatus>, label: string) {
+    const button = wrapper.findAll('button').find((b) => b.text() === label);
+    expect(button, `期限の button「${label}」が無い`).toBeDefined();
+    return button!;
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('完了の状態では、過ぎた期限（ソフトとハード）を赤くせず、日付だけを出す', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T12:00:00'));
+    const wrapper = mountWithStatus('status-done');
+    expect(buttonByText(wrapper, '7月10日').classes()).not.toContain('text-destructive');
+    expect(buttonByText(wrapper, '7月11日').classes()).not.toContain('text-destructive');
+    expect(wrapper.text()).not.toContain('超過');
+  });
+
+  it('期限より後の日に完了した物は、ソフトとハードの両方に遅れた日数を中立で添える', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T12:00:00'));
+    const wrapper = mountWithStatus('status-done', '2026-07-14T09:00:00');
+    expect(buttonByText(wrapper, '7月10日（4日超過）').classes()).not.toContain('text-destructive');
+    expect(buttonByText(wrapper, '7月11日（3日超過）').classes()).not.toContain('text-destructive');
+  });
+
+  it('期限の前に完了した物は、ソフトとハードの両方で日付だけを出す', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T12:00:00'));
+    const wrapper = mountWithStatus('status-done', '2026-07-06T09:00:00');
+    buttonByText(wrapper, '7月10日');
+    buttonByText(wrapper, '7月11日');
+    expect(wrapper.text()).not.toContain('超過');
+  });
+
+  it('完了していない状態では、今までどおり過ぎた期限を赤く超過と出す', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T12:00:00'));
+    const wrapper = mountWithStatus('status-progress');
+    expect(buttonByText(wrapper, '4日超過').classes()).toContain('text-destructive');
+    expect(buttonByText(wrapper, '3日超過').classes()).toContain('text-destructive');
+  });
+});
+
+describe('TaskDetailHub 説明の編集', () => {
+  async function startEdit(description: string | null = '元の説明') {
+    const wrapper = mount(TaskDetailHub, {
+      props: {
+        task: { ...task, description },
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+      },
+    });
+    const opener = wrapper
+      .findAll('button')
+      .find((b) => b.text() === (description ?? '説明を追加'));
+    await opener!.trigger('click');
+    return wrapper;
+  }
+  const dialogs = (w: Awaited<ReturnType<typeof startEdit>>) => w.findAllComponents(ConfirmDialog);
+  const button = (w: Awaited<ReturnType<typeof startEdit>>, label: string) =>
+    w.findAll('button').find((b) => b.text() === label);
+
+  it('保存とキャンセルのボタンを出す', async () => {
+    const wrapper = await startEdit();
+    expect(button(wrapper, '保存')).toBeTruthy();
+    expect(button(wrapper, 'キャンセル')).toBeTruthy();
+  });
+
+  it('blur では保存せず編集を続ける', async () => {
+    const wrapper = await startEdit();
+    const textarea = wrapper.get('textarea[aria-label="説明"]');
+    await textarea.setValue('書きかけ');
+    await textarea.trigger('blur');
+    expect(wrapper.emitted('save:description')).toBeUndefined();
+    expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(true);
+  });
+
+  it('保存ボタンで保存して閉じる', async () => {
+    const wrapper = await startEdit();
+    await wrapper.get('textarea[aria-label="説明"]').setValue('新しい説明');
+    await button(wrapper, '保存')!.trigger('click');
+    expect(wrapper.emitted('save:description')).toEqual([['新しい説明']]);
+    expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(false);
+  });
+
+  it('編集中に別のタスクへ替わったら編集を閉じ、前の下書きを移った先へ保存しない', async () => {
+    const wrapper = await startEdit();
+    await wrapper.get('textarea[aria-label="説明"]').setValue('A の書きかけ');
+    await wrapper.setProps({ task: { ...task, id: 'task-b', description: 'B の説明' } });
+    expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(false);
+    expect(wrapper.emitted('save:description')).toBeUndefined();
+    expect(wrapper.text()).toContain('B の説明');
+  });
+
+  it('変更ありの Esc は確認を出し、取りやめると編集が続く', async () => {
+    const wrapper = await startEdit();
+    const textarea = wrapper.get('textarea[aria-label="説明"]');
+    await textarea.setValue('書きかけ');
+    await textarea.trigger('keydown', { key: 'Escape' });
+    const confirm = dialogs(wrapper)[0]!;
+    expect(confirm.props('open')).toBe(true);
+    expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(true);
+    (confirm.props('onCancel') as () => void)();
+    await nextTick();
+    expect(dialogs(wrapper)[0]!.props('open')).toBe(false);
+    expect((wrapper.get('textarea[aria-label="説明"]').element as HTMLTextAreaElement).value).toBe(
+      '書きかけ',
+    );
+  });
+
+  it('確認で破棄すると元に戻り、保存はしない', async () => {
+    const wrapper = await startEdit();
+    await wrapper.get('textarea[aria-label="説明"]').setValue('書きかけ');
+    await button(wrapper, 'キャンセル')!.trigger('click');
+    (dialogs(wrapper)[0]!.props('onConfirm') as () => void)();
+    await nextTick();
+    expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(false);
+    expect(wrapper.emitted('save:description')).toBeUndefined();
+    expect(wrapper.text()).toContain('元の説明');
+  });
+
+  it('変更ありのままタイトルの編集を始めると確認が出て、取りやめると説明の編集と内容が残る', async () => {
+    const wrapper = await startEdit();
+    await wrapper.get('textarea[aria-label="説明"]').setValue('書きかけ');
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === task.title)!
+      .trigger('click');
+    const confirm = dialogs(wrapper)[0]!;
+    expect(confirm.props('open')).toBe(true);
+    (confirm.props('onCancel') as () => void)();
+    await nextTick();
+    expect((wrapper.get('textarea[aria-label="説明"]').element as HTMLTextAreaElement).value).toBe(
+      '書きかけ',
+    );
+    expect(wrapper.emitted('save:title')).toBeUndefined();
+  });
+
+  it('変更が無ければ Esc もキャンセルも確認なしで閉じる', async () => {
+    const wrapper = await startEdit();
+    await wrapper.get('textarea[aria-label="説明"]').trigger('keydown', { key: 'Escape' });
+    expect(dialogs(wrapper)[0]!.props('open')).toBe(false);
+    expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(false);
+  });
+
+  it('クリアは確認後にだけ空にして保存する', async () => {
+    const wrapper = await startEdit();
+    await button(wrapper, 'クリア')!.trigger('click');
+    expect(wrapper.emitted('save:description')).toBeUndefined();
+    const confirm = dialogs(wrapper)[1]!;
+    expect(confirm.props('open')).toBe(true);
+    (confirm.props('onConfirm') as () => void)();
+    await nextTick();
+    expect(wrapper.emitted('save:description')).toEqual([[null]]);
+  });
+});
+
+describe('TaskDetailHub 読み込みの失敗', () => {
+  it('失敗を出し、再試行で表示中の失敗した query を取り直す', async () => {
+    let calls = 0;
+    const Host = defineComponent({
+      components: { TaskDetailHub },
+      setup() {
+        const q = useQuery({
+          queryKey: ['hub-retry'],
+          queryFn: () => {
+            calls += 1;
+            return Promise.reject(new Error('x'));
+          },
+          retry: false,
+        });
+        return { q };
+      },
+      template: '<TaskDetailHub :error="q.isError.value" />',
+    });
+    const wrapper = mount(Host, {
+      global: { plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]] },
+    });
+    await flushPromises();
+    expect(calls).toBe(1);
+    expect(wrapper.get('[data-testid="load-error"]').text()).toContain('読み込みに失敗しました');
+
+    await wrapper.get('[data-testid="load-error"] button').trigger('click');
+    await flushPromises();
+    expect(calls).toBe(2);
   });
 });

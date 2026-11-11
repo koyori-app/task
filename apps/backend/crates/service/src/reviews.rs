@@ -1,18 +1,24 @@
 //! レビューラウンドと指摘の業務ロジック。
 //!
-//! 仕様は `docs/features/review-findings.md`。ここに置くのは
+//! 仕様は `docs/dev/features/review-findings/index.md`。ここに置くのは
 //! 「ラウンドの採番」「状態遷移の規則」「繰り延べ先タスクの作成・クローズ」。
+
+// 受け入れ条件（docs/dev/features/review-findings/index.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
+// - 要約コメントの鮮度: 投稿時点の PR head が最新ラウンドの `head_sha` と違えば「マージ可」と書かれない（対照: 一致すれば可）。head が取れないときも「マージ可」と書かれない
+// - 代行の痕跡: 要約コメントの本文に「オーナー代行での棄却 n 件」が出る
+// - 拒否系: `rejected` の主体はその指摘を出した本人に限る
+// - 遷移表と重大度制約、`gate` の判定順
 
 use sea_orm::sea_query::{Expr, LockType};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
-    QueryOrder, QuerySelect, prelude::Uuid,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, FromQueryResult,
+    QueryFilter, QueryOrder, QuerySelect, Statement, prelude::Uuid,
 };
 
 use entity::review_findings::{FindingSeverity, FindingState};
 use entity::{
-    github_integrations, project_statuses, projects, review_findings, reviews, tasks,
-    tenant_members, tenants,
+    forge_pull_requests, github_integrations, project_statuses, projects, review_findings, reviews,
+    tasks, tenant_members, tenants,
 };
 use payload::reviews::{ReviewGate, ReviewedPullRequest};
 
@@ -644,6 +650,7 @@ pub async fn create_deferred_task<C: ConnectionTrait>(
         sprint_id: Set(None),
         soft_deadline: Set(None),
         hard_deadline: Set(None),
+        planned_start_on: Set(None),
         estimated_minutes: Set(None),
         is_archived: Set(false),
         created_by: Set(actor_id),
@@ -917,6 +924,25 @@ pub async fn latest_head_sha<C: ConnectionTrait>(
     Ok(latest)
 }
 
+/// `head_sha` に対するラウンドを出したレビュワー（重複なし）。
+/// マージ可でなくなったとき、承認を取り消す対象を決めるのに使う。
+pub async fn reviewer_ids_at_head<C: ConnectionTrait>(
+    db: &C,
+    project_id: Uuid,
+    repo: &RepoRef,
+    pr_number: i32,
+    head_sha: &str,
+) -> Result<Vec<Uuid>, sea_orm::DbErr> {
+    scoped_rounds(project_id, repo, pr_number)
+        .filter(reviews::Column::HeadSha.eq(head_sha))
+        .select_only()
+        .column(reviews::Column::ReviewerId)
+        .distinct()
+        .into_tuple()
+        .all(db)
+        .await
+}
+
 /// 要約ジョブが最後に GitHub で確かめた head と、その時刻。
 ///
 /// 画面はこれと最新ラウンドの `head_sha` を比べて「レビューが古い」を出す。
@@ -1010,7 +1036,12 @@ pub async fn reviewed_pull_requests<C: ConnectionTrait>(
                 pr_author: None,
                 unresolved: 0,
                 blocking: 0,
+                blocking_fixed: 0,
                 last_reviewed_at: round.created_at.with_timezone(&chrono::Utc),
+                state: "unknown".into(),
+                merged_at: None,
+                merge_effects_processed_at: None,
+                pull_request_id: None,
             });
         // ラウンドは round 昇順なので、最後に見たものが最新
         entry.rounds = round.round;
@@ -1034,13 +1065,118 @@ pub async fn reviewed_pull_requests<C: ConnectionTrait>(
             entry.unresolved += 1;
             if severity.blocks_merge() {
                 entry.blocking += 1;
+                if state == FindingState::Fixed {
+                    entry.blocking_fixed += 1;
+                }
             }
+        }
+    }
+
+    // PR 行とは自然キーで結ぶ。shortcut: host を見ていない（PR 行は GitHub のみ）。GitLab 対応時に host も含める
+    let pull_requests = forge_pull_requests::Entity::find()
+        .filter(forge_pull_requests::Column::ProjectId.eq(project_id))
+        .filter(forge_pull_requests::Column::RepoOwner.eq(repo.owner.clone()))
+        .filter(forge_pull_requests::Column::RepoName.eq(repo.name.clone()))
+        .filter(forge_pull_requests::Column::Number.is_in(by_pr.keys().copied()))
+        .all(db)
+        .await?;
+    for row in pull_requests {
+        if let Some(entry) = by_pr.get_mut(&row.number) {
+            entry.state = row.state;
+            entry.merged_at = row.merged_at.map(|at| at.with_timezone(&chrono::Utc));
+            entry.merge_effects_processed_at = row
+                .merge_effects_processed_at
+                .map(|at| at.with_timezone(&chrono::Utc));
+            entry.pull_request_id = Some(row.id);
         }
     }
 
     let mut out: Vec<ReviewedPullRequest> = by_pr.into_values().collect();
     // 新しくレビューされた PR を上に
     out.sort_by_key(|pr| std::cmp::Reverse(pr.last_reviewed_at));
+    Ok(out)
+}
+
+/// ラウンドを作る PR の行を `state = unknown` で用意する（docs/dev/features/tasks/github-tasks/index.md の「CLI との合流」）。
+///
+/// 既に行があれば触らない。後から届いた webhook が同じ行へ合流する。
+/// 連携の無いプロジェクトのラウンドはリポジトリが決まらないので作らない。
+/// `reviews.pull_request_id` への FK 付け替えは未実施で、レビュー側とは自然キーで結ぶ。
+pub async fn ensure_pull_request_row<C: ConnectionTrait>(
+    db: &C,
+    project_id: Uuid,
+    repo: &RepoRef,
+    pr_number: i32,
+) -> Result<(), sea_orm::DbErr> {
+    if !repo.is_linked() {
+        return Ok(());
+    }
+    db.execute_raw(Statement::from_sql_and_values(
+        db.get_database_backend(),
+        "INSERT INTO forge_pull_requests (id, project_id, host, host_url, repo_owner, repo_name, number,
+                                          title, author_handle, state, html_url, commits_complete,
+                                          created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, '', '', 'unknown', '', false, now(), now())
+         ON CONFLICT (project_id, host, host_url, repo_owner, repo_name, number) DO NOTHING",
+        [
+            Uuid::new_v4().into(),
+            project_id.into(),
+            "github".into(),
+            crate::github::webhook_events::HOST_URL.into(),
+            repo.owner.clone().into(),
+            repo.name.clone().into(),
+            pr_number.into(),
+        ],
+    ))
+    .await?;
+    Ok(())
+}
+
+/// タスクに結ばれた PR 行ごとの、マージを塞いでいる指摘の件数（[`blocking_count`] と同じ集計）。
+///
+/// レビューの無い PR 行は含めない（呼び出し側で null）。`can_read_review` が偽なら空——
+/// task 系のスコープしか無い PAT にレビューの中身を漏らさない。PR 行の `project_id` が
+/// タスクのプロジェクトと違うものも含めない（呼び出し元がそのプロジェクトのレビューを読めるとは限らない）。
+pub async fn blocking_by_task_pull_request<C: ConnectionTrait>(
+    db: &C,
+    task_id: Uuid,
+    project_id: Uuid,
+    can_read_review: bool,
+) -> Result<std::collections::HashMap<Uuid, i64>, sea_orm::DbErr> {
+    #[derive(sea_orm::FromQueryResult)]
+    struct Row {
+        pull_request_id: Uuid,
+        severity: Option<FindingSeverity>,
+        state: Option<FindingState>,
+    }
+
+    let mut out = std::collections::HashMap::new();
+    if !can_read_review {
+        return Ok(out);
+    }
+    // 指摘ゼロのラウンドだけの PR も 0 件として返すため、指摘は外部結合
+    let rows = Row::find_by_statement(Statement::from_sql_and_values(
+        db.get_database_backend(),
+        "SELECT DISTINCT p.id AS pull_request_id, f.id AS finding_id, f.severity, f.state
+         FROM forge_pull_request_links l
+         JOIN forge_pull_requests p ON p.id = l.pull_request_id
+         JOIN reviews r ON r.project_id = p.project_id AND r.repo_owner = p.repo_owner
+                       AND r.repo_name = p.repo_name AND r.pr_number = p.number
+         LEFT JOIN review_findings f ON f.review_id = r.id
+         WHERE l.task_id = $1 AND p.project_id = $2",
+        [task_id.into(), project_id.into()],
+    ))
+    .all(db)
+    .await?;
+    for row in rows {
+        let count = out.entry(row.pull_request_id).or_insert(0);
+        if let (Some(severity), Some(state)) = (row.severity, row.state)
+            && severity.blocks_merge()
+            && state.counts_as_unresolved()
+        {
+            *count += 1;
+        }
+    }
     Ok(out)
 }
 
@@ -1064,6 +1200,10 @@ pub struct SummarySnapshot {
     pub latest_summary: String,
     /// task 側の指摘一覧への URL（設定が無ければ省く）
     pub findings_url: Option<String>,
+    /// task が承認を取り消したまま、今の head にラウンドを出していない人の GitHub login。
+    /// その人の変更要求が GitHub でマージを止めるので、空でなければマージ可にしない。
+    /// GitHub を読む要約ジョブが埋める（DB からは作れない）
+    pub awaiting_rereview: Vec<String>,
 }
 
 impl SummarySnapshot {
@@ -1083,8 +1223,15 @@ impl SummarySnapshot {
     ///
     /// 集計 API と同じ規則（レビューが 1 件も無い PR を可にしない）に加えて、
     /// レビュー後にコミットが積まれていないことを確かめる。確かめられないときも可にしない。
+    /// task が承認を取り消した人の再レビュー待ちが残っていても可にしない。
     #[must_use]
     pub fn merge_ready(&self) -> bool {
+        self.clean_and_fresh() && self.awaiting_rereview.is_empty()
+    }
+
+    /// High / Medium の未解決が無く、レビューした commit が今の head（再レビュー待ちは見ない）。
+    #[must_use]
+    pub fn clean_and_fresh(&self) -> bool {
         self.blocking == 0 && self.rounds > 0 && self.head_is_fresh() == Some(true)
     }
 }
@@ -1123,6 +1270,7 @@ pub async fn summary_snapshot<C: ConnectionTrait>(
         owner_override_rejections,
         latest_summary,
         findings_url,
+        awaiting_rereview: Vec::new(),
     })
 }
 
@@ -1148,6 +1296,19 @@ pub fn render_summary_comment(
 
     if snapshot.merge_ready() {
         let _ = writeln!(out, "**マージ可** — High / Medium の未解決はありません。");
+    } else if snapshot.clean_and_fresh() {
+        let names: Vec<String> = snapshot
+            .awaiting_rereview
+            .iter()
+            .map(|login| format!("`{login}`"))
+            .collect();
+        let _ = writeln!(
+            out,
+            "**再レビュー待ち** — High / Medium の未解決はありませんが、task が承認を取り消した \
+             {} の変更要求が残っています。今の HEAD（{}）をレビューしてください。",
+            names.join("、"),
+            short_sha(snapshot.latest_head_sha.as_deref())
+        );
     } else if snapshot.blocking == 0 && snapshot.rounds > 0 {
         let _ = match snapshot.head_is_fresh() {
             Some(false) => writeln!(
@@ -1486,6 +1647,7 @@ mod tests {
             owner_override_rejections: 0,
             latest_summary: "総評".into(),
             findings_url: Some("https://task.example/findings".into()),
+            awaiting_rereview: Vec::new(),
         }
     }
 
@@ -1574,6 +1736,31 @@ mod tests {
             "確かめられないときも可と書かない: {unknown}"
         );
         assert!(unknown.contains("鮮度不明"));
+    }
+
+    /// task が承認を取り消した人の再レビュー待ちが残っていれば「マージ可」と書かない。
+    #[test]
+    fn summary_comment_waits_for_the_revoked_reviewer() {
+        let waiting = SummarySnapshot {
+            awaiting_rereview: vec!["alice".into()],
+            ..snapshot(vec![(FindingSeverity::High, Verified, 1)])
+        };
+        assert!(!waiting.merge_ready());
+        let body = render_summary_comment(&waiting, MARKER, "2026-08-26 10:00");
+        assert!(!body.contains("マージ可"), "{body}");
+        assert!(body.contains("再レビュー待ち"), "{body}");
+        assert!(body.contains("`alice`"), "{body}");
+
+        // 指摘が残っていれば、再レビュー待ちより先にマージ不可を出す
+        let blocked = render_summary_comment(
+            &SummarySnapshot {
+                awaiting_rereview: vec!["alice".into()],
+                ..snapshot(vec![(FindingSeverity::High, Open, 1)])
+            },
+            MARKER,
+            "2026-08-26 10:00",
+        );
+        assert!(blocked.contains("マージ不可"), "{blocked}");
     }
 
     /// オーナー代行での棄却は件数を出す（0 なら出さない）。

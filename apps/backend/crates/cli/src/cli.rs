@@ -154,6 +154,12 @@ pub enum TasksCommand {
         /// Filter by parent task (KEY-N or UUID)
         #[arg(long)]
         parent: Option<String>,
+        /// Only tasks planned to start on or after this date (YYYY-MM-DD)
+        #[arg(long, value_name = "YYYY-MM-DD")]
+        planned_start_from: Option<chrono::NaiveDate>,
+        /// Only tasks planned to start on or before this date (YYYY-MM-DD)
+        #[arg(long, value_name = "YYYY-MM-DD")]
+        planned_start_to: Option<chrono::NaiveDate>,
         /// List archived tasks instead of active ones
         #[arg(long)]
         archived: bool,
@@ -203,6 +209,23 @@ pub enum TasksCommand {
         #[command(flatten)]
         fields: TaskFieldArgs,
     },
+    /// Create many tasks at once from a JSON array (all or none)
+    ///
+    /// Each element takes the same names and values as `tasks create`: title, description,
+    /// priority, status, labels, assignees, parent, soft_deadline, hard_deadline,
+    /// planned_start, estimate, progress, milestone, sprint. Every name is resolved before
+    /// anything is sent; the first one that cannot be resolved stops the command with
+    /// `tasks[i]: ...` (i is 0-based).
+    BulkCreate {
+        /// Project key or UUID
+        #[arg(long)]
+        project: String,
+        /// JSON file with an array of tasks, or - for stdin
+        file: String,
+        /// Status name for elements without `status` (default: the project's default status)
+        #[arg(long)]
+        status: Option<String>,
+    },
     /// Show a task
     Show {
         /// Task ref (KEY-N or UUID)
@@ -210,6 +233,10 @@ pub enum TasksCommand {
         /// Project key when using UUID
         #[arg(long)]
         project: Option<String>,
+        /// Print the description as stored, keeping mention markers (`<@user-id>`) instead of
+        /// `@name`; use it to edit the description and pass it back to `tasks update`
+        #[arg(long)]
+        raw: bool,
     },
     /// Update a task
     Update {
@@ -272,6 +299,48 @@ pub enum TasksCommand {
         #[arg(long)]
         project: Option<String>,
     },
+    /// Pull requests linked to a task
+    Pr {
+        #[command(subcommand)]
+        command: TaskPrCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TaskPrCommand {
+    /// List the pull requests linked to a task, and the project's repository
+    List {
+        /// Task ref (KEY-N or UUID)
+        task_ref: String,
+        /// Project key when using UUID
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Link a pull request of the project's GitHub repository to a task
+    Link {
+        /// Task ref (KEY-N or UUID)
+        task_ref: String,
+        /// Pull request number
+        #[arg(value_parser = clap::value_parser!(i32).range(1..))]
+        number: i32,
+        /// Complete the task when the pull request is merged
+        #[arg(long)]
+        closes: bool,
+        /// Project key when using UUID
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Unlink a pull request from a task (removes the link from every source)
+    Unlink {
+        /// Task ref (KEY-N or UUID)
+        task_ref: String,
+        /// Pull request number
+        #[arg(value_parser = clap::value_parser!(i32).range(1..))]
+        number: i32,
+        /// Project key when using UUID
+        #[arg(long)]
+        project: Option<String>,
+    },
 }
 
 /// 作成と更新で同じ綴りにする項目。片方だけ増えると使う側が覚え直しになる。
@@ -283,6 +352,9 @@ pub struct TaskFieldArgs {
     /// Hard deadline (RFC 3339, or YYYY-MM-DD for the start of that day in UTC)
     #[arg(long)]
     pub hard_deadline: Option<String>,
+    /// Planned start date (YYYY-MM-DD)
+    #[arg(long, value_name = "YYYY-MM-DD")]
+    pub planned_start: Option<chrono::NaiveDate>,
     /// Estimate in minutes (1 or more)
     #[arg(long)]
     pub estimate: Option<i32>,
@@ -324,6 +396,9 @@ pub struct TaskClearArgs {
     /// Remove the hard deadline
     #[arg(long, conflicts_with = "hard_deadline")]
     pub clear_hard_deadline: bool,
+    /// Remove the planned start date
+    #[arg(long, conflicts_with = "planned_start")]
+    pub clear_planned_start: bool,
     /// Remove the estimate
     #[arg(long, conflicts_with = "estimate")]
     pub clear_estimate: bool,
@@ -405,7 +480,7 @@ pub enum SprintsCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum NotificationsCommand {
-    /// List my notifications (unread first, newest first)
+    /// List my notifications (newest first; read state does not affect the order)
     List {
         /// Only unread notifications
         #[arg(long)]
@@ -459,7 +534,7 @@ pub enum ReviewCommand {
         /// Repository to read (default: the current integration; "" for rounds recorded before it)
         #[arg(long, value_name = "owner/name")]
         repo: Option<String>,
-        /// Filter by state (open,fixed,verified,deferred,rejected)
+        /// Filter by state (open,fixing,fixed,verified,deferred,rejected)
         #[arg(long, value_name = "states")]
         state: Option<String>,
         /// Filter by severity (high,medium,low,nit)
@@ -485,7 +560,7 @@ pub enum ReviewCommand {
         /// Project key or UUID
         #[arg(long)]
         project: String,
-        /// New state (open,fixed,verified,deferred,rejected)
+        /// New state (open,fixing,fixed,verified,deferred,rejected)
         #[arg(long)]
         state: String,
         /// Why the state changed (kept in the history)
@@ -632,6 +707,43 @@ mod tests {
         );
     }
 
+    /// 開始予定日は日付だけを受け、解除と同時には指定できない。
+    #[test]
+    fn parses_a_planned_start_date_and_refuses_it_with_its_clear() {
+        let base = ["task", "tasks", "update", "APP-1"];
+        let parse = |extra: &[&str]| {
+            Cli::try_parse_from(base.iter().chain(extra).copied().collect::<Vec<_>>())
+        };
+        let cli = parse(&["--planned-start", "2026-10-16"]).unwrap();
+        let Command::Tasks { command, .. } = cli.command else {
+            panic!("expected tasks");
+        };
+        let TasksCommand::Update { fields, .. } = *command else {
+            panic!("expected tasks update");
+        };
+        assert_eq!(
+            fields.planned_start,
+            chrono::NaiveDate::from_ymd_opt(2026, 10, 16)
+        );
+        assert!(parse(&["--planned-start", "2026-10-16T00:00:00Z"]).is_err());
+        assert!(parse(&["--planned-start", "2026-10-16", "--clear-planned-start"]).is_err());
+        assert!(parse(&["--clear-planned-start"]).is_ok());
+    }
+
+    /// API は 0 以下の番号を 400 で返すだけなので、引数の段階で断る。
+    #[test]
+    fn takes_only_a_positive_pull_request_number() {
+        for action in ["link", "unlink"] {
+            for bad in ["0", "-1", "abc"] {
+                assert!(
+                    Cli::try_parse_from(["task", "tasks", "pr", action, "APP-1", bad]).is_err(),
+                    "{action} {bad}"
+                );
+            }
+            assert!(Cli::try_parse_from(["task", "tasks", "pr", action, "APP-1", "1"]).is_ok());
+        }
+    }
+
     #[test]
     fn keeps_an_empty_repo_filter_as_a_value() {
         let cli = Cli::try_parse_from([
@@ -654,5 +766,20 @@ mod tests {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn tasks_show_takes_raw_flag() {
+        let raw_of = |argv: &[&str]| {
+            let Command::Tasks { command, .. } = Cli::try_parse_from(argv).unwrap().command else {
+                panic!("expected tasks");
+            };
+            let TasksCommand::Show { raw, .. } = *command else {
+                panic!("expected tasks show");
+            };
+            raw
+        };
+        assert!(raw_of(&["task", "tasks", "show", "APP-1", "--raw"]));
+        assert!(!raw_of(&["task", "tasks", "show", "APP-1"]));
     }
 }

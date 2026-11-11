@@ -4,7 +4,8 @@
  * pipeline: remark-parse → (profile 別 remark 層) → remark-rehype → (profile 別 rehype 層)
  *           → rehype-stringify → DOMPurify (構造専任) → HTML 文字列。
  * - allowDangerousHtml は使わない。mdast の生 html ノードは remark-rehype 既定で黙って
- *   消えるため、プラグインは data.hName / hProperties の型付き emit のみ行う契約。
+ *   消えるため、profile の先頭の remark 層 (remark-kfm-raw-html) が text ノードへ替えて
+ *   字として出す (落とさず escape)。プラグインは data.hName / hProperties の型付き emit のみ行う契約。
  * - コアはプラグインを import しない。profile ごとの remark / rehype 層と sanitize スキーマは
  *   composition root (index.ts) が注入する。
  * - processor は profile ごとに 1 回だけ build して memoize する (N 重初期化回避)。
@@ -17,6 +18,7 @@ import remarkRehype from 'remark-rehype';
 import type { PluggableList } from 'unified';
 import { unified } from 'unified';
 import { visit } from 'unist-util-visit';
+import type { MentionTable } from '@/lib/comment-mention';
 import { buildCacheKey, createL1Cache } from './_cache';
 import type { SanitizeSchema } from './_sanitize';
 import { createSanitizer } from './_sanitize';
@@ -74,6 +76,25 @@ export type RenderOptions = {
    * (細工した脚注 label との id 衝突で scope 分離が破れるため)。
    */
   readonly scope?: string;
+  /**
+   * タスク参照 (KEY-N) の自動リンク化に使うテナント。vfile の data.kfm.taskRef として
+   * プラグインへ渡す (processor をテナントごとに作らないため options にしない)。
+   * href がテナントで変わるのでキャッシュキーにも載る。省略時はリンク化しない。
+   */
+  readonly taskRef?: { readonly tenant: string };
+  /**
+   * メンションの印（`<@利用者ID>`）を札にする時の表（id → 状態・名前。API の `mentions` と同じ形）。
+   * vfile の data.kfm.mentions としてプラグインへ渡す。札の字と状態が表で変わるのでキャッシュキーにも載る。
+   * 省略時は印を札にしない（素の文字のまま）。渡せば、表に無い id は「不明な利用者」の札になる。
+   */
+  readonly mentions?: MentionTable;
+  /** member の札を「ログイン中の本人へのメンション」として強調する時の利用者 ID。 */
+  readonly currentUserId?: string | null;
+  /**
+   * メンションの札をプロフィールへの link にする時のテナント（表示用 id）。省けば札は link にならない。
+   * `taskRef` とは別に持つ（コメントは KEY-N の link を付けぬまま、札だけを link にするため）。
+   */
+  readonly mentionTenant?: string;
 };
 
 export type RenderDescription = (text: string, options?: RenderOptions) => Promise<string>;
@@ -248,13 +269,51 @@ export function createRenderer(options: CreateRendererOptions): RenderDescriptio
     const clobberPrefix =
       scope === undefined ? DEFAULT_CLOBBER_PREFIX : `${DEFAULT_CLOBBER_PREFIX}${scope}-`;
     // scope '' は上の検証で throw 済みのため、キーの空文字は「scope なし」と一意に対応する
-    const key = buildCacheKey(fingerprint, profile, scope ?? '', contentConfigJson, normalized);
+    // tenant '' はプラグインの検証で落ちてリンク化しないため、キーの空文字は「taskRef なし」と同値
+    const taskRef = renderOptions.taskRef;
+    // 表の有無で描画が変わる（無い: 印は素の文字 / 有る: 札）ので、未指定は '' で空の表と分ける。
+    // 並びを id で正規化し、本人強調を変える currentUserId も含めて閲覧者間の混線を防ぐ。
+    const mentions = renderOptions.mentions;
+    const currentUserId = renderOptions.currentUserId?.toLowerCase() ?? null;
+    const mentionsKey =
+      mentions === undefined
+        ? ''
+        : JSON.stringify({
+            users: Object.entries(mentions)
+              .map(([id, user]) => [
+                id.toLowerCase(),
+                user.status,
+                user.name ?? null,
+                // 札の画像も表から引くので、アイコンの差し替えで別の HTML になるよう鍵に含める
+                user.avatar_url ?? null,
+              ])
+              .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+            currentUserId,
+            // 札の link の先も表の側の値なので、テナントの違う描画が同じキーにならぬようにする
+            mentionTenant: renderOptions.mentionTenant ?? null,
+          });
+    const key = buildCacheKey(
+      fingerprint,
+      profile,
+      scope ?? '',
+      taskRef?.tenant ?? '',
+      contentConfigJson,
+      normalized,
+      mentionsKey,
+    );
     const cached = cache.get(key);
     if (cached !== undefined) return cached;
     const processor = getProcessor(profile, clobberPrefix);
     let rendered: string;
     try {
-      rendered = String(await processor.process(normalized));
+      rendered = String(
+        await processor.process({
+          value: normalized,
+          data: {
+            kfm: { taskRef, mentions, currentUserId, mentionTenant: renderOptions.mentionTenant },
+          },
+        }),
+      );
     } catch (error) {
       // process 失敗は「捨てて再試行」。renderDescription はプロセス全体で共有される
       // singleton のため、失敗した実体を永久保持するとプロセス再起動まで復旧不能になる。

@@ -142,7 +142,7 @@ async fn delete_user_cascade(db: &DatabaseConnection, user_id: Uuid) -> Result<(
     // メンバー 0 件になり、テナント全体に開放されてしまう（#568）。
     // 残った行は project-only の客分の名指しに当たるが、この削除は PAT を revoke し
     // users の行を墓標化するため、削除済み利用者がそこから入ることはない
-    // （客分の定めは apps/backend/docs/tenant-project-authz.md の「所属の 3 層」）。
+    // （客分の定めは docs/dev/design/tenant-project-authz.md の「継承と明示」）。
     // users の行は墓標として残す方式なので、FK の ON DELETE CASCADE は発火しない
     if table_exists(db, "tenant_members").await? {
         tenant_members::Entity::delete_many()
@@ -244,14 +244,20 @@ pub async fn create_user(
     Valid(Json(payload)): Valid<Json<AdminCreateUserRequest>>,
 ) -> Result<(StatusCode, Json<UserResponse>), AppError> {
     let email = normalize_email(&payload.email);
+    if users::is_bot_email(&email) {
+        return Err(AppError::BadRequest);
+    }
     let password_hash = create_password_hash(&payload.password).map_err(auth_error_to_app)?;
     let user_id = Uuid::new_v4();
 
     let user = users::ActiveModel {
+        account_kind: Set("human".to_string()),
+        bot_tenant_id: Set(None),
         id: Set(user_id),
         username: Set(payload.username),
         bio: Set(Some(String::new())),
         avatar_url: Set(None),
+        avatar_storage_key: Set(None),
         email: Set(email),
         email_verified: Set(payload.email_verified),
         password_hash: Set(Some(password_hash)),
@@ -314,6 +320,9 @@ pub async fn update_user(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
+    if user.is_bot() {
+        return Err(AppError::Forbidden);
+    }
 
     if payload.is_admin == Some(false) && user.is_admin {
         ensure_not_last_admin(&state.db, id).await?;
@@ -410,12 +419,18 @@ pub async fn delete_user(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
+    if user.is_bot() {
+        return Err(AppError::Forbidden);
+    }
 
     if user.is_admin {
         ensure_not_last_admin(&state.db, id).await?;
     }
 
     delete_user_cascade(&state.db, id).await?;
+    if let Some(key) = &user.avatar_storage_key {
+        service::avatar::delete_avatar_object(state.storage.as_ref(), key).await;
+    }
 
     record_audit(
         &state.db,
@@ -455,6 +470,9 @@ pub async fn password_reset(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
+    if user.is_bot() {
+        return Err(AppError::Forbidden);
+    }
 
     let send_to = payload
         .send_to
@@ -517,12 +535,12 @@ pub async fn reset_2fa(
     Path(id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<StatusCode, AppError> {
-    if users::Entity::find_by_id(id)
+    let user = users::Entity::find_by_id(id)
         .one(&state.db)
         .await?
-        .is_none()
-    {
-        return Err(AppError::NotFound);
+        .ok_or(AppError::NotFound)?;
+    if user.is_bot() {
+        return Err(AppError::Forbidden);
     }
 
     reset_2fa_for_user(&state.db, id).await?;
@@ -561,12 +579,12 @@ pub async fn delete_passkey(
     Path((id, passkey_id)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
 ) -> Result<StatusCode, AppError> {
-    if users::Entity::find_by_id(id)
+    let user = users::Entity::find_by_id(id)
         .one(&state.db)
         .await?
-        .is_none()
-    {
-        return Err(AppError::NotFound);
+        .ok_or(AppError::NotFound)?;
+    if user.is_bot() {
+        return Err(AppError::Forbidden);
     }
 
     if !table_exists(&state.db, "passkeys").await? {
@@ -616,12 +634,12 @@ pub async fn delete_oauth(
     Path((id, provider)): Path<(Uuid, String)>,
     headers: HeaderMap,
 ) -> Result<StatusCode, AppError> {
-    if users::Entity::find_by_id(id)
+    let user = users::Entity::find_by_id(id)
         .one(&state.db)
         .await?
-        .is_none()
-    {
-        return Err(AppError::NotFound);
+        .ok_or(AppError::NotFound)?;
+    if user.is_bot() {
+        return Err(AppError::Forbidden);
     }
 
     if !table_exists(&state.db, "oauth_connections").await? {

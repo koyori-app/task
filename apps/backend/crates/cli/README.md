@@ -3,7 +3,7 @@
 `task` コマンド。Rust の単一バイナリで、実行にランタイムの用意は要らない。
 
 主なユースケースは AI レビュワーと CI からの `task review submit` / `task review summary`
-（マージ前ゲート）。コマンドの仕様は `docs/features/review-findings.md` §6 が正。
+（マージ前ゲート）。コマンドの仕様は `docs/dev/features/review-findings/index.md` の「CLI」が正。
 
 ## 導入
 
@@ -119,7 +119,13 @@ task tasks list --project TASK --page 2 --limit 100
 task tasks list --project TASK --status Todo --label bug --sort deadline_asc
 task tasks list --project TASK --archived
 task tasks search --project TASK ページング
+task tasks search --project TASK @alice      # alice を印でメンションした説明文にも当たる
+task tasks show TASK-181                     # 説明文のメンションは @今の名 で出る
+task tasks show TASK-181 --raw               # 保存されたまま（<@利用者ID> の印）で出す
 ```
+
+`tasks show` は説明文のメンションの印を `@今の名` に戻して出す。それを `tasks update --description` へ
+そのまま戻すとメンションが素の文字になるので、書き換えて戻すときは `--raw` で印のまま取る（`--json` でも同じ）。
 
 `--status` / `--label` / `--assignee` / `--milestone` / `--sprint` は名前または UUID で指せる。
 名前は完全一致を優先し、それがなければ大文字小文字を無視して照合する。候補が複数あるときは
@@ -137,6 +143,33 @@ task tasks update TASK-181 --progress 40 --sprint week-40 --add-label bug
 task tasks update TASK-181 --clear-sprint --archive
 ```
 
+### 一括作成
+
+```bash
+task tasks bulk-create --project TASK tasks.json [--status Todo] [--json]
+cat tasks.json | task tasks bulk-create --project TASK -
+```
+
+`FILE` は JSON 配列（`-` で標準入力。1〜100 件）。各要素は `tasks create` のフラグと同じ名前・値で、
+UUID でなく名前で書ける。`description_file` は無く、未知のキーは断る。
+
+```json
+[
+  { "title": "起票", "description": "本文", "priority": "high", "status": "Todo",
+    "labels": ["bug"], "assignees": ["yupix"], "parent": "TASK-480",
+    "soft_deadline": "2026-09-30", "hard_deadline": "2026-10-31", "planned_start": "2026-09-01",
+    "estimate": 60, "progress": 0, "milestone": "v1", "sprint": "week-40" }
+]
+```
+
+- 状態は要素の `status` を優先し、無い要素だけ `--status`、どちらも無ければプロジェクト既定
+- 送信前に全要素の名前を解決する。1 つでも解決できなければ API を叩かず `tasks[i]: …`（`i` は 0 始まり）
+  を出して終了コード 2 で終わる。解決の途中の認証・権限・通信の失敗は、位置を添えたうえで元の終了コード
+  （3 / 4 / 1）のまま返す。ラベル等の一覧はプロジェクト単位で 1 回だけ取る
+- API は全件作るか 1 件も作らないか。途中で落ちたときは入力を直して丸ごと再送する
+- 出力は入力順の `KEY-N  title`。`--json` は API の応答（`tasks` 配列）をそのまま出す
+- 作成は件数分の通知・`task.created` Webhook を出す（`tasks create` を件数分叩いたのと同じ）
+
 - 期限は RFC 3339（`2026-09-30T12:00:00Z`）か日付だけ（`2026-09-30` = その日の始まり `00:00:00Z`）。
   日付だけのときに何時になるかは Web UI と揃えている
 - ソフト期限はハード期限より**前**でなければならない。同時刻は API が 400 を返す
@@ -146,22 +179,71 @@ task tasks update TASK-181 --clear-sprint --archive
   同じユーザー ID に解決される指定は一人分にまとめる
 - 渡さなかった項目は送らないので、既存の値は消えない。消すときは `--clear-*` を使う
 
+### PR との連携
+
+タスクに結ばれた PR を一覧し、PR 番号で手動リンク・解除する
+（仕様は `docs/dev/features/tasks/github-tasks/index.md` の「API」）。
+
+```bash
+task tasks pr list TASK-181                 # 連携リポジトリと、リンク済み PR（番号・状態・closes・リンク元・タイトル）
+task tasks pr link TASK-181 87 --closes     # --closes でマージ時にタスクを完了にする
+task tasks pr unlink TASK-181 87
+```
+
+- リンク先のリポジトリはプロジェクトの現在の GitHub 連携先で決まる。連携していなければ
+  `github-integration-missing` を含むエラーで終了する（終了コード 1）
+- 解除はリンク元（タイトル・本文・ブランチ・手動）によらずすべて外す。タイトル・本文に
+  `KEY-N` が残っていれば、次の PR イベントで自動リンクが戻る
+- 解除する PR は一覧から番号で引く。リンクされていない番号は終了コード 5。別リポジトリの
+  同じ番号もリンクされていれば現在の連携先のものを選び、選べなければ候補を並べて終了コード 2
+
 ## 設定
 
 `~/.config/task/config.yaml`（トークンを含むので `0600` で保存する）。環境変数が優先される。
 
-| 設定 | 環境変数 |
-|---|---|
-| `api_url` | `TASK_API_URL` |
-| `token` | `TASK_TOKEN` |
-| `tenant_id` | `TASK_TENANT` |
+| 設定 | 環境変数 | 環境変数の効き方 |
+|---|---|---|
+| `api_url` | `TASK_API_URL` | `TASK_TOKEN` と組で渡す |
+| `token` | `TASK_TOKEN` | `TASK_API_URL` と組で渡す |
+| `tenant_id` | `TASK_TENANT` | 単独で上書きできる |
 
 ```bash
 task config set api_url https://task.example.com
-task config set tenant_id <tenant-uuid>
 task auth token < token.txt        # 引数を省くと標準入力から読む
 task auth whoami                   # 使用中の鍵と持ち主・scope・有効期限が出る
 ```
+
+### 設定の優先順位
+
+API の URL とトークンは組で決める。片方ずつ config から補うと、あるインスタンスの
+トークンを別のインスタンスへ送ってしまうため。
+
+1. `TASK_API_URL` と `TASK_TOKEN` が両方あれば、両方とも環境変数を使う。config は `tenant_id` も含めて読まない
+   （環境変数のトークンは別テナントのことが多いため。config が無くても壊れていても動く）。
+   テナントは `TASK_TENANT` があればそれ、無ければトークンから引く
+2. どちらも無ければ、両方とも config を使う
+3. 片方だけなら、config が揃っていても終了コード 2 で止まり、API には何も送らない
+
+空文字の環境変数（`TASK_TOKEN=` や `TASK_TENANT=`）は未設定として扱う。`config *` / `auth token` / `auth logout`
+は接続しないので、片方だけの状態でも動く。
+
+以前は項目ごとに環境変数が優先されたので、`TASK_TOKEN` だけを渡して URL は config から
+読ませる使い方ができた。今はエラーになるので、次のどちらかに揃える。
+
+```bash
+# 両方を環境変数で渡す
+export TASK_API_URL=https://task.example.com
+export TASK_TOKEN=...
+
+# 両方を解除して config に揃える
+unset TASK_API_URL TASK_TOKEN
+task config set api_url https://task.example.com
+task auth token < token.txt
+```
+
+`tenant_id` は任意。未設定ならトークンの属するテナントを `GET /v1/personal_tokens/me` から引く
+（config には書かない）。設定していればそちらを使うので、別テナントのトークンに替えたら
+`task config unset tenant_id`（環境変数なら `TASK_TENANT` の解除）で外す。外さないと 403 になる。
 
 トークンは Web のアカウント設定（アクセストークン）で発行する。CLI のすべての操作を使うなら
 `api`、読むだけなら `read_api` を付ける。資源ごとに絞るなら `read:task` / `write:review` の

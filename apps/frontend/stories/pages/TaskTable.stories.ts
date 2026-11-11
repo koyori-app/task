@@ -329,8 +329,10 @@ const sampleComments = [
         updated_at: '2026-06-11T00:00:00Z',
         user: { id: 'user-2', name: 'sousuke', avatar_url: null },
         replies: [],
+        reactions: [],
       },
     ],
+    reactions: [],
   },
 ];
 
@@ -665,6 +667,10 @@ function createProjectSwitchMockFetch(): ProjectSwitchMock {
     if (url.includes('/tasks')) {
       return jsonResponse(sampleTasks);
     }
+    // 担当者候補は利用者の配列。プロジェクト系の受け口に落とすと、名の無い候補になる
+    if (url.includes('/assignable-users')) {
+      return jsonResponse(sampleMembers.map((member) => member.user));
+    }
     // 残ったプロジェクト系だけを最後に受ける
     if (url.includes('/v1/tenants/') && url.includes('/projects')) {
       return jsonResponse(sampleProjects);
@@ -716,6 +722,10 @@ function createLabelFilterMockFetch(): LabelFilterMock {
     }
     if (url.includes('/tasks')) {
       return jsonResponse(sampleTasks);
+    }
+    // 担当者候補は利用者の配列。プロジェクト系の受け口に落とすと、名の無い候補になる
+    if (url.includes('/assignable-users')) {
+      return jsonResponse(sampleMembers.map((member) => member.user));
     }
     // 残ったプロジェクト系だけを最後に受ける
     if (url.includes('/v1/tenants/') && url.includes('/projects')) {
@@ -975,13 +985,12 @@ export const ListViewDnd: Story = {
     );
 
     // @formkit/drag-and-drop は mouse には native HTML5 drag を使う
-    // （node に draggable=true を付ける）。userEvent.pointer の座標列や
-    // playwright の dragTo では発火せぬことを実測済みゆえ、
+    // （node に draggable=true を付ける）。story から実の mouse は動かせないので、
     // DragEvent の列を dataTransfer 込みで直に撃つ。
     const fireDrag = (steps: Array<[HTMLElement, string]>) => {
       const dataTransfer = new DataTransfer();
       for (const [el, type] of steps) {
-        // sort・transfer の判定は event の座標を見る。的の中心を撃つ。
+        // sort の判定は event の座標を見る。的の中心を撃つ。
         const rect = el.getBoundingClientRect();
         el.dispatchEvent(
           new DragEvent(type, {
@@ -1001,9 +1010,7 @@ export const ListViewDnd: Story = {
     // 受け入れ 3（TASK-239）: 群の中の drag では順序が変わらぬ。
     // 移動の前に、二行在る In Progress の中で試す（mock の再取得と競らぬ順）。
     const progressToggle = await canvas.findByRole('button', { name: 'In Progress を折りたたむ' });
-    const progress = progressToggle
-      .closest('section')
-      ?.querySelector<HTMLElement>('[data-dnd-status-id]');
+    const progress = progressToggle.closest<HTMLElement>('[data-dnd-status-id]');
     if (!progress) throw new Error('progress container not found');
     await waitFor(() => expect(rowsOf(progress).length).toBeGreaterThan(1));
     const before = rowsOf(progress).map((row) => row.textContent?.slice(0, 24));
@@ -1043,9 +1050,7 @@ export const ListViewDnd: Story = {
     );
     if (!source) throw new Error('source row not found');
     const reviewToggle = await canvas.findByRole('button', { name: 'In Review を折りたたむ' });
-    const target = reviewToggle
-      .closest('section')
-      ?.querySelector<HTMLElement>('[data-dnd-status-id]');
+    const target = reviewToggle.closest<HTMLElement>('[data-dnd-status-id]');
     if (!target) throw new Error('target container not found');
     // 保存の確定後に表示を正本から引き直す。成功のときに一度元の群へ戻ってから
     // 動き直す（二重に動く）と見苦しいので、元の群へ戻ったことが一度でもあれば記録する。
@@ -1061,7 +1066,7 @@ export const ListViewDnd: Story = {
     await waitFor(() => expect(target.textContent).toContain('OAuth 対応を実装する'));
 
     // 受け入れ 1・2（TASK-239）: 移動は既存の PUT tasks/{id} { status_id } で保存される。
-    // 行は lib が DOM の上で動かすゆえ、上の検めだけでは保存の配線が切れても緑になる。
+    // 行は保存の確定を待たず先に動くので、上の検めだけでは保存の配線が切れても緑になる。
     const findPut = () => findTaskPut(globalThis.fetch, 'task-1');
     await waitFor(() => expect(findPut()).toBeTruthy());
     await expect(findPut()!.clone().json()).resolves.toEqual({ status_id: 's-review' });
@@ -1120,7 +1125,7 @@ async function dragOauthToReview(
   );
   const containerOf = async (name: string) => {
     const toggle = await canvas.findByRole('button', { name: `${name} を折りたたむ` });
-    const container = toggle.closest('section')?.querySelector<HTMLElement>('[data-dnd-status-id]');
+    const container = toggle.closest<HTMLElement>('[data-dnd-status-id]');
     if (!container) throw new Error(`${name} container not found`);
     return container;
   };
@@ -1166,7 +1171,7 @@ async function dragOauthToReview(
 /** PUT が失敗したとき、DnD で動いた行が元の群へ戻ることを確かめる。 */
 async function expectFailedMoveIsRolledBack(canvasElement: HTMLElement) {
   const { progress, review } = await dragOauthToReview(canvasElement);
-  // lib が先に DOM を動かすので、まず移った先に見える。
+  // 保存の確定を待たず先に動かすので、まず移った先に見える。
   await waitFor(() => expect(review.textContent).toContain('OAuth 対応を実装する'));
   await waitFor(() => expect(findTaskPut(globalThis.fetch, 'task-1')).toBeTruthy());
 
@@ -1246,6 +1251,108 @@ export const ListViewDndRefetchDuringSave: Story = {
   },
 };
 
+/** 実レイアウトで `el` の中心に当たる要素。ここに撃てば、そこが本当に落とせる場所か分かる。 */
+function hitAt(el: Element) {
+  el.scrollIntoView({ block: 'center' });
+  const { x, y, width, height } = el.getBoundingClientRect();
+  const clientX = x + width / 2;
+  const clientY = y + height / 2;
+  const hit = document.elementFromPoint(clientX, clientY);
+  if (!hit) throw new Error('hit target not found');
+  return { hit, clientX, clientY };
+}
+
+export const ListViewDndWholeGroup: Story = {
+  name: 'List 表示の DnD（群のどこへでも落とせて、落としたときだけ保存する）',
+  decorators: [storyDecorator(listContext)],
+  // In Review を空にする（行が無い群へも落とせることを見る）
+  beforeEach: () =>
+    createMockFetch({
+      persistTaskStatus: true,
+      tasks: {
+        tasks: sampleTasks.tasks.filter((task) => task.status_id !== 's-review'),
+        total: sampleTasks.tasks.length - 1,
+      },
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const rows = () => [...canvasElement.querySelectorAll<HTMLElement>('[data-dnd-task]')];
+    await waitFor(() => expect(rows().length).toBe(5));
+    const rowOf = (title: string) => rows().find((row) => row.textContent?.includes(title))!;
+    const sectionOf = async (name: string) =>
+      (await canvas.findByRole('button', { name: `${name} を折りたたむ` })).closest<HTMLElement>(
+        '[data-dnd-status-id]',
+      )!;
+    const statusPuts = () =>
+      (globalThis.fetch as unknown as { mock: { calls: [Request | string][] } }).mock.calls
+        .map(([req]) => req)
+        .filter((req): req is Request => typeof req !== 'string' && req.method === 'PUT');
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    // 押して行にフォーカスが移っても掴めるまま。lib の既定はここで draggable を切り、
+    // 未フォーカスの行は初回の押下でドラッグにならなかった。
+    const oauth = rowOf('OAuth 対応を実装する');
+    const pressed = oauth.querySelector<HTMLElement>('[tabindex="0"]')!;
+    pressed.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'mouse' }));
+    pressed.focus();
+    await expect(oauth.draggable).toBe(true);
+    pressed.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerType: 'mouse' }));
+
+    // マウス（native drag）。途中の群を通っても保存せず、空の群の文言の上へ落とせる。
+    const review = await sectionOf('In Review');
+    const dataTransfer = new DataTransfer();
+    const fire = (el: Element, type: string, clientX = 0, clientY = 0) =>
+      el.dispatchEvent(
+        new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer, clientX, clientY }),
+      );
+    fire(oauth, 'dragstart');
+    fire(rowOf('タスク一覧 API の実装'), 'dragover');
+    await sleep(50);
+    await expect(statusPuts()).toHaveLength(0);
+    await expect(rowOf('OAuth 対応を実装する').closest('section')).not.toBe(review);
+
+    const emptyText = within(review).getByText('タスクはありません');
+    const { hit: overEmpty, clientX, clientY } = hitAt(emptyText);
+    await expect(review.contains(overEmpty)).toBe(true);
+    // 要素へ入る dragenter を止める。止めないと WebKit は入った直後の drop を出さない。
+    await expect(fire(overEmpty, 'dragenter', clientX, clientY)).toBe(false);
+    fire(overEmpty, 'dragover', clientX, clientY);
+    await waitFor(() => expect(review.className).toContain('ring-2'));
+    fire(overEmpty, 'drop', clientX, clientY);
+    fire(oauth, 'dragend');
+    await waitFor(() => expect(review.textContent).toContain('OAuth 対応を実装する'));
+    await waitFor(() => expect(statusPuts()).toHaveLength(1));
+    await expect(statusPuts()[0]!.clone().json()).resolves.toEqual({ status_id: 's-review' });
+    await expect(review.className).not.toContain('ring-2');
+
+    // タッチ（lib の pointer drag）。長押しのあと群の見出しの上で離す。
+    const done = await sectionOf('Done');
+    const notify = rowOf('通知メール送信機能');
+    const touch = (type: string, x = 0, y = 0) =>
+      notify.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          pointerType: 'touch',
+          clientX: x,
+          clientY: y,
+        }),
+      );
+    const toggle = await canvas.findByRole('button', { name: 'Done を折りたたむ' });
+    const heading = hitAt(toggle.parentElement!);
+    await expect(done.contains(heading.hit)).toBe(true);
+    touch('pointerdown');
+    await sleep(350);
+    touch('pointermove', heading.clientX, heading.clientY);
+    touch('pointermove', heading.clientX, heading.clientY);
+    await waitFor(() => expect(done.className).toContain('ring-2'));
+    touch('pointerup', heading.clientX, heading.clientY);
+    await waitFor(() => expect(statusPuts()).toHaveLength(2));
+    await expect(statusPuts()[1]!.clone().json()).resolves.toEqual({ status_id: 's-done' });
+    await waitFor(() => expect(done.textContent).toContain('通知メール送信機能'));
+  },
+};
+
 export const ListViewSubtasks: Story = {
   name: 'List 表示のサブタスク展開',
   decorators: [storyDecorator(listContext)],
@@ -1290,10 +1397,10 @@ export const ListViewDetailOverlay: Story = {
     await user.click(await canvas.findByRole('button', { name: 'OAuth 対応を実装する' }));
 
     const dialog = await screen.findByRole('dialog');
-    // 履歴は箇条書き、コメントはカードで並ぶ
-    await expect(
-      within(dialog).findByText(/ステータスを In Progress に変更しました/),
-    ).resolves.toBeInTheDocument();
+    // 履歴とコメントを 1 本に並べる
+    await waitFor(() =>
+      expect(dialog.querySelector('[data-activity-feed]')?.textContent).toContain('In Progress'),
+    );
     await expect(
       within(dialog).findByText('ここは PKCE の検証を先に入れたほうがよさそうです。'),
     ).resolves.toBeInTheDocument();
@@ -1317,6 +1424,9 @@ export const ListViewOverlaySubtaskBack: Story = {
     const canvas = within(canvasElement);
     const user = userEvent.setup();
     // 開くタスクが変わるとオーバーレイは作り直されるので、毎回 dialog を引き直す
+    // Esc は dialog の cancel として届く。user-event の keydown は合成なので、ブラウザは cancel を起こさない
+    const pressEscape = () =>
+      screen.getByRole('dialog').dispatchEvent(new Event('cancel', { cancelable: true }));
     const expectOverlayHeading = (name: string) =>
       waitFor(() =>
         expect(
@@ -1330,11 +1440,11 @@ export const ListViewOverlaySubtaskBack: Story = {
     await expectOverlayHeading('PKCE の検証を追加する');
 
     // 子で Esc → 閉じずに親へ戻る
-    await user.keyboard('{Escape}');
+    pressEscape();
     await expectOverlayHeading('OAuth 対応を実装する');
 
-    // 親で Esc → 閉じる（退場アニメーションの後に外れる）
-    await user.keyboard('{Escape}');
+    // 親で Esc → 閉じる
+    pressEscape();
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   },
 };
@@ -1384,22 +1494,35 @@ export const Sorting: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const user = userEvent.setup();
-    const titleHeader = await canvas.findByRole('button', { name: /タイトル/ });
-    await user.click(titleHeader);
+    const titleHeader = await canvas.findByRole('columnheader', { name: 'タイトル' });
+    const sortButton = within(titleHeader).getByRole('button', { name: 'タイトル' });
+    await expect(titleHeader).toHaveAttribute('aria-sort', 'none');
+
+    // 見出しのボタンは 昇順 → 降順 → 解除 と進む
+    await user.click(sortButton);
+    await expect(titleHeader).toHaveAttribute('aria-sort', 'ascending');
+    await user.click(sortButton);
+    await expect(titleHeader).toHaveAttribute('aria-sort', 'descending');
+    await user.click(sortButton);
+    await expect(titleHeader).toHaveAttribute('aria-sort', 'none');
+    // 並べ替えられない列（ラベル）は見出しがボタンにならない
+    const labelsHeader = canvas.getByRole('columnheader', { name: 'ラベル' });
+    await expect(labelsHeader).not.toHaveAttribute('aria-sort');
+    await expect(within(labelsHeader).queryByRole('button')).not.toBeInTheDocument();
     await expect(canvas.findByText('OAuth 対応を実装する')).resolves.toBeInTheDocument();
   },
 };
 
 export const RowSelection: Story = {
-  name: '行選択（Select all で全行選択）',
+  name: '行選択（すべて選択で全行選択）',
   beforeEach: mockFetch,
   parameters: {
     docs: {
       description: {
         story:
-          '壊れたら: header の Select all を押しても選択件数の行が動かない' +
+          '壊れたら: すべて選択を押しても選択件数の行が動かない' +
           '（getIsAllPageRowsSelected / getFilteredSelectedRowModel の配線切れ）。' +
-          '押した先の状態（n / total 件選択と各行の checkbox）まで見る。',
+          '一部選択の途中状態（indeterminate）と、押した先の状態（n / total 件選択と各行の checkbox）まで見る。',
       },
     },
   },
@@ -1408,33 +1531,43 @@ export const RowSelection: Story = {
     const user = userEvent.setup();
     await expect(canvas.findByText('OAuth 対応を実装する')).resolves.toBeInTheDocument();
 
-    // 押す前: 描画された行数はフィクスチャの全件、選択は 0
-    const rowCount = canvasElement.querySelectorAll('tbody tr').length;
+    // 押す前: 描画された行数はフィクスチャの全件、選択は 0。
+    // すべて選択は一覧の外（選択件数の横）にあるので、一覧の中の checkbox は行の分だけ
+    const list = canvas.getByRole('table', { name: 'タスク一覧' });
+    const rowBoxes = within(list).getAllByRole('checkbox');
+    const rowCount = rowBoxes.length;
     await expect(rowCount).toBe(sampleTasks.total);
+    await expect(within(list).getAllByRole('row')).toHaveLength(rowCount + 1);
     await expect(
       canvas.findByText(new RegExp(`0 / ${sampleTasks.total} 件選択`)),
     ).resolves.toBeInTheDocument();
+    const selectAll = canvas.getByRole('checkbox', { name: 'すべて選択' });
+    await expect(selectAll).not.toBeChecked();
+    await expect(selectAll).not.toBePartiallyChecked();
 
-    // header の Select all を押す（toggleAllPageRowsSelected →
-    // getIsAllPageRowsSelected / getFilteredSelectedRowModel を踏む）。
-    // ariaLabel は accessible name に出ておらず findByRole では引けぬ
-    // （既存の RowAccessibility も querySelector で取っておる）ため、
-    // thead の checkbox を構造で取る。
-    const selectAll = canvasElement.querySelector('thead [role="checkbox"]');
-    if (!(selectAll instanceof HTMLElement)) {
-      throw new Error('Select all checkbox not found');
-    }
+    // 1 行だけ選ぶと、すべて選択は途中状態（indeterminate）になり、行に選択の印が付く
+    await user.click(canvas.getByRole('checkbox', { name: 'ENG-1 を選択' }));
+    await expect(
+      canvas.findByText(new RegExp(`1 / ${sampleTasks.total} 件選択`)),
+    ).resolves.toBeInTheDocument();
+    await expect(selectAll).toBePartiallyChecked();
+    await expect(canvas.getByRole('row', { name: /OAuth 対応を実装する/ })).toHaveAttribute(
+      'data-selected',
+      'true',
+    );
+
+    // すべて選択を押す（toggleAllPageRowsSelected →
+    // getIsAllPageRowsSelected / getFilteredSelectedRowModel を踏む）
     await user.click(selectAll);
 
-    // 押した先: 選択件数の行が行数と一致し、header と各行の checkbox が選択状態
+    // 押した先: 選択件数の行が行数と一致し、すべて選択と各行の checkbox が選択状態
     await expect(
       canvas.findByText(new RegExp(`${rowCount} / ${sampleTasks.total} 件選択`)),
     ).resolves.toBeInTheDocument();
-    await expect(selectAll).toHaveAttribute('aria-checked', 'true');
-    const rowBoxes = [...canvasElement.querySelectorAll('tbody [role="checkbox"]')];
-    await expect(rowBoxes).toHaveLength(rowCount);
+    await expect(selectAll).toBeChecked();
+    await expect(selectAll).not.toBePartiallyChecked();
     for (const box of rowBoxes) {
-      await expect(box).toHaveAttribute('aria-checked', 'true');
+      await expect(box).toBeChecked();
     }
   },
 };
@@ -1456,7 +1589,9 @@ export const ColumnVisibility: Story = {
     const canvas = within(canvasElement);
     const user = userEvent.setup();
     // 押す前: 優先度のヘッダが出ている
-    await expect(canvas.findByRole('button', { name: '優先度' })).resolves.toBeInTheDocument();
+    await expect(
+      canvas.findByRole('columnheader', { name: '優先度' }),
+    ).resolves.toBeInTheDocument();
 
     // 列のドロップダウンを開く
     await user.click(await canvas.findByRole('button', { name: '列' }));
@@ -1473,9 +1608,15 @@ export const ColumnVisibility: Story = {
     // 押した先: その列のヘッダが現に消える（getVisibleCells の帰結）。
     // 他の列（タイトル）は残る——過剰に消えていないことの対照
     await waitFor(() =>
-      expect(canvas.queryByRole('button', { name: '優先度' })).not.toBeInTheDocument(),
+      expect(canvas.queryByRole('columnheader', { name: '優先度' })).not.toBeInTheDocument(),
     );
-    await expect(canvas.findByRole('button', { name: /タイトル/ })).resolves.toBeInTheDocument();
+    await expect(
+      canvas.findByRole('columnheader', { name: 'タイトル' }),
+    ).resolves.toBeInTheDocument();
+    // checkbox なのでメニューは開いたまま。続けて別の列も切り替えられる
+    await expect(menu.getByRole('menu', { name: '列' })).toBeVisible();
+    await expect(priorityItem).toHaveAttribute('aria-checked', 'false');
+    await expect(priorityItem).toHaveFocus();
   },
 };
 
@@ -1626,10 +1767,7 @@ export const RowAccessibility: Story = {
     await expect(taskRow).not.toHaveAttribute('role');
     await expect(taskRow).not.toHaveAttribute('tabindex');
     await expect(taskLink).toHaveAttribute('href', '/tenant-123/projects/ENG/tasks/ENG-1');
-    const rowCheckbox = taskRow.querySelector('[role="checkbox"]');
-    if (!(rowCheckbox instanceof HTMLElement)) {
-      throw new Error('row checkbox not found');
-    }
+    const rowCheckbox = within(taskRow).getByRole('checkbox', { name: 'ENG-1 を選択' });
     rowCheckbox.focus();
     rowCheckbox.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
     await expect(rowCheckbox).toHaveFocus();
@@ -1641,5 +1779,45 @@ export const RowAccessibility: Story = {
       canvas.findByRole('button', { name: '詳細を閉じる' }),
     ).resolves.toBeInTheDocument();
     await expect(new URLSearchParams(window.location.search).get('selected')).toBe('ENG-1');
+  },
+};
+
+export const SplitPaneResize: Story = {
+  name: '一覧と詳細の境界をキーボードで動かす',
+  beforeEach() {
+    localStorage.removeItem('tasks-split-view');
+    const restoreFetch = mockFetch();
+    return () => {
+      restoreFetch();
+      localStorage.removeItem('tasks-split-view');
+    };
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    const titleCell = await canvas.findByText('OAuth 対応を実装する');
+    // 詳細が閉じている間は分割しない
+    await expect(canvas.queryByRole('separator')).not.toBeInTheDocument();
+    const taskLink = titleCell.closest('a');
+    if (!(taskLink instanceof HTMLAnchorElement)) {
+      throw new Error('task link not found');
+    }
+    await userEvent.click(taskLink);
+
+    const handle = await canvas.findByRole('separator', { name: 'タスク一覧と詳細' });
+    await expect(handle).toHaveAttribute('aria-controls', 'task-list-pane');
+    // 幅を測るまでは操作を受けない
+    await waitFor(() => expect(handle).not.toHaveAttribute('aria-disabled'));
+    const valueNow = () => Number(handle.getAttribute('aria-valuenow'));
+    const start = valueNow();
+    await expect(start).toBeGreaterThan(0);
+
+    handle.focus();
+    await userEvent.keyboard('{ArrowRight}');
+    await waitFor(() => expect(valueNow()).toBe(start + 10));
+    await userEvent.keyboard('{ArrowLeft}{ArrowLeft}');
+    await waitFor(() => expect(valueNow()).toBe(start - 10));
+    // 動かした幅は次に開いたときのために残す
+    await expect(localStorage.getItem('tasks-split-view')).toBe(String(start - 10));
   },
 };

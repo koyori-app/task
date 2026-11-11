@@ -1,6 +1,10 @@
+// テストケースの一覧（docs/dev/features/drive/index.md から移した）
+// - OpenAPI 全体の prefix 重複検出
+
 use axum::http::{HeaderValue, header};
 use tower_http::set_header::SetResponseHeaderLayer;
 use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
 use crate::AppState;
 
@@ -28,8 +32,13 @@ pub fn create_routes() -> OpenApiRouter<AppState> {
                 .nest("/personal_tokens", crate::routes::personal_tokens::routes())
                 .nest("/users", crate::routes::users::routes())
                 .nest("/tenants", crate::routes::tenants::routes())
+                .nest("/invitations", crate::routes::tenants::invitation_routes())
                 .nest("/github", crate::routes::github::public_github_routes())
-                .nest("/drive", crate::routes::drive::public_routes()),
+                .nest("/drive", crate::routes::drive::public_routes())
+                .nest(
+                    "/avatars",
+                    OpenApiRouter::new().routes(routes!(crate::handlers::avatars::get_avatar)),
+                ),
         )
         // レイヤーは登録済みのルートにのみ適用されるため、nest の後に付ける。
         .layer(SetResponseHeaderLayer::if_not_present(

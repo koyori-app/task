@@ -1,5 +1,6 @@
 import { computed, onScopeDispose, ref, watch, type MaybeRefOrGetter, toValue } from 'vue';
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
+import { OpenApiVueQueryError } from '@koyori-app/openapi-vue-query';
 import { navigate } from 'vike/client/router';
 
 import type { EditableField, MutatingField } from '@/components/tasks/editable-field';
@@ -15,11 +16,18 @@ export const GET_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/task
 const LIST_STATUSES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/statuses' as const;
 const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
 const LIST_LABELS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/labels' as const;
+// カレンダー（オーバーレイで詳細を開いたまま裏に残る）の帯も同じタスクを持つ
+const SCHEDULE_PATH = '/v1/tenants/{tenant_id}/schedule' as const;
 /** 「保存しました」を出しておく時間（ミリ秒） */
 const SAVED_NOTICE_MS = 2000;
 
 type TaskDetail = components['schemas']['TaskDetailResponse'];
 type UpdateTaskRequest = components['schemas']['UpdateTaskRequest'];
+
+/** 遅い方の日時を返す。別フィールドの古い応答が後から届いても更新日を巻き戻さない */
+function laterIso(current: string, next: string) {
+  return Date.parse(next) > Date.parse(current) ? next : current;
+}
 
 /**
  * コードポイント順の文字列比較。
@@ -37,6 +45,14 @@ function compareStrings(left: string, right: string) {
     if (a !== b) return a < b ? -1 : 1;
   }
   return l.length - r.length;
+}
+
+/** backend は親の循環（自分自身・子孫を親にする）を 409、消えたタスクを 404 で拒む */
+function parentErrorMessage(error: unknown) {
+  const status = error instanceof OpenApiVueQueryError ? error.response?.status : undefined;
+  if (status === 409) return '自分自身や子孫のタスクは親にできません';
+  if (status === 404) return 'タスクが見つかりません。削除された可能性があります';
+  return '親タスクの更新に失敗しました';
 }
 
 export interface UseTaskDetailParams {
@@ -89,12 +105,13 @@ export function useTaskDetail(params: UseTaskDetailParams) {
   const statusError = ref<string | null>(null);
   const priorityError = ref<string | null>(null);
   const labelsError = ref<string | null>(null);
+  const parentError = ref<string | null>(null);
   const deleteError = ref<string | null>(null);
   const fieldErrors = ref<Partial<Record<EditableField, string>>>({});
   /** 直近に保存が確定したフィールド。一定時間で消える（Hub が「保存しました」を出す） */
-  const savedField = ref<EditableField | null>(null);
+  const savedField = ref<MutatingField | null>(null);
   let savedNoticeTimer: ReturnType<typeof setTimeout> | undefined;
-  function showSavedNotice(field: EditableField) {
+  function showSavedNotice(field: MutatingField) {
     if (savedNoticeTimer) clearTimeout(savedNoticeTimer);
     savedField.value = field;
     savedNoticeTimer = setTimeout(() => (savedField.value = null), SAVED_NOTICE_MS);
@@ -104,13 +121,22 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     savedField.value = null;
   }
   onScopeDispose(clearSavedNotice);
-  // 別のタスクへ移ったら前のタスクの通知を残さない
-  watch(taskId, clearSavedNotice);
   const selectedStatusId = ref('');
   const optimisticTask = ref<Partial<TaskDetail>>({});
   const pendingFieldRevisions = ref<Partial<Record<MutatingField, number>>>({});
-  const appliedFieldRevisions: Partial<Record<MutatingField, number>> = {};
+  // タスクとフィールドの組で持つ。移った後に完了する mutation も前のタスクのキャッシュへ書くので、
+  // 移動時に消すと古い保存で巻き戻してしまい、共有すると別のタスクのリビジョンと比べてしまう
+  const appliedFieldRevisions = new Map<string, number>();
   let nextMutationRevision = 0;
+  // 別のタスクへ移ったら前のタスクの通知・楽観更新・進行中フラグを残さない。
+  // 移る前の mutation はリビジョンが pendingFieldRevisions と一致しなくなり、移った先に作用しない。
+  // この一致を保つため nextMutationRevision は戻さない
+  watch(taskId, () => {
+    clearSavedNotice();
+    optimisticTask.value = {};
+    pendingFieldRevisions.value = {};
+    parentError.value = null;
+  });
 
   const taskQueryKey = computed(
     () =>
@@ -184,8 +210,9 @@ export function useTaskDetail(params: UseTaskDetailParams) {
   });
 
   watch(
-    () => taskQuery.data.value?.status_id,
-    (statusId) => {
+    // 移動先と status_id が同じだと値が変わらないので、前のタスクの選択を残さないよう taskId も見る
+    [() => taskQuery.data.value?.status_id, taskId],
+    ([statusId]) => {
       if (statusId) selectedStatusId.value = statusId;
     },
     { immediate: true },
@@ -203,6 +230,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
       title: pending.title !== undefined,
       description: pending.description !== undefined,
       progress_pct: pending.progress_pct !== undefined,
+      planned_start_on: pending.planned_start_on !== undefined,
       soft_deadline: pending.soft_deadline !== undefined,
       hard_deadline: pending.hard_deadline !== undefined,
     };
@@ -211,6 +239,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
   const statusUpdating = computed(() => pendingFieldRevisions.value.status_id !== undefined);
   const priorityUpdating = computed(() => pendingFieldRevisions.value.priority !== undefined);
   const labelsUpdating = computed(() => pendingFieldRevisions.value.labels !== undefined);
+  const parentUpdating = computed(() => pendingFieldRevisions.value.parent_task_id !== undefined);
 
   const updateTaskMutation = apiClient.useMutation('put', GET_TASK_PATH);
 
@@ -229,6 +258,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
       queryClient.invalidateQueries({ queryKey: ['get', TASK_SEARCH_PATH] }),
       queryClient.invalidateQueries({ queryKey: ['get', ACTIVITIES_PATH] }),
       queryClient.invalidateQueries({ queryKey: ['get', TASK_RELATIONS_PATH] }),
+      queryClient.invalidateQueries({ queryKey: ['get', SCHEDULE_PATH] }),
     ]);
   }
 
@@ -242,6 +272,8 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     // 親側で開いているサブタスク一覧も更新する。ただし削除対象自身の relations query も
     // active なため、これを待つと消したタスクの再取得が終わるまで一覧へ戻れない。
     void queryClient.invalidateQueries({ queryKey: ['get', TASK_RELATIONS_PATH] });
+    // カレンダーの再取得（全件）も待つと戻りが遅れるので待たない
+    void queryClient.invalidateQueries({ queryKey: ['get', SCHEDULE_PATH] });
     return Promise.all([
       queryClient.invalidateQueries({ queryKey: ['get', LIST_TASKS_PATH] }),
       queryClient.invalidateQueries({ queryKey: ['get', TASK_SEARCH_PATH] }),
@@ -260,7 +292,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     },
   });
 
-  function rollbackOptimistic(field: MutatingField, revision: number) {
+  function rollbackOptimistic(field: MutatingField, revision: number, error: unknown) {
     if (pendingFieldRevisions.value[field] !== revision) return;
 
     const nextOptimistic = { ...optimisticTask.value };
@@ -284,6 +316,10 @@ export function useTaskDetail(params: UseTaskDetailParams) {
       labelsError.value = 'ラベルの更新に失敗しました';
       return;
     }
+    if (field === 'parent_task_id') {
+      parentError.value = parentErrorMessage(error);
+      return;
+    }
     fieldErrors.value = {
       ...fieldErrors.value,
       [field]: '更新に失敗しました',
@@ -297,11 +333,20 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     // mutation 開始時点の key。ペイン切替後の完了でも対象タスクのキャッシュに書くための固定値
     queryKey: typeof taskQueryKey.value,
   ) {
-    const appliedRevision = appliedFieldRevisions[field] ?? 0;
-    if (revision > appliedRevision) {
-      appliedFieldRevisions[field] = revision;
+    const appliedKey = `${queryKey[2].params.path.id}:${field}`;
+    if (revision > (appliedFieldRevisions.get(appliedKey) ?? 0)) {
+      appliedFieldRevisions.set(appliedKey, revision);
+      // 状態を変えると backend が completed_at も書き換える（完了へ移れば入り、出れば空になる）。
+      // 期限の遅れはこれで数えるので、状態と一緒に応答から取る
       queryClient.setQueryData<TaskDetail | null>(queryKey, (current) =>
-        current ? { ...current, [field]: data[field] } : data,
+        current
+          ? {
+              ...current,
+              [field]: data[field],
+              updated_at: laterIso(current.updated_at, data.updated_at),
+              ...(field === 'status_id' && { completed_at: data.completed_at }),
+            }
+          : data,
       );
     }
 
@@ -321,13 +366,14 @@ export function useTaskDetail(params: UseTaskDetailParams) {
       priorityError.value = null;
     } else if (field === 'labels') {
       labelsError.value = null;
+    } else if (field === 'parent_task_id') {
+      parentError.value = null;
     } else {
       fieldErrors.value = { ...fieldErrors.value, [field]: undefined };
-      // 通知の欄があるのはインライン編集のフィールドだけ。ステータス等の保存で表示中の通知を消さない。
-      // 古いリビジョンの完了（上の早期 return）では出さない。
-      // オーバーレイは別のタスクへ移っても同じインスタンスなので、移る前のタスクの保存も出さない
-      if (queryKey === taskQueryKey.value) showSavedNotice(field);
     }
+    // 古いリビジョンの完了（上の早期 return）では出さない。
+    // オーバーレイは別のタスクへ移っても同じインスタンスなので、移る前のタスクの保存も出さない
+    if (queryKey === taskQueryKey.value) showSavedNotice(field);
   }
 
   function mutateTask(
@@ -343,6 +389,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     if (field === 'status_id') statusError.value = null;
     else if (field === 'priority') priorityError.value = null;
     else if (field === 'labels') labelsError.value = null;
+    else if (field === 'parent_task_id') parentError.value = null;
     else fieldErrors.value = { ...fieldErrors.value, [field]: undefined };
     if (savedField.value === field) savedField.value = null;
 
@@ -364,10 +411,14 @@ export function useTaskDetail(params: UseTaskDetailParams) {
       .then((data: TaskDetail) => {
         applyMutationSuccess(field, revision, data, queryKey);
         void invalidateAfterTaskMutation();
+        // 親の変更は元の親と新しい親にも及ぶので、タスク本体も prefix 一致で取り直す
+        if (field === 'parent_task_id') {
+          void queryClient.invalidateQueries({ queryKey: ['get', GET_TASK_PATH] });
+        }
         params.onAfterFieldSaved?.(field);
       })
-      .catch(() => {
-        rollbackOptimistic(field, revision);
+      .catch((error: unknown) => {
+        rollbackOptimistic(field, revision, error);
         // ラベルは task.labels 全量を送るため、削除済みラベルが混ざると 400 になる。
         // タスクとラベル一覧を再取得して古いキャッシュを解消し、再操作できる状態に戻す
         if (field === 'labels') {
@@ -416,6 +467,19 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     const next = clampProgressPct(value);
     if (next === current.progress_pct) return;
     mutateTask({ progress_pct: next }, { progress_pct: next }, 'progress_pct');
+  }
+
+  /** `YYYY-MM-DD` のまま送る。Date を通すとタイムゾーンで日付がずれる */
+  function onSavePlannedStartOn(value: string | null) {
+    const current = taskQuery.data.value;
+    if (!current) return;
+    if (!value) {
+      if (!current.planned_start_on) return;
+      mutateTask({ clear_planned_start_on: true }, { planned_start_on: null }, 'planned_start_on');
+      return;
+    }
+    if (value === current.planned_start_on) return;
+    mutateTask({ planned_start_on: value }, { planned_start_on: value }, 'planned_start_on');
   }
 
   function onSaveSoftDeadline(value: string | null) {
@@ -473,6 +537,17 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     mutateTask({ label_ids: labelIds }, { labels: chosen }, 'labels');
   }
 
+  /** `null` で親を外す。API は値と clear フラグを別に持つ */
+  function onChangeParent(parentTaskId: string | null) {
+    const current = taskQuery.data.value;
+    if (!current || parentTaskId === (current.parent_task_id ?? null)) return;
+    mutateTask(
+      parentTaskId ? { parent_task_id: parentTaskId } : { clear_parent_task_id: true },
+      { parent_task_id: parentTaskId },
+      'parent_task_id',
+    );
+  }
+
   function confirmDelete() {
     if (!tenantId.value || !projectId.value || !taskId.value) return;
     deleteError.value = null;
@@ -528,6 +603,8 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     onPriorityChange,
     labelsUpdating,
     labelsError,
+    parentUpdating,
+    parentError,
     fieldUpdating,
     fieldErrors,
     savedField,
@@ -539,9 +616,11 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     onSaveTitle,
     onSaveDescription,
     onSaveProgressPct,
+    onSavePlannedStartOn,
     onSaveSoftDeadline,
     onSaveHardDeadline,
     onSaveLabels,
+    onChangeParent,
     // 削除
     deleteError,
     deletePending: computed(() => deleteTaskMutation.isPending.value),

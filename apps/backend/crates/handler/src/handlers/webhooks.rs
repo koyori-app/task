@@ -1,6 +1,7 @@
-//! 外部向け Webhook の管理 API（docs/features/tasks/10.webhooks.md §6）。
+//! 外部向け Webhook の管理 API（docs/dev/features/tasks/10.webhooks.md の「API」）。
 //!
-//! 一覧は `read:project`、配信履歴と変更は `write:project` + プロジェクト Admin（またはテナントオーナー）。
+//! 一覧は `read:project`、配信履歴と変更は `write:project` + プロジェクト Admin
+//! （またはテナントオーナー・そのプロジェクトに入れるテナント Admin。`require_project_admin`）。
 //! 有効 / 無効の切り替えは専用の口を作らず、PUT の `is_active` で行う。
 
 use axum::{
@@ -47,7 +48,7 @@ async fn ensure_admin_access(
     auth.require_scope(Scope::WriteProject)?;
     auth.ensure_tenant_access(state, tenant_id, Some(project_id))
         .await?;
-    require_project_admin(state, tenant_id, project_id, auth.user_id).await
+    require_project_admin(&state.db, tenant_id, project_id, auth.user_id).await
 }
 
 /// 他プロジェクトの ID を渡されても存在を漏らさない（404）。
@@ -86,7 +87,7 @@ pub async fn list_webhooks(
 ) -> Result<Json<Vec<WebhookResponse>>, AppError> {
     ensure_read_access(&state, &auth, tenant_id, project_id).await?;
     let is_admin = if auth.require_scope(Scope::WriteProject).is_ok() {
-        match require_project_admin(&state, tenant_id, project_id, auth.user_id).await {
+        match require_project_admin(&state.db, tenant_id, project_id, auth.user_id).await {
             Ok(()) => true,
             Err(AppError::Forbidden) => false,
             Err(error) => return Err(error),

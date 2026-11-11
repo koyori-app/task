@@ -2,6 +2,7 @@ use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::or_unknown::OrUnknown;
 use entity::tasks;
 
 #[derive(Debug, Deserialize, ToSchema, utoipa::IntoParams)]
@@ -12,6 +13,8 @@ pub struct ListMyTasksQuery {
     #[serde(default = "default_include_personal")]
     pub include_personal: bool,
     pub project_id: Option<Uuid>,
+    /// IANA timezone used for "today" / "week". Defaults to UTC.
+    pub timezone: Option<String>,
     #[serde(default = "default_limit")]
     pub limit: u64,
     #[serde(default)]
@@ -45,6 +48,7 @@ pub struct MyTaskStatusInfo {
     pub id: Uuid,
     pub name: String,
     pub color: String,
+    pub is_done_state: bool,
 }
 
 #[derive(Serialize, ToSchema, serde::Deserialize)]
@@ -55,11 +59,14 @@ pub struct MyTaskItem {
     pub seq_key: String,
     pub title: String,
     pub status: MyTaskStatusInfo,
-    pub priority: tasks::TaskPriority,
+    #[schema(inline)]
+    pub priority: OrUnknown<tasks::TaskPriority>,
     #[schema(value_type = Option<String>, format = "date-time", nullable)]
     pub soft_deadline: Option<chrono::DateTime<chrono::Utc>>,
     #[schema(value_type = Option<String>, format = "date-time", nullable)]
     pub hard_deadline: Option<chrono::DateTime<chrono::Utc>>,
+    #[schema(value_type = Option<String>, format = "date", nullable)]
+    pub planned_start_on: Option<chrono::NaiveDate>,
     pub project: MyTaskProjectInfo,
     pub is_personal: bool,
 }

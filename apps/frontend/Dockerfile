@@ -24,7 +24,22 @@ RUN --mount=type=cache,target=/pnpm-store \
 WORKDIR /repo/apps/frontend
 # openapi.json（コミット済み）→ 型生成 → ビルド
 RUN pnpm run openapi:generate
+# ブラウザ側 Sentry の DSN（sentry.browser.config.ts の import.meta.env.PUBLIC_ENV__SENTRY_DSN）。
+# vike build がバンドルへ埋め込む値なので、実行時の環境変数では変えられない。
+# ブラウザに配る前提の公開値なのでイメージに入ってよい。未指定なら空（送信しない）。
+# install のレイヤーキャッシュを崩さないよう、build の直前で宣言する
+ARG PUBLIC_ENV__SENTRY_DSN=
 RUN pnpm run build
+
+# 実行時に要る node_modules 。SSR の依存は vite.config.ts の ssr.noExternal で dist/server に
+# 同梱してあり、外部に残しているのは ssr.external の 2 つだけ:
+# - isomorphic-dompurify（jsdom が __dirname 相対でファイルを読むため同梱できない）
+# - @wooorm/starry-night（実行時に vscode-oniguruma の onig.wasm を node_modules から読む）
+# その閉包だけを、pnpm が lockfile どおりに入れた node_modules から写す（版を解き直さない）。
+# ワークスペース全体の node_modules（devDependencies 込みで 900 MB 超）はイメージに入れない。
+# 外部に残すパッケージを増やしたら、ここの引数と runtime の確かめにも足すこと。
+RUN node scripts/collect-runtime-deps.mjs /runtime-deps/node_modules \
+    isomorphic-dompurify @wooorm/starry-night
 
 ########## runtime ##########
 # 実行は Bun。e2e（e2e/playwright.config.ts）も `bun ./dist/server/index.mjs` で
@@ -33,13 +48,20 @@ RUN pnpm run build
 FROM oven/bun:1-slim AS runtime
 WORKDIR /repo/apps/frontend
 
-# pnpm の node_modules は /repo/node_modules（.pnpm ストア）への相対 symlink 構成なので両方コピーする
-COPY --from=builder --chown=bun:bun /repo/node_modules /repo/node_modules
-COPY --from=builder --chown=bun:bun /repo/package.json /repo/pnpm-workspace.yaml /repo/
-COPY --from=builder --chown=bun:bun /repo/apps/frontend/node_modules ./node_modules
+# dist/server に SSR の依存を同梱してあるので、node_modules は builder で作った外部分だけ
+COPY --from=builder --chown=bun:bun /runtime-deps/node_modules ./node_modules
 COPY --from=builder --chown=bun:bun /repo/apps/frontend/dist ./dist
 COPY --from=builder --chown=bun:bun /repo/apps/frontend/server/public ./server/public
 COPY --from=builder --chown=bun:bun /repo/apps/frontend/package.json ./package.json
+
+# 外部に残した依存が、このイメージの node_modules だけで動くことをビルド時に確かめる
+# （e2e は全部入りの node_modules で動くので、ここの欠落を拾えない）。
+# starry-night の初期化は onig.wasm を読み、dompurify の初期化は jsdom を起こす。
+RUN bun -e 'const { createStarryNight, common } = await import("@wooorm/starry-night"); \
+    const sn = await createStarryNight(common); \
+    if (!sn.flagToScope("ts")) throw new Error("starry-night: ts の文法が無い"); \
+    const purify = (await import("isomorphic-dompurify")).default; \
+    if (purify.sanitize("<b onclick=x>ok</b>") !== "<b>ok</b>") throw new Error("dompurify: 期待と違う出力");'
 
 # bun イメージに同梱の非 root ユーザー
 USER bun

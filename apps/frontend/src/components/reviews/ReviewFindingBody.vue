@@ -15,6 +15,8 @@ const props = defineProps<{
   body: string;
   /** 脚注 id (user-content-*) の衝突を避ける scope。指摘 id を渡す */
   findingId: string;
+  /** 本文中の KEY-N をリンクにする先のテナント (URL の tenant display_id) */
+  tenant: string;
 }>();
 
 /**
@@ -30,6 +32,7 @@ const html = ref<string | null>(null);
 
 watchEffect(async () => {
   const source = props.body;
+  const tenant = props.tenant;
   try {
     const { renderDescription } = await import('@/lib/markup-renderer');
     // profile 'comment': 指摘の本文は GitHub の comment 欄の流儀 (空行を強制せず
@@ -37,16 +40,18 @@ watchEffect(async () => {
     const rendered = await renderDescription(source, {
       scope: `finding-${props.findingId}`,
       profile: 'comment',
+      taskRef: { tenant },
     });
     // 書き込みの競り合いだけを防ぐ: 遅れて終わった古い描画が、後から始まった新しい
-    // 本文の出力を上書きしない (成功・失敗の両側で同じ検めを行う)。
+    // 本文・テナントの出力を上書きしない (成功・失敗の両側で同じ検めを行う)。
+    // テナントも見るのは、同じ本文でも KEY-N のリンク先がテナントで変わるため。
     // なお本文が差し替わってから描き上がるまでの間、前の本文の HTML が見え続けるのは
     // 意図である —— 素のテキストへ瞬き戻すより、描き上がりで一度に入れ替える方を採る。
-    if (source === props.body) html.value = rendered;
+    if (source === props.body && tenant === props.tenant) html.value = rendered;
   } catch {
     // 描画に失敗しても本文は読める (素のテキストへ倒す)。古い本文の失敗が
     // いま表示中の描画を消さないよう、成功側と同じ検めを掛ける
-    if (source === props.body) html.value = null;
+    if (source === props.body && tenant === props.tenant) html.value = null;
   }
 });
 </script>

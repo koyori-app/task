@@ -7,7 +7,7 @@ pub struct Migration;
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         // Koyori Desktop の Bearer 資格情報。PAT と違いテナントに束縛せず、権限は
-        // セッション相当（apps/backend/docs/personal-access-tokens-authz.md の Desktop 認証）。
+        // セッション相当（docs/dev/design/personal-access-tokens-authz.md の Desktop 認証）。
         // 失効は revoked_at を立てるだけで行は残す（端末一覧に失効済みとして出さないだけ）。
         // token_hash は列の UNIQUE で持つ（部分 UNIQUE は起動時の schema sync が落とす）
         manager

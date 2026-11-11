@@ -1,4 +1,5 @@
 import { apiProxyPlugin } from '#/middlewares/api-proxy';
+import { pwaManifestPlugin } from '#/pwa';
 import { prehydrationQueryGuard } from '#/middlewares/prehydration-query-guard';
 import { renderDescriptionPlugin } from '#/middlewares/render-description';
 import { settingInjector } from '#/middlewares/setting-injector';
@@ -29,6 +30,9 @@ export function getApp() {
   const app = new Elysia();
 
   app.use(staticPlugin({ assets: 'server/public', prefix: '/static-assets' }));
+
+  // PWA（TASK-297）: Web App Manifest。
+  app.use(pwaManifestPlugin);
 
   app.post(
     '/internal/password-strength',

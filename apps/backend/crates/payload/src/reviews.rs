@@ -133,16 +133,15 @@ pub struct FindingResponse {
     pub review_id: Uuid,
     pub pr_number: i32,
     pub round: i32,
-    pub severity: FindingSeverity,
+    #[schema(inline)]
+    pub severity: OrUnknown<FindingSeverity>,
     pub title: String,
     pub body: String,
     #[schema(nullable)]
     pub file: Option<String>,
     #[schema(nullable)]
     pub line: Option<i32>,
-    // 状態の列挙値は OrUnknown で包む。サーバーが状態を足しても、配布済みの CLI が
-    // 応答を丸ごと読めなくならないように（JSON の形も OpenAPI も変わらない）
-    #[schema(value_type = FindingState)]
+    #[schema(inline)]
     pub state: OrUnknown<FindingState>,
     /// 繰り延べ時に自動起票した通常タスク
     #[schema(value_type = Option<String>, format = "uuid", nullable)]
@@ -160,7 +159,7 @@ pub struct FindingResponse {
     ///
     /// 遷移規則・役割規則（仕様 §3）は backend だけが持つ。クライアントはこれを見て
     /// 操作を出し、規則を写さない。
-    #[schema(value_type = Vec<FindingState>)]
+    #[schema(inline)]
     pub available_actions: Vec<OrUnknown<FindingState>>,
 }
 
@@ -177,7 +176,7 @@ impl FindingResponse {
             review_id: model.review_id,
             pr_number,
             round,
-            severity: model.severity,
+            severity: model.severity.into(),
             title: model.title,
             body: model.body,
             file: model.file,
@@ -199,9 +198,9 @@ pub struct FindingTransitionResponse {
     pub id: Uuid,
     pub actor: UserSummary,
     /// 起票（登録）は `null`
-    #[schema(value_type = Option<FindingState>, nullable)]
+    #[schema(inline)]
     pub from_state: Option<OrUnknown<FindingState>>,
-    #[schema(value_type = FindingState)]
+    #[schema(inline)]
     pub to_state: OrUnknown<FindingState>,
     #[schema(nullable)]
     pub note: Option<String>,
@@ -265,7 +264,8 @@ pub struct ReviewSummaryResponse {
     /// 表示用の判定（上から順に最初に当たったもの）。クライアントは再計算しない
     ///
     /// 権威のゲートは引き続き CLI の `--head` 照合と branch protection。
-    pub gate: ReviewGate,
+    #[schema(inline)]
+    pub gate: OrUnknown<ReviewGate>,
 }
 
 /// PR のマージ判定の表示区分（仕様 §5）。
@@ -299,24 +299,39 @@ pub struct ReviewedPullRequest {
     pub pr_title: Option<String>,
     #[schema(nullable)]
     pub pr_author: Option<String>,
-    /// 未解決（open / fixed）の指摘数。重大度は問わない
+    /// 未解決（open / fixing / fixed）の指摘数。重大度は問わない
     pub unresolved: u64,
-    /// マージを塞いでいる件数（High / Medium かつ open / fixed）
+    /// マージを塞いでいる件数（High / Medium かつ open / fixing / fixed）
     ///
     /// **可否の断定はここからは出せない。** 可否には鮮度と連携の有無も要り
     /// （`ReviewSummary` + `mergeVerdict` の片道降格）、この一覧はその材料を
     /// 持たない。一覧に `mergeable` を置いていた頃、詳細パネルが「リポジトリ
     /// 未確定」と言う横で一覧だけ「マージ可」と出る矛盾が実際に起きた
     pub blocking: u64,
+    /// `blocking` のうち fixed の件数（`blocking` の内数）。修正済みでレビュー側の
+    /// 確認（verified）を待っている分で、`blocking - blocking_fixed` が open / fixing の残り
+    pub blocking_fixed: u64,
     /// 最新ラウンドの作成時刻
     #[schema(value_type = String, format = "date-time")]
     pub last_reviewed_at: DateTime<Utc>,
+    /// ホスト上の PR の状態（`open` / `closed` / `merged` / `unknown`）。
+    /// PR 行（`forge_pull_requests`）が無い、または webhook をまだ受けていなければ `unknown`
+    pub state: String,
+    #[schema(value_type = Option<String>, format = "date-time")]
+    pub merged_at: Option<DateTime<Utc>>,
+    /// マージ時の副作用を処理した時刻。`state = merged` で null なら未適用
+    #[schema(value_type = Option<String>, format = "date-time")]
+    pub merge_effects_processed_at: Option<DateTime<Utc>>,
+    /// 自然キー（プロジェクト・リポジトリ・番号）で結んだ PR 行。無ければ null
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub pull_request_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema, serde::Deserialize)]
 pub struct SeverityStateCount {
-    pub severity: FindingSeverity,
-    #[schema(value_type = FindingState)]
+    #[schema(inline)]
+    pub severity: OrUnknown<FindingSeverity>,
+    #[schema(inline)]
     pub state: OrUnknown<FindingState>,
     pub count: u64,
 }
@@ -326,6 +341,16 @@ impl OrUnknown<FindingState> {
     pub fn as_str(&self) -> &str {
         match self {
             Self::Known(state) => state.as_str(),
+            Self::Unknown(raw) => raw,
+        }
+    }
+}
+
+impl OrUnknown<FindingSeverity> {
+    /// 表示用の綴り。知らない値はサーバーが返したままの文字列。
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Known(severity) => severity.as_str(),
             Self::Unknown(raw) => raw,
         }
     }

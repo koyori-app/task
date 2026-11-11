@@ -226,6 +226,7 @@ async fn admin_users_integration_suite() {
             sprint_id: Set(None),
             soft_deadline: Set(None),
             hard_deadline: Set(None),
+            planned_start_on: Set(None),
             estimated_minutes: Set(None),
             is_archived: Set(false),
             created_by: Set(target.id),

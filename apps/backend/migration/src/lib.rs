@@ -14,7 +14,21 @@ mod m20260922010000_notifications_email_outbox;
 mod m20260922020000_webhooks;
 mod m20260924000000_notifications_cursor_index;
 mod m20260924010000_device_tokens;
+mod m20261002000000_tenant_invitations;
 mod m20261004000000_pat_scopes_api;
+mod m20261016000000_task_planned_start_on;
+mod m20261016005000_drive_files_content_hash;
+mod m20261016010000_task_attachments_source;
+mod m20261016020000_user_avatar_storage_key;
+mod m20261017000000_forge_pull_requests;
+mod m20261017010000_github_issue_links_state;
+mod m20261017020000_forge_branch_links;
+mod m20261020000000_tasks_title_trgm;
+mod m20261021000000_tenant_members_org_profile;
+mod m20261104000000_tenants_owner_org_profile;
+mod m20261105000000_reactions;
+mod m20261105010000_projects_key_unique_per_tenant;
+mod m20261106000000_tenant_bots;
 
 pub struct Migrator;
 
@@ -36,7 +50,21 @@ impl MigratorTrait for Migrator {
             Box::new(m20260922020000_webhooks::Migration),
             Box::new(m20260924000000_notifications_cursor_index::Migration),
             Box::new(m20260924010000_device_tokens::Migration),
+            Box::new(m20261002000000_tenant_invitations::Migration),
             Box::new(m20261004000000_pat_scopes_api::Migration),
+            Box::new(m20261016000000_task_planned_start_on::Migration),
+            Box::new(m20261016005000_drive_files_content_hash::Migration),
+            Box::new(m20261016010000_task_attachments_source::Migration),
+            Box::new(m20261016020000_user_avatar_storage_key::Migration),
+            Box::new(m20261017000000_forge_pull_requests::Migration),
+            Box::new(m20261017010000_github_issue_links_state::Migration),
+            Box::new(m20261017020000_forge_branch_links::Migration),
+            Box::new(m20261020000000_tasks_title_trgm::Migration),
+            Box::new(m20261021000000_tenant_members_org_profile::Migration),
+            Box::new(m20261104000000_tenants_owner_org_profile::Migration),
+            Box::new(m20261105000000_reactions::Migration),
+            Box::new(m20261105010000_projects_key_unique_per_tenant::Migration),
+            Box::new(m20261106000000_tenant_bots::Migration),
         ]
     }
 }

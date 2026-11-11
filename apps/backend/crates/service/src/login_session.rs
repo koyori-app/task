@@ -12,7 +12,8 @@ use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait,
 };
 
-use entity::{tenant_members, tenants, totp_credentials, users};
+use common::error::AppError;
+use entity::{passkeys, tenant_members, tenants, totp_credentials, users};
 use payload::auth_2fa::Login2faResponse;
 
 use crate::auth::AuthError;
@@ -29,6 +30,23 @@ async fn user_has_active_2fa(db: &DatabaseConnection, user_id: Uuid) -> Result<b
         .one(db)
         .await?;
     Ok(cred.map(|c| c.is_verified).unwrap_or(false))
+}
+
+/// テナントの 2FA 強制（`require_2fa`）を満たすか。TOTP が有効か、パスキーを登録済みなら満たす
+/// （パスキー自体が MFA。docs/dev/features/auth/2fa.md の「テナントの強制」）。
+/// テナントの所属判定と強制の有効化で使うので、handler の `AppError` で返す。
+pub async fn user_satisfies_2fa(db: &DatabaseConnection, user_id: Uuid) -> Result<bool, AppError> {
+    if user_has_active_2fa(db, user_id)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::Error::new(e)))?
+    {
+        return Ok(true);
+    }
+    Ok(passkeys::Entity::find()
+        .filter(passkeys::Column::UserId.eq(user_id))
+        .one(db)
+        .await?
+        .is_some())
 }
 
 /// ユーザーが関わるテナント — テナントオーナー・テナントメンバー・project-only の客分
@@ -62,7 +80,7 @@ pub async fn user_in_require_2fa_tenant(
     }
     // project-only の客分として関わるテナントも対象に含める。残った project_members の
     // 行が実アクセス権（客分）になった以上、ここから漏れると require_2fa テナントの
-    // project を 2FA 無しで読み書きできてしまう（docs/features/auth-2fa.md）。
+    // project を 2FA 無しで読み書きできてしまう（docs/dev/features/auth/2fa.md）。
     // 客分テナントの列挙は access::guest_tenant_ids を再利用する（同じ SQL を増やさない）
     let guest_ids = crate::access::guest_tenant_ids(db, user_id)
         .await
@@ -101,6 +119,9 @@ pub async fn establish_login_session(
     db: &DatabaseConnection,
     user: &users::Model,
 ) -> Result<Option<Login2faResponse>, AuthError> {
+    if user.is_bot() {
+        return Err(AuthError::Forbidden);
+    }
     let (requires_2fa, requires_2fa_setup) = login_2fa_flags(db, user).await?;
     session.renew();
     session.set("issued_at_ms", Utc::now().timestamp_millis());

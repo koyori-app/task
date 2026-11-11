@@ -52,6 +52,9 @@ pub async fn create_tenant(
         owner_id: Set(auth.user_id),
         drive_quota_bytes: Set(None),
         require_2fa: Set(false),
+        owner_department: Set(None),
+        owner_position: Set(None),
+        owner_team: Set(None),
     };
     let model = tenant.insert(&state.db).await?;
     Ok((StatusCode::CREATED, Json(model.into())))
@@ -81,7 +84,7 @@ pub async fn list_tenants(
     // フィルタ自体が認可を兼ねているため追加チェックは不要。
     // 客分に開く tenant-wide の口はプロジェクト一覧・My Tasks（己の分に絞る）だけの
     // ため、クライアントは membership の印で開ける口を見分ける
-    // （apps/backend/docs/tenant-project-authz.md）。
+    // （docs/dev/design/tenant-project-authz.md）。
     auth.require_scope(Scope::ReadTenant)?;
     let items = match &auth.method {
         AuthMethod::Session | AuthMethod::DeviceToken { .. } => {

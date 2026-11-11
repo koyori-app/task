@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::{Validate, ValidationError};
 
+use crate::tenant_members::OrgProfile;
+
 /// Public user profile — excludes password_hash, sessions_revoked_at, and other secrets.
 #[derive(Debug, Clone, Serialize, ToSchema, serde::Deserialize)]
 pub struct UserResponse {
@@ -10,6 +12,9 @@ pub struct UserResponse {
     pub id: Uuid,
     #[schema(value_type = String, format = "username")]
     pub username: String,
+    #[serde(default = "default_account_kind")]
+    #[schema(required = false)]
+    pub account_kind: String,
     #[schema(nullable)]
     pub bio: Option<String>,
     #[schema(nullable)]
@@ -30,8 +35,50 @@ pub struct UserSummary {
     #[schema(value_type = String, format = "uuid")]
     pub id: Uuid,
     pub username: String,
+    #[serde(default = "default_account_kind")]
+    #[schema(required = false)]
+    pub account_kind: String,
     #[schema(nullable)]
     pub avatar_url: Option<String>,
+}
+
+/// 他の利用者に見せるプロフィール。`UserResponse` からメール等の本人向け項目を落としたもの
+#[derive(Debug, Clone, Serialize, ToSchema, serde::Deserialize)]
+pub struct UserProfileResponse {
+    #[schema(value_type = String, format = "uuid")]
+    pub id: Uuid,
+    pub username: String,
+    #[serde(default = "default_account_kind")]
+    #[schema(required = false)]
+    pub account_kind: String,
+    #[schema(nullable)]
+    pub bio: Option<String>,
+    #[schema(nullable)]
+    pub avatar_url: Option<String>,
+    /// このテナントでの部署。未設定・客分では null
+    #[schema(nullable)]
+    pub department: Option<String>,
+    /// このテナントでの役職。未設定・客分では null
+    #[schema(nullable)]
+    pub position: Option<String>,
+    /// このテナントでのチーム。未設定・客分では null
+    #[schema(nullable)]
+    pub team: Option<String>,
+}
+
+impl UserProfileResponse {
+    pub fn from_parts(user: entity::users::Model, org: OrgProfile) -> Self {
+        Self {
+            id: user.id,
+            username: user.username,
+            account_kind: user.account_kind,
+            bio: user.bio,
+            avatar_url: user.avatar_url,
+            department: org.department,
+            position: org.position,
+            team: org.team,
+        }
+    }
 }
 
 impl From<entity::users::Model> for UserSummary {
@@ -39,6 +86,7 @@ impl From<entity::users::Model> for UserSummary {
         Self {
             id: model.id,
             username: model.username,
+            account_kind: model.account_kind,
             avatar_url: model.avatar_url,
         }
     }
@@ -49,6 +97,7 @@ impl From<entity::users::Model> for UserResponse {
         Self {
             id: model.id,
             username: model.username,
+            account_kind: model.account_kind,
             bio: model.bio,
             avatar_url: model.avatar_url,
             email: model.email,
@@ -143,5 +192,22 @@ mod tests {
         payload.username = Some("😀😀😀".to_string());
         payload.bio = Some("😀".repeat(1000));
         assert!(payload.validate().is_ok());
+    }
+}
+
+/// 種別を返さない旧 API の利用者は人として読む。
+pub(crate) fn default_account_kind() -> String {
+    "human".into()
+}
+
+#[cfg(test)]
+mod legacy_kind_tests {
+    #[test]
+    fn legacy_user_summary_defaults_to_human() {
+        let user: super::UserSummary = serde_json::from_value(serde_json::json!({
+            "id": sea_orm::prelude::Uuid::new_v4(), "username": "legacy", "avatar_url": null
+        }))
+        .expect("legacy user summary");
+        assert_eq!(user.account_kind, "human");
     }
 }

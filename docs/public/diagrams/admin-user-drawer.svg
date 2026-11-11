@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 270" role="img" aria-label="ユーザー詳細ドロワーの配置">
+  <style>
+    :root { --bg:#ffffff; --panel:#f4f4f5; --line:#a1a1aa; --text:#27272a; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#18181b; --panel:#27272a; --line:#71717a; --text:#f4f4f5; } }
+    text { fill:var(--text); font:13px system-ui, sans-serif; }
+    .box { fill:var(--panel); stroke:var(--line); }
+    .h { font-weight:600; }
+  </style>
+  <rect x="1" y="1" width="418" height="268" rx="6" fill="var(--bg)" stroke="var(--line)"/>
+  <text x="16" y="30" class="h">bob@example.com</text>
+  <text x="16" y="56">状態: 停止中</text>
+  <rect class="box" x="16" y="76" width="120" height="30" rx="4"/>
+  <text x="28" y="96">停止解除</text>
+  <rect class="box" x="146" y="76" width="220" height="30" rx="4"/>
+  <text x="158" y="96">パスワードリセット送信</text>
+  <rect class="box" x="16" y="116" width="120" height="30" rx="4"/>
+  <text x="28" y="136">2FA リセット</text>
+  <rect class="box" x="146" y="116" width="220" height="30" rx="4"/>
+  <text x="158" y="136">パスキー削除</text>
+  <rect class="box" x="16" y="156" width="120" height="30" rx="4"/>
+  <text x="28" y="176">OAuth 解除</text>
+  <rect class="box" x="146" y="156" width="220" height="30" rx="4"/>
+  <text x="158" y="176">強制削除</text>
+  <text x="16" y="228">管理者フラグ:  付与 / 剥奪</text>
+</svg>

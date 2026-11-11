@@ -2,16 +2,7 @@
 import { useQueryClient } from '@tanstack/vue-query';
 import { PhDesktop } from '@phosphor-icons/vue';
 import { ref } from 'vue';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Button, Dialog, Skeleton } from '@koyori-app/ui-vue';
 import { devicesQueryOptions, useDevicesQuery, useRevokeDeviceMutation } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
 import { formatExpiry, formatLastUsed, maskedToken } from '@/lib/personal-tokens';
@@ -25,8 +16,8 @@ const revokeDevice = useRevokeDeviceMutation();
 const revokeTarget = ref<Device | null>(null);
 const revokeError = ref<string | null>(null);
 
-function onRevokeOpenChange(open: boolean) {
-  if (!open && !revokeDevice.isPending.value) revokeTarget.value = null;
+function onRevokeClose() {
+  if (!revokeDevice.isPending.value) revokeTarget.value = null;
 }
 
 async function onRevokeConfirm() {
@@ -51,7 +42,7 @@ async function onRevokeConfirm() {
       </p>
     </div>
 
-    <Skeleton v-if="devicesQuery.isPending.value" class="h-16 w-full" />
+    <Skeleton v-if="devicesQuery.isPending.value" height="4rem" />
     <p v-else-if="devicesQuery.isError.value" class="text-destructive text-sm">
       端末の一覧を取得できませんでした。再読み込みしてください。
     </p>
@@ -80,48 +71,44 @@ async function onRevokeConfirm() {
         </div>
         <Button
           type="button"
-          variant="outline"
-          size="sm"
-          class="text-destructive hover:text-destructive"
+          variant="tertiary"
+          class="text-(--koyori-color-danger)"
+          label="失効"
           @click="
             revokeTarget = device;
             revokeError = null;
           "
-        >
-          失効
-        </Button>
+        />
       </li>
     </ul>
 
-    <Dialog v-if="revokeTarget" :open="true" @update:open="onRevokeOpenChange">
-      <DialogContent class="max-w-md" :show-close-button="false">
-        <DialogHeader>
-          <DialogTitle>端末を失効しますか？</DialogTitle>
-          <DialogDescription>
-            「{{ revokeTarget.name }}」を失効します。この端末の Koyori Desktop
-            はすぐにサインアウトされ、使うにはもう一度承認が必要です。
-          </DialogDescription>
-        </DialogHeader>
-        <p v-if="revokeError" class="text-destructive text-sm">{{ revokeError }}</p>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            :disabled="revokeDevice.isPending.value"
-            @click="revokeTarget = null"
-          >
-            キャンセル
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            :disabled="revokeDevice.isPending.value"
-            @click="onRevokeConfirm"
-          >
-            {{ revokeDevice.isPending.value ? '失効中…' : '失効する' }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
+    <Dialog
+      :open="revokeTarget !== null"
+      title="端末を失効しますか？"
+      :description="
+        revokeTarget
+          ? `「${revokeTarget.name}」を失効します。この端末の Koyori Desktop はすぐにサインアウトされ、使うにはもう一度承認が必要です。`
+          : ''
+      "
+      :on-close="onRevokeClose"
+    >
+      <p v-if="revokeError" class="text-destructive text-sm">{{ revokeError }}</p>
+      <template #actions>
+        <Button
+          type="button"
+          variant="tertiary"
+          :disabled="revokeDevice.isPending.value"
+          label="キャンセル"
+          @click="revokeTarget = null"
+        />
+        <Button
+          type="button"
+          variant="danger"
+          :disabled="revokeDevice.isPending.value"
+          :label="revokeDevice.isPending.value ? '失効中…' : '失効する'"
+          @click="onRevokeConfirm"
+        />
+      </template>
     </Dialog>
   </div>
 </template>

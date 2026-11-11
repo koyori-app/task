@@ -1,18 +1,11 @@
-use regex::Regex;
 use sea_orm::entity::prelude::Json;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
     Statement, prelude::Uuid,
 };
-use std::sync::LazyLock;
 
 use crate::error::AppError;
-use entity::{
-    labels, project_statuses, projects, task_activities, task_labels, tasks, tenants, users,
-};
-
-static MENTION_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"@([a-zA-Z0-9_-]+)").expect("mention regex"));
+use entity::{labels, project_statuses, task_activities, task_labels, tasks};
 
 pub async fn record_activity<C: ConnectionTrait>(
     db: &C,
@@ -36,7 +29,7 @@ pub async fn record_activity<C: ConnectionTrait>(
 }
 
 /// 連携由来の出来事を、同じ `dedupe_key` につき 1 回だけ積む
-/// （docs/features/tasks/9.github-tasks.md §2「アクティビティ」）。
+/// （docs/dev/features/tasks/github-tasks/index.md の「アクティビティ」）。
 ///
 /// 既存行を数えて判定しない。並行する 2 つの処理の事前確認はすれ違うが、UNIQUE はすれ違わない。
 pub async fn record_activity_once<C: ConnectionTrait>(
@@ -98,7 +91,7 @@ pub async fn task_label_entries<C: ConnectionTrait>(
 }
 
 /// 前後スナップショットの差分から label_added / label_removed を 1 ラベルにつき
-/// 1 件ずつ記録する（docs/features/tasks/4.collaboration.md の event_type 定義に対応）。
+/// 1 件ずつ記録する（docs/dev/features/tasks/4.collaboration.md の event_type 定義に対応）。
 /// 集合に変化が無ければ何も記録しない。
 pub async fn record_label_diff<C: ConnectionTrait>(
     db: &C,
@@ -143,52 +136,27 @@ pub fn priority_label(priority: tasks::TaskPriority) -> &'static str {
     }
 }
 
+/// コメント本文のメンション（`<@利用者ID>` の印）から、通知してよい宛先を返す。
+///
+/// 拾うのは印だけで、`@username` の文字は拾わぬ（同名の二人や `bob@example.com` からの誤りを
+/// 持ち込まぬ）。宛先は、そのプロジェクトに入れる者（`project_accessible_user_ids`）とテナント owner
+/// に限る。境の外の id・在らぬ id は宛先にせず、本文はそのまま保存される（描画側が灰色の札にする）。
 pub async fn extract_mentions<C: ConnectionTrait>(
     db: &C,
     body: &str,
     project_id: Uuid,
 ) -> Result<Vec<Uuid>, AppError> {
-    // Collect unique usernames preserving first-occurrence order
-    let mut seen = std::collections::HashSet::new();
-    let usernames: Vec<&str> = MENTION_RE
-        .captures_iter(body)
-        .filter_map(|cap| cap.get(1).map(|m| m.as_str()))
-        .filter(|u| seen.insert(*u))
-        .collect();
-
-    if usernames.is_empty() {
+    let ids = payload::mentions::extract_ids(body);
+    if ids.is_empty() {
         return Ok(vec![]);
     }
-
-    // プロジェクト境界の外にいる人はメンションしても通知しない。
-    // メンバー未指定のプロジェクトはテナントメンバー全員が対象になる（#568）
-    let member_ids: std::collections::HashSet<Uuid> =
-        crate::access::project_accessible_user_ids(db, project_id).await?;
-
-    let tenant_owner_id: Option<Uuid> =
-        if let Some(proj) = projects::Entity::find_by_id(project_id).one(db).await? {
-            tenants::Entity::find_by_id(proj.tenant_id)
-                .one(db)
-                .await?
-                .map(|t| t.owner_id)
-        } else {
-            None
-        };
-
-    // Single batch query for all mentioned users
-    let matched = users::Entity::find()
-        .filter(users::Column::Username.is_in(usernames))
-        .all(db)
-        .await?;
-
-    let mut user_ids: Vec<Uuid> = Vec::new();
-    let mut seen_ids: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
-    for u in matched {
-        let is_allowed =
-            member_ids.contains(&u.id) || tenant_owner_id.is_some_and(|oid| oid == u.id);
-        if is_allowed && seen_ids.insert(u.id) {
-            user_ids.push(u.id);
-        }
-    }
-    Ok(user_ids)
+    let resolved = crate::mentions::resolve(db, project_id, &ids).await?;
+    Ok(ids
+        .into_iter()
+        .filter(|id| {
+            resolved
+                .get(id)
+                .is_some_and(|u| u.status == payload::mentions::MentionStatus::Member)
+        })
+        .collect())
 }

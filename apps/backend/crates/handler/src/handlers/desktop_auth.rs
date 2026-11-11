@@ -1,5 +1,5 @@
 //! Koyori Desktop の認証（Authorization Code + PKCE、loopback）と端末管理。
-//! 規則は apps/backend/docs/personal-access-tokens-authz.md の「Desktop 認証」。
+//! 規則は docs/dev/design/personal-access-tokens-authz.md の「Desktop 認証」。
 //! code / token / code_verifier はログに出さない。
 
 use axum::{
@@ -14,6 +14,7 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
 };
 
+use super::client_key;
 use crate::AppState;
 use crate::error::AppError;
 use crate::extractors::{AuthMethod, AuthUser};
@@ -55,16 +56,6 @@ pub async fn create_desktop_auth_code(
     Ok((StatusCode::CREATED, Json(DesktopAuthCodeResponse { code })))
 }
 
-/// レート制限の接続元キー。プロキシが付ける値を使う（監査ログと同じ取り方）。
-fn client_key(headers: &HeaderMap) -> String {
-    headers
-        .get("x-forwarded-for")
-        .or_else(|| headers.get("x-real-ip"))
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.split(',').next().unwrap_or(s).trim().to_string())
-        .unwrap_or_else(|| "unknown".to_string())
-}
-
 #[axum::debug_handler]
 #[utoipa::path(
     post,
@@ -100,7 +91,8 @@ pub async fn exchange_desktop_auth_token(
         .one(&state.db)
         .await?
         .ok_or(AuthError::Unauthorized)?;
-    if user.is_suspended
+    if user.is_bot()
+        || user.is_suspended
         || user
             .sessions_revoked_at
             .is_some_and(|revoked_at| revoked_at.timestamp_millis() >= pending.issued_at_ms)

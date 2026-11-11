@@ -9,12 +9,12 @@ use axum_valid::Valid;
 use sea_orm::prelude::Uuid;
 use sea_orm::sea_query::LockType;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
-    QueryOrder, QuerySelect, TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait,
+    QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
 };
 
 use crate::AppState;
-use crate::auth_helpers::is_tenant_owner;
+use crate::auth_helpers::{has_tenant_admin_role, is_tenant_owner, project_is_open_or_member};
 use crate::error::{AppError, ServerError};
 use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
@@ -23,7 +23,7 @@ use entity::{
     project_members, projects, scopes::Scope, task_watchers, tasks, tenant_members, tenants, users,
 };
 use payload::project_members::*;
-use payload::users::UserSummary;
+use payload::tenant_members::OrgProfile;
 use service::access::assignable_user_ids;
 
 #[axum::debug_handler]
@@ -39,7 +39,7 @@ use service::access::assignable_user_ids;
         AssignableUsersQuery,
     ),
     responses(
-        (status = 200, description = "担当者候補", body = [UserSummary]),
+        (status = 200, description = "担当者候補", body = [AssignableUserResponse]),
         CrudErrors,
     )
 )]
@@ -67,7 +67,7 @@ pub async fn list_assignable_users(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Query(query): Query<AssignableUsersQuery>,
-) -> Result<Json<Vec<UserSummary>>, AppError> {
+) -> Result<Json<Vec<AssignableUserResponse>>, AppError> {
     match &query.username {
         // 読み書きどちらかがあればよい（write:task だけの PAT も名前で指せる）
         Some(_) => auth
@@ -90,48 +90,98 @@ pub async fn list_assignable_users(
         .await?;
     // 突き合わせは DB ではなくここで行う。SQL の lower() と Rust の大文字小文字の
     // 扱いがずれると、CLI が名前で引けたり引けなかったりする
-    let users = users
+    let users: Vec<users::Model> = users
         .into_iter()
         .filter(|user| match &query.username {
             Some(username) => user.username.eq_ignore_ascii_case(username),
             None => true,
         })
-        .map(UserSummary::from)
+        .collect();
+    // 部署・チームはプロフィール（`get_user_profile`）と同じ条件で返す。この口は客分と
+    // `read:tenant` の無い PAT も通るので、絞らないと読めないはずの所属がここから読める
+    let can_read_org = auth.require_scope(Scope::ReadTenant).is_ok()
+        && match auth.ensure_tenant_access(&state, tenant_id, None).await {
+            Ok(()) => true,
+            Err(AppError::Forbidden | AppError::ForbiddenDetail(_)) => false,
+            Err(error) => return Err(error),
+        };
+    // オーナーの所属はテナントの行にある（`OrgProfile::resolve`）。読めない主体には引かない
+    let tenant = if can_read_org {
+        tenants::Entity::find_by_id(tenant_id)
+            .one(&state.db)
+            .await?
+    } else {
+        None
+    };
+    let members: HashMap<Uuid, tenant_members::Model> = if can_read_org {
+        tenant_members::Entity::find()
+            .filter(tenant_members::Column::TenantId.eq(tenant_id))
+            .filter(tenant_members::Column::UserId.is_in(users.iter().map(|user| user.id)))
+            .all(&state.db)
+            .await?
+            .into_iter()
+            .map(|member| (member.user_id, member))
+            .collect()
+    } else {
+        HashMap::new()
+    };
+    let users = users
+        .into_iter()
+        .map(|user| {
+            let org = tenant
+                .as_ref()
+                .map(|tenant| OrgProfile::resolve(tenant, user.id, members.get(&user.id)))
+                .unwrap_or_default();
+            AssignableUserResponse::from_parts(user, org)
+        })
         .collect();
     Ok(Json(users))
 }
 
-async fn get_project_in_tenant(
-    state: &AppState,
+async fn get_project_in_tenant<C: ConnectionTrait>(
+    db: &C,
     tenant_id: Uuid,
     project_id: Uuid,
 ) -> Result<projects::Model, AppError> {
     projects::Entity::find_by_id(project_id)
         .filter(projects::Column::TenantId.eq(tenant_id))
-        .one(&state.db)
+        .one(db)
         .await?
         .ok_or(AppError::NotFound)
 }
 
-pub(crate) async fn require_project_admin(
-    state: &AppState,
+/// プロジェクトのメンバー・Webhook を管理できる人: テナントオーナー、プロジェクト `Admin` の ACE、
+/// そして共有プロジェクトに**今も入れる**テナント `Admin`。
+///
+/// 呼び出し元は先に `ensure_tenant_access(Some(project_id))` を通すこと（PAT の束縛と見える範囲は
+/// そちらが保証する）。ただしそれはロックの外で走るので、テナント `Admin` の分岐ではロック内で
+/// `project_is_open_or_member` を見直す。ロック待ちの間に別の操作が最初の ACE を置いて閉じていれば、
+/// 入れなくなったプロジェクトを管理させない。個人プロジェクト（Inbox）はテナントロールでは触れない。
+pub(crate) async fn require_project_admin<C: ConnectionTrait>(
+    db: &C,
     tenant_id: Uuid,
     project_id: Uuid,
     user_id: Uuid,
 ) -> Result<(), AppError> {
-    let _ = get_project_in_tenant(state, tenant_id, project_id).await?;
-    if is_tenant_owner(&state.db, tenant_id, user_id).await? {
+    let project = get_project_in_tenant(db, tenant_id, project_id).await?;
+    if is_tenant_owner(db, tenant_id, user_id).await? {
         return Ok(());
     }
     let member = project_members::Entity::find()
         .filter(project_members::Column::ProjectId.eq(project_id))
         .filter(project_members::Column::UserId.eq(user_id))
-        .one(&state.db)
+        .one(db)
         .await?;
-    match member {
-        Some(m) if m.role == ProjectRole::Admin => Ok(()),
-        _ => Err(AppError::Forbidden),
+    if member.is_some_and(|m| m.role == ProjectRole::Admin) {
+        return Ok(());
     }
+    if !project.is_personal
+        && has_tenant_admin_role(db, tenant_id, user_id).await?
+        && project_is_open_or_member(db, project_id, user_id).await?
+    {
+        return Ok(());
+    }
+    Err(AppError::Forbidden)
 }
 
 /// メンバー行に表示用のユーザー情報を同梱する。FK があるため利用者は必ず居るはずで、
@@ -180,13 +230,15 @@ async fn find_member<C: ConnectionTrait>(
 ///   「まだもう 1 人いる」を読んで両方通る
 /// - 降格が B を在籍中の Admin として数えている最中に B が除名されると、
 ///   降格は消えた相手を数えたまま通る
+/// - 削除が「最後の 1 行」と数えている最中に追加が通ると、Admin の居ない
+///   明示 ACE（Viewer だけ）が残る
 ///
 /// 掴むのはプロジェクト行ではなく**テナント行**。判定([`would_drop_last_admin`])が
 /// 読むのは `project_members` と `tenant_members` の両方で、後者はプロジェクト行を
 /// 掴んでも守れない。テナント行なら 1 つで両方を覆えるので、複数のロックと
 /// その取得順序を持たずに済む。
 ///
-/// この関数は [`crate::handlers::tenant_members::remove_member`] からも呼ぶ。
+/// この関数は [`add_member`] と [`crate::handlers::tenant_members::remove_member`] からも呼ぶ。
 /// 片側だけが掴んでも直列化にならない。
 ///
 /// # このロックが保証しないこと
@@ -199,7 +251,8 @@ async fn find_member<C: ConnectionTrait>(
 /// どのみち同じ状態には到達する。
 ///
 /// 実際に維持しているのは**「そのプロジェクトを管理できる人が常に居る」**で、
-/// [`require_project_admin`] がテナントオーナーを無条件で通すことで成立している。
+/// [`require_project_admin`] がテナントオーナーを無条件で通すことで成立している
+/// （テナント Admin も開いたプロジェクトなら直せるが、閉じたプロジェクトからは締め出されるので保証主体ではない）。
 /// Admin が全員テナントから抜けた状態は想定内で、[`would_drop_last_admin`] が
 /// 在籍者だけを数えるのはまさにそこから復旧できるようにするため。
 ///
@@ -289,7 +342,7 @@ pub async fn list_members(
     auth.require_scope(Scope::ReadProject)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_project_admin(&state, tenant_id, project_id, auth.user_id).await?;
+    require_project_admin(&state.db, tenant_id, project_id, auth.user_id).await?;
     let members = project_members::Entity::find()
         .filter(project_members::Column::ProjectId.eq(project_id))
         .all(&state.db)
@@ -324,24 +377,34 @@ pub async fn add_member(
     auth.require_scope(Scope::WriteProject)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_project_admin(&state, tenant_id, project_id, auth.user_id).await?;
+    // 認可はロックの後で見る。ロック待ちの間に自分の Admin 行が消されると、
+    // 権限を失ったまま追加が通ってしまう
+    let txn = state.db.begin().await?;
+    lock_membership_changes(&txn, tenant_id).await?;
+    require_project_admin(&txn, tenant_id, project_id, auth.user_id).await?;
 
     let user = users::Entity::find_by_id(payload.user_id)
-        .one(&state.db)
+        .one(&txn)
         .await?
         .ok_or(AppError::NotFound)?;
 
+    if user.is_bot() && user.bot_tenant_id != Some(tenant_id) {
+        return Err(AppError::Forbidden);
+    }
+    if user.is_bot() && !payload.role.allowed_for_bot() {
+        return Err(AppError::BadRequestDetail("bot-role-too-strong".into()));
+    }
     // テナントに居るかは問わない。明示 ACE はテナント所属（継承）と独立に置ける
-    // （apps/backend/docs/tenant-project-authz.md の「継承と明示」）。テナントに居ない人を
+    // （docs/dev/design/tenant-project-authz.md の「継承と明示」）。テナントに居ない人を
     // 招けば、その人はその場で project-only の客分になる。GitHub の outside collaborator
-    // と同じ形で、招けるのは従来どおりプロジェクト Admin とオーナーだけ（`require_project_admin`）。
+    // と同じ形で、招けるのはプロジェクト Admin・オーナー・入れるテナント Admin だけ（`require_project_admin`）。
     // テナント側で客分の招待を締める旗は別 Issue で扱う。
-    // テナント所属を見なくなったので、除名との競合（確認の後・insert の前に除名が通る）は
-    // 起きようがなく、テナント行のロックも要らない
+    // テナント行のロックは「最後の 1 行」の削除（`remove_member`）との競合のため。
+    // 削除が他の行は無いと数えた後に追加が通ると、Admin の居ない明示 ACE（Viewer だけ）が残る
     let existing = project_members::Entity::find()
         .filter(project_members::Column::ProjectId.eq(project_id))
         .filter(project_members::Column::UserId.eq(payload.user_id))
-        .one(&state.db)
+        .one(&txn)
         .await?;
     if existing.is_some() {
         return Err(AppError::Conflict);
@@ -353,7 +416,8 @@ pub async fn add_member(
         user_id: Set(payload.user_id),
         role: Set(payload.role),
     };
-    let model = member.insert(&state.db).await?;
+    let model = member.insert(&txn).await?;
+    txn.commit().await?;
     Ok((
         StatusCode::CREATED,
         Json(ProjectMemberResponse::from_parts(model, user)),
@@ -388,10 +452,11 @@ pub async fn update_member(
     auth.require_scope(Scope::WriteProject)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_project_admin(&state, tenant_id, project_id, auth.user_id).await?;
-    // 数えてから書くので、同じプロジェクトのメンバー変更を直列化する
+    // 数えてから書くので、同じプロジェクトのメンバー変更を直列化する。
+    // 認可もロックの後で見る（待っている間に自分の Admin 行が消されうる）
     let txn = state.db.begin().await?;
     lock_membership_changes(&txn, tenant_id).await?;
+    require_project_admin(&txn, tenant_id, project_id, auth.user_id).await?;
     let current = find_member(&txn, project_id, member_user_id).await?;
     if payload.role != ProjectRole::Admin
         && would_drop_last_admin(&txn, tenant_id, project_id, member_user_id).await?
@@ -402,6 +467,9 @@ pub async fn update_member(
         .one(&txn)
         .await?
         .ok_or_else(|| anyhow::anyhow!("project member {member_user_id} has no user row"))?;
+    if user.is_bot() && !payload.role.allowed_for_bot() {
+        return Err(AppError::BadRequestDetail("bot-role-too-strong".into()));
+    }
     let mut active: project_members::ActiveModel = current.into();
     active.role = Set(payload.role);
     let updated = active.update(&txn).await?;
@@ -423,7 +491,7 @@ pub async fn update_member(
     ),
     responses(
         (status = 204, description = "削除しました"),
-        (status = 409, description = "最後のAdminは削除できません", body = ServerError),
+        (status = 409, description = "最後の在籍 Admin は削除できません（共有プロジェクトの最後のメンバーを外す場合を除く）", body = ServerError),
         CrudErrors,
     )
 )]
@@ -435,12 +503,23 @@ pub async fn remove_member(
     auth.require_scope(Scope::WriteProject)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    require_project_admin(&state, tenant_id, project_id, auth.user_id).await?;
-    // 数えてから書くので、同じプロジェクトのメンバー変更を直列化する
+    // 数えてから書くので、同じプロジェクトのメンバー変更を直列化する。
+    // 認可もロックの後で見る（待っている間に自分の Admin 行が消されうる）
     let txn = state.db.begin().await?;
     lock_membership_changes(&txn, tenant_id).await?;
+    require_project_admin(&txn, tenant_id, project_id, auth.user_id).await?;
+    let project = get_project_in_tenant(&txn, tenant_id, project_id).await?;
     let member = find_member(&txn, project_id, member_user_id).await?;
-    if would_drop_last_admin(&txn, tenant_id, project_id, member_user_id).await? {
+    let others = project_members::Entity::find()
+        .filter(project_members::Column::ProjectId.eq(project_id))
+        .filter(project_members::Column::UserId.ne(member_user_id))
+        .count(&txn)
+        .await?;
+    // 共有プロジェクトの最後の 1 行を外すと継承（テナント全員）へ戻る。管理はテナントオーナーが引き継ぐ
+    let returns_to_inherited = !project.is_personal && others == 0;
+    if !returns_to_inherited
+        && would_drop_last_admin(&txn, tenant_id, project_id, member_user_id).await?
+    {
         return Err(AppError::Conflict);
     }
     // プロジェクト配下タスクの watcher を削除してから member を削除

@@ -1,3 +1,4 @@
+use axum::middleware;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
@@ -5,12 +6,20 @@ use crate::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::<AppState>::new()
+        .routes(routes!(crate::handlers::bots::list_bots))
+        .routes(routes!(crate::handlers::bots::create_bot))
+        .routes(routes!(crate::handlers::bots::update_bot))
+        .routes(routes!(crate::handlers::bots::list_bot_tokens))
+        .routes(routes!(crate::handlers::bots::create_bot_token))
+        .routes(routes!(crate::handlers::bots::revoke_bot_token))
         .routes(routes!(crate::handlers::tenants::list_tenants))
         .routes(routes!(crate::handlers::tenants::create_tenant))
         .routes(routes!(crate::handlers::tenants::get_tenant))
         .routes(routes!(crate::handlers::tenants::update_tenant))
         .routes(routes!(crate::handlers::tenants::delete_tenant))
         .routes(routes!(crate::handlers::auth_2fa::set_tenant_require_2fa))
+        .routes(routes!(crate::handlers::tenant_members::get_user_profile))
+        .routes(routes!(crate::handlers::schedule::get_schedule))
         .nest(
             "/{tenant_id}/drive/folders",
             crate::routes::drive::tenant_folder_routes(),
@@ -24,6 +33,22 @@ pub fn routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(crate::handlers::tenant_members::remove_member))
                 .routes(routes!(
                     crate::handlers::tenant_members::list_explicit_projects
+                )),
+        )
+        .nest(
+            "/{tenant_id}/invitations",
+            OpenApiRouter::<AppState>::new()
+                .routes(routes!(
+                    crate::handlers::tenant_invitations::list_invitations
+                ))
+                .routes(routes!(
+                    crate::handlers::tenant_invitations::create_invitation
+                ))
+                .routes(routes!(
+                    crate::handlers::tenant_invitations::resend_invitation
+                ))
+                .routes(routes!(
+                    crate::handlers::tenant_invitations::delete_invitation
                 )),
         )
         .nest(
@@ -61,12 +86,20 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::project_members::remove_member)),
                 )
                 .nest(
+                    "/{project_id}/events",
+                    OpenApiRouter::<AppState>::new().routes(routes!(
+                        crate::handlers::project_events::stream_project_events
+                    )),
+                )
+                .nest(
                     "/{project_id}/tasks",
                     OpenApiRouter::<AppState>::new()
                         .routes(routes!(crate::handlers::tasks::list_tasks))
                         .routes(routes!(crate::handlers::tasks::create_task))
                         .routes(routes!(crate::handlers::task_extensions::search_tasks))
+                        .routes(routes!(crate::handlers::task_extensions::similar_tasks))
                         .routes(routes!(crate::handlers::task_extensions::bulk_update_tasks))
+                        .routes(routes!(crate::handlers::tasks::bulk_create_tasks))
                         .routes(routes!(crate::handlers::tasks::get_task))
                         .routes(routes!(crate::handlers::tasks::update_task))
                         .routes(routes!(crate::handlers::tasks::delete_task))
@@ -84,6 +117,20 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::task_comments::update_comment))
                         .routes(routes!(crate::handlers::task_comments::delete_comment))
                         .routes(routes!(crate::handlers::task_comments::list_activities))
+                        .routes(routes!(crate::handlers::reactions::add_task_reaction))
+                        .routes(routes!(crate::handlers::reactions::remove_task_reaction))
+                        .routes(routes!(
+                            crate::handlers::reactions::list_task_reaction_users
+                        ))
+                        .routes(routes!(crate::handlers::reactions::add_comment_reaction))
+                        .routes(routes!(crate::handlers::reactions::remove_comment_reaction))
+                        .routes(routes!(
+                            crate::handlers::reactions::list_comment_reaction_users
+                        ))
+                        .routes(routes!(crate::handlers::forge::get_task_forge))
+                        .routes(routes!(crate::handlers::forge::link_task_pull_request))
+                        .routes(routes!(crate::handlers::forge::unlink_task_pull_request))
+                        .routes(routes!(crate::handlers::forge::delete_task_forge_branch))
                         .routes(routes!(crate::handlers::time_tracking::get_time_summary))
                         .routes(routes!(crate::handlers::time_tracking::list_time_logs))
                         .routes(routes!(crate::handlers::time_tracking::create_time_log))
@@ -99,7 +146,17 @@ pub fn routes() -> OpenApiRouter<AppState> {
                             crate::handlers::task_extensions::list_task_attachments
                         ))
                         .routes(routes!(crate::handlers::task_extensions::attach_task_file))
-                        .routes(routes!(crate::handlers::task_extensions::detach_task_file)),
+                        .routes(routes!(crate::handlers::task_extensions::detach_task_file))
+                        // レイヤーは router の state を読めないので、Redis は Extension で受ける
+                        .layer(middleware::from_fn(
+                            crate::middlewares::project_events::publish_tasks_changed,
+                        )),
+                )
+                .nest(
+                    "/{project_id}/forge",
+                    OpenApiRouter::<AppState>::new().routes(routes!(
+                        crate::handlers::forge_merge_effects::acknowledge_merge_effects
+                    )),
                 )
                 .nest(
                     "/{project_id}/task-views",
@@ -173,4 +230,15 @@ pub fn routes() -> OpenApiRouter<AppState> {
                 .routes(routes!(crate::handlers::my_tasks::list_my_tasks))
                 .routes(routes!(crate::handlers::dashboard::get_dashboard)),
         )
+}
+
+/// 招待の受け手側の口（`/v1/invitations`）。テナントはトークンから決まるので tenant_id を取らない。
+pub fn invitation_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::<AppState>::new()
+        .routes(routes!(
+            crate::handlers::tenant_invitations::preview_invitation
+        ))
+        .routes(routes!(
+            crate::handlers::tenant_invitations::accept_invitation
+        ))
 }

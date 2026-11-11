@@ -1,18 +1,27 @@
+// 似ているタスクのテストケース（docs/dev/design/task-similarity-search.md から移した）:
+// - 入力後に候補が描画される。空入力では問い合わせない
+// - 候補クリックで遷移（表示用 tenant ID の URL）してダイアログが閉じる
+// - 入力消去の後から旧応答が到着しても表示しない（1 ケース。閉じる・タスク切替は同じ key の仕組みなので重ねない）
+// - 取得失敗でも作成ボタンが押せる
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ref, nextTick } from 'vue';
 import { mount, flushPromises, DOMWrapper } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
+import type { components } from '@/generated/api';
 
 const isHydrated = ref(true);
 const isPending = ref(false);
 const mutateAsync = vi.fn();
+const { navigate } = vi.hoisted(() => ({ navigate: vi.fn() }));
+
+vi.mock('vike/client/router', () => ({ navigate }));
 
 vi.mock('@/composables/useHydrated', () => ({
   useHydrated: () => isHydrated,
 }));
 
-vi.mock('@/lib/task-display', () => ({
-  taskDetailHref: vi.fn(() => '/tenant/projects/proj/tasks/1'),
+vi.mock('@/lib/task-display', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/task-display')>()),
   PRIORITY_CONFIG: {
     CriticalFire: { label: '緊急', color: '#dc2626', icon: {} },
     Critical: { label: '重大', color: '#ef4444', icon: {} },
@@ -46,6 +55,7 @@ vi.mock('@/components/markdown/MarkdownEditor.vue', async () => ({
 }));
 
 import CreateTaskDialog from '../CreateTaskDialog.vue';
+import { pickerOption, pickerTrigger } from '@/components/__tests__/picker';
 
 const statuses = [
   {
@@ -89,7 +99,8 @@ const labels = [
 ];
 
 /** 担当者の候補。`assignable-users` はメンバー行ではなく利用者そのものを返す */
-const members = [
+type AssignableUser = components['schemas']['AssignableUserResponse'];
+const members: AssignableUser[] = [
   { id: 'user-1', username: 'yupix', avatar_url: null },
   { id: 'user-2', username: 'sousuke', avatar_url: null },
 ];
@@ -102,22 +113,8 @@ type MountOptions = {
   members?: typeof members;
   membersLoading?: boolean;
   membersError?: boolean;
-};
-
-/**
- * 担当者・ラベルのメニューはトリガーを押さないと描画されないので、中身を素の要素に
- * 差し替えて直接読む。チェック項目は押すと反転した値を返すボタンにする。
- */
-const dropdownStubs = {
-  DropdownMenu: { template: '<div><slot /></div>' },
-  DropdownMenuTrigger: { template: '<div><slot /></div>' },
-  DropdownMenuContent: { template: '<div><slot /></div>' },
-  DropdownMenuCheckboxItem: {
-    props: ['modelValue'],
-    emits: ['update:modelValue', 'select'],
-    template:
-      '<button type="button" role="menuitemcheckbox" :aria-checked="String(!!modelValue)" @click="$emit(\'update:modelValue\', !modelValue)"><slot /></button>',
-  },
+  initialTitle?: string;
+  initialAssigneeIds?: string[];
 };
 
 function mountDialog(queryClient: QueryClient, options: MountOptions = {}) {
@@ -134,16 +131,19 @@ function mountDialog(queryClient: QueryClient, options: MountOptions = {}) {
       members: options.members,
       membersLoading: options.membersLoading,
       membersError: options.membersError,
+      initialTitle: options.initialTitle,
+      initialAssigneeIds: options.initialAssigneeIds,
     },
     global: {
       plugins: [[VueQueryPlugin, { queryClient }]],
-      stubs: dropdownStubs,
+      // 似ているタスクのリンクは表示用のテナント ID（ルートの tenant）で組む
+      provide: { 'vike-vue:usePageContext': { routeParams: { tenant: 'acme' } } },
     },
     attachTo: document.body,
   });
 }
 
-/** 担当者・ラベルのメニューの項目（stub 済み）を表示名で引く */
+/** ラベルのメニューの項目を表示名で引く */
 function menuItem(name: string) {
   const item = [...document.body.querySelectorAll('[role="menuitemcheckbox"]')].find(
     (el) => el.textContent?.trim() === name,
@@ -165,9 +165,26 @@ function getForm() {
 }
 
 function getDialog() {
-  const dialog = document.body.querySelector('[role="dialog"]');
+  const dialog = document.body.querySelector('dialog');
   if (!dialog) throw new Error('dialog not found');
-  return dialog as HTMLElement;
+  return dialog;
+}
+
+function findButton(label: string) {
+  return [...document.body.querySelectorAll('button')].find(
+    (b) => b.textContent?.trim() === label || b.getAttribute('aria-label') === label,
+  );
+}
+
+function clickButton(label: string) {
+  const button = findButton(label);
+  if (!button) throw new Error(`button "${label}" not found`);
+  button.click();
+}
+
+/** Esc は dialog の cancel として届く */
+function pressEscape() {
+  getDialog().dispatchEvent(new Event('cancel', { cancelable: true }));
 }
 
 describe('CreateTaskDialog double-submit guard', () => {
@@ -262,36 +279,21 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
   it('closes on Escape from a focused field', async () => {
     const wrapper = mountDialog(queryClient);
     await nextTick();
-    const titleInput = getTitleInput();
-    titleInput.focus();
+    getTitleInput().focus();
 
-    document.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
-    );
+    pressEscape();
     await nextTick();
 
     expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
     wrapper.unmount();
   });
 
-  it('keeps Tab focus within the dialog', async () => {
+  // × がタイトル欄より前にあるので、showModal の自動フォーカスに任せると × に当たる
+  it('focuses the title field (not the close button) when opened', async () => {
     const wrapper = mountDialog(queryClient);
-    await nextTick();
-    const dialog = getDialog();
-    const focusables = dialog.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])',
-    );
-    expect(focusables.length).toBeGreaterThan(1);
+    await flushPromises();
 
-    focusables[0]?.focus();
-    for (let i = 0; i < focusables.length + 2; i += 1) {
-      document.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }),
-      );
-      await nextTick();
-      expect(dialog.contains(document.activeElement)).toBe(true);
-    }
-
+    expect(document.activeElement).toBe(getTitleInput());
     wrapper.unmount();
   });
 
@@ -305,7 +307,9 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
     await vi.waitFor(() => {
       expect(invalidateSpy).toHaveBeenCalledWith({
         queryKey: ['get', '/v1/tenants/{tenant_id}/projects/{project_id}/tasks'],
-        refetchType: 'none',
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ['get', '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/search'],
       });
     });
     expect(wrapper.emitted('created')?.[0]).toEqual([createdTask]);
@@ -314,7 +318,7 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
 
   /**
    * 作成に成功すると親が created を受けて open を false にする。その経路は
-   * onOpenChange を通らないので、成功表示を閉じるときに捨てないと次に開いた
+   * onClose を通らないので、成功表示を閉じるときに捨てないと次に開いた
    * 瞬間に前回の「タスクを作成しました」が出る。
    */
   it('閉じて開き直したとき、前回の成功表示が残らない', async () => {
@@ -356,12 +360,184 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
     await nextTick();
     await new DOMWrapper(getTitleInput()).setValue('Draft title');
 
-    document.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
-    );
+    pressEscape();
+    await nextTick();
+    clickButton('破棄する');
     await nextTick();
 
     expect(getTitleInput().value).toBe('');
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+    wrapper.unmount();
+  });
+});
+
+describe('CreateTaskDialog discard confirmation', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    isHydrated.value = true;
+    isPending.value = false;
+    mutateAsync.mockReset();
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined as never);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  // 閉じた Dialog も DOM に残るので、ボタンの有無ではなく dialog の open で見る
+  const confirmOpen = () => !!findButton('破棄する')?.closest('dialog[open]');
+
+  const closers: [string, () => void][] = [
+    ['Esc', () => pressEscape()],
+    [
+      '背景クリック',
+      () => getDialog().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })),
+    ],
+    ['× ボタン', () => clickButton('閉じる')],
+    ['取り消す', () => clickButton('取り消す')],
+  ];
+
+  it.each(closers)('タイトルがあるとき %s は確認を出し、戻ると入力が残る', async (name, close) => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('書きかけ');
+
+    close();
+    await nextTick();
+    expect(confirmOpen(), name).toBe(true);
+    expect(wrapper.emitted('update:open')).toBeUndefined();
+
+    clickButton('戻る');
+    await nextTick();
+
+    expect(confirmOpen()).toBe(false);
+    expect(wrapper.emitted('update:open')).toBeUndefined();
+    expect(getTitleInput().value).toBe('書きかけ');
+    wrapper.unmount();
+  });
+
+  const estimateInput = () =>
+    document.body.querySelector<HTMLInputElement>('input[name="estimated_minutes"]')!;
+
+  // タイトル・説明が空でも、他の項目に入力があれば捨てる前に確認する
+  it.each(closers)(
+    '見積もりだけ入力して %s で閉じようとすると確認し、戻ると値が残る',
+    async (name, close) => {
+      const wrapper = mountDialog(queryClient);
+      await nextTick();
+      await new DOMWrapper(estimateInput()).setValue('90');
+
+      close();
+      await nextTick();
+      expect(confirmOpen(), name).toBe(true);
+      expect(wrapper.emitted('update:open')).toBeUndefined();
+
+      clickButton('戻る');
+      await nextTick();
+
+      expect(confirmOpen()).toBe(false);
+      expect(estimateInput().value).toBe('90');
+      wrapper.unmount();
+    },
+  );
+
+  it('優先度だけ変えても確認し、破棄すると閉じる', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    pickerOption(pickerTrigger(document.body, '優先度'), '高').click();
+    await nextTick();
+
+    pressEscape();
+    await nextTick();
+    expect(confirmOpen()).toBe(true);
+
+    clickButton('破棄する');
+    await nextTick();
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+    wrapper.unmount();
+  });
+
+  it('ラベルだけ選んでも確認する', async () => {
+    const wrapper = mountDialog(queryClient, { labels });
+    await nextTick();
+    document.body.querySelector<HTMLButtonElement>('button[aria-label^="ラベル"]')!.click();
+    await nextTick();
+    menuItem('bug').click();
+    await nextTick();
+
+    pressEscape();
+    await nextTick();
+    expect(confirmOpen()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('説明だけでも確認を出す', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(document.body.querySelector('textarea') as HTMLTextAreaElement).setValue(
+      '説明',
+    );
+
+    pressEscape();
+    await nextTick();
+
+    expect(confirmOpen()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('入力が無ければ確認せずに閉じる', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+
+    pressEscape();
+    await nextTick();
+
+    expect(confirmOpen()).toBe(false);
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+    wrapper.unmount();
+  });
+
+  it('initialTitle のままなら確認せずに閉じ、書き換えたら確認する', async () => {
+    const wrapper = mountDialog(queryClient, { initialTitle: '選択範囲' });
+    await nextTick();
+
+    pressEscape();
+    await nextTick();
+    expect(confirmOpen()).toBe(false);
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+    wrapper.unmount();
+
+    document.body.innerHTML = '';
+    const second = mountDialog(queryClient, { initialTitle: '選択範囲' });
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('選択範囲に追記');
+    pressEscape();
+    await nextTick();
+    expect(confirmOpen()).toBe(true);
+    second.unmount();
+  });
+
+  it('日本語入力の変換中の Esc は既定動作を止めて閉じさせない', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+
+    const composing = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      isComposing: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    getTitleInput().dispatchEvent(composing);
+    expect(composing.defaultPrevented).toBe(true);
+
+    const plain = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    getTitleInput().dispatchEvent(plain);
+    expect(plain.defaultPrevented).toBe(false);
     wrapper.unmount();
   });
 });
@@ -467,6 +643,143 @@ describe('CreateTaskDialog estimate', () => {
         '見積もりは 1 以上 2147483647 以下の整数（分）で入力してください',
       );
     }
+    wrapper.unmount();
+  });
+
+  /*
+   * 数値にならない入力は、ブラウザでは value が空・badInput が true で届く（happy-dom は
+   * 文字列を value に残すので状態を与える）。止めないと未入力と同じ扱いで見積もりが消える
+   */
+  it('数値にならない見積もりは未入力として扱わず、送らずに止める', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('見積もりの打ち間違い');
+    Object.defineProperty(getEstimateInput(), 'validity', {
+      value: { badInput: true, valid: false },
+    });
+
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(mutateAsync).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain(
+      '見積もりは 1 以上 2147483647 以下の整数（分）で入力してください',
+    );
+    wrapper.unmount();
+  });
+});
+
+describe('CreateTaskDialog dates', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    isHydrated.value = true;
+    isPending.value = false;
+    mutateAsync.mockReset();
+    mutateAsync.mockResolvedValue(createdTask);
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined as never);
+    // カレンダーは今日の月で開く。選ぶ日が同じ月に出るよう今日を固定する
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-15T12:00:00+09:00'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    document.body.innerHTML = '';
+  });
+
+  /** 日付欄のカレンダーを開いて日を選ぶ。カレンダーは開いている間だけ DOM にある */
+  async function pickDate(fieldId: string, date: string) {
+    const trigger = document.getElementById(fieldId);
+    if (!trigger) throw new Error(`${fieldId} not found`);
+    trigger.click();
+    await nextTick();
+    const day = document.body.querySelector<HTMLElement>(`[data-date="${date}"]`);
+    if (!day) throw new Error(`${date} not found in the calendar of ${fieldId}`);
+    day.click();
+    await nextTick();
+  }
+
+  it('開始予定日は日付のまま、期限と最終期限は UTC の日時にして送る', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('日付付き');
+    await pickDate('task-planned-start', '2026-10-19');
+    await pickDate('task-soft-deadline', '2026-10-23');
+    await pickDate('task-hard-deadline', '2026-10-31');
+
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(mutateAsync.mock.calls[0][0].body).toMatchObject({
+      planned_start_on: '2026-10-19',
+      soft_deadline: '2026-10-23T00:00:00.000Z',
+      hard_deadline: '2026-10-31T00:00:00.000Z',
+    });
+    wrapper.unmount();
+  });
+
+  it('選ばなかった日付は送らない', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('期限だけ');
+    await pickDate('task-soft-deadline', '2026-10-23');
+
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    const { body } = mutateAsync.mock.calls[0][0];
+    expect(body.soft_deadline).toBe('2026-10-23T00:00:00.000Z');
+    expect(body).not.toHaveProperty('planned_start_on');
+    expect(body).not.toHaveProperty('hard_deadline');
+    wrapper.unmount();
+  });
+
+  // WebKit ではフォーカスが dialog へ移ると DatePicker がカレンダーを閉じ、月送りとクリアが効かない
+  it('カレンダーのボタンを押すと、そのボタンにフォーカスする', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    document.getElementById('task-hard-deadline')?.click();
+    await nextTick();
+
+    const nextMonth = document.body.querySelector('[aria-label="次の月"]');
+    if (!nextMonth) throw new Error('next month button not found');
+    nextMonth.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+
+    expect(document.activeElement).toBe(nextMonth);
+    wrapper.unmount();
+  });
+
+  /*
+   * type="date" は見た目と value が食い違う。WebKit は空欄に今日の日付を出し、途中までの
+   * 入力も見た目には残るのに value は空で、何も送られないまま作成が通っていた
+   */
+  it('未入力の日付欄は「未設定」と出し、見た目と送信内容が食い違う type="date" を置かない', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+
+    expect(document.body.querySelector('input[type="date"]')).toBeNull();
+    for (const id of ['task-planned-start', 'task-soft-deadline', 'task-hard-deadline']) {
+      expect(document.getElementById(id)?.textContent, id).toContain('未設定');
+    }
+    wrapper.unmount();
+  });
+
+  it('開始予定日が期限より後なら送らずに警告する', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('逆転');
+    await pickDate('task-planned-start', '2026-10-24');
+    await pickDate('task-soft-deadline', '2026-10-23');
+
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(mutateAsync).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('期限より後になっています');
     wrapper.unmount();
   });
 });
@@ -664,6 +977,28 @@ describe('CreateTaskDialog labels query states', () => {
     wrapper.unmount();
   });
 
+  it('ラベルのメニューは本文のスクロール領域で切れないようトップレイヤーに出す', async () => {
+    const wrapper = mountDialog(queryClient, { labels });
+    await nextTick();
+
+    const trigger = labelsGroup()!.querySelector('button[aria-haspopup="menu"]')!;
+    expect(trigger.closest('[data-menu-top-layer]')).not.toBeNull();
+    wrapper.unmount();
+  });
+
+  it('優先度・ステータス・担当者の一覧も本文のスクロール領域で切れないようトップレイヤーに出す', async () => {
+    const wrapper = mountDialog(queryClient, { members });
+    await nextTick();
+
+    for (const name of ['優先度', 'ステータス', '担当者']) {
+      // 選択中の値があると読み上げ名は「優先度: 中」の形になる
+      const trigger = document.body.querySelector(`button[aria-label^="${name}"]`);
+      expect(trigger, name).not.toBeNull();
+      expect(trigger!.closest('[data-menu-top-layer]'), name).not.toBeNull();
+    }
+    wrapper.unmount();
+  });
+
   it('正常な 0 件ではラベル欄を表示しない', async () => {
     const wrapper = mountDialog(queryClient, { labels: [] });
     await nextTick();
@@ -706,7 +1041,17 @@ describe('CreateTaskDialog assignee selection', () => {
     document.body.innerHTML = '';
   });
 
-  const memberButton = menuItem;
+  /** 担当者の欄（Picker のトリガー。Field の id が付く） */
+  function assigneeTrigger() {
+    const trigger = document.getElementById('task-assignees');
+    if (!trigger) throw new Error('assignee trigger not found');
+    return trigger;
+  }
+
+  /** 担当者の候補（Picker の option）を名で引く。閉じていても DOM にある */
+  function memberButton(name: string) {
+    return pickerOption(assigneeTrigger(), name);
+  }
 
   /**
    * 担当者は作成後にしか付けられなかった。作成時に選べると、割り当て済みの状態で
@@ -717,18 +1062,44 @@ describe('CreateTaskDialog assignee selection', () => {
     await nextTick();
     await new DOMWrapper(getTitleInput()).setValue('担当者付きで作成');
 
-    expect(document.getElementById('task-assignees-value')?.textContent).toContain('未割り当て');
+    expect(assigneeTrigger().textContent).toContain('未割り当て');
     memberButton('yupix').click();
     await nextTick();
-    expect(memberButton('yupix').getAttribute('aria-checked')).toBe('true');
+    expect(memberButton('yupix').getAttribute('aria-selected')).toBe('true');
     // 選んだ人は欄の中にも出る
-    expect(document.getElementById('task-assignees-value')?.textContent).toContain('yupix');
+    expect(assigneeTrigger().textContent).toContain('yupix');
 
     getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await flushPromises();
 
     expect(mutateAsync.mock.calls[0][0].body.assignees).toEqual([
       { user_id: 'user-1', role: 'primary' },
+    ]);
+    wrapper.unmount();
+  });
+
+  it('部署を選ぶと属する全員を assignees として作成リクエストに含める', async () => {
+    const wrapper = mountDialog(queryClient, {
+      members: [
+        { id: 'user-1', username: 'yupix', avatar_url: null, department: '開発' },
+        { id: 'user-2', username: 'sousuke', avatar_url: null, department: '開発' },
+        { id: 'user-3', username: 'kousuke', avatar_url: null, department: '営業' },
+      ],
+    });
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('部署でまとめて作成');
+
+    memberButton('部署「開発」の全員').click();
+    await nextTick();
+    expect(assigneeTrigger().textContent).toContain('yupix');
+    expect(assigneeTrigger().textContent).toContain('sousuke');
+
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+
+    expect(mutateAsync.mock.calls[0][0].body.assignees).toEqual([
+      { user_id: 'user-1', role: 'primary' },
+      { user_id: 'user-2', role: 'primary' },
     ]);
     wrapper.unmount();
   });
@@ -866,6 +1237,351 @@ describe('CreateTaskDialog assignable-users query states', () => {
     expect(group).not.toBeNull();
     expect(group!.getAttribute('role')).toBe('group');
     expect(document.getElementById('task-assignees-label')?.textContent).toContain('担当者');
+    wrapper.unmount();
+  });
+});
+
+describe('CreateTaskDialog initialTitle', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    queryClient = new QueryClient();
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('開いたときにタイトルの初期値を入れる', async () => {
+    const wrapper = mountDialog(queryClient, { initialTitle: '選択した文' });
+    await nextTick();
+
+    expect(getTitleInput().value).toBe('選択した文');
+    wrapper.unmount();
+  });
+
+  it('閉じて開き直すと、その時点の初期値を入れ直す', async () => {
+    const wrapper = mountDialog(queryClient, { open: false, initialTitle: '一度目' });
+    await wrapper.setProps({ open: true });
+    await nextTick();
+    getTitleInput().value = '書き換えた';
+    getTitleInput().dispatchEvent(new Event('input'));
+
+    await wrapper.setProps({ open: false });
+    await wrapper.setProps({ initialTitle: '二度目', open: true });
+    await nextTick();
+
+    expect(getTitleInput().value).toBe('二度目');
+    wrapper.unmount();
+  });
+
+  it('指定しなければ空のまま（既存の呼び出し元）', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+
+    expect(getTitleInput().value).toBe('');
+    wrapper.unmount();
+  });
+});
+
+describe('CreateTaskDialog similar tasks', () => {
+  let queryClient: QueryClient;
+
+  const similarHit = { id: 'task-7', seq_id: 7, title: 'ログイン画面の修正', score: 0.5 };
+  const json = (data: unknown, status = 200) =>
+    new Response(JSON.stringify(data), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  /** 似ているタスクの問い合わせ（GET /tasks/similar）だけを拾う */
+  const similarRequests = (fetchMock: ReturnType<typeof vi.fn>) =>
+    fetchMock.mock.calls
+      .map(([request]) => new URL((request as Request).url))
+      .filter((url) => url.pathname.endsWith('/tasks/similar'));
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  /** debounce（300ms）を確実に過ぎるまで待つ */
+  const afterDebounce = () => sleep(400);
+
+  beforeEach(() => {
+    isHydrated.value = true;
+    isPending.value = false;
+    navigate.mockReset();
+    mutateAsync.mockReset();
+    mutateAsync.mockResolvedValue(createdTask);
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined as never);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    document.body.innerHTML = '';
+  });
+
+  it('入力後に似ているタスクを描画する', async () => {
+    const fetchMock = vi.fn(async () => json({ tasks: [similarHit] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+
+    await new DOMWrapper(getTitleInput()).setValue('  ログイン画面  ');
+
+    await vi.waitFor(() => {
+      expect(document.body.querySelector('[data-similar-tasks]')?.textContent).toContain(
+        'ログイン画面の修正',
+      );
+    });
+    const [url] = similarRequests(fetchMock);
+    expect(url?.pathname).toBe('/api/v1/tenants/tenant-uuid/projects/project-uuid/tasks/similar');
+    expect(url?.searchParams.get('title')).toBe('ログイン画面');
+    expect(url?.searchParams.get('limit')).toBe('5');
+    expect(url?.searchParams.has('exclude_task_id')).toBe(false);
+    wrapper.unmount();
+  });
+
+  it.each([
+    ['空白のみ', '   '],
+    ['1 文字', ' ロ '],
+  ])('%s では問い合わせない', async (_, value) => {
+    const fetchMock = vi.fn(async () => json({ tasks: [similarHit] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+
+    await new DOMWrapper(getTitleInput()).setValue(value);
+    await afterDebounce();
+    await flushPromises();
+
+    expect(similarRequests(fetchMock)).toHaveLength(0);
+    expect(document.body.querySelector('[data-similar-tasks]')).toBeNull();
+    wrapper.unmount();
+  });
+
+  it('候補を押すと別タブで詳細を開き、ダイアログも入力も残す', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => json({ tasks: [similarHit] })),
+    );
+    const open = vi.fn();
+    vi.stubGlobal('open', open);
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('ログイン画面');
+
+    const link = await vi.waitFor(() => {
+      const el = document.body.querySelector<HTMLAnchorElement>('[data-similar-tasks] a');
+      if (!el) throw new Error('候補がまだ出ていない');
+      return el;
+    });
+    expect(link.getAttribute('href')).toBe('/acme/projects/PROJ/tasks/PROJ-7');
+    link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+    await nextTick();
+
+    expect(open).toHaveBeenCalledWith('/acme/projects/PROJ/tasks/PROJ-7', '_blank', 'noopener');
+    expect(navigate).not.toHaveBeenCalled();
+    expect(wrapper.emitted('update:open')).toBeUndefined();
+    expect(getTitleInput().value).toBe('ログイン画面');
+    wrapper.unmount();
+  });
+
+  it('入力を消した後に旧タイトルの応答が届いても表示しない', async () => {
+    let resolveOld: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveOld = resolve;
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    const titleInput = new DOMWrapper(getTitleInput());
+
+    await titleInput.setValue('ログイン画面');
+    await vi.waitFor(() => expect(similarRequests(fetchMock)).toHaveLength(1));
+    await titleInput.setValue('');
+    // debounce が追いつく前（問い合わせの key がまだ旧タイトル）に旧応答が届く
+    resolveOld?.(json({ tasks: [similarHit] }));
+    await flushPromises();
+
+    expect(document.body.querySelector('[data-similar-tasks]')).toBeNull();
+    await afterDebounce();
+    await flushPromises();
+    expect(document.body.querySelector('[data-similar-tasks]')).toBeNull();
+    wrapper.unmount();
+  });
+
+  it('似ているタスクの取得に失敗しても作成できる', async () => {
+    const fetchMock = vi.fn(async () => json({ message: 'internal-error' }, 500));
+    vi.stubGlobal('fetch', fetchMock);
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+
+    await new DOMWrapper(getTitleInput()).setValue('ログイン画面');
+    await vi.waitFor(() => expect(similarRequests(fetchMock)).toHaveLength(1));
+    await flushPromises();
+
+    expect(document.body.querySelector('[data-similar-tasks]')).toBeNull();
+    const submit = document.body.querySelector<HTMLButtonElement>('button[type="submit"]');
+    expect(submit?.disabled).toBe(false);
+    await new DOMWrapper(getForm()).trigger('submit');
+    await flushPromises();
+    expect(mutateAsync).toHaveBeenCalledTimes(1);
+    expect(wrapper.emitted('created')?.[0]).toEqual([createdTask]);
+    wrapper.unmount();
+  });
+});
+
+describe('CreateTaskDialog initialAssigneeIds', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    isHydrated.value = true;
+    isPending.value = false;
+    mutateAsync.mockReset();
+    mutateAsync.mockResolvedValue(createdTask);
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined as never);
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  const confirmOpen = () => !!findButton('破棄する')?.closest('dialog[open]');
+  const assigneeTrigger = () => document.getElementById('task-assignees')!;
+  const submit = async () => {
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+  };
+
+  it('初期担当者を assignees として送る', async () => {
+    const wrapper = mountDialog(queryClient, { members, initialAssigneeIds: ['user-1'] });
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('自分に割り当て');
+    expect(assigneeTrigger().textContent).toContain('yupix');
+
+    await submit();
+
+    expect(mutateAsync.mock.calls[0][0].body.assignees).toEqual([
+      { user_id: 'user-1', role: 'primary' },
+    ]);
+    wrapper.unmount();
+  });
+
+  it('初期担当者のままなら確認せずに閉じる', async () => {
+    const wrapper = mountDialog(queryClient, { members, initialAssigneeIds: ['user-1'] });
+    await nextTick();
+
+    pressEscape();
+    await nextTick();
+
+    expect(confirmOpen()).toBe(false);
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+    wrapper.unmount();
+  });
+
+  it('初期担当者を外すと確認し、送信では assignees を送らない', async () => {
+    const wrapper = mountDialog(queryClient, { members, initialAssigneeIds: ['user-1'] });
+    await nextTick();
+    pickerOption(assigneeTrigger(), 'yupix').click();
+    await nextTick();
+
+    pressEscape();
+    await nextTick();
+    expect(confirmOpen()).toBe(true);
+    clickButton('戻る');
+    await nextTick();
+
+    await new DOMWrapper(getTitleInput()).setValue('未割当で作成');
+    await submit();
+    expect(mutateAsync.mock.calls[0][0].body.assignees).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('候補に無い初期担当者は入れず、確認も出さない', async () => {
+    const wrapper = mountDialog(queryClient, { members, initialAssigneeIds: ['stranger'] });
+    await nextTick();
+
+    pressEscape();
+    await nextTick();
+    expect(confirmOpen()).toBe(false);
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+
+    await new DOMWrapper(getTitleInput()).setValue('候補外');
+    await submit();
+    expect(mutateAsync.mock.calls[0][0].body.assignees).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('閉じて開き直すと初期担当者が入り直す', async () => {
+    const wrapper = mountDialog(queryClient, { members, initialAssigneeIds: ['user-1'] });
+    await nextTick();
+    pickerOption(assigneeTrigger(), 'yupix').click();
+    await nextTick();
+    expect(assigneeTrigger().textContent).not.toContain('yupix');
+
+    await wrapper.setProps({ open: false });
+    await wrapper.setProps({ open: true });
+    await nextTick();
+
+    expect(assigneeTrigger().textContent).toContain('yupix');
+    wrapper.unmount();
+  });
+
+  it('候補が未取得の間は初期担当者を入れず、送信でも assignees を送らない', async () => {
+    const wrapper = mountDialog(queryClient, { initialAssigneeIds: ['user-1'] });
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('候補の取得前');
+
+    await submit();
+
+    expect(mutateAsync.mock.calls[0][0].body.assignees).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('候補が後から届くと初期担当者が入り、確認せずに閉じる', async () => {
+    const wrapper = mountDialog(queryClient, {
+      membersLoading: true,
+      initialAssigneeIds: ['user-1'],
+    });
+    await nextTick();
+
+    await wrapper.setProps({ members, membersLoading: false });
+    await nextTick();
+    expect(assigneeTrigger().textContent).toContain('yupix');
+
+    pressEscape();
+    await nextTick();
+    expect(confirmOpen()).toBe(false);
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+    wrapper.unmount();
+  });
+
+  it('候補が届いたあとに外した担当者は、候補が再取得されても入れ直さない', async () => {
+    // 候補が届く前は担当者の欄が出ず、利用者が触れない。触れるのは届いたあとなので、
+    // 触ったあとに候補の配列が差し替わる（再取得）場合で上書きされないことを確かめる
+    const wrapper = mountDialog(queryClient, {
+      membersLoading: true,
+      initialAssigneeIds: ['user-1'],
+    });
+    await wrapper.setProps({ members, membersLoading: false });
+    await nextTick();
+    pickerOption(assigneeTrigger(), 'yupix').click();
+    await nextTick();
+    expect(assigneeTrigger().textContent).not.toContain('yupix');
+
+    await wrapper.setProps({ members: members.map((user) => ({ ...user })) });
+    await nextTick();
+
+    expect(assigneeTrigger().textContent).not.toContain('yupix');
+    await new DOMWrapper(getTitleInput()).setValue('外したまま');
+    await submit();
+    expect(mutateAsync.mock.calls[0][0].body.assignees).toBeUndefined();
     wrapper.unmount();
   });
 });

@@ -13,7 +13,7 @@ use tokio::sync::Notify;
 use wiremock::matchers::{header, method};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-// 外部向け Webhook（TASK-227）の統合テスト。仕様は docs/features/tasks/10.webhooks.md。
+// 外部向け Webhook（TASK-227）の統合テスト。仕様は docs/dev/features/tasks/10.webhooks.md。
 
 const SECRET: &str = "0123456789abcdef-secret";
 
@@ -97,6 +97,7 @@ fn job_state(app: &TestApp) -> job::JobState {
         smtp_client: app.state.smtp_client.clone(),
         http_client: app.state.http_client.clone(),
         review_summary_storage: app.state.review_summary_storage.clone(),
+        github_issue_sync_storage: app.state.github_issue_sync_storage.clone(),
         pg_pool: app.state.pg_pool.clone(),
         oauth_settings: app.state.oauth_settings.clone(),
     }
@@ -162,7 +163,7 @@ async fn mock_server(status: u16) -> MockServer {
     server
 }
 
-/// 変更は Admin / オーナーだけ（Member は 403）。一覧の URL は管理者だけに返す。
+/// 変更はプロジェクト Admin / オーナー / 入れるテナント Admin だけ（Member は 403）。一覧の URL は管理者だけに返す。
 #[tokio::test]
 async fn crud_and_authorization() {
     let mut fx = setup().await;
@@ -854,7 +855,8 @@ async fn discord_format_sends_content_and_embeds_without_signature() {
             .expect("content")
             .contains("Discord に流す")
     );
-    assert_eq!(body["embeds"][0]["title"], "task.created");
+    assert_eq!(body["embeds"][0]["title"], "タスクの作成");
+    assert_eq!(body["embeds"][0]["color"], 0x2ecc71);
 }
 
 /// 再送は同じ payload で新しい配信を作り、元の行は変えない。Member は履歴も再送も読めない。
@@ -938,4 +940,46 @@ async fn redeliver_creates_new_delivery() {
     let history: serde_json::Value = history.json().await.expect("json");
     assert_eq!(history.as_array().expect("array").len(), 1);
     assert_eq!(history[0]["id"], created["id"], "新しい順");
+}
+
+/// テナント `Admin` はプロジェクト Admin の ACE が無くても Webhook を作れる（TASK-372。
+/// `require_project_admin` 経由の対照）。
+#[tokio::test]
+async fn tenant_admin_can_create_webhooks() {
+    let mut fx = setup().await;
+    let admin = fx.app.insert_user_default().await;
+    let added = fx
+        .app
+        .post_json_with_session(
+            &format!("/v1/tenants/{}/members", fx.tenant_id),
+            serde_json::json!({ "user_id": admin.id, "role": "Admin" }),
+        )
+        .await;
+    assert_eq!(added.status(), StatusCode::CREATED);
+    // fixture のプロジェクトは `member` の ACE で閉じているので、入れるように Viewer の ACE を置く
+    let ace = fx
+        .app
+        .post_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{}/members",
+                fx.tenant_id, fx.project_id
+            ),
+            serde_json::json!({ "user_id": admin.id, "role": "Viewer" }),
+        )
+        .await;
+    assert_eq!(ace.status(), StatusCode::CREATED);
+
+    fx.login(&admin).await;
+    let created = fx
+        .app
+        .post_json_with_session(
+            &fx.webhooks_path(),
+            serde_json::json!({"url": "https://203.0.113.10/x", "secret": SECRET, "events": ["task.created"]}),
+        )
+        .await;
+    assert_eq!(
+        created.status(),
+        StatusCode::CREATED,
+        "テナント Admin は作れる"
+    );
 }

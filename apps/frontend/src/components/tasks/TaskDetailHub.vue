@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import LoadErrorState from '@/components/LoadErrorState.vue';
+import ReactionBar from '@/components/reactions/ReactionBar.vue';
+import { copyTaskIdLabel, useCopyTaskId } from '@/composables/useCopyTaskId';
+import type { ReactionController } from '@/composables/useReactions';
+import { useQueryClient } from '@tanstack/vue-query';
 import {
   CalendarClock,
   CalendarDays,
@@ -10,14 +15,11 @@ import {
   CircleDashed,
   Copy,
   EllipsisVertical,
-  Filter,
   Flag,
   Loader2,
   Pencil,
   Percent,
   Plus,
-  Search,
-  Settings,
   ListChecks,
   SquarePen,
   Star,
@@ -27,23 +29,23 @@ import {
   UserPlus,
   X,
 } from '@lucide/vue';
-import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import type { ComponentPublicInstance } from 'vue';
 import type { components } from '@/generated/api';
-import AvatarGroup from '@/components/AvatarGroup.vue';
-import type { EditableField } from '@/components/tasks/editable-field';
+import type { EditableField, MutatingField } from '@/components/tasks/editable-field';
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
 import TaskPropertyRow from '@/components/tasks/TaskPropertyRow.vue';
-import { Button } from '@/components/ui/button';
 import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Input } from '@/components/ui/input';
+  AvatarGroup,
+  Button,
+  ConfirmDialog,
+  Dropdown,
+  Input,
+  type DropdownItem,
+  type DropdownSection,
+} from '@koyori-app/ui-vue';
 import MarkdownEditor from '@/components/markdown/MarkdownEditor.vue';
+import { lookup, toPlainText } from '@/lib/comment-mention';
 import {
   PRIORITY_CONFIG,
   clampProgressPct,
@@ -62,6 +64,7 @@ import '@/lib/remark-koyori-alerts/style.css';
 import '@/lib/rehype-starry-night/style.css';
 import '@/lib/rehype-kfm-code/style.css';
 import '@/lib/remark-kfm-mermaid/style.css';
+import '@/lib/remark-kfm-mention/style.css';
 
 type TaskDetail = components['schemas']['TaskDetailResponse'];
 type StatusOption = components['schemas']['ProjectStatusResponse'];
@@ -83,6 +86,12 @@ const props = defineProps<{
   assigneeError?: string | null;
   /** 候補の取得状態。取得中・失敗を「候補 0 人」と混ぜない */
   membersState?: { loading?: boolean; error?: boolean; onRetry?: () => void };
+  /** 担当者のプロフィール画面の URL。渡すと担当者名をリンクで並べる */
+  profileHref?: (userId: string) => string;
+  /** ログイン中ユーザーの ID。押した人の一覧で「自分」を示す */
+  currentUserId?: string | null;
+  /** 絵文字リアクションの操作。渡さなければリアクションの UI を出さない */
+  reactionController?: ReactionController;
   projectLabels?: LabelOption[];
   projectLabelsLoading?: boolean;
   projectLabelsError?: boolean;
@@ -91,7 +100,7 @@ const props = defineProps<{
   fieldUpdating?: Partial<Record<EditableField, boolean>>;
   fieldErrors?: Partial<Record<EditableField, string>>;
   /** 直近に保存が確定したフィールド。該当箇所に「保存しました」を出す（失敗表示が優先） */
-  savedField?: EditableField | null;
+  savedField?: MutatingField | null;
   loading?: boolean;
   notFound?: boolean;
   error?: boolean;
@@ -119,12 +128,22 @@ const props = defineProps<{
   descriptionSource?: string | null;
 }>();
 
+const queryClient = useQueryClient();
+/** 取得元の query は呼び出し側にあるので、表示中のうち失敗しているものだけをやり直す */
+function retryFailed() {
+  void queryClient.refetchQueries({
+    type: 'active',
+    predicate: (query) => query.state.status === 'error',
+  });
+}
+
 const emit = defineEmits<{
   'update:statusId': [value: string];
   'change:priority': [value: TaskDetail['priority']];
   'save:title': [value: string];
   'save:description': [value: string | null];
   'save:progress_pct': [value: number];
+  'save:planned_start_on': [value: string | null];
   'save:soft_deadline': [value: string | null];
   'save:hard_deadline': [value: string | null];
   'save:label_ids': [value: string[]];
@@ -132,43 +151,7 @@ const emit = defineEmits<{
   'delete-request': [];
 }>();
 
-/** コピー結果を出しておく時間（ミリ秒） */
-const COPY_RESET_MS = 2000;
-
-/** タスク ID のコピー結果。非 secure context では clipboard が無いので失敗も示す */
-const copyState = ref<'idle' | 'copied' | 'error'>('idle');
-let copyResetTimer: ReturnType<typeof setTimeout> | undefined;
-/** コピー操作の世代。連続して押したとき、最後の操作だけが表示とタイマーを持つ */
-let copyRequest = 0;
-
-function clearCopyReset() {
-  if (copyResetTimer) {
-    clearTimeout(copyResetTimer);
-    copyResetTimer = undefined;
-  }
-}
-
-async function copyTaskId(seqKey: string) {
-  const request = ++copyRequest;
-  // 実行中は前の結果を出したままにする（新しい操作の結果が出る前に消さない）
-  clearCopyReset();
-
-  let result: 'copied' | 'error';
-  try {
-    await navigator.clipboard.writeText(seqKey);
-    result = 'copied';
-  } catch {
-    result = 'error';
-  }
-
-  // 遅れて返ってきた古い操作は、新しい操作の表示もタイマーも触らない
-  if (request !== copyRequest) return;
-  clearCopyReset();
-  copyState.value = result;
-  copyResetTimer = setTimeout(() => (copyState.value = 'idle'), COPY_RESET_MS);
-}
-
-onBeforeUnmount(clearCopyReset);
+const { copyState, copyTaskId } = useCopyTaskId();
 
 const resolvedStatus = computed(() =>
   props.statuses.find((status) => status.id === props.statusId),
@@ -178,6 +161,28 @@ const priorityOptions = Object.entries(PRIORITY_CONFIG) as [
   TaskDetail['priority'],
   (typeof PRIORITY_CONFIG)[TaskDetail['priority']],
 ][];
+
+const TASK_ACTION_ITEMS: DropdownItem[] = [{ value: 'delete', label: '削除', destructive: true }];
+
+const statusItems = computed<DropdownItem[]>(() =>
+  props.statuses.map((status) => ({
+    value: status.id,
+    label: status.name,
+    kind: 'radio',
+    checked: status.id === props.statusId,
+    disabled: props.statusUpdating,
+  })),
+);
+
+const priorityItems = computed<DropdownItem[]>(() =>
+  priorityOptions.map(([value, config]) => ({
+    value,
+    label: config.label,
+    kind: 'radio',
+    checked: value === props.task?.priority,
+    disabled: props.priorityUpdating,
+  })),
+);
 
 /** 「完了にする」の移動先。既定の完了に印が無ければ並び順で最初の完了へ倒す。 */
 const doneStatus = computed(
@@ -199,6 +204,17 @@ const nextStatus = computed(() => {
 // 古い HTML の遮断: 描画元 (descriptionSource) がクライアントの最新 task.description と
 // 厳密一致しない descriptionHtml は捨て、プレーンテキスト表示へ倒す。v-html の直前で
 // 照合するのは、消費側の渡し忘れ・渡し間違いでも stale HTML が漏れないようにするため。
+/**
+ * KFM 表示の前（取得中・失敗・保存直後で HTML が古い間）に出すプレーン表示用の説明。
+ * メンションの印（`<@利用者ID>`）は id を含むので、札と同じ字（`@今の名`）に直して出す。
+ */
+const plainDescription = computed(() => {
+  const description = props.task?.description;
+  if (!description) return '';
+  const table = props.task?.mentions ?? {};
+  return toPlainText(description, (id) => lookup(table, id));
+});
+
 const freshDescriptionHtml = computed(() => {
   if (!props.descriptionHtml || !props.task?.description) return null;
   if (props.descriptionSource !== props.task.description) return null;
@@ -208,6 +224,24 @@ const editingField = ref<EditableField | null>(null);
 const draftValue = ref('');
 const editingControlRef = ref<HTMLElement | ComponentPublicInstance | null>(null);
 
+/**
+ * 保存に送った下書き。失敗表示が出ている間だけ「編集を再開」でここから書き直せる。
+ * 送った直後は楽観更新で task が送った値になるので、成否は task ではなく失敗表示で見る。
+ * 編集を開くたびに取り出して消す（Esc で閉じれば残らず、確定すればまた控える）
+ */
+const failedDrafts = ref<Partial<Record<EditableField, string>>>({});
+// 分割ビューのペインは別のタスクへ移っても同じインスタンスなので、前のタスクの下書きを持ち越さない
+watch(
+  () => props.task?.id,
+  () => (failedDrafts.value = {}),
+);
+
+/** 送る値を下書きとして控え、そのまま返す。null（空にする）は空文字で控える */
+function keepDraft<T extends string | number | null>(field: EditableField, value: T): T {
+  failedDrafts.value[field] = value == null ? '' : String(value);
+  return value;
+}
+
 function isFieldUpdating(field: EditableField) {
   return props.fieldUpdating?.[field] ?? false;
 }
@@ -216,8 +250,24 @@ function fieldError(field: EditableField) {
   return props.fieldErrors?.[field] ?? null;
 }
 
+function canResume(field: EditableField) {
+  return !!fieldError(field) && failedDrafts.value[field] !== undefined;
+}
+
+/** 日付の失敗表示は 3 欄で 1 行なので、再開できる欄を 1 つ選ぶ */
+const resumableDateField = computed(() =>
+  (['planned_start_on', 'soft_deadline', 'hard_deadline'] as const).find(canResume),
+);
+
 async function startEditing(field: EditableField) {
   if (!props.task || isFieldUpdating(field)) return;
+  // 説明に未保存の変更があるまま別項目へ移ると、共有の draftValue が上書きされて失われる。
+  // 切り替えを止めて破棄確認を出し、確認で破棄したときだけ続ける
+  if (editingField.value === 'description' && field !== 'description' && descriptionDirty.value) {
+    pendingField.value = field;
+    discardConfirmOpen.value = true;
+    return;
+  }
   editingField.value = field;
   switch (field) {
     case 'title':
@@ -229,6 +279,9 @@ async function startEditing(field: EditableField) {
     case 'progress_pct':
       draftValue.value = String(props.task.progress_pct);
       break;
+    case 'planned_start_on':
+      draftValue.value = props.task.planned_start_on ?? '';
+      break;
     case 'soft_deadline':
       draftValue.value = isoToLocalDateInput(props.task.soft_deadline);
       break;
@@ -236,6 +289,9 @@ async function startEditing(field: EditableField) {
       draftValue.value = isoToLocalDateInput(props.task.hard_deadline);
       break;
   }
+  const failed = failedDrafts.value[field];
+  delete failedDrafts.value[field];
+  if (failed !== undefined && fieldError(field)) draftValue.value = failed;
   await nextTick();
   const control = editingControlRef.value;
   // MarkdownEditor は器の div を focus しても効かない (実体は CodeMirror の
@@ -246,7 +302,8 @@ async function startEditing(field: EditableField) {
   }
   const element =
     control instanceof HTMLElement ? control : (control?.$el as HTMLElement | undefined);
-  element?.focus();
+  // koyori の Input の root は枠の span なので、中の input に当てる
+  (element?.querySelector('input') ?? element)?.focus();
 }
 
 function cancelEditing() {
@@ -267,14 +324,14 @@ function commitEditing(field: EditableField) {
         cancelEditing();
         return;
       }
-      if (next !== props.task.title) emit('save:title', next);
+      if (next !== props.task.title) emit('save:title', keepDraft('title', next));
       break;
     }
     case 'description': {
       const trimmed = draftValue.value.trim();
       const current = props.task.description ?? '';
       if (trimmed === current) break;
-      emit('save:description', trimmed.length ? trimmed : null);
+      emit('save:description', keepDraft('description', trimmed.length ? trimmed : null));
       break;
     }
     case 'progress_pct': {
@@ -283,19 +340,28 @@ function commitEditing(field: EditableField) {
       const parsed = Number(raw);
       if (!Number.isFinite(parsed)) break;
       const next = clampProgressPct(parsed);
-      if (next !== props.task.progress_pct) emit('save:progress_pct', next);
+      if (next !== props.task.progress_pct)
+        emit('save:progress_pct', keepDraft('progress_pct', next));
+      break;
+    }
+    case 'planned_start_on': {
+      // Soft 期限より後なら送らずに編集を開いたまま警告を見せる（サーバーは検証しない）
+      if (plannedStartAfterSoft.value) return;
+      const next = draftValue.value.trim();
+      if (next !== (props.task.planned_start_on ?? ''))
+        emit('save:planned_start_on', keepDraft('planned_start_on', next || null));
       break;
     }
     case 'soft_deadline': {
       const current = isoToLocalDateInput(props.task.soft_deadline);
       if (draftValue.value === current) break;
-      emit('save:soft_deadline', draftValue.value.trim() ? draftValue.value.trim() : null);
+      emit('save:soft_deadline', keepDraft('soft_deadline', draftValue.value.trim() || null));
       break;
     }
     case 'hard_deadline': {
       const current = isoToLocalDateInput(props.task.hard_deadline);
       if (draftValue.value === current) break;
-      emit('save:hard_deadline', draftValue.value.trim() ? draftValue.value.trim() : null);
+      emit('save:hard_deadline', keepDraft('hard_deadline', draftValue.value.trim() || null));
       break;
     }
   }
@@ -303,10 +369,59 @@ function commitEditing(field: EditableField) {
   cancelEditing();
 }
 
+// 説明の編集: 破棄・全消去は確認を挟む。blur では保存も破棄もしない
+const discardConfirmOpen = ref(false);
+const pendingField = ref<EditableField | null>(null);
+const clearConfirmOpen = ref(false);
+
+// 子タスクへの移動などでは同じインスタンスのまま task だけが替わる。書きかけを持ち越すと
+// 移った先のタスクへ前のタスクの下書きが保存されるので、編集と確認を閉じる
+watch(
+  () => props.task?.id,
+  () => {
+    discardConfirmOpen.value = false;
+    pendingField.value = null;
+    clearConfirmOpen.value = false;
+    cancelEditing();
+  },
+);
+
+const descriptionDirty = computed(
+  () => draftValue.value.trim() !== (props.task?.description ?? '').trim(),
+);
+
+/** 変更があれば確認を出し、無ければそのまま閉じる（Esc と「キャンセル」共通） */
+function requestCancelDescription() {
+  if (descriptionDirty.value) {
+    discardConfirmOpen.value = true;
+    return;
+  }
+  cancelEditing();
+}
+
+function confirmDiscardDescription() {
+  discardConfirmOpen.value = false;
+  const next = pendingField.value;
+  pendingField.value = null;
+  cancelEditing();
+  if (next) void startEditing(next);
+}
+
+function cancelDiscardDescription() {
+  discardConfirmOpen.value = false;
+  pendingField.value = null;
+}
+
+function confirmClearDescription() {
+  clearConfirmOpen.value = false;
+  clearDescription();
+}
+
 function onEditKeydown(event: KeyboardEvent, field: EditableField) {
   if (event.key === 'Escape') {
     event.preventDefault();
-    cancelEditing();
+    if (field === 'description') requestCancelDescription();
+    else cancelEditing();
     return;
   }
   if (event.key === 'Enter' && field !== 'description') {
@@ -314,6 +429,23 @@ function onEditKeydown(event: KeyboardEvent, field: EditableField) {
     commitEditing(field);
   }
 }
+
+function hasLabel(labelId: string) {
+  return !!props.task?.labels.some((label) => label.id === labelId);
+}
+
+const labelSections = computed<DropdownSection[]>(() => [
+  {
+    heading: '選択してください',
+    items: (props.projectLabels ?? []).map((label) => ({
+      value: label.id,
+      label: label.name,
+      kind: 'checkbox',
+      checked: hasLabel(label.id),
+      disabled: props.labelsUpdating || props.projectLabelsError,
+    })),
+  },
+]);
 
 function toggleLabel(labelId: string, checked: boolean) {
   // 一覧の取得に失敗している間は、表示しているラベルが現在の集合か判断できない。
@@ -334,10 +466,25 @@ const PENDING_ACTIONS = [
   { label: 'チェックリストを作成', icon: ListChecks },
 ];
 
-function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
+const plannedStartAfterSoft = computed(() => {
+  if (editingField.value !== 'planned_start_on' || !props.task?.soft_deadline) return false;
+  const draft = draftValue.value.trim();
+  return !!draft && draft > isoToLocalDateInput(props.task.soft_deadline);
+});
+
+function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadline') {
   if (isFieldUpdating(field)) return;
-  if (field === 'soft_deadline') emit('save:soft_deadline', null);
+  // 空にする操作は失う入力が無い。前に成功した下書きで「編集を再開」を出さないよう捨てる
+  delete failedDrafts.value[field];
+  if (field === 'planned_start_on') emit('save:planned_start_on', null);
+  else if (field === 'soft_deadline') emit('save:soft_deadline', null);
   else emit('save:hard_deadline', null);
+  cancelEditing();
+}
+
+function clearDescription() {
+  delete failedDrafts.value.description;
+  emit('save:description', null);
   cancelEditing();
 }
 </script>
@@ -348,12 +495,11 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
       <Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
     </div>
 
-    <div
+    <LoadErrorState
       v-else-if="error"
-      class="rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive"
-    >
-      タスクの読み込みに失敗しました
-    </div>
+      message="タスクの読み込みに失敗しました"
+      @retry="retryFailed"
+    />
 
     <div v-else-if="notFound" class="rounded-lg border p-6 text-sm text-muted-foreground">
       タスクが見つかりません
@@ -369,7 +515,7 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
         スクロールする器はこの div。左右 2 列に割るのは lg 以上だけで、そこでは
         本文と履歴がそれぞれ内側でスクロールする（親は lg:overflow-hidden で止める）。
         ペイン表示と lg 未満は 1 列に積むので、ここが唯一のスクロール容器になる。
-        親（SplitterPanel / DialogContent）は overflow-hidden で高さを固定するため、
+        親（SplitPane のペイン / オーバーレイの Dialog）は高さを固定するため、
         ここに overflow を持たせないと、はみ出した分に到達できなくなる。
       -->
       <div
@@ -382,80 +528,44 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
           disabled で置く。押せるのに何も起きない状態にはしない。
         -->
           <header class="flex h-12 shrink-0 items-center gap-1 border-b px-3 pr-12">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              class="size-7"
-              aria-label="前のタスク"
-              disabled
-            >
-              <ChevronUp class="size-4" aria-hidden="true" />
+            <Button type="button" variant="ghost" ariaLabel="前のタスク" disabled>
+              <template #icon><ChevronUp class="size-4" aria-hidden="true" /></template>
             </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              class="size-7"
-              aria-label="次のタスク"
-              disabled
-            >
-              <ChevronDown class="size-4" aria-hidden="true" />
+            <Button type="button" variant="ghost" ariaLabel="次のタスク" disabled>
+              <template #icon><ChevronDown class="size-4" aria-hidden="true" /></template>
             </Button>
 
             <div class="ml-auto flex items-center gap-1">
               <Button
                 type="button"
                 variant="ghost"
-                size="sm"
-                class="mr-1 h-7 gap-1.5 px-2 font-mono text-sm font-normal text-muted-foreground"
-                :aria-label="
-                  copyState === 'copied'
-                    ? 'タスクIDをコピーしました'
-                    : copyState === 'error'
-                      ? 'タスクIDをコピーできませんでした'
-                      : `タスクID ${taskSeqKey(projectKey, task.seq_id)} をコピー`
-                "
+                class="mr-1"
+                :label="taskSeqKey(projectKey, task.seq_id)"
+                :ariaLabel="copyTaskIdLabel(copyState, taskSeqKey(projectKey, task.seq_id))"
                 @click="copyTaskId(taskSeqKey(projectKey, task.seq_id))"
               >
-                {{ taskSeqKey(projectKey, task.seq_id) }}
-                <Check v-if="copyState === 'copied'" class="size-3.5" aria-hidden="true" />
-                <X v-else-if="copyState === 'error'" class="size-3.5" aria-hidden="true" />
-                <Copy v-else class="size-3.5" aria-hidden="true" />
+                <template #icon>
+                  <Check v-if="copyState === 'copied'" class="size-3.5" aria-hidden="true" />
+                  <X v-else-if="copyState === 'error'" class="size-3.5" aria-hidden="true" />
+                  <Copy v-else class="size-3.5" aria-hidden="true" />
+                </template>
               </Button>
-              <Button
-                type="button"
+              <Button type="button" variant="ghost" ariaLabel="スター" disabled>
+                <template #icon><Star class="size-4" aria-hidden="true" /></template>
+              </Button>
+              <Button type="button" variant="tertiary" disabled label="共有">
+                <template #icon><UserPlus class="size-4" aria-hidden="true" /></template>
+              </Button>
+              <Dropdown
+                top-layer
                 variant="ghost"
-                size="icon"
-                class="size-7"
-                aria-label="スター"
-                disabled
+                ariaLabel="タスク操作"
+                :disabled="deleteDisabled"
+                :items="TASK_ACTION_ITEMS"
+                :on-select="() => emit('delete-request')"
               >
-                <Star class="size-4" aria-hidden="true" />
-              </Button>
-              <Button type="button" variant="outline" size="sm" class="h-7 gap-1.5 px-2" disabled>
-                <UserPlus class="size-4" aria-hidden="true" />
-                共有
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger as-child>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    class="size-7"
-                    aria-label="タスク操作"
-                    :disabled="deleteDisabled"
-                  >
-                    <EllipsisVertical class="size-4" aria-hidden="true" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem variant="destructive" @select="emit('delete-request')">
-                    削除
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                <template #icon><EllipsisVertical class="size-4" aria-hidden="true" /></template>
+              </Dropdown>
               <slot name="header-actions" />
             </div>
           </header>
@@ -477,14 +587,15 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
             <div>
               <div v-if="editingField === 'title'" class="flex flex-col gap-1">
                 <Input
-                  v-model="draftValue"
                   ref="editingControlRef"
                   data-editing="title"
-                  class="h-auto py-1 text-2xl font-semibold md:text-2xl"
+                  class="font-semibold [--koyori-font-size-sm:1.5rem]"
                   :disabled="isFieldUpdating('title')"
                   aria-label="タイトル"
+                  :value="draftValue"
+                  :on-value-change="(v: string) => (draftValue = v)"
+                  :on-blur="() => commitEditing('title')"
                   @keydown="onEditKeydown($event, 'title')"
-                  @blur="commitEditing('title')"
                 />
               </div>
               <button
@@ -494,7 +605,10 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
                 :disabled="isFieldUpdating('title')"
                 @click="startEditing('title')"
               >
-                <h1 class="text-2xl font-semibold tracking-tight">{{ task.title }}</h1>
+                <!-- flex の子は min-w-0 が無いと縮まず、スペースのない URL が折り返さない -->
+                <h1 class="min-w-0 text-2xl font-semibold tracking-tight break-words">
+                  {{ task.title }}
+                </h1>
                 <Pencil
                   class="mt-1.5 size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
                   aria-hidden="true"
@@ -502,6 +616,14 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
               </button>
               <p v-if="fieldError('title')" class="mt-1 text-xs text-destructive">
                 {{ fieldError('title') }}
+                <Button
+                  v-if="canResume('title')"
+                  type="button"
+                  variant="ghost"
+                  label="編集を再開"
+                  ariaLabel="タイトルの編集を再開"
+                  @click="startEditing('title')"
+                />
               </p>
               <p
                 v-else-if="savedField === 'title'"
@@ -525,45 +647,28 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
                       右の矢印はワークフロー順の次へ 1 つ進める（入れ子のボタンは作れないので
                       見た目だけ 1 つの器に見せる）。
                     -->
-                    <div
-                      class="inline-flex h-7 max-w-full items-center overflow-hidden rounded bg-muted"
-                    >
-                      <DropdownMenu>
-                        <DropdownMenuTrigger as-child>
-                          <button
-                            type="button"
-                            role="combobox"
-                            aria-label="ステータス"
-                            :aria-expanded="false"
-                            class="inline-flex h-7 max-w-full items-center px-2 text-xs font-semibold uppercase tracking-wide hover:bg-muted-foreground/10 disabled:opacity-50"
-                            :disabled="statusUpdating"
-                          >
-                            <span class="truncate">{{ resolvedStatus?.name ?? '未設定' }}</span>
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start">
-                          <DropdownMenuCheckboxItem
-                            v-for="status in statuses"
-                            :key="status.id"
-                            :model-value="status.id === statusId"
-                            :disabled="statusUpdating"
-                            @update:model-value="emit('update:statusId', status.id)"
-                          >
-                            <span
-                              v-if="status.color"
-                              class="inline-block size-2.5 shrink-0 rounded-full"
-                              :style="{ backgroundColor: status.color }"
-                              aria-hidden="true"
-                            />
-                            {{ status.name }}
-                          </DropdownMenuCheckboxItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                    <div class="inline-flex h-7 max-w-full items-center rounded bg-muted">
+                      <!-- 一覧は根の中に出るので、器で切り取らない（overflow-hidden を付けない） -->
+                      <Dropdown
+                        top-layer
+                        class="min-w-0"
+                        label="ステータス"
+                        :disabled="statusUpdating"
+                        :icon="null"
+                        :items="statusItems"
+                        :on-select="(id: string) => emit('update:statusId', id)"
+                      >
+                        <template #trigger>
+                          <span class="truncate text-xs font-semibold uppercase tracking-wide">{{
+                            resolvedStatus?.name ?? '未設定'
+                          }}</span>
+                        </template>
+                      </Dropdown>
 
                       <button
                         v-if="nextStatus"
                         type="button"
-                        class="inline-flex h-7 items-center border-l border-background/60 px-1.5 hover:bg-muted-foreground/10 disabled:opacity-50"
+                        class="inline-flex h-7 items-center rounded-r border-l border-background/60 px-1.5 hover:bg-muted-foreground/10 disabled:opacity-50"
                         :aria-label="`${nextStatus.name} にする`"
                         :title="`次へ: ${nextStatus.name}`"
                         :disabled="statusUpdating"
@@ -578,44 +683,90 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
                       v-if="doneStatus && doneStatus.id !== statusId"
                       type="button"
                       variant="ghost"
-                      size="icon"
-                      class="size-7"
-                      :aria-label="`${doneStatus.name} にする（完了）`"
+                      :ariaLabel="`${doneStatus.name} にする（完了）`"
                       :disabled="statusUpdating"
                       @click="emit('update:statusId', doneStatus.id)"
                     >
-                      <Check class="size-4" aria-hidden="true" />
+                      <template #icon><Check class="size-4" aria-hidden="true" /></template>
                     </Button>
                   </div>
                   <p v-if="statusError" class="mt-1 text-xs text-destructive">{{ statusError }}</p>
+                  <p
+                    v-else-if="savedField === 'status_id'"
+                    role="status"
+                    class="mt-1 text-xs text-muted-foreground"
+                  >
+                    保存しました
+                  </p>
                 </TaskPropertyRow>
 
                 <!-- 日付は 1 行に 2 つ（参照の Start → Due） -->
                 <TaskPropertyRow label="日付" :icon="CalendarDays">
                   <div class="flex flex-wrap items-center gap-1">
-                    <div v-if="editingField === 'soft_deadline'" class="flex items-center gap-1">
+                    <div v-if="editingField === 'planned_start_on'" class="flex items-center gap-1">
+                      <!-- koyori の Input は date に max / aria-invalid を付けない。期限より後かは保存時に止め、下の alert で知らせる -->
                       <Input
-                        v-model="draftValue"
                         ref="editingControlRef"
-                        data-editing="soft_deadline"
+                        data-editing="planned_start_on"
                         type="date"
-                        class="h-7 max-w-40"
-                        :disabled="isFieldUpdating('soft_deadline')"
-                        aria-label="ソフト期限"
-                        @keydown="onEditKeydown($event, 'soft_deadline')"
-                        @blur="commitEditing('soft_deadline')"
+                        class="max-w-40"
+                        :disabled="isFieldUpdating('planned_start_on')"
+                        aria-label="開始予定日"
+                        :value="draftValue"
+                        :on-value-change="(v: string) => (draftValue = v)"
+                        :on-blur="() => commitEditing('planned_start_on')"
+                        @keydown="onEditKeydown($event, 'planned_start_on')"
                       />
                       <Button
                         type="button"
                         variant="ghost"
-                        size="icon"
-                        class="size-7 shrink-0"
-                        aria-label="ソフト期限を消す"
+                        class="shrink-0"
+                        ariaLabel="開始予定日を消す"
+                        :disabled="isFieldUpdating('planned_start_on')"
+                        @mousedown.prevent
+                        @click="clearDeadline('planned_start_on')"
+                      >
+                        <template #icon><X class="size-4" aria-hidden="true" /></template>
+                      </Button>
+                    </div>
+                    <button
+                      v-else
+                      type="button"
+                      class="inline-flex h-7 items-center gap-1.5 rounded px-1.5 text-sm hover:bg-muted"
+                      :class="task.planned_start_on ? '' : 'text-muted-foreground'"
+                      aria-label="開始予定日を編集"
+                      :disabled="isFieldUpdating('planned_start_on')"
+                      @click="startEditing('planned_start_on')"
+                    >
+                      <CalendarDays class="size-4" aria-hidden="true" />
+                      {{ task.planned_start_on ?? '開始予定' }}
+                    </button>
+
+                    <ArrowRight class="size-3.5 text-muted-foreground" aria-hidden="true" />
+
+                    <div v-if="editingField === 'soft_deadline'" class="flex items-center gap-1">
+                      <Input
+                        ref="editingControlRef"
+                        data-editing="soft_deadline"
+                        type="date"
+                        class="max-w-40"
+                        :disabled="isFieldUpdating('soft_deadline')"
+                        aria-label="ソフト期限"
+                        :value="draftValue"
+                        :on-value-change="(v: string) => (draftValue = v)"
+                        :on-blur="() => commitEditing('soft_deadline')"
+                        @keydown="onEditKeydown($event, 'soft_deadline')"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        class="shrink-0"
+                        ariaLabel="ソフト期限を消す"
                         :disabled="isFieldUpdating('soft_deadline')"
                         @mousedown.prevent
                         @click="clearDeadline('soft_deadline')"
                       >
-                        <X class="size-4" aria-hidden="true" />
+                        <template #icon><X class="size-4" aria-hidden="true" /></template>
                       </Button>
                     </div>
                     <button
@@ -624,7 +775,9 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
                       class="inline-flex h-7 items-center gap-1.5 rounded px-1.5 text-sm hover:bg-muted"
                       :class="
                         task.soft_deadline
-                          ? formatDeadline(task.soft_deadline)?.overdue
+                          ? formatDeadline(task.soft_deadline, {
+                              done: resolvedStatus?.is_done_state,
+                            })?.overdue
                             ? 'text-destructive'
                             : ''
                           : 'text-muted-foreground'
@@ -634,34 +787,39 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
                       @click="startEditing('soft_deadline')"
                     >
                       <CalendarDays class="size-4" aria-hidden="true" />
-                      {{ formatDeadline(task.soft_deadline)?.label ?? '期限' }}
+                      {{
+                        formatDeadline(task.soft_deadline, {
+                          done: resolvedStatus?.is_done_state,
+                          completedAt: task.completed_at,
+                        })?.label ?? '期限'
+                      }}
                     </button>
 
                     <ArrowRight class="size-3.5 text-muted-foreground" aria-hidden="true" />
 
                     <div v-if="editingField === 'hard_deadline'" class="flex items-center gap-1">
                       <Input
-                        v-model="draftValue"
                         ref="editingControlRef"
                         data-editing="hard_deadline"
                         type="date"
-                        class="h-7 max-w-40"
+                        class="max-w-40"
                         :disabled="isFieldUpdating('hard_deadline')"
                         aria-label="ハード期限"
+                        :value="draftValue"
+                        :on-value-change="(v: string) => (draftValue = v)"
+                        :on-blur="() => commitEditing('hard_deadline')"
                         @keydown="onEditKeydown($event, 'hard_deadline')"
-                        @blur="commitEditing('hard_deadline')"
                       />
                       <Button
                         type="button"
                         variant="ghost"
-                        size="icon"
-                        class="size-7 shrink-0"
-                        aria-label="ハード期限を消す"
+                        class="shrink-0"
+                        ariaLabel="ハード期限を消す"
                         :disabled="isFieldUpdating('hard_deadline')"
                         @mousedown.prevent
                         @click="clearDeadline('hard_deadline')"
                       >
-                        <X class="size-4" aria-hidden="true" />
+                        <template #icon><X class="size-4" aria-hidden="true" /></template>
                       </Button>
                     </div>
                     <button
@@ -670,7 +828,9 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
                       class="inline-flex h-7 items-center gap-1.5 rounded px-1.5 text-sm hover:bg-muted"
                       :class="
                         task.hard_deadline
-                          ? formatDeadline(task.hard_deadline)?.overdue
+                          ? formatDeadline(task.hard_deadline, {
+                              done: resolvedStatus?.is_done_state,
+                            })?.overdue
                             ? 'text-destructive'
                             : ''
                           : 'text-muted-foreground'
@@ -680,17 +840,49 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
                       @click="startEditing('hard_deadline')"
                     >
                       <CalendarClock class="size-4" aria-hidden="true" />
-                      {{ formatDeadline(task.hard_deadline)?.label ?? 'ハード期限' }}
+                      {{
+                        formatDeadline(task.hard_deadline, {
+                          done: resolvedStatus?.is_done_state,
+                          completedAt: task.completed_at,
+                        })?.label ?? 'ハード期限'
+                      }}
                     </button>
                   </div>
                   <p
-                    v-if="fieldError('soft_deadline') || fieldError('hard_deadline')"
+                    v-if="plannedStartAfterSoft"
                     class="mt-1 text-xs text-destructive"
+                    role="alert"
                   >
-                    {{ fieldError('soft_deadline') ?? fieldError('hard_deadline') }}
+                    開始予定日が期限より後になっています
                   </p>
                   <p
-                    v-else-if="savedField === 'soft_deadline' || savedField === 'hard_deadline'"
+                    v-else-if="
+                      fieldError('planned_start_on') ||
+                      fieldError('soft_deadline') ||
+                      fieldError('hard_deadline')
+                    "
+                    class="mt-1 text-xs text-destructive"
+                  >
+                    {{
+                      fieldError('planned_start_on') ??
+                      fieldError('soft_deadline') ??
+                      fieldError('hard_deadline')
+                    }}
+                    <Button
+                      v-if="resumableDateField"
+                      type="button"
+                      variant="ghost"
+                      label="編集を再開"
+                      ariaLabel="日付の編集を再開"
+                      @click="startEditing(resumableDateField!)"
+                    />
+                  </p>
+                  <p
+                    v-else-if="
+                      savedField === 'planned_start_on' ||
+                      savedField === 'soft_deadline' ||
+                      savedField === 'hard_deadline'
+                    "
                     role="status"
                     class="mt-1 text-xs text-muted-foreground"
                   >
@@ -714,13 +906,22 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
                       右の × でまとめて外す。個別に外すのはメニューの中から。
                     -->
                     <div class="flex min-h-8 items-center gap-1 rounded hover:bg-muted">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger as-child>
-                          <button
-                            type="button"
-                            class="flex min-h-8 flex-1 flex-wrap items-center gap-1.5 px-2 py-1 text-left disabled:opacity-50"
-                            aria-label="ラベルを編集"
-                            :disabled="labelsUpdating || projectLabelsLoading"
+                      <!-- 更新中は項目だけを止める。Dropdown ごと disabled にすると一覧が閉じる -->
+                      <Dropdown
+                        top-layer
+                        class="min-w-0 flex-1 [&>button]:w-full"
+                        label="ラベルを編集"
+                        :icon="null"
+                        :disabled="projectLabelsLoading"
+                        :items="labelSections"
+                        :empty-message="
+                          projectLabelsError ? 'ラベルを読み込めませんでした' : 'ラベルがありません'
+                        "
+                        :on-select="(id: string) => toggleLabel(id, !hasLabel(id))"
+                      >
+                        <template #trigger>
+                          <span
+                            class="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 text-left"
                           >
                             <span v-if="!task.labels.length" class="text-muted-foreground">
                               未設定
@@ -737,88 +938,31 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
                               />
                               {{ label.name }}
                             </span>
-                          </button>
-                        </DropdownMenuTrigger>
-
-                        <DropdownMenuContent align="start" class="w-64">
-                          <!-- 選択済み。ここでは 1 件ずつ外せる -->
-                          <div
-                            v-if="task.labels.length"
-                            class="flex flex-wrap items-center gap-1.5 border-b p-2"
-                          >
-                            <span
-                              v-for="label in task.labels"
-                              :key="label.id"
-                              class="inline-flex items-center gap-1 rounded bg-muted px-2 py-0.5 text-xs"
-                            >
-                              <span
-                                class="inline-block size-2 rounded-full"
-                                :style="{ backgroundColor: label.color }"
-                                aria-hidden="true"
-                              />
-                              {{ label.name }}
-                              <button
-                                type="button"
-                                class="rounded-full text-muted-foreground hover:text-foreground"
-                                :aria-label="`${label.name} を外す`"
-                                :disabled="labelsUpdating"
-                                @click.stop="toggleLabel(label.id, false)"
-                              >
-                                <X class="size-3" aria-hidden="true" />
-                              </button>
-                            </span>
-                          </div>
-
-                          <div
-                            class="flex items-center justify-between px-2 py-1.5 text-xs text-muted-foreground"
-                          >
-                            選択してください
-                            <!-- ラベルの管理はプロジェクト設定にあるので、ここでは出口を置くだけ -->
-                            <Settings class="size-3.5" aria-hidden="true" />
-                          </div>
-
-                          <p v-if="projectLabelsError" class="px-2 py-1.5 text-sm text-destructive">
-                            ラベルを読み込めませんでした
-                          </p>
-                          <p
-                            v-else-if="!projectLabels?.length"
-                            class="px-2 py-1.5 text-sm text-muted-foreground"
-                          >
-                            ラベルがありません
-                          </p>
-                          <DropdownMenuCheckboxItem
-                            v-for="label in projectLabels"
-                            :key="label.id"
-                            :model-value="task.labels.some((l) => l.id === label.id)"
-                            :disabled="labelsUpdating || projectLabelsError"
-                            @select="(event: Event) => event.preventDefault()"
-                            @update:model-value="(v) => toggleLabel(label.id, !!v)"
-                          >
-                            <span
-                              class="inline-block size-2.5 shrink-0 rounded-full"
-                              :style="{ backgroundColor: label.color }"
-                              aria-hidden="true"
-                            />
-                            {{ label.name }}
-                          </DropdownMenuCheckboxItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                          </span>
+                        </template>
+                      </Dropdown>
 
                       <Button
                         v-if="task.labels.length"
                         type="button"
                         variant="ghost"
-                        size="icon"
-                        class="size-7 shrink-0 text-muted-foreground"
-                        aria-label="ラベルをすべて外す"
+                        class="shrink-0"
+                        ariaLabel="ラベルをすべて外す"
                         :disabled="labelsUpdating"
                         @click="emit('save:label_ids', [])"
                       >
-                        <X class="size-4" aria-hidden="true" />
+                        <template #icon><X class="size-4" aria-hidden="true" /></template>
                       </Button>
                     </div>
                     <p v-if="labelsError" class="mt-1 text-xs text-destructive">
                       {{ labelsError }}
+                    </p>
+                    <p
+                      v-else-if="savedField === 'labels'"
+                      role="status"
+                      class="mt-1 text-xs text-muted-foreground"
+                    >
+                      保存しました
                     </p>
                   </TaskPropertyRow>
                 </div>
@@ -833,6 +977,7 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
                 >
                   <!-- メンバーを渡された消費側では選び直せる。渡されなければ表示だけ -->
                   <TaskAssigneePicker
+                    top-layer
                     v-if="members"
                     :members="members"
                     :selected="task.assignees.map((assignee) => assignee.user)"
@@ -842,9 +987,31 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
                   />
                   <AvatarGroup
                     v-else-if="task.assignees.length"
-                    hide-names
-                    :users="task.assignees.map((assignee) => assignee.user)"
+                    label="担当者"
+                    :items="
+                      task.assignees.map(({ user }) => ({
+                        name: user.username,
+                        src: user.avatar_url ?? undefined,
+                      }))
+                    "
+                    :max="3"
+                    :size="28"
                   />
+                  <!-- ピッカーのトリガーはボタンなので、リンクは中に入れず横に並べる -->
+                  <div
+                    v-if="profileHref && task.assignees.length"
+                    class="mt-1 flex flex-wrap gap-x-2 text-xs"
+                    data-assignee-profile-links
+                  >
+                    <a
+                      v-for="assignee in task.assignees"
+                      :key="assignee.user.id"
+                      :href="profileHref(assignee.user.id)"
+                      class="text-muted-foreground hover:text-foreground hover:underline"
+                    >
+                      {{ assignee.user.username }}
+                    </a>
+                  </div>
                   <p v-if="assigneeError" class="mt-1 text-xs text-destructive">
                     {{ assigneeError }}
                   </p>
@@ -853,60 +1020,57 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
                 <TaskPropertyRow label="優先度" :icon="Flag">
                   <!--
                     ステータスと同じピル + メニューで変える（#665 の native select から
-                    参照デザインへ載せ替え）。旗と文字色は優先度ごとの色で出す。
+                    参照デザインへ載せ替え）。優先度の色は旗だけに載せる。文字に載せると
+                    「中」や「高」が読めない。
                   -->
-                  <DropdownMenu>
-                    <DropdownMenuTrigger as-child>
-                      <button
-                        type="button"
-                        role="combobox"
-                        aria-label="優先度"
-                        :aria-expanded="false"
-                        class="inline-flex h-7 max-w-full items-center gap-1.5 rounded px-1.5 text-sm hover:bg-muted disabled:opacity-50"
-                        :style="{ color: PRIORITY_CONFIG[task.priority].color }"
-                        :disabled="priorityUpdating"
-                      >
-                        <Flag class="size-4" aria-hidden="true" />
-                        <span class="truncate">{{ PRIORITY_CONFIG[task.priority].label }}</span>
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start">
-                      <DropdownMenuCheckboxItem
-                        v-for="[value, config] in priorityOptions"
-                        :key="value"
-                        :model-value="value === task.priority"
-                        :disabled="priorityUpdating"
-                        @update:model-value="emit('change:priority', value)"
-                      >
-                        <component
-                          :is="config.icon"
+                  <Dropdown
+                    top-layer
+                    label="優先度"
+                    :icon="null"
+                    :disabled="priorityUpdating"
+                    :items="priorityItems"
+                    :on-select="
+                      (value: string) => emit('change:priority', value as TaskDetail['priority'])
+                    "
+                  >
+                    <template #trigger>
+                      <span class="flex items-center gap-1.5">
+                        <Flag
                           class="size-4"
-                          :style="{ color: config.color }"
+                          :style="{ color: PRIORITY_CONFIG[task.priority].color }"
                           aria-hidden="true"
                         />
-                        {{ config.label }}
-                      </DropdownMenuCheckboxItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                        <span class="truncate">{{ PRIORITY_CONFIG[task.priority].label }}</span>
+                      </span>
+                    </template>
+                  </Dropdown>
                   <p v-if="priorityError" class="mt-1 text-xs text-destructive">
                     {{ priorityError }}
+                  </p>
+                  <p
+                    v-else-if="savedField === 'priority'"
+                    role="status"
+                    class="mt-1 text-xs text-muted-foreground"
+                  >
+                    保存しました
                   </p>
                 </TaskPropertyRow>
 
                 <TaskPropertyRow label="進捗" :icon="Percent">
                   <Input
                     v-if="editingField === 'progress_pct'"
-                    v-model="draftValue"
                     ref="editingControlRef"
                     data-editing="progress_pct"
                     type="number"
-                    min="0"
-                    max="100"
-                    class="h-7 max-w-24"
+                    :min="0"
+                    :max="100"
+                    class="max-w-24"
                     :disabled="isFieldUpdating('progress_pct')"
                     aria-label="進捗率"
+                    :value="draftValue"
+                    :on-value-change="(v: string) => (draftValue = v)"
+                    :on-blur="() => commitEditing('progress_pct')"
                     @keydown="onEditKeydown($event, 'progress_pct')"
-                    @blur="commitEditing('progress_pct')"
                   />
                   <button
                     v-else
@@ -919,6 +1083,14 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
                   </button>
                   <p v-if="fieldError('progress_pct')" class="mt-1 text-xs text-destructive">
                     {{ fieldError('progress_pct') }}
+                    <Button
+                      v-if="canResume('progress_pct')"
+                      type="button"
+                      variant="ghost"
+                      label="編集を再開"
+                      ariaLabel="進捗の編集を再開"
+                      @click="startEditing('progress_pct')"
+                    />
                   </p>
                   <p
                     v-else-if="savedField === 'progress_pct'"
@@ -939,28 +1111,20 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
                   v-if="editingField === 'description' && task.description"
                   type="button"
                   variant="ghost"
-                  size="sm"
-                  class="h-7 px-2"
                   :disabled="isFieldUpdating('description')"
+                  label="クリア"
                   @mousedown.prevent
-                  @click="
-                    emit('save:description', null);
-                    cancelEditing();
-                  "
-                >
-                  クリア
-                </Button>
+                  @click="clearConfirmOpen = true"
+                />
                 <Button
                   v-else-if="editingField !== 'description' && freshDescriptionHtml"
                   type="button"
                   variant="ghost"
-                  size="icon"
-                  class="size-7"
-                  aria-label="説明を編集"
+                  ariaLabel="説明を編集"
                   :disabled="isFieldUpdating('description')"
                   @click="startEditing('description')"
                 >
-                  <Pencil class="size-4" aria-hidden="true" />
+                  <template #icon><Pencil class="size-4" aria-hidden="true" /></template>
                 </Button>
               </div>
 
@@ -972,9 +1136,10 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
                 :disabled="isFieldUpdating('description')"
                 aria-label="説明"
                 placeholder="markdown で書けます"
+                :candidates="members ?? []"
+                :mentions="task.mentions"
                 @keydown="onEditKeydown($event, 'description')"
                 @submit="commitEditing('description')"
-                @blur="commitEditing('description')"
               />
               <!--
               KFM 表示は非対話の div にする: 描画 HTML はリンク等の対話要素を含みうるため、
@@ -998,12 +1163,68 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
                 @click="startEditing('description')"
               >
                 <p v-if="task.description" class="whitespace-pre-wrap text-sm leading-relaxed">
-                  {{ task.description }}
+                  {{ plainDescription }}
                 </p>
                 <p v-else class="text-sm text-muted-foreground">説明を追加</p>
               </button>
+              <div v-if="editingField === 'description'" class="mt-2 flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="tertiary"
+                  :disabled="isFieldUpdating('description')"
+                  label="キャンセル"
+                  @click="requestCancelDescription"
+                />
+                <Button
+                  type="button"
+                  :disabled="isFieldUpdating('description')"
+                  label="保存"
+                  @click="commitEditing('description')"
+                />
+              </div>
+              <ConfirmDialog
+                :open="discardConfirmOpen"
+                title="編集を破棄しますか？"
+                message="説明の変更は保存されていません。破棄すると元に戻せません。"
+                confirm-label="破棄する"
+                destructive
+                :on-confirm="confirmDiscardDescription"
+                :on-cancel="cancelDiscardDescription"
+              />
+              <ConfirmDialog
+                :open="clearConfirmOpen"
+                title="説明を消しますか？"
+                message="説明をすべて消して保存します。この操作は取り消せません。"
+                confirm-label="消す"
+                destructive
+                :on-confirm="confirmClearDescription"
+                :on-cancel="() => (clearConfirmOpen = false)"
+              />
+              <!-- 概要へのリアクション。説明が空の間と編集中は出さない -->
+              <ReactionBar
+                v-if="reactionController && task.description && editingField !== 'description'"
+                class="mt-2"
+                :reactions="task.reactions"
+                can-react
+                always-show-add
+                :busy="reactionController.isBusy(null)"
+                :error="reactionController.errorFor(null)"
+                :fetch-users="(emoji) => reactionController!.fetchUsers(null, emoji)"
+                :profile-href="profileHref"
+                :current-user-id="currentUserId"
+                @toggle="reactionController.toggle(null, $event)"
+                @add="reactionController.toggle(null, $event)"
+              />
               <p v-if="fieldError('description')" class="mt-2 text-xs text-destructive">
                 {{ fieldError('description') }}
+                <Button
+                  v-if="canResume('description')"
+                  type="button"
+                  variant="ghost"
+                  label="編集を再開"
+                  ariaLabel="説明の編集を再開"
+                  @click="startEditing('description')"
+                />
               </p>
               <p
                 v-else-if="savedField === 'description'"
@@ -1017,15 +1238,10 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
             <!-- モックのうち未対応のアクション。サブタスクは直後の main slot で実装済み -->
             <ul class="flex flex-col gap-1">
               <li v-for="action in PENDING_ACTIONS" :key="action.label">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  class="h-8 w-full justify-start gap-2 px-2 text-sm font-normal text-muted-foreground"
-                  disabled
-                >
-                  <component :is="action.icon" class="size-4" aria-hidden="true" />
-                  {{ action.label }}
+                <Button type="button" variant="ghost" class="w-full" :label="action.label" disabled>
+                  <template #icon>
+                    <component :is="action.icon" class="size-4" aria-hidden="true" />
+                  </template>
                 </Button>
               </li>
             </ul>
@@ -1054,26 +1270,7 @@ function clearDeadline(field: 'soft_deadline' | 'hard_deadline') {
           >
             <h2 class="text-sm font-semibold">アクティビティ</h2>
             <div class="ml-auto flex items-center gap-0.5">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                class="size-7"
-                aria-label="アクティビティを検索"
-                disabled
-              >
-                <Search class="size-4" aria-hidden="true" />
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                class="size-7"
-                aria-label="アクティビティを絞り込む"
-                disabled
-              >
-                <Filter class="size-4" aria-hidden="true" />
-              </Button>
+              <slot name="sidebar-actions" />
             </div>
           </div>
 

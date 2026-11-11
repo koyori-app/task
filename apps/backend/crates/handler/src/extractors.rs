@@ -18,10 +18,12 @@ use crate::auth_helpers::{
     explicit_member_project_ids, is_shared_project_explicit_member, is_tenant_member,
     project_is_open_or_member,
 };
+use crate::middlewares::sentry_context;
 use crate::{AppState, error::AppError};
 use service::auth::{
     AuthError, DEVICE_TOKEN_PREFIX, authenticate_device_token, authenticate_personal_token,
 };
+use service::login_session::user_satisfies_2fa;
 
 type Session = axum_session::Session<SessionRedisPool>;
 
@@ -42,6 +44,9 @@ async fn user_from_session(session: &Session, state: &AppState) -> Result<users:
         .await?
         .ok_or(AuthError::Unauthorized)?;
 
+    if user.is_bot() {
+        return Err(AuthError::Forbidden);
+    }
     if let Some(revoked_at) = user.sessions_revoked_at
         && issued_at_ms < revoked_at.timestamp_millis()
     {
@@ -128,7 +133,22 @@ impl AuthUser {
     /// テナントオーナー専用操作向け。PAT 境界チェック + オーナー確認を一括実施し、
     /// テナントモデルを返す（呼び出し側で再取得不要）。
     /// `ensure_tenant_access` + `owner_id` 二重チェックの代替として使用する。
+    /// テナントが 2FA を強制していれば、オーナー本人も 2FA を満たす必要がある。
     pub async fn ensure_tenant_owner(
+        &self,
+        state: &AppState,
+        tenant_id: Uuid,
+    ) -> Result<tenants::Model, AppError> {
+        let tenant = self
+            .ensure_tenant_owner_skipping_2fa(state, tenant_id)
+            .await?;
+        ensure_tenant_2fa(state, &tenant, self.user_id).await?;
+        Ok(tenant)
+    }
+
+    /// `ensure_tenant_owner` から 2FA 強制の判定だけを除いたもの。
+    /// 2FA の無いオーナーが強制を無効化できるようにする救済経路（`set_tenant_require_2fa`）専用。
+    pub async fn ensure_tenant_owner_skipping_2fa(
         &self,
         state: &AppState,
         tenant_id: Uuid,
@@ -155,13 +175,43 @@ impl AuthUser {
         if tenant.owner_id != self.user_id {
             return Err(AppError::Forbidden);
         }
+        sentry_context::set_tenant(tenant_id);
         Ok(tenant)
+    }
+
+    /// 所属判定（`ensure_tenant_access`）を通らずに通す口（ファイル本文の配信など）向け:
+    /// テナントが 2FA を強制していれば、本人が 2FA を満たすかだけを確かめる。
+    pub async fn ensure_tenant_2fa(
+        &self,
+        state: &AppState,
+        tenant_id: Uuid,
+    ) -> Result<(), AppError> {
+        let tenant = tenants::Entity::find_by_id(tenant_id)
+            .one(&state.db)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        ensure_tenant_2fa(state, &tenant, self.user_id).await
     }
 
     /// テナント / プロジェクト境界チェック。
     pub async fn ensure_tenant_access(
         &self,
         state: &AppState,
+        tenant_id: Uuid,
+        project_id: Option<Uuid>,
+    ) -> Result<(), AppError> {
+        self.ensure_token_binding(tenant_id, project_id)?;
+
+        // PAT のバインドは「どのテナントを触れるか」の制限であって、所属の証明ではない。
+        // テナントから外した利用者のトークンが読み取りを保持しないよう、
+        // 所属判定はセッションと同じ経路に通す。
+        has_tenant_access(state, self.user_id, tenant_id, project_id).await
+    }
+
+    /// PAT の束縛（`tenant_id` / `allowed_project_ids`）だけを突き合わせる。所属判定はしない。
+    /// セッションと Device Token は束縛を持たないので常に通る。
+    pub fn ensure_token_binding(
+        &self,
         tenant_id: Uuid,
         project_id: Option<Uuid>,
     ) -> Result<(), AppError> {
@@ -187,11 +237,7 @@ impl AuthUser {
                 None => {}
             }
         }
-
-        // PAT のバインドは「どのテナントを触れるか」の制限であって、所属の証明ではない。
-        // テナントから外した利用者のトークンが読み取りを保持しないよう、
-        // 所属判定はセッションと同じ経路に通す。
-        has_tenant_access(state, self.user_id, tenant_id, project_id).await
+        Ok(())
     }
 
     /// テナント一覧系の 2 口（プロジェクト一覧・My Tasks）専用: 通常の所属判定に加えて
@@ -213,10 +259,11 @@ impl AuthUser {
             Err(AppError::ForbiddenDetail(detail)) if detail == "tenant-membership-missing" => {
                 let ids = explicit_member_project_ids(&state.db, tenant_id, self.user_id).await?;
                 if ids.is_empty() {
-                    Err(AppError::ForbiddenDetail(detail))
-                } else {
-                    Ok(Some(ids))
+                    return Err(AppError::ForbiddenDetail(detail));
                 }
+                self.ensure_tenant_2fa(state, tenant_id).await?;
+                sentry_context::set_tenant(tenant_id);
+                Ok(Some(ids))
             }
             Err(e) => Err(e),
         }
@@ -245,9 +292,12 @@ async fn verify_project_in_tenant(
 ///
 /// project にだけ参加しテナントに参加しない客分（project-only guest）は、
 /// 名指しされたプロジェクトの中だけ通る。名指しの無いテナント全体の口は従来どおり 403
-/// （apps/backend/docs/tenant-project-authz.md の「所属の 3 層」）。
+/// （docs/dev/design/tenant-project-authz.md の「継承と明示」）。
 /// 一覧系 2 口（プロジェクト一覧・My Tasks）の客分への絞り込み開放は
 /// `ensure_tenant_access_or_guest_scope` が別途担う。
+///
+/// 所属があっても、テナントが 2FA を強制していて利用者が 2FA を満たさなければ 403
+/// （`2fa-setup-required`）。強制前に得たセッション・PAT・Device Token もここで止める。
 async fn has_tenant_access(
     state: &AppState,
     user_id: Uuid,
@@ -258,7 +308,49 @@ async fn has_tenant_access(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
+    // 2FA は所属が決まった後に見る（無関係な利用者へテナントの強制設定を漏らさない）
+    has_tenant_membership(state, &tenant, user_id, project_id).await?;
+    ensure_tenant_2fa(state, &tenant, user_id).await?;
+    sentry_context::set_tenant(tenant_id);
+    Ok(())
+}
 
+/// テナントが 2FA を強制していれば、利用者が 2FA を満たすかを確かめる
+/// （docs/dev/features/auth/2fa.md の「リクエストごとの判定」）。強制していないテナントでは DB を引かない。
+///
+/// BOT は強制の対象から外す。BOT は TOTP もパスキーも持てず（migration の制約と、登録が人の
+/// セッション限りであるため）、セッションにも入れない。2FA は人の対話のサインインを守る物で、
+/// BOT は PAT でしか入らない。BOT の PAT を発行できるのは 2FA を満たした人の Admin だけ
+/// （`handlers::bots`）なので、強制の意図は発行の所で保たれる。人の PAT は従来どおり止める。
+pub(crate) async fn ensure_tenant_2fa(
+    state: &AppState,
+    tenant: &tenants::Model,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    if !tenant.require_2fa || is_bot_user(state, user_id).await? {
+        return Ok(());
+    }
+    if !user_satisfies_2fa(&state.db, user_id).await? {
+        return Err(AppError::ForbiddenDetail("2fa-setup-required".into()));
+    }
+    Ok(())
+}
+
+async fn is_bot_user(state: &AppState, user_id: Uuid) -> Result<bool, AppError> {
+    Ok(users::Entity::find_by_id(user_id)
+        .one(&state.db)
+        .await?
+        .is_some_and(|user| user.is_bot()))
+}
+
+/// `has_tenant_access` の所属判定（オーナー・テナントメンバー・客分）。
+async fn has_tenant_membership(
+    state: &AppState,
+    tenant: &tenants::Model,
+    user_id: Uuid,
+    project_id: Option<Uuid>,
+) -> Result<(), AppError> {
+    let tenant_id = tenant.id;
     if tenant.owner_id == user_id {
         if let Some(pid) = project_id {
             verify_project_in_tenant(state, tenant_id, pid).await?;
@@ -330,60 +422,70 @@ impl FromRequestParts<AppState> for AuthUser {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        if let Some(token) = bearer_token_from_parts(parts)
-            && token.starts_with(DEVICE_TOKEN_PREFIX)
-        {
-            device_token_user(state, &token).await
-        } else if let Some(token) = bearer_token_from_parts(parts) {
-            let record = authenticate_personal_token(
-                &state.db,
-                &state.settings.personal_token_secret,
-                &token,
-            )
-            .await?;
-            let user = users::Entity::find_by_id(record.user_id)
-                .one(&state.db)
-                .await?
-                .ok_or(AuthError::Unauthorized)?;
-            if user.is_suspended {
-                return Err(AuthError::Suspended);
-            }
-            Ok(AuthUser {
-                user_id: record.user_id,
-                username: user.username,
-                method: AuthMethod::PersonalToken {
-                    token_id: record.id,
-                    token_name: record.name,
-                    tenant_id: record.tenant_id,
-                    allowed_project_ids: match record.allowed_project_ids.as_ref() {
-                        None => None,
-                        Some(v) => {
-                            entity::personal_tokens::parse_allowed_project_ids(v).map_err(|e| {
-                                AuthError::Internal(anyhow::anyhow!(
-                                    "allowed_project_ids parse error: {e}"
-                                ))
-                            })?
-                        }
-                    },
-                    scopes: record.scopes,
-                    expires_at: record.expires_at,
-                },
-            })
-        } else {
-            let session = session_from_parts(parts, state).await?;
-            if session_is_half_authed(&session) {
-                return Err(AuthError::Forbidden);
-            }
-            let user = user_from_session(&session, state).await?;
-            if user.is_suspended {
-                return Err(AuthError::Suspended);
-            }
-            Ok(AuthUser {
-                user_id: user.id,
-                username: user.username,
-                method: AuthMethod::Session,
-            })
+        let auth = authenticate(parts, state).await?;
+        sentry_context::set_user(auth.user_id);
+        // 他の認証方式のテナントは、アクセスを確かめる時点（`has_tenant_access` など）で載せる
+        if let AuthMethod::PersonalToken { tenant_id, .. } = &auth.method {
+            sentry_context::set_tenant(*tenant_id);
         }
+        Ok(auth)
+    }
+}
+
+async fn authenticate(parts: &mut Parts, state: &AppState) -> Result<AuthUser, AuthError> {
+    if let Some(token) = bearer_token_from_parts(parts)
+        && token.starts_with(DEVICE_TOKEN_PREFIX)
+    {
+        device_token_user(state, &token).await
+    } else if let Some(token) = bearer_token_from_parts(parts) {
+        let record =
+            authenticate_personal_token(&state.db, &state.settings.personal_token_secret, &token)
+                .await?;
+        let user = users::Entity::find_by_id(record.user_id)
+            .one(&state.db)
+            .await?
+            .ok_or(AuthError::Unauthorized)?;
+        if user.is_suspended {
+            return Err(AuthError::Suspended);
+        }
+        if user.is_bot() && user.bot_tenant_id != Some(record.tenant_id) {
+            return Err(AuthError::Forbidden);
+        }
+        Ok(AuthUser {
+            user_id: record.user_id,
+            username: user.username,
+            method: AuthMethod::PersonalToken {
+                token_id: record.id,
+                token_name: record.name,
+                tenant_id: record.tenant_id,
+                allowed_project_ids: match record.allowed_project_ids.as_ref() {
+                    None => None,
+                    Some(v) => {
+                        entity::personal_tokens::parse_allowed_project_ids(v).map_err(|e| {
+                            AuthError::Internal(anyhow::anyhow!(
+                                "allowed_project_ids parse error: {e}"
+                            ))
+                        })?
+                    }
+                },
+                scopes: record.scopes,
+                expires_at: record.expires_at,
+            },
+        })
+    } else {
+        let session = session_from_parts(parts, state).await?;
+        if session_is_half_authed(&session) {
+            return Err(AuthError::Forbidden);
+        }
+        let user = user_from_session(&session, state).await?;
+        if user.is_bot() || user.is_suspended {
+            return Err(AuthError::Suspended);
+        }
+        Ok(AuthUser {
+            user_id: user.id,
+            username: user.username,
+            method: AuthMethod::Session,
+        })
     }
 }
 
@@ -394,7 +496,7 @@ async fn device_token_user(state: &AppState, token: &str) -> Result<AuthUser, Au
         .one(&state.db)
         .await?
         .ok_or(AuthError::Unauthorized)?;
-    if user.is_suspended {
+    if user.is_bot() || user.is_suspended {
         return Err(AuthError::Suspended);
     }
     // 交換中に全失効された場合も、コードの承認時刻を基準に端末を落とす。
@@ -441,7 +543,7 @@ impl FromRequestParts<AppState> for HalfAuthedUser {
             .await?
             .ok_or(AuthError::Unauthorized)?;
         // Suspend before session-revocation so admin suspend still returns 403 on 2FA verify.
-        if user.is_suspended {
+        if user.is_bot() || user.is_suspended {
             return Err(AuthError::Suspended);
         }
         if let Some(revoked_at) = user.sessions_revoked_at
@@ -449,6 +551,7 @@ impl FromRequestParts<AppState> for HalfAuthedUser {
         {
             return Err(AuthError::Unauthorized);
         }
+        sentry_context::set_user(user.id);
         Ok(HalfAuthedUser { user_id: user.id })
     }
 }
@@ -470,9 +573,10 @@ impl FromRequestParts<AppState> for LoggedInUser {
         }
         let session = session_from_parts(parts, state).await?;
         let user = user_from_session(&session, state).await?;
-        if user.is_suspended {
+        if user.is_bot() || user.is_suspended {
             return Err(AuthError::Suspended);
         }
+        sentry_context::set_user(user.id);
         Ok(LoggedInUser { user_id: user.id })
     }
 }
@@ -489,22 +593,25 @@ impl FromRequestParts<AppState> for AdminUser {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        // PAT ではこのエンドポイント群を認証できない。従来もセッション不在で 401 を返して
-        // いたため、拒否のステータスは変えない。
+        // Bearer（PAT・Device Token）ではこのエンドポイント群を認証できない。無効なトークンは
+        // AuthUser が 401 を返し、有効なものは認証方式の不一致として 403 にする
+        // （Desktop は Device Token への 401 を失効とみなしてログアウトするため）。
         if bearer_token_from_parts(parts).is_some() {
-            return Err(AuthError::Unauthorized);
+            AuthUser::from_request_parts(parts, state).await?;
+            return Err(AuthError::Forbidden);
         }
         let session = session_from_parts(parts, state).await?;
         if session_is_half_authed(&session) {
             return Err(AuthError::Forbidden);
         }
         let user = user_from_session(&session, state).await?;
-        if user.is_suspended {
+        if user.is_bot() || user.is_suspended {
             return Err(AuthError::Suspended);
         }
         if !user.is_admin {
             return Err(AuthError::Forbidden);
         }
+        sentry_context::set_user(user.id);
         Ok(AdminUser { user_id: user.id })
     }
 }
@@ -527,19 +634,22 @@ impl FromRequestParts<AppState> for CurrentUser {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        // PAT ではこのエンドポイント群を認証できない。従来もセッション不在で 401 を返して
-        // いたため、拒否のステータスは変えない。
+        // Bearer（PAT・Device Token）ではこのエンドポイント群を認証できない。無効なトークンは
+        // AuthUser が 401 を返し、有効なものは認証方式の不一致として 403 にする
+        // （Desktop は Device Token への 401 を失効とみなしてログアウトするため）。
         if bearer_token_from_parts(parts).is_some() {
-            return Err(AuthError::Unauthorized);
+            AuthUser::from_request_parts(parts, state).await?;
+            return Err(AuthError::Forbidden);
         }
         let session = session_from_parts(parts, state).await?;
         if session_is_half_authed(&session) {
             return Err(AuthError::Forbidden);
         }
         let user = user_from_session(&session, state).await?;
-        if user.is_suspended {
+        if user.is_bot() || user.is_suspended {
             return Err(AuthError::Suspended);
         }
+        sentry_context::set_user(user.id);
         Ok(CurrentUser(user))
     }
 }

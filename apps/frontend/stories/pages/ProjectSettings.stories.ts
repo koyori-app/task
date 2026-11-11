@@ -279,15 +279,11 @@ export const WorkflowListAndUuidResolution: Story = {
     const user = userEvent.setup();
     await user.click(await canvas.findByRole('button', { name: 'ワークフロー' }));
     await expect(canvas.findByLabelText('レビュー中の名前')).resolves.toHaveValue('レビュー中');
+    await expect(canvas.getAllByRole('checkbox', { name: 'Default', checked: true })).toHaveLength(
+      1,
+    );
     await expect(
-      canvas
-        .getAllByRole('checkbox', { name: 'Default' })
-        .filter((checkbox) => checkbox.getAttribute('aria-checked') === 'true'),
-    ).toHaveLength(1);
-    await expect(
-      canvas
-        .getAllByRole('checkbox', { name: 'Done state' })
-        .filter((checkbox) => checkbox.getAttribute('aria-checked') === 'true'),
+      canvas.getAllByRole('checkbox', { name: 'Done state', checked: true }),
     ).toHaveLength(1);
 
     const statusesRequest = (fetchSpy!.mock.calls as [Request | string][])

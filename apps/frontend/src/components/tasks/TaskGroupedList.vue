@@ -1,21 +1,19 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, shallowRef, watch, type Ref } from 'vue';
+import {
+  handleNodePointerdown,
+  isDragState,
+  isSynthDragState,
+  state as dndState,
+} from '@formkit/drag-and-drop';
 import { dragAndDrop } from '@formkit/drag-and-drop/vue';
-import { emitTransferAsStatusChange } from '@/components/tasks/task-grouped-dnd';
+import { useEventListener } from '@vueuse/core';
+import { canStartRowDrag, statusIdAt } from '@/components/tasks/task-grouped-dnd';
 import { PhCaretDown, PhPlus } from '@phosphor-icons/vue';
 import { CornerDownLeft } from '@lucide/vue';
 import { PhCalendarPlus, PhFlag, PhTag } from '@phosphor-icons/vue';
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Button, Dropdown, Input, type DropdownItem } from '@koyori-app/ui-vue';
 import TaskGroupedRow from '@/components/tasks/TaskGroupedRow.vue';
 import TaskSubtaskBranch from '@/components/tasks/TaskSubtaskBranch.vue';
 import type { components } from '@/generated/api';
@@ -27,7 +25,7 @@ import {
   type ApiPriority as TaskPriority,
 } from '@/lib/task-display';
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
-import { TASK_ROW_GRID } from '@/components/tasks/task-grouped-columns';
+import { TASK_HEADER_GRID } from '@/components/tasks/task-grouped-columns';
 import TaskListSortHeader from '@/components/tasks/TaskListSortHeader.vue';
 import {
   TASK_LIST_SORT_COLUMNS,
@@ -41,6 +39,8 @@ type ProjectMember = { id: string; username: string; avatar_url?: string | null 
 
 const props = defineProps<{
   groups: TaskGroup[];
+  /** タスク ID（`KEY-N`）を組み立てるプロジェクトキー */
+  projectKey: string;
   tenantId: string | null | undefined;
   projectId: string | null | undefined;
   labelId?: string | null;
@@ -80,13 +80,20 @@ const emit = defineEmits<{
 }>();
 
 // ---- 群のあいだの DnD（@formkit/drag-and-drop） ----
-// 正本は親（query cache）である。lib には群ごとの鏡写しを渡し、
-// 群をまたいだ transfer だけを onMoveStatus として親へ流す。
+// 正本は親（query cache）である。lib には群ごとの鏡写しを渡す。
 // 群の中の並べ替えは保存先（タスクの順序欄が API に無い）ゆえ扱わぬ。
+//
+// lib に任せるのは掴むところ（ドラッグ像・長押し・自動スクロール）までで、行き先と確定は
+// ここで持つ。lib の transfer は行の上の dragover で即座に行を動かして確定する作りで、
+// 落とせるのが行の上に限られ、通っただけの群へ保存が飛ぶ。
 /** タッチで行を掴むまでの長押し時間。lib の既定（1 秒）では長すぎ、OS の長押しメニューに負ける */
 const TOUCH_DRAG_LONG_PRESS_MS = 300;
 const dndValues = new Map<string, Ref<TaskResponse[]>>();
 const dndRegistered = new Set<string>();
+/** ポインターのいる群。掴んだ行の元の群と群の外では null。強調に使う */
+const dropTargetStatusId = ref<string | null>(null);
+/** 落とされた群。lib の後始末が済む onDragend で確定する（取り消しでは入らない） */
+let droppedStatusId: string | null = null;
 
 function dndTasksOf(group: TaskGroup): TaskResponse[] {
   return dndValues.get(group.status.id)?.value ?? group.tasks;
@@ -102,36 +109,86 @@ function registerDndGroup(statusId: string, el: unknown) {
   dragAndDrop<TaskResponse>({
     parent: shallowRef(el),
     values,
-    group: 'task-grouped-list',
-    // 群の中の並べ替えは扱わぬ（タスクの手動順序を持つ欄が API に無い）。
-    // 見た目だけ動いて戻るのも紛らわしいゆえ、lib 段で止める。
+    // 群の中の並べ替えも群をまたぐ transfer も lib では起こさない。
     sortable: false,
+    dropZone: false,
     draggable: (child) => child.hasAttribute('data-dnd-task'),
     // タッチでは長押ししてから動かしたときだけ掴む。lib の既定は指が動いた瞬間に
     // 掴んで touchmove を preventDefault するので、行の上から始めたスクロールが
     // すべて drag になる（行がリストのほぼ全面を覆う）。マウスは native drag なので影響なし
     longPress: true,
     longPressDuration: TOUCH_DRAG_LONG_PRESS_MS,
-    onTransfer: (data) =>
-      emitTransferAsStatusChange(data, (task, statusId) => {
-        // 成否は親が表示する（行の下のエラー）。ここで reject を握らないと、
-        // lib の handler から出た Promise は誰にも待たれず unhandled rejection になる。
-        moveStatus(task, statusId).catch(() => {});
-      }),
+    // 掴めるかは押した場所で決める。lib の既定は行の中へのフォーカスで draggable を
+    // 切るが、行は tabindex を持ちボタンも並ぶので、未フォーカスの行は押した瞬間に
+    // 掴めなくなり、文字の選択が始まる（ブラウザを問わない）。
+    handleNodeFocus: () => {},
+    handleNodeBlur: () => {},
+    handleNodePointerdown: (data, state) => {
+      const canDrag = canStartRowDrag(data.e.target);
+      data.targetData.node.el.draggable = canDrag;
+      if (canDrag) handleNodePointerdown(data, state);
+    },
+    onDragend: ({ draggedNode }) => {
+      const statusId = droppedStatusId;
+      droppedStatusId = null;
+      dropTargetStatusId.value = null;
+      if (statusId) moveRow(draggedNode.data.value as TaskResponse, statusId);
+    },
   });
 }
 
+function trackDropTarget(el: EventTarget | null) {
+  if (!isDragState(dndState)) return;
+  const statusId = statusIdAt(el);
+  const task = dndState.draggedNode.data.value as TaskResponse;
+  // 保存中の行は status_id が古く、その群にもう居ない。動かすと行が重複するので落とし先を持たせない
+  const saving = !dndValues.get(task.status_id)?.value.some((row) => row.id === task.id);
+  dropTargetStatusId.value = saving || statusId === task.status_id ? null : statusId;
+}
+
+function dropOn(el: EventTarget | null) {
+  trackDropTarget(el);
+  droppedStatusId = dropTargetStatusId.value;
+}
+
+// 行とその親の handler が stopPropagation するので、window の capture で先に受ける。
+const CAPTURE = { capture: true };
+// native drag（マウス）。lib が dragenter を止めるのは行の上だけで、WebKit は止まっていない
+// 要素へ入った直後に離すと drop を出さない（Chromium と Firefox は出す）。
+useEventListener('dragenter', (e) => isDragState(dndState) && e.preventDefault(), CAPTURE);
+useEventListener('dragover', (e) => trackDropTarget(e.target), CAPTURE);
+useEventListener('drop', (e) => dropOn(e.target), CAPTURE);
+// lib の pointer drag（タッチ）。指の下の要素は target に出ないので座標から引く。
+useEventListener(
+  'pointermove',
+  (e) =>
+    isSynthDragState(dndState) && trackDropTarget(document.elementFromPoint(e.clientX, e.clientY)),
+  CAPTURE,
+);
+useEventListener(
+  'pointerup',
+  (e) => isSynthDragState(dndState) && dropOn(document.elementFromPoint(e.clientX, e.clientY)),
+  CAPTURE,
+);
+
+function moveRow(task: TaskResponse, statusId: string) {
+  const from = dndValues.get(task.status_id);
+  const to = dndValues.get(statusId);
+  if (from) from.value = from.value.filter((row) => row.id !== task.id);
+  if (to) to.value = [...to.value, task];
+  // 成否は親が表示する（行の下のエラー）。ここで reject を握らないと、
+  // lib の handler から出た Promise は誰にも待たれず unhandled rejection になる。
+  moveStatus(task, statusId).catch(() => {});
+}
+
 /**
- * lib は transfer の時点で DOM と鏡写しを先に動かしている。保存が失敗しても
- * 正本（props）は変わらないので下の watch は走らず、動いた行が残ってしまう。
- * そこで確定を待ってから、成否を問わず鏡写しを正本から引き直す。成功なら
- * 再取得の済んだ姿に、失敗なら元の姿になる。
+ * 落とした時点で鏡写しを先に動かす。保存が失敗しても正本（props）は変わらないので
+ * 下の watch は走らず、動いた行が残ってしまう。そこで確定を待ってから、成否を問わず
+ * 鏡写しを正本から引き直す。成功なら再取得の済んだ姿に、失敗なら元の姿になる。
  *
- * 引き直すのは、飛行中の移動がすべて確定したときだけにする。lib は 1 回の
- * ドラッグで transfer を 2 回出すことがあり（実測）、2 回目は親が送信中として
- * 何もせず即座に返す。その時点で引き直すと、再取得の前の姿へ一度戻ってから
- * 動き直す（二重に動く）。nextTick を挟むのも同じ理由で、再取得の結果が
- * props に届くのを待つため。
+ * 引き直すのは、飛行中の移動がすべて確定したときだけにする。別の行の保存が残って
+ * いるうちに引き直すと、その行が再取得の前の姿へ一度戻ってから動き直す（二重に動く）。
+ * nextTick を挟むのは、再取得の結果が props に届くのを待つため。
  */
 let movesInFlight = 0;
 /** 飛行中の移動が関わる群（移した元と先）。status id → 関わっている移動の数 */
@@ -210,10 +267,11 @@ type InputRef = InstanceType<typeof Input>;
  * v-for の内側に置いた ref は、対象が 1 つでも Vue が配列で入れる
  * （コンパイラが `ref_for` を付けるため）。追加行は同時に 1 つしか開かないので
  * 先頭を取る。素の `.$el` を読むと常に undefined でフォーカスが当たらない。
+ * koyori の Input の root は枠の span なので、中の input に当てる。
  */
 function focusDraft(target: InputRef | InputRef[] | null) {
   const instance = Array.isArray(target) ? target[0] : target;
-  (instance?.$el as HTMLInputElement | undefined)?.focus();
+  (instance?.$el as HTMLElement | undefined)?.querySelector('input')?.focus();
 }
 
 const draftInputRef = ref<InputRef | InputRef[] | null>(null);
@@ -235,6 +293,23 @@ function toggleDraftAssignee(userId: string, checked: boolean) {
     ? [...draftAssigneeIds.value, userId]
     : draftAssigneeIds.value.filter((id) => id !== userId);
 }
+
+const draftPriorityItems = computed<DropdownItem[]>(() =>
+  (Object.keys(PRIORITY_CONFIG) as TaskPriority[]).map((value) => ({
+    value,
+    label: PRIORITY_CONFIG[value].label,
+    kind: 'radio',
+    checked: value === draftPriority.value,
+  })),
+);
+const draftLabelItems = computed<DropdownItem[]>(() =>
+  props.projectLabels.map((label) => ({
+    value: label.id,
+    label: label.name,
+    kind: 'checkbox',
+    checked: draftLabelIds.value.includes(label.id),
+  })),
+);
 
 function toggleDraftLabel(labelId: string, checked: boolean) {
   draftLabelIds.value = checked
@@ -308,23 +383,35 @@ async function commitAdding(statusId: string) {
 </script>
 
 <template>
-  <div class="flex flex-col gap-4">
-    <section v-for="group in groups" :key="group.status.id">
+  <div class="@container flex flex-col">
+    <!-- 行の 2 段と列の切り替えは、この根の幅で決める（task-grouped-columns.ts） -->
+    <!-- 群どうしの余白も落とし先に含めるので、gap ではなく群の padding で空ける -->
+    <section
+      v-for="group in groups"
+      :key="group.status.id"
+      :data-dnd-status-id="group.status.id"
+      class="pb-4 last:pb-0"
+      :class="
+        dropTargetStatusId === group.status.id &&
+        'rounded-md bg-muted/40 ring-2 ring-ring/50 ring-inset'
+      "
+    >
       <div class="flex h-8 items-center gap-2">
         <Button
           type="button"
           variant="ghost"
-          size="icon"
-          class="size-5"
-          :aria-label="`${group.status.name} を折りたたむ`"
-          :aria-expanded="!collapsed[group.status.id]"
+          :ariaLabel="`${group.status.name} を折りたたむ`"
+          :ariaExpanded="!collapsed[group.status.id]"
+          :ariaControls="`task-group-${group.status.id}`"
           @click="toggle(group.status.id)"
         >
-          <!-- 2 つのアイコンを差し替えると切り替わるだけになるので、1 つを回して見せる -->
-          <PhCaretDown
-            class="size-3 transition-transform duration-200 ease-out motion-reduce:transition-none"
-            :class="collapsed[group.status.id] && '-rotate-90'"
-          />
+          <template #icon>
+            <!-- 2 つのアイコンを差し替えると切り替わるだけになるので、1 つを回して見せる -->
+            <PhCaretDown
+              class="size-3 transition-transform duration-200 ease-out motion-reduce:transition-none"
+              :class="collapsed[group.status.id] && '-rotate-90'"
+            />
+          </template>
         </Button>
         <span
           class="inline-flex h-5 items-center gap-1.5 rounded-md border px-2 text-[11px] font-semibold uppercase tracking-wide"
@@ -346,12 +433,17 @@ async function commitAdding(statusId: string) {
         遷移させる（中身の高さが変わっても指定を直さなくてよい）。
       -->
       <div
+        :id="`task-group-${group.status.id}`"
         class="grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none"
         :class="collapsed[group.status.id] ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'"
       >
+        <!--
+          開閉の枠が、行の Dropdown / 担当者の一覧を切り取る。
+          中の Dropdown と担当者の選択は top-layer で一覧をトップレイヤーに出す。
+        -->
         <div class="overflow-hidden">
-          <div class="overflow-x-auto" :inert="collapsed[group.status.id] || undefined">
-            <div :class="[TASK_ROW_GRID, 'border-b text-xs text-muted-foreground']">
+          <div :inert="collapsed[group.status.id] || undefined">
+            <div :class="[TASK_HEADER_GRID, 'border-b text-xs text-muted-foreground']">
               <TaskListSortHeader
                 v-for="column in TASK_LIST_SORT_COLUMNS"
                 :key="column.id"
@@ -367,22 +459,17 @@ async function commitAdding(statusId: string) {
               <Button
                 type="button"
                 variant="ghost"
-                size="sm"
-                class="h-7 text-xs"
                 :disabled="group.isLoading"
+                :label="`もっと見る（残り ${group.total - group.tasks.length} 件）`"
                 @click="emit('more', group.status.id)"
-              >
-                もっと見る（残り {{ group.total - group.tasks.length }} 件）
-              </Button>
+              />
             </div>
 
-            <div
-              :ref="(el) => registerDndGroup(group.status.id, el)"
-              :data-dnd-status-id="group.status.id"
-            >
+            <div :ref="(el) => registerDndGroup(group.status.id, el)">
               <template v-for="task in dndTasksOf(group)" :key="task.id">
                 <TaskGroupedRow
                   data-dnd-task
+                  :project-key="projectKey"
                   :task="task"
                   :statuses="statuses"
                   :project-labels="projectLabels"
@@ -407,6 +494,7 @@ async function commitAdding(statusId: string) {
                 />
                 <TaskSubtaskBranch
                   v-if="expandedTaskIds[task.id]"
+                  :project-key="projectKey"
                   :parent-task="task"
                   :filters="{
                     status_id: group.status.id,
@@ -443,50 +531,41 @@ async function commitAdding(statusId: string) {
               <Button
                 type="button"
                 variant="ghost"
-                size="sm"
-                class="h-7 text-xs"
                 :disabled="group.isLoading"
+                :label="`もっと見る（残り ${group.total - group.tasks.length} 件）`"
                 @click="emit('more', group.status.id)"
-              >
-                もっと見る（残り {{ group.total - group.tasks.length }} 件）
-              </Button>
+              />
             </div>
 
             <!-- 失敗したページは取り直せるようにする。導線が無いと、以降のページへ進めない -->
-            <div v-if="group.isError" class="flex min-w-[42rem] items-center gap-2 px-3 py-2">
+            <div v-if="group.isError" class="flex items-center gap-2 px-3 py-2">
               <p class="text-sm text-destructive">読み込みに失敗しました</p>
               <Button
                 type="button"
-                variant="outline"
-                size="sm"
-                class="h-7 text-xs"
+                variant="tertiary"
                 :disabled="group.isLoading"
+                label="再試行"
                 @click="group.retry()"
-              >
-                再試行
-              </Button>
+              />
             </div>
             <p
               v-else-if="group.isLoading && !group.tasks.length"
-              class="min-w-[42rem] px-3 py-2 text-sm text-muted-foreground"
+              class="px-3 py-2 text-sm text-muted-foreground"
             >
               読み込み中…
             </p>
-            <p
-              v-else-if="!group.tasks.length"
-              class="min-w-[42rem] px-3 py-2 text-sm text-muted-foreground"
-            >
+            <p v-else-if="!group.tasks.length" class="px-3 py-2 text-sm text-muted-foreground">
               タスクはありません
             </p>
 
-            <div class="min-w-[42rem]">
+            <div>
               <!--
                 追加中の行は、できあがるタスクの行と同じ見た目にする（参照）。
                 入力欄を枠で囲うと、行の並びから浮いて別の画面のように見える。
               -->
               <div
                 v-if="addingStatusId === group.status.id"
-                class="flex items-center gap-2 border-b border-border/60 px-2 py-1.5"
+                class="flex flex-wrap items-center gap-2 border-b border-border/60 px-2 py-1.5"
               >
                 <span
                   class="size-4 shrink-0 rounded-full border-2 border-dashed"
@@ -495,16 +574,18 @@ async function commitAdding(statusId: string) {
                 />
                 <Input
                   ref="draftInputRef"
-                  v-model="draftTitle"
-                  class="h-7 flex-1 border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
+                  class="min-w-48 flex-1"
                   placeholder="タスク名を入力"
                   :aria-label="`${group.status.name} にタスクを追加`"
                   :disabled="!!creatingStatusIds?.[group.status.id]"
+                  :value="draftTitle"
+                  :on-value-change="(v: string) => (draftTitle = v)"
                   @keydown.enter.prevent="commitAdding(group.status.id)"
                   @keydown.esc.prevent="cancelAdding"
                 />
                 <!-- 作成時にその場で決める（後から行で直せるが、入れ直す手間を省く） -->
                 <TaskAssigneePicker
+                  top-layer
                   :members="members"
                   :selected="draftAssignees"
                   :members-state="membersState"
@@ -514,128 +595,80 @@ async function commitAdding(statusId: string) {
                 <Input
                   v-if="showDraftDeadline"
                   ref="draftDeadlineRef"
-                  v-model="draftDeadline"
                   type="date"
-                  class="h-7 w-36 text-xs"
+                  class="w-36"
                   aria-label="期限"
-                  @blur="showDraftDeadline = false"
+                  :value="draftDeadline"
+                  :on-value-change="(v: string) => (draftDeadline = v)"
+                  :on-blur="() => (showDraftDeadline = false)"
                   @keydown.esc.prevent="showDraftDeadline = false"
                 />
                 <Button
                   v-else
                   type="button"
                   variant="ghost"
-                  size="icon"
-                  class="size-7"
-                  :class="draftDeadline ? 'text-foreground' : 'text-muted-foreground'"
-                  aria-label="期限を設定"
+                  :class="
+                    draftDeadline
+                      ? 'text-(--koyori-color-text)'
+                      : 'text-(--koyori-color-text-muted)'
+                  "
+                  ariaLabel="期限を設定"
                   @click="openDraftDeadline"
                 >
-                  <PhCalendarPlus class="size-4" aria-hidden="true" />
+                  <template #icon><PhCalendarPlus class="size-4" aria-hidden="true" /></template>
                 </Button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger as-child>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      class="size-7 p-0"
-                      :style="
-                        draftPriority ? { color: PRIORITY_CONFIG[draftPriority].color } : undefined
-                      "
-                      :aria-label="
-                        draftPriority ? `優先度: ${PRIORITY_CONFIG[draftPriority].label}` : '優先度'
-                      "
-                    >
-                      <PhFlag class="size-4" aria-hidden="true" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start">
-                    <DropdownMenuRadioGroup
-                      :model-value="draftPriority ?? ''"
-                      @update:model-value="(v) => (draftPriority = String(v) as TaskPriority)"
-                    >
-                      <DropdownMenuRadioItem
-                        v-for="(config, value) in PRIORITY_CONFIG"
-                        :key="value"
-                        :value="value"
-                        :style="{ color: config.color }"
-                      >
-                        <PhFlag class="size-4" aria-hidden="true" />
-                        {{ config.label }}
-                      </DropdownMenuRadioItem>
-                    </DropdownMenuRadioGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <DropdownMenu>
-                  <DropdownMenuTrigger as-child>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      class="size-7 p-0"
-                      :class="draftLabels.length ? 'text-foreground' : 'text-muted-foreground'"
-                      :aria-label="
-                        draftLabels.length ? `ラベル: ${draftLabels.length}件` : 'ラベル'
-                      "
-                    >
-                      <PhTag class="size-4" aria-hidden="true" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start">
-                    <p
-                      v-if="!projectLabels.length"
-                      class="px-2 py-1.5 text-sm text-muted-foreground"
-                    >
-                      ラベルがありません
-                    </p>
-                    <DropdownMenuCheckboxItem
-                      v-for="label in projectLabels"
-                      :key="label.id"
-                      :model-value="draftLabelIds.includes(label.id)"
-                      @select="(event: Event) => event.preventDefault()"
-                      @update:model-value="(v) => toggleDraftLabel(label.id, !!v)"
-                    >
-                      <span
-                        class="inline-block size-2.5 shrink-0 rounded-full"
-                        :style="{ backgroundColor: label.color }"
-                        aria-hidden="true"
-                      />
-                      {{ label.name }}
-                    </DropdownMenuCheckboxItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-
-                <Button
-                  type="button"
-                  size="sm"
+                <Dropdown
                   variant="ghost"
-                  class="h-7 px-2 text-xs"
-                  @click="cancelAdding"
+                  top-layer
+                  :class="draftPriority ? '[&>button]:text-(--priority-color)' : ''"
+                  :style="
+                    draftPriority
+                      ? { '--priority-color': PRIORITY_CONFIG[draftPriority].color }
+                      : undefined
+                  "
+                  :ariaLabel="
+                    draftPriority ? `優先度: ${PRIORITY_CONFIG[draftPriority].label}` : '優先度'
+                  "
+                  :items="draftPriorityItems"
+                  :on-select="(value: string) => (draftPriority = value as TaskPriority)"
                 >
-                  キャンセル
-                </Button>
+                  <template #icon><PhFlag class="size-4" aria-hidden="true" /></template>
+                </Dropdown>
+                <Dropdown
+                  variant="ghost"
+                  top-layer
+                  :class="
+                    draftLabels.length
+                      ? '[&>button]:text-(--koyori-color-text)'
+                      : '[&>button]:text-(--koyori-color-text-muted)'
+                  "
+                  :ariaLabel="draftLabels.length ? `ラベル: ${draftLabels.length}件` : 'ラベル'"
+                  :items="draftLabelItems"
+                  empty-message="ラベルがありません"
+                  :on-select="(id: string) => toggleDraftLabel(id, !draftLabelIds.includes(id))"
+                >
+                  <template #icon><PhTag class="size-4" aria-hidden="true" /></template>
+                </Dropdown>
+
+                <Button type="button" variant="ghost" label="キャンセル" @click="cancelAdding" />
                 <Button
                   type="button"
-                  size="sm"
-                  class="h-7 gap-1 px-2 text-xs"
                   :disabled="!!creatingStatusIds?.[group.status.id] || !draftTitle.trim()"
+                  label="保存"
                   @click="commitAdding(group.status.id)"
                 >
-                  保存
-                  <CornerDownLeft class="size-3" aria-hidden="true" />
+                  <template #icon><CornerDownLeft class="size-3" aria-hidden="true" /></template>
                 </Button>
               </div>
               <Button
                 v-else
                 type="button"
                 variant="ghost"
-                size="sm"
-                class="ml-2 h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+                class="ml-2"
+                label="タスクを追加"
                 @click="startAdding(group.status.id)"
               >
-                <PhPlus class="size-3.5" />
-                タスクを追加
+                <template #icon><PhPlus class="size-3.5" /></template>
               </Button>
               <p
                 v-if="createErrors?.[group.status.id]"

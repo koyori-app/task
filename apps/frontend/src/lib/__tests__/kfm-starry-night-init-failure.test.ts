@@ -1,3 +1,4 @@
+// 初期化の失敗（poisoned promise）を捨てて次の描画で作り直す回収経路
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRenderer } from '../markup-renderer';
 import { createRehypeStarryNight, starryNightSanitizeSchema } from '../rehype-starry-night';

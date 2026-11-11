@@ -1,34 +1,19 @@
 <script setup lang="ts">
 import { useQueryClient } from '@tanstack/vue-query';
-import { PhCaretDown, PhCopy, PhKey, PhPlus } from '@phosphor-icons/vue';
+import { PhCopy, PhKey, PhPlus } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
-import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import {
+  Button,
+  Checkbox,
   Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
+  Dropdown,
+  Field,
+  Input,
+  Picker,
+  Skeleton,
+  type DropdownItem,
+} from '@koyori-app/ui-vue';
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
-import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Skeleton } from '@/components/ui/skeleton';
 import {
   personalTokensQueryOptions,
   useCreatePersonalTokenMutation,
@@ -65,6 +50,9 @@ const issuableTenants = computed(() =>
   (tenantsQuery.data.value ?? []).filter(
     (t) => t.membership === 'Owner' || t.member_role === 'Admin',
   ),
+);
+const tenantItems = computed(() =>
+  issuableTenants.value.map((tenant) => ({ value: tenant.id, label: tenant.name })),
 );
 
 /** 一覧・取り消しダイアログでトークンの束縛先テナントを表示するための対応表。 */
@@ -189,9 +177,15 @@ function openRevokeDialog(token: PersonalToken) {
   revokeError.value = null;
 }
 
-function onRevokeOpenChange(open: boolean) {
+const revokeDescription = computed(() =>
+  revokeTarget.value
+    ? `テナント「${tenantName(revokeTarget.value.tenant_id)}」の「${revokeTarget.value.name}」を取り消します。このトークンを使っている API・CLI は即座に認証できなくなります。この操作は元に戻せません。`
+    : '',
+);
+
+function onRevokeClose() {
   // 取り消しリクエスト進行中はダイアログを閉じない（結果の見逃し防止）
-  if (!open && !revokeToken.isPending.value) revokeTarget.value = null;
+  if (!revokeToken.isPending.value) revokeTarget.value = null;
 }
 
 async function onRevokeConfirm() {
@@ -206,6 +200,11 @@ async function onRevokeConfirm() {
   } catch {
     revokeError.value = 'トークンを取り消せませんでした。時間をおいて再度お試しください。';
   }
+}
+
+/** スコープは見せるだけ。トークンの行ごとに出すので、配列は行の scopes から組む */
+function scopeItems(scopes: string[]): DropdownItem[] {
+  return scopes.map((scope) => ({ value: scope, label: scope, disabled: true }));
 }
 </script>
 
@@ -222,10 +221,10 @@ async function onRevokeConfirm() {
         v-if="!isFormOpen"
         type="button"
         :disabled="issuableTenants.length === 0"
+        label="トークンを発行"
         @click="openForm"
       >
-        <PhPlus class="size-4" />
-        トークンを発行
+        <template #icon><PhPlus class="size-4" /></template>
       </Button>
     </div>
 
@@ -244,9 +243,13 @@ async function onRevokeConfirm() {
           data-testid="created-token"
           >{{ createdToken }}</code
         >
-        <Button type="button" variant="outline" size="sm" @click="copyCreatedToken">
-          <PhCopy class="size-4" />
-          {{ copied ? 'コピーしました' : 'コピー' }}
+        <Button
+          type="button"
+          variant="tertiary"
+          :label="copied ? 'コピーしました' : 'コピー'"
+          @click="copyCreatedToken"
+        >
+          <template #icon><PhCopy class="size-4" /></template>
         </Button>
       </div>
       <p v-if="copyError" role="alert" class="text-destructive text-sm">{{ copyError }}</p>
@@ -255,100 +258,99 @@ async function onRevokeConfirm() {
     <!-- 発行フォーム -->
     <div v-if="isFormOpen" class="rounded-lg border p-4">
       <HydrationSafeForm v-slot="{ isHydrated }" @submit="onSubmit">
-        <FieldGroup>
+        <div class="flex flex-col gap-6">
           <h3 class="text-base font-semibold">新しいトークンを発行</h3>
 
-          <Field>
-            <FieldLabel for="token-name">トークン名</FieldLabel>
+          <Field
+            id="token-name"
+            label="トークン名"
+            description="このトークンの用途がわかる名前を付けます。"
+            :error="nameError ?? ''"
+          >
             <Input
-              id="token-name"
-              v-model="tokenName"
               placeholder="例: CI デプロイ"
-              @blur="validateName()"
-              @input="nameError = null"
+              :value="tokenName"
+              :on-value-change="
+                (v: string) => {
+                  tokenName = v;
+                  nameError = null;
+                }
+              "
+              :on-blur="validateName"
             />
-            <FieldDescription>このトークンの用途がわかる名前を付けます。</FieldDescription>
-            <FieldError class="min-h-[1.25rem]">{{ nameError ?? '' }}</FieldError>
           </Field>
 
           <!-- 候補が一つでも出す。出さぬと、どのテナントに縛られるかが発行後まで見えぬ。 -->
-          <Field v-if="issuableTenants.length > 0">
-            <FieldLabel for="token-tenant">テナント</FieldLabel>
-            <Select
-              :model-value="formTenantId ?? undefined"
-              @update:model-value="(v) => (selectedTenantId = v == null ? null : String(v))"
-            >
-              <SelectTrigger id="token-tenant" class="w-full">
-                <SelectValue placeholder="選択してください" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem v-for="tenant in issuableTenants" :key="tenant.id" :value="tenant.id">
-                  {{ tenant.name }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            <FieldDescription>トークンはこのテナントの中でだけ使えます。</FieldDescription>
+          <Field
+            v-if="issuableTenants.length > 0"
+            id="token-tenant"
+            label="テナント"
+            description="トークンはこのテナントの中でだけ使えます。"
+          >
+            <Picker
+              label="テナント"
+              :searchable="tenantItems.length > 8"
+              :items="tenantItems"
+              :selected-values="formTenantId ? [formTenantId] : []"
+              :on-selection-change="(values: string[]) => (selectedTenantId = values[0] ?? null)"
+            />
           </Field>
 
-          <Field>
-            <FieldLabel>有効期限</FieldLabel>
+          <div class="flex flex-col gap-2">
+            <p class="text-sm font-medium">有効期限</p>
             <div class="flex flex-wrap gap-2">
               <Button
                 v-for="preset in EXPIRATION_PRESETS"
                 :key="preset.key"
                 type="button"
-                size="sm"
-                :variant="expiration === preset.key ? 'default' : 'outline'"
-                :aria-pressed="expiration === preset.key"
+                :variant="expiration === preset.key ? 'primary' : 'tertiary'"
+                :ariaPressed="expiration === preset.key ? 'true' : 'false'"
+                :label="preset.label"
                 @click="expiration = preset.key"
-              >
-                {{ preset.label }}
-              </Button>
+              />
             </div>
-          </Field>
+          </div>
 
-          <Field>
-            <FieldLabel>スコープ</FieldLabel>
-            <div class="flex flex-col gap-3">
-              <label
-                v-for="entry in SCOPE_CATALOG"
-                :key="entry.scope"
-                class="flex cursor-pointer items-start gap-3"
-              >
+          <fieldset class="min-w-0">
+            <legend class="text-sm font-medium">スコープ</legend>
+            <p id="token-scopes-error" role="alert" class="text-sm text-(--koyori-color-danger)">
+              {{ scopesError ?? '' }}
+            </p>
+            <div class="mt-2 flex flex-col gap-3">
+              <div v-for="entry in SCOPE_CATALOG" :key="entry.scope" class="flex flex-col">
                 <Checkbox
-                  class="mt-0.5"
-                  :model-value="selectedScopes.includes(entry.scope)"
+                  :label="entry.scope"
                   :name="`scope-${entry.scope}`"
-                  @update:model-value="(v) => toggleScope(entry.scope, v === true)"
+                  :checked="selectedScopes.includes(entry.scope)"
+                  :ariaDescribedBy="`token-scope-${entry.scope}-description token-scopes-error`"
+                  :on-checked-change="(checked: boolean) => toggleScope(entry.scope, checked)"
                 />
-                <span class="flex flex-col">
-                  <code class="font-mono text-sm">{{ entry.scope }}</code>
-                  <span class="text-muted-foreground text-sm">{{ entry.description }}</span>
-                </span>
-              </label>
+                <p
+                  :id="`token-scope-${entry.scope}-description`"
+                  class="text-muted-foreground pl-[calc(var(--koyori-control-height-sm)+var(--koyori-space-xs))] text-sm"
+                >
+                  {{ entry.description }}
+                </p>
+              </div>
             </div>
-            <FieldError class="min-h-[1.25rem]">{{ scopesError ?? '' }}</FieldError>
-          </Field>
+          </fieldset>
 
           <p v-if="submitError" class="text-destructive text-sm">{{ submitError }}</p>
 
-          <Field>
-            <div class="flex gap-2">
-              <Button type="submit" :disabled="!isHydrated || createToken.isPending.value">
-                {{ createToken.isPending.value ? '発行中…' : 'トークンを発行' }}
-              </Button>
-              <Button type="button" variant="outline" @click="resetForm">キャンセル</Button>
-            </div>
-          </Field>
-        </FieldGroup>
+          <div class="flex gap-2">
+            <Button
+              type="submit"
+              :disabled="!isHydrated || createToken.isPending.value"
+              :label="createToken.isPending.value ? '発行中…' : 'トークンを発行'"
+            />
+            <Button type="button" variant="tertiary" label="キャンセル" @click="resetForm" />
+          </div>
+        </div>
       </HydrationSafeForm>
     </div>
 
     <!-- 一覧 -->
-    <div v-if="tokensQuery.isPending.value" class="flex flex-col gap-2">
-      <Skeleton class="h-16 w-full" />
-      <Skeleton class="h-16 w-full" />
-    </div>
+    <Skeleton v-if="tokensQuery.isPending.value" :lines="2" height="4rem" />
     <p v-else-if="tokensQuery.isError.value" class="text-destructive text-sm">
       トークンの一覧を取得できませんでした。再読み込みしてください。
     </p>
@@ -395,63 +397,42 @@ async function onRevokeConfirm() {
             </p>
             <p class="text-muted-foreground text-xs">{{ formatLastUsed(token.last_used_at) }}</p>
           </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger as-child>
-              <Button type="button" variant="outline" size="sm">
-                スコープを表示
-                <PhCaretDown class="size-3" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem v-for="scope in token.scopes" :key="scope" disabled>
-                <code class="font-mono text-xs">{{ scope }}</code>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Dropdown variant="tertiary" label="スコープを表示" :items="scopeItems(token.scopes)" />
           <Button
             type="button"
-            variant="outline"
-            size="sm"
-            class="text-destructive hover:text-destructive"
+            variant="tertiary"
+            class="text-(--koyori-color-danger)"
+            label="取り消し"
             @click="openRevokeDialog(token)"
-          >
-            取り消し
-          </Button>
+          />
         </li>
       </ul>
     </template>
 
     <!-- 取り消し確認 -->
-    <Dialog v-if="revokeTarget" :open="true" @update:open="onRevokeOpenChange">
-      <DialogContent class="max-w-md" :show-close-button="false">
-        <DialogHeader>
-          <DialogTitle>トークンを取り消しますか？</DialogTitle>
-          <DialogDescription>
-            テナント「{{ tenantName(revokeTarget.tenant_id) }}」の「{{ revokeTarget.name }}」を
-            取り消します。このトークンを使っている API・CLI
-            は即座に認証できなくなります。この操作は元に戻せません。
-          </DialogDescription>
-        </DialogHeader>
-        <p v-if="revokeError" class="text-destructive text-sm">{{ revokeError }}</p>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            :disabled="revokeToken.isPending.value"
-            @click="revokeTarget = null"
-          >
-            キャンセル
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            :disabled="revokeToken.isPending.value"
-            @click="onRevokeConfirm"
-          >
-            {{ revokeToken.isPending.value ? '取り消し中…' : '取り消す' }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
+    <Dialog
+      :open="revokeTarget !== null"
+      title="トークンを取り消しますか？"
+      :description="revokeDescription"
+      :on-close="onRevokeClose"
+    >
+      <p v-if="revokeError" class="text-destructive text-sm">{{ revokeError }}</p>
+      <template #actions>
+        <Button
+          type="button"
+          variant="tertiary"
+          :disabled="revokeToken.isPending.value"
+          label="キャンセル"
+          @click="revokeTarget = null"
+        />
+        <Button
+          type="button"
+          variant="danger"
+          :disabled="revokeToken.isPending.value"
+          :label="revokeToken.isPending.value ? '取り消し中…' : '取り消す'"
+          @click="onRevokeConfirm"
+        />
+      </template>
     </Dialog>
   </div>
 </template>

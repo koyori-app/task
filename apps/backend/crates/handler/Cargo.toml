@@ -15,6 +15,7 @@ forge-core = { workspace = true }
 forge-github = { workspace = true }
 apalis-postgres = { version = "1.0.0-rc.8", default-features = false, features = ["migrate", "tokio-comp", "time"] }
 axum = { workspace = true, features = ["multipart"] }
+axum-extra = { version = "0.12", default-features = false, features = ["query"] }
 axum-valid = "0.25.0"
 axum_session = { version = "0.20.0" }
 axum_session_redispool = { version = "0.11.0" }
@@ -24,14 +25,16 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 futures = "0.3"
 hex = "0.4"
 hmac = "0.13"
+http-body-util = "0.1"
 rand = "0.10"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "form"] }
 sea-orm = { workspace = true, features = ["with-chrono", "postgres-array"] }
+sentry = { version = "0.48.2", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = "0.11"
 subtle = "2.4"
-tokio = { version = "1.52.1", features = ["fs", "io-util", "macros", "rt-multi-thread", "net", "time"] }
+tokio = { version = "1.52.1", features = ["fs", "io-util", "macros", "rt-multi-thread", "net", "sync", "time"] }
 thiserror = { workspace = true }
 tower-http = { version = "0.7", features = ["cors", "limit", "set-header"] }
 tracing = { workspace = true }

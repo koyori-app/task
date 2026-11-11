@@ -4,11 +4,10 @@
 #![allow(dead_code)]
 
 use std::net::SocketAddr;
-use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     body::Body,
     extract::{Query, State},
     http::{Request, StatusCode, header},
@@ -18,7 +17,7 @@ use axum::{
 use axum_session::{SameSite, SessionConfig, SessionLayer, SessionMode, SessionStore};
 use axum_session_redispool::SessionRedisPool;
 use entity::{
-    github_integrations, oauth_connections, personal_tokens, projects,
+    github_integrations, oauth_connections, passkeys, personal_tokens, projects,
     scopes::{Scope, ScopeList},
     tenant_members, tenants, users,
 };
@@ -28,14 +27,15 @@ use backend::{
     jobs::{
         setup_already_registered_email_storage, setup_github_issue_sync_storage,
         setup_github_webhook_storage, setup_password_reset_email_storage, setup_pool,
-        setup_review_summary_storage, setup_verification_email_storage,
+        setup_review_summary_storage, setup_tenant_invitation_email_storage,
+        setup_verification_email_storage,
     },
     routes, settings,
     utils::{
         auth::create_password_hash,
         drive::DriveConfig,
         http::create_http_client,
-        oauth::{OAuthSettings, ProviderConfig},
+        oauth::{OAuthSettings, ProviderConfig, parse_gitlab_selfhosted_instances},
         smtp::{SentMail, SmtpClient},
         storage::setup_storage,
         totp::build_totp,
@@ -59,7 +59,10 @@ use testcontainers_modules::{
         runners::SyncRunner,
     },
 };
-use tokio::{net::TcpListener, sync::OnceCell};
+use tokio::{
+    net::TcpListener,
+    sync::{OnceCell, watch},
+};
 use tower::ServiceExt;
 use url::Url;
 use uuid::Uuid;
@@ -91,42 +94,79 @@ pub const TEST_OAUTH_CLIENT_ID: &str = "test-gitlab-selfhosted-client";
 pub const TEST_OAUTH_CLIENT_SECRET: &str = "test-gitlab-selfhosted-secret";
 pub const TEST_OAUTH_ENCRYPTION_KEY: &str = "01234567890123456789012345678901";
 
-fn load_dotenv() {
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let _ = dotenvy::dotenv().ok();
-    let _ = dotenvy::from_path(manifest.join(".env")).ok();
-    let _ = dotenvy::from_path("/home/coder/task/apps/backend/.env").ok();
+/// 試験が繋ぐ Postgres の行き先を渡す env の名。
+pub const TEST_DATABASE_URL_ENV: &str = "TEST_DATABASE_URL";
+/// 試験が繋ぐ redis（valkey）の行き先を渡す env の名。
+pub const TEST_REDIS_URL_ENV: &str = "TEST_REDIS_URL";
+/// loopback でない行き先を許す旗。試験専用と分かっている行き先（CI のサービスコンテナ
+/// など）の時だけ `1` にする。
+pub const TEST_ALLOW_NON_LOOPBACK_ENV: &str = "TEST_ALLOW_NON_LOOPBACK";
+
+/// 試験が実際に繋ぐ行き先。
+pub struct TestEndpoints {
+    pub database_url: String,
+    pub redis_url: String,
 }
 
-static TEST_ENV_READY: OnceLock<()> = OnceLock::new();
+static TEST_ENDPOINTS: OnceLock<TestEndpoints> = OnceLock::new();
 
 /// 統合テストに必要な環境変数を整える（テストバイナリごとに1回だけ実行）。
 ///
-/// - `.env` / プロセス環境に `DATABASE_URL` / `REDIS_URL` があればそのまま使う（CI 経路）
+/// DB と redis の行き先は、試験用と明示した名からだけ取る:
+/// - `TEST_DATABASE_URL` / `TEST_REDIS_URL` があればそれを使う（CI と、docker の無い手元の経路）
 /// - 無ければ testcontainers で CI と同一イメージ（`postgres:17` / `valkey/valkey:8.1`）を
-///   ランダムポートで起動し、接続文字列を注入する
-/// - SMTP 等の残りの必須 env は `backend-test.yml` の `env:` と同じテスト用の値で補完する
-fn ensure_test_env() {
-    TEST_ENV_READY.get_or_init(|| {
-        load_dotenv();
-
-        let need_pg = std::env::var("DATABASE_URL").is_err();
-        let need_redis = std::env::var("REDIS_URL").is_err();
-        if need_pg || need_redis {
+///   ランダムポートで起動し、その行き先を使う
+///
+/// 一般の名（`DATABASE_URL` / `database_url` / `REDIS_URL` / `redis_url`）は、環境にあっても
+/// `.env` にあっても読まない。開発用の値は試験用でない DB を指していることがある。しかも
+/// `.env` の小文字の名は環境の大文字の名に勝つ: dotenvy は環境に無い名だけを足し、settings
+/// （config の `Environment`）は名を小文字にして後に読んだ物を採るため。
+/// 決めた行き先は一般の名へ大文字・小文字とも書き込む。後で `load_settings` が `.env` を
+/// 読んでも、既にある名は上書きされない（`TestApp` は settings にも行き先を据え直す）。
+///
+/// 行き先が loopback（または Unix socket）でなければ、`TEST_ALLOW_NON_LOOPBACK=1` が無い限り
+/// 繋ぐ前に止まる。
+fn ensure_test_env() -> &'static TestEndpoints {
+    TEST_ENDPOINTS.get_or_init(|| {
+        let explicit_pg = non_empty_env(TEST_DATABASE_URL_ENV);
+        let explicit_redis = non_empty_env(TEST_REDIS_URL_ENV);
+        let need_pg = explicit_pg.is_none();
+        let need_redis = explicit_redis.is_none();
+        let (container_pg, container_redis) = if need_pg || need_redis {
             // SyncRunner は内部で tokio ランタイムを使うため、テストのランタイム上から
             // 直接呼ぶとパニックする。専用スレッドで起動して結果だけ受け取る。
-            let (pg_url, redis_url) =
-                std::thread::spawn(move || start_test_containers(need_pg, need_redis))
-                    .join()
-                    .expect("start test containers");
-            // SAFETY: test process is single-threaded before Tokio workers spawn.
-            unsafe {
-                if let Some(url) = pg_url {
-                    std::env::set_var("DATABASE_URL", url);
-                }
-                if let Some(url) = redis_url {
-                    std::env::set_var("REDIS_URL", url);
-                }
+            std::thread::spawn(move || start_test_containers(need_pg, need_redis))
+                .join()
+                .expect("start test containers")
+        } else {
+            (None, None)
+        };
+        let endpoints = TestEndpoints {
+            database_url: explicit_pg
+                .or(container_pg)
+                .expect("postgres url for tests"),
+            redis_url: explicit_redis
+                .or(container_redis)
+                .expect("redis url for tests"),
+        };
+
+        let allow_non_loopback = std::env::var(TEST_ALLOW_NON_LOOPBACK_ENV).is_ok_and(|v| v == "1");
+        for (name, url) in [
+            (TEST_DATABASE_URL_ENV, &endpoints.database_url),
+            (TEST_REDIS_URL_ENV, &endpoints.redis_url),
+        ] {
+            if let Err(reason) = check_test_endpoint(url, allow_non_loopback) {
+                panic!("{name}: {reason}");
+            }
+        }
+
+        // SAFETY: test process is single-threaded before Tokio workers spawn.
+        unsafe {
+            for key in ["DATABASE_URL", "database_url"] {
+                std::env::set_var(key, &endpoints.database_url);
+            }
+            for key in ["REDIS_URL", "redis_url"] {
+                std::env::set_var(key, &endpoints.redis_url);
             }
         }
 
@@ -141,7 +181,53 @@ fn ensure_test_env() {
         set_default_env("RECOVERY_CODE_SECRET", "00000000000000000000000000000000");
         set_default_env("TOTP_ENCRYPTION_KEY", "01234567890123456789012345678901");
         set_default_env("ARGON2_TEST_MODE", "true");
-    });
+
+        endpoints
+    })
+}
+
+fn non_empty_env(key: &str) -> Option<String> {
+    std::env::var(key).ok().filter(|v| !v.trim().is_empty())
+}
+
+/// 行き先が loopback か Unix socket かを見る。そうでなければ、許しの旗が無い限り拒む。
+///
+/// 理由の文には host だけを載せ、URL（資格を含みうる）は載せない。
+pub fn check_test_endpoint(raw: &str, allow_non_loopback: bool) -> Result<(), String> {
+    let url = url::Url::parse(raw).map_err(|e| format!("not a URL ({e})"))?;
+    let mut hosts: Vec<String> = Vec::new();
+    if let Some(host) = url.host_str().filter(|h| !h.is_empty()) {
+        hosts.push(host.trim_matches(['[', ']']).to_string());
+    }
+    // libpq の形の `?host=` / `?hostaddr=` も行き先になる（`/` で始まる物は Unix socket の dir）。
+    for (key, value) in url.query_pairs() {
+        if (key == "host" || key == "hostaddr") && !value.starts_with('/') {
+            hosts.extend(value.split(',').map(str::to_string));
+        }
+    }
+    let remote: Vec<&String> = hosts.iter().filter(|h| !is_loopback_host(h)).collect();
+    if remote.is_empty() || allow_non_loopback {
+        return Ok(());
+    }
+    Err(format!(
+        "refusing to run integration tests against non-loopback host(s) {remote:?}. \
+         Point it at a throwaway local database, or set {TEST_ALLOW_NON_LOOPBACK_ENV}=1 \
+         if the host is a test-only service"
+    ))
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
+/// settings の行き先を、試験の行き先に据え直す。`load_settings` は `.env` を読むので、
+/// 環境に無い綴りの名（大文字と小文字の混ざった物など）が `.env` から入っても効かせない。
+fn pin_test_endpoints(settings: &mut settings::Settings, endpoints: &TestEndpoints) {
+    settings.database_url = endpoints.database_url.clone();
+    settings.redis_url = endpoints.redis_url.clone();
 }
 
 fn set_default_env(key: &str, value: &str) {
@@ -241,8 +327,22 @@ async fn ensure_schema(db: &DatabaseConnection) {
             let _ = db
                 .execute_unprepared("DROP INDEX IF EXISTS idx_sprints_active_per_project")
                 .await;
+            // 使い回す DB に残った旧形の projects の UNIQUE。本番は
+            // m20261105010000_projects_key_unique_per_tenant が消す
             let _ = db
-                .execute_unprepared("DROP INDEX IF EXISTS idx_projects_personal_owner")
+                .execute_unprepared(
+                    r#"
+DROP INDEX IF EXISTS idx_projects_personal_owner;
+DROP INDEX IF EXISTS "idx-projects-idx_projects_personal_owner";
+DROP INDEX IF EXISTS "idx-projects-projects_key_tenant_unique";
+"#,
+                )
+                .await;
+            // 行の残った DB へ sync() が NOT NULL 列を既定値なしで足すと落ちるため、先に足しておく
+            let _ = db
+                .execute_unprepared(
+                    "ALTER TABLE IF EXISTS task_attachments ADD COLUMN IF NOT EXISTS source VARCHAR(16) NOT NULL DEFAULT 'manual'",
+                )
                 .await;
 
             db.get_schema_registry("entity::*")
@@ -304,13 +404,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_sprints_active_per_project
 
             db.execute_unprepared(
                 r#"
-DROP INDEX IF EXISTS idx_projects_personal_owner;
 ALTER TABLE projects
     ADD COLUMN IF NOT EXISTS is_personal BOOLEAN NOT NULL DEFAULT false,
     ADD COLUMN IF NOT EXISTS personal_owner_id UUID REFERENCES users(id) ON DELETE CASCADE;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_personal_owner
-    ON projects(tenant_id, personal_owner_id)
-    WHERE is_personal = true;
 "#,
             )
             .await
@@ -332,6 +428,13 @@ ALTER TABLE system_settings
             .await
             .expect("prepare system_settings defaults");
 
+            // 同上。マイグレーション（m20261016010000_task_attachments_source.rs）と同じ既定値
+            db.execute_unprepared(
+                "ALTER TABLE task_attachments ALTER COLUMN source SET DEFAULT 'manual';",
+            )
+            .await
+            .expect("prepare task_attachments defaults");
+
             // search_vector は GENERATED ALWAYS AS の tsvector カラムで entity 定義に無いため
             // sync() が作らない。手動で追加する。
             db.execute_unprepared(
@@ -348,6 +451,16 @@ CREATE INDEX IF NOT EXISTS idx_tasks_search_vector ON tasks USING GIN(search_vec
             .await
             .expect("prepare search_vector column");
 
+            // pg_trgm の拡張と title の trigram index も migration（m20261020000000）にしか無い
+            db.execute_unprepared(
+                r#"
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX IF NOT EXISTS idx_tasks_title_trgm ON tasks USING GIN (title gin_trgm_ops);
+"#,
+            )
+            .await
+            .expect("prepare pg_trgm index");
+
         })
         .await;
 }
@@ -362,6 +475,23 @@ pub struct MockGitLabUser {
 #[derive(Clone)]
 struct MockOAuthState {
     user: Arc<Mutex<MockGitLabUser>>,
+    hits: Arc<MockOAuthHits>,
+}
+
+/// mock の各口が叩かれた回数。許可していない instance に要求が届かぬことを数えて確かめる。
+#[derive(Debug, Default)]
+pub struct MockOAuthHits {
+    pub authorize: std::sync::atomic::AtomicUsize,
+    pub token: std::sync::atomic::AtomicUsize,
+    pub userinfo: std::sync::atomic::AtomicUsize,
+}
+
+impl MockOAuthHits {
+    /// token と userinfo の口が叩かれた回数の和（client secret を送る口と利用者情報の口）。
+    pub fn backchannel(&self) -> usize {
+        self.token.load(std::sync::atomic::Ordering::SeqCst)
+            + self.userinfo.load(std::sync::atomic::Ordering::SeqCst)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -387,13 +517,18 @@ struct GitLabUserResponse {
 
 pub struct MockOAuthHandle {
     pub base_url: String,
+    pub hits: Arc<MockOAuthHits>,
     user: Arc<Mutex<MockGitLabUser>>,
 }
 
 impl MockOAuthHandle {
     pub async fn start(initial_user: MockGitLabUser) -> Self {
         let user = Arc::new(Mutex::new(initial_user));
-        let state = MockOAuthState { user: user.clone() };
+        let hits = Arc::new(MockOAuthHits::default());
+        let state = MockOAuthState {
+            user: user.clone(),
+            hits: hits.clone(),
+        };
 
         let router = Router::new()
             .route("/oauth/authorize", get(authorize))
@@ -413,6 +548,7 @@ impl MockOAuthHandle {
 
         Self {
             base_url: format!("http://{addr}"),
+            hits,
             user,
         }
     }
@@ -422,7 +558,14 @@ impl MockOAuthHandle {
     }
 }
 
-async fn authorize(Query(query): Query<AuthorizeQuery>) -> Redirect {
+async fn authorize(
+    State(state): State<MockOAuthState>,
+    Query(query): Query<AuthorizeQuery>,
+) -> Redirect {
+    state
+        .hits
+        .authorize
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let mut url =
         url::Url::parse(&query.redirect_uri).expect("mock oauth redirect_uri must be valid");
     url.query_pairs_mut()
@@ -431,7 +574,11 @@ async fn authorize(Query(query): Query<AuthorizeQuery>) -> Redirect {
     Redirect::temporary(url.as_str())
 }
 
-async fn token() -> impl IntoResponse {
+async fn token(State(state): State<MockOAuthState>) -> impl IntoResponse {
+    state
+        .hits
+        .token
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     (
         StatusCode::OK,
         Json(TokenResponseBody {
@@ -442,6 +589,10 @@ async fn token() -> impl IntoResponse {
 }
 
 async fn userinfo(State(state): State<MockOAuthState>) -> impl IntoResponse {
+    state
+        .hits
+        .userinfo
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let user = state.user.lock().expect("mock oauth user lock").clone();
     let confirmed_at = user
         .email
@@ -460,6 +611,8 @@ pub struct TestApp {
     pub state: AppState,
     pub base_url: String,
     pub mock: MockOAuthHandle,
+    /// サーバーの停止を真似る。`true` を送ると SSE の応答が閉じる。
+    pub shutdown_tx: watch::Sender<bool>,
     sent_mails: Arc<Mutex<Vec<SentMail>>>,
     client: Client,
     router: Router,
@@ -488,8 +641,9 @@ impl TestApp {
 
     pub async fn new_with_webhook_loopback(allow: bool) -> Self {
         init_tracing();
-        ensure_test_env();
-        let mut settings = settings::load_settings().expect("load settings from .env");
+        let endpoints = ensure_test_env();
+        let mut settings = settings::load_settings().expect("load settings");
+        pin_test_endpoints(&mut settings, endpoints);
         settings.email_verification_app_url = "http://localhost:3000".to_string();
         settings.webhook_allow_loopback = allow;
         Self::build(settings).await
@@ -498,7 +652,8 @@ impl TestApp {
     pub async fn new_with_github() -> Self {
         init_tracing();
         load_github_test_env();
-        let settings = settings::load_settings().expect("load settings");
+        let mut settings = settings::load_settings().expect("load settings");
+        pin_test_endpoints(&mut settings, ensure_test_env());
         assert!(
             settings.github_app.is_some(),
             "GITHUB_APP_ID must enable github_app in tests"
@@ -539,6 +694,10 @@ impl TestApp {
             setup_already_registered_email_storage(&pg_pool, &settings)
                 .await
                 .expect("already registered email storage");
+        let tenant_invitation_email_storage =
+            setup_tenant_invitation_email_storage(&pg_pool, &settings)
+                .await
+                .expect("tenant invitation email storage");
         let storage = setup_storage().await.expect("storage backend");
         let http_client = create_http_client().expect("http client");
         let webauthn = build_webauthn(&settings).expect("webauthn");
@@ -562,10 +721,16 @@ impl TestApp {
             default_redirect_path: "/dashboard".to_string(),
             github: None,
             gitlab: None,
-            gitlab_selfhosted: Some(ProviderConfig {
-                client_id: TEST_OAUTH_CLIENT_ID.to_string(),
-                client_secret: TEST_OAUTH_CLIENT_SECRET.to_string(),
-            }),
+            // 許可の一覧には mock の instance だけを置く（一覧に無い instance の試験は別の mock を立てる）
+            gitlab_selfhosted_instances: parse_gitlab_selfhosted_instances(
+                Some(&mock.base_url),
+                Some(ProviderConfig {
+                    client_id: TEST_OAUTH_CLIENT_ID.to_string(),
+                    client_secret: TEST_OAUTH_CLIENT_SECRET.to_string(),
+                }),
+                None,
+            )
+            .expect("selfhosted allowlist"),
             google: None,
             oidc: None,
             github_app: Some(ProviderConfig {
@@ -585,6 +750,7 @@ impl TestApp {
             github_issue_sync_storage,
             password_reset_email_storage,
             already_registered_email_storage,
+            tenant_invitation_email_storage,
             review_summary_storage,
             storage,
             drive_config: DriveConfig::from_env(),
@@ -600,9 +766,12 @@ impl TestApp {
         .await
         .expect("session store");
 
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let (router, _) = routes::create_routes().split_for_parts();
         let router = router
             .with_state(state.clone())
+            .layer(Extension(state.redis_client.clone()))
+            .layer(Extension(shutdown_rx))
             .layer(SessionLayer::new(session_store));
 
         let app_router = router.clone();
@@ -622,6 +791,7 @@ impl TestApp {
             state,
             base_url,
             mock,
+            shutdown_tx,
             sent_mails,
             client,
             router,
@@ -685,10 +855,13 @@ impl TestApp {
         let password_hash = create_password_hash(&password).expect("password hash");
 
         users::ActiveModel {
+            account_kind: Set("human".to_string()),
+            bot_tenant_id: Set(None),
             id: Set(id),
             username: Set(format!("test_{}", &id.to_string()[..8])),
             bio: Set(Some(String::new())),
             avatar_url: Set(None),
+            avatar_storage_key: Set(None),
             email: Set(email.clone()),
             email_verified: Set(true),
             password_hash: Set(Some(password_hash)),
@@ -731,6 +904,9 @@ impl TestApp {
             owner_id: Set(owner_id),
             drive_quota_bytes: Set(None),
             require_2fa: Set(false),
+            owner_department: Set(None),
+            owner_position: Set(None),
+            owner_team: Set(None),
         }
         .insert(&self.state.db)
         .await
@@ -974,6 +1150,21 @@ impl TestApp {
             .expect("post request")
     }
 
+    pub async fn put_json_with_bearer(
+        &self,
+        path: &str,
+        body: serde_json::Value,
+        token: &str,
+    ) -> Response {
+        self.client
+            .put(format!("{}{path}", self.base_url))
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .json(&body)
+            .send()
+            .await
+            .expect("put request")
+    }
+
     pub async fn post_json_with_session_and_headers(
         &self,
         path: &str,
@@ -1107,10 +1298,13 @@ pub async fn insert_user(db: &DatabaseConnection, is_admin: bool, is_suspended: 
     let password_hash = create_password_hash(&password).expect("password hash");
 
     users::ActiveModel {
+        account_kind: Set("human".to_string()),
+        bot_tenant_id: Set(None),
         id: Set(id),
         username: Set(format!("test_{}", &id.to_string()[..8])),
         bio: Set(Some(String::new())),
         avatar_url: Set(None),
+        avatar_storage_key: Set(None),
         email: Set(email.clone()),
         email_verified: Set(true),
         password_hash: Set(Some(password_hash)),
@@ -1145,10 +1339,13 @@ pub async fn insert_passkey_user(
     };
 
     users::ActiveModel {
+        account_kind: Set("human".to_string()),
+        bot_tenant_id: Set(None),
         id: Set(id),
         username: Set(format!("test_{}", &id.to_string()[..8])),
         bio: Set(Some(String::new())),
         avatar_url: Set(None),
+        avatar_storage_key: Set(None),
         email: Set(email.clone()),
         email_verified: Set(email_verified),
         password_hash: Set(if password_hash.is_empty() {
@@ -1170,6 +1367,24 @@ pub async fn insert_passkey_user(
         email,
         password,
     }
+}
+
+/// パスキーの行を DB へ直に挿す（登録フローを経ない）。2FA を満たす利用者を作る用。
+pub async fn insert_passkey(db: &DatabaseConnection, user_id: Uuid) {
+    passkeys::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        user_id: Set(user_id),
+        credential_id: Set(user_id.as_bytes().to_vec()),
+        public_key: Set(vec![1, 2, 3]),
+        aaguid: Set(None),
+        sign_count: Set(0),
+        name: Set("test-passkey".into()),
+        last_used_at: Set(None),
+        created_at: Set(chrono::Utc::now().into()),
+    }
+    .insert(db)
+    .await
+    .expect("insert passkey");
 }
 
 pub fn secret_from_otpauth_uri(uri: &str) -> String {
@@ -1251,6 +1466,9 @@ pub async fn insert_tenant(db: &DatabaseConnection, owner_id: Uuid) -> Uuid {
         owner_id: Set(owner_id),
         drive_quota_bytes: Set(None),
         require_2fa: Set(false),
+        owner_department: Set(None),
+        owner_position: Set(None),
+        owner_team: Set(None),
     }
     .insert(db)
     .await
@@ -1293,6 +1511,9 @@ pub async fn ensure_tenant_member_for_project(
         tenant_id: Set(project.tenant_id),
         user_id: Set(user_id),
         role: Set(entity::tenant_members::TenantRole::Member),
+        department: Set(None),
+        position: Set(None),
+        team: Set(None),
     }
     .insert(db)
     .await
@@ -1364,4 +1585,47 @@ pub async fn create_status(
         .expect("status id")
         .parse()
         .expect("uuid")
+}
+
+/// ログイン済みセッションでファイルをアップロードし、レスポンス JSON を返す。
+pub async fn upload_drive_file(
+    app: &TestApp,
+    tenant_id: Uuid,
+    folder_id: Option<Uuid>,
+    file_name: &str,
+    mime: &str,
+    body: &[u8],
+) -> serde_json::Value {
+    let mut form = reqwest::multipart::Form::new();
+    if let Some(folder_id) = folder_id {
+        form = form.text("folder_id", folder_id.to_string());
+    }
+    form = form.part(
+        "file",
+        reqwest::multipart::Part::bytes(body.to_vec())
+            .file_name(file_name.to_string())
+            .mime_str(mime)
+            .expect("mime"),
+    );
+
+    let response = app
+        .client()
+        .post(format!(
+            "{}/v1/tenants/{tenant_id}/drive/files",
+            app.base_url()
+        ))
+        .multipart(form)
+        .send()
+        .await
+        .expect("upload request");
+    assert_eq!(
+        response.status(),
+        StatusCode::CREATED,
+        "アップロードは成功するはず"
+    );
+    response.json().await.expect("upload response json")
+}
+
+pub fn file_id_of(file: &serde_json::Value) -> Uuid {
+    Uuid::parse_str(file["id"].as_str().expect("id is string")).expect("id is uuid")
 }

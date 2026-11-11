@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { usePageContext } from 'vike-vue/usePageContext';
 import { onMounted, ref } from 'vue';
-import { Button } from '@/components/ui/button';
+import { Button } from '@koyori-app/ui-vue';
 import { useVerifyEmailMutation } from '@/lib/api-vue-query';
 
 defineOptions({ name: 'EmailVerification' });
@@ -38,7 +38,7 @@ onMounted(async () => {
     <h1 class="text-2xl font-bold">メールアドレスを確認しました</h1>
     <p class="text-muted-foreground text-sm">サインインしてご利用ください。</p>
     <a href="/signin">
-      <Button>サインインページへ</Button>
+      <Button label="サインインページへ" />
     </a>
   </div>
   <div v-else class="flex flex-col items-center gap-4 p-6 text-center md:p-8">
@@ -47,7 +47,7 @@ onMounted(async () => {
       確認用のリンクが無効か、有効期限が切れています。すでに確認が済んでいる場合もこの表示になります。サインインできないときは、サインインページから確認メールを再送してください。
     </p>
     <a href="/signin">
-      <Button variant="outline">サインインページへ</Button>
+      <Button variant="tertiary" label="サインインページへ" />
     </a>
   </div>
 </template>

@@ -15,12 +15,19 @@ allowBuilds:
   unrs-resolver: true
   vue-demi: true
 catalog:
+  '@koyori-app/arc': 0.1.0-alpha.3
+  '@koyori-app/arc-vue': 0.1.0-alpha.3
+  '@koyori-app/ui-vue': 0.7.0
   '@lezer/highlight': 1.2.5
+  '@tanstack/vue-virtual': 3.13.38
   remark-breaks: 4.0.0
-  vite: npm:@voidzero-dev/vite-plus-core@0.3.3
-  vite-plus: 0.3.3
+  vite: npm:@voidzero-dev/vite-plus-core@1.5.0
+  vite-plus: 1.5.0
 minimumReleaseAgeExclude:
   - '@koyori-app/openapi-vue-query'
+  - '@koyori-app/ui-vue'
+  - '@koyori-app/arc@0.1.0-alpha.3'
+  - '@koyori-app/arc-vue@0.1.0-alpha.3'
   - '@vue/compiler-core@3.6.0-rc.11'
   - '@vue/compiler-dom@3.6.0-rc.11'
   - '@vue/compiler-sfc@3.6.0-rc.11'

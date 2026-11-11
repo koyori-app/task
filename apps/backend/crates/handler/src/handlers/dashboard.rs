@@ -58,13 +58,9 @@ pub async fn get_dashboard(
         .ensure_tenant_access_or_guest_scope(&state, tenant_id)
         .await?;
     let filter = q.filter.as_deref().unwrap_or("today");
-    let predicate = match filter {
-        "today" => "due_date = c.today",
-        "week" => "due_date >= c.week_start AND due_date < c.week_start + 7",
-        "overdue" => "due_date < c.today",
-        "all" => "TRUE",
-        _ => return Err(AppError::BadRequest),
-    };
+    let predicate =
+        service::deadline_filter::predicate(filter, "due_date", "c.today", "c.week_start")
+            .ok_or(AppError::BadRequest)?;
     let timezone = q.timezone.as_deref().unwrap_or("UTC");
     if timezone.len() > 100 || !service::timezone::exists(&state.db, timezone).await? {
         return Err(AppError::BadRequest);
@@ -171,7 +167,7 @@ GROUP BY c.week_start, d.day ORDER BY d.day
     let recent = state
         .db
         .query_all_raw(sql(r#"
-SELECT a.id, a.event_type, a.payload, a.created_at, a.user_id, u.username,
+SELECT a.id, a.event_type, a.payload, a.created_at, a.user_id, u.username, u.account_kind,
        t.title, t.seq_id, p.key, p.name
 FROM task_activities a JOIN scoped t ON t.id = a.task_id
 JOIN projects p ON p.id = t.project_id LEFT JOIN users u ON u.id = a.user_id
@@ -182,6 +178,7 @@ ORDER BY a.created_at DESC, a.id DESC LIMIT 3
     for row in recent {
         let user_id: Option<Uuid> = row.try_get("", "user_id")?;
         let username: Option<String> = row.try_get("", "username")?;
+        let account_kind: Option<String> = row.try_get("", "account_kind")?;
         activities.push(DashboardActivity {
             activity: ActivityItem {
                 id: row.try_get("", "id")?,
@@ -192,6 +189,7 @@ ORDER BY a.created_at DESC, a.id DESC LIMIT 3
                     .with_timezone(&Utc),
                 user: user_id.map(|id| ActivityUser {
                     id,
+                    account_kind: account_kind.unwrap_or_else(|| "human".into()),
                     name: username.unwrap_or_else(|| "unknown".into()),
                 }),
             },

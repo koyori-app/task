@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LoadErrorState from '@/components/LoadErrorState.vue';
 import { useQueryClient } from '@tanstack/vue-query';
 import {
   PhCaretLeft,
@@ -8,15 +9,7 @@ import {
   PhWarningCircle,
 } from '@phosphor-icons/vue';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Button, ConfirmDialog, Field, Input, Picker } from '@koyori-app/ui-vue';
 import ReviewFindingBody from '@/components/reviews/ReviewFindingBody.vue';
 import ReviewRoundComposer from '@/components/reviews/ReviewRoundComposer.vue';
 import {
@@ -53,14 +46,17 @@ import {
   relativeReviewFindingHref,
   type ReviewFindingsUrlState,
 } from '@/lib/review-findings-url-state';
+import { pullRequestState } from '@/lib/forge-pull-request';
 import {
   PR_PAGE_SIZE,
+  PR_STATE_FILTERS,
   filterPullRequests,
   hasGithubConnection,
   isMyPullRequest,
   pageCount,
   pageOfPullRequest,
   viewerGithubLogin,
+  type PrStateFilter,
 } from '@/lib/review-pr-rail';
 
 const props = defineProps<{
@@ -94,6 +90,9 @@ const mineOnly = ref(initialUrlState.mine);
 const prPage = ref<number | null>(initialUrlState.page);
 const urlWarnings = ref([...(props.initialUrlWarnings ?? [])]);
 const isComposerOpen = ref(false);
+/** 起票欄に捨てると失われる下書きがあるか（別 PR を選ぶ前に確認する） */
+const composerDirty = ref(false);
+const pendingPr = ref<number | null>(null);
 const transitionError = ref<string | null>(null);
 
 const prsQuery = useReviewedPullRequestsQuery(props.tenantId, props.projectId);
@@ -123,12 +122,18 @@ const githubNeedsRelink = computed(
 );
 /** 選択中 PR とは別——サイドバーの見える行だけを絞る。 */
 const prQuery = ref('');
+const prStateFilter = ref<PrStateFilter>('all');
 // PR 一覧は連携一覧を待たずに出す（連携一覧は外部への問い合わせで遅れることがある）。
 // 連携一覧が要るのは「自分の PR」の判定だけで、その間スイッチは使えない
 const railReady = computed(() => prsQuery.isSuccess.value);
 const connectionsFailed = computed(() => connectionsQuery.isError.value);
 const railList = computed(() =>
-  filterPullRequests(pullRequests.value, prQuery.value, mineOnly.value ? githubLogin.value : null),
+  filterPullRequests(
+    pullRequests.value,
+    prQuery.value,
+    mineOnly.value ? githubLogin.value : null,
+    prStateFilter.value,
+  ),
 );
 /**
  * 実際に作成者で絞っているか。連携一覧の待機中・取得失敗の間は `mineOnly`（URL の mine=1）が
@@ -194,6 +199,24 @@ function checkUrlRailState() {
 watch(urlRailCheckReady, checkUrlRailState, { immediate: true });
 const rounds = computed(() => roundsQuery.data.value ?? []);
 
+const ALL_ITEM = { value: 'all', label: 'すべて' };
+const prStateItems = PR_STATE_FILTERS.map((state) => ({
+  value: state,
+  label: state === 'all' ? 'すべて' : pullRequestState(state).label,
+}));
+const roundItems = computed(() => [
+  ALL_ITEM,
+  ...rounds.value.map((round: Review) => ({
+    value: String(round.round),
+    label: `R${round.round}`,
+  })),
+]);
+const severityItems = [
+  ALL_ITEM,
+  ...SEVERITIES.map((value) => ({ value, label: SEVERITY_LABELS[value] })),
+];
+const stateItems = [ALL_ITEM, ...STATES.map((value) => ({ value, label: STATE_LABELS[value] }))];
+
 function currentUrlState(): ReviewFindingsUrlState {
   return {
     pr: selectedPr.value,
@@ -226,12 +249,32 @@ function applyUrlState(state: ReviewFindingsUrlState, warnings: readonly string[
   urlRailCheckPending = true;
   checkUrlRailState();
   isComposerOpen.value = false;
+  composerDirty.value = false;
   transitionError.value = null;
 }
 
+/** 下書きを抱えたまま「戻る」で離れようとした時の、復元待ちの URL 状態 */
+const pendingRestore = ref<{ state: ReviewFindingsUrlState; warnings: string[] } | null>(null);
+
 function restoreFromLocation() {
   const parsed = parseReviewFindingsUrlState(new URL(window.location.href).searchParams);
+  if (isComposerOpen.value && composerDirty.value) {
+    pendingRestore.value = { state: parsed.state, warnings: [...parsed.warnings] };
+    return;
+  }
   applyUrlState(parsed.state, parsed.warnings);
+}
+
+function confirmRestore() {
+  const next = pendingRestore.value;
+  pendingRestore.value = null;
+  if (next) applyUrlState(next.state, next.warnings);
+}
+
+/** やめる: ブラウザは既に前の URL へ動いているので、今の画面の URL を積み直して下書きを保つ */
+function cancelRestore() {
+  pendingRestore.value = null;
+  writeUrl('push');
 }
 
 onMounted(() => window.addEventListener('popstate', restoreFromLocation));
@@ -351,6 +394,22 @@ function setStateFilter(value: unknown) {
 }
 
 function selectPr(pr: number) {
+  if (pr === selectedPr.value) return;
+  if (isComposerOpen.value && composerDirty.value) {
+    pendingPr.value = pr;
+    return;
+  }
+  doSelectPr(pr);
+}
+
+function confirmSelectPr() {
+  const pr = pendingPr.value;
+  pendingPr.value = null;
+  if (pr != null) doSelectPr(pr);
+}
+
+function doSelectPr(pr: number) {
+  composerDirty.value = false;
   // 選んだ PR が載っているページを URL に残す（page が無いと、戻ったときにその PR のページへ飛ぶ）
   prPage.value = currentPage.value;
   selectedPr.value = pr;
@@ -365,6 +424,11 @@ function selectPr(pr: number) {
 function onPrQueryInput() {
   prPage.value = 1;
   writeUrl('replace');
+}
+
+function setPrStateFilter(value: unknown) {
+  prStateFilter.value = value as PrStateFilter;
+  onPrQueryInput();
 }
 
 function setMineOnly(value: boolean) {
@@ -476,6 +540,7 @@ async function transition(finding: ReviewFinding, to: FindingState) {
 
 async function onRoundCreated() {
   isComposerOpen.value = false;
+  composerDirty.value = false;
   await invalidateAll();
 }
 </script>
@@ -518,15 +583,27 @@ async function onRoundCreated() {
               </label>
               <Input
                 id="filter-pr"
-                v-model="prQuery"
                 type="search"
                 autocomplete="off"
                 placeholder="例: 231、共有リンク"
-                class="text-sm"
-                data-testid="filter-pr"
-                @update:model-value="onPrQueryInput"
+                :value="prQuery"
+                :on-value-change="
+                  (v: string) => {
+                    prQuery = v;
+                    onPrQueryInput();
+                  }
+                "
               />
             </div>
+            <Field id="filter-pr-state" label="PR の状態">
+              <Picker
+                label="PR の状態"
+                :searchable="false"
+                :items="prStateItems"
+                :selected-values="[prStateFilter]"
+                :on-selection-change="(values: string[]) => setPrStateFilter(values[0])"
+              />
+            </Field>
             <!-- PR の作成者は GitHub のユーザー名なので、連携が無いと見分けられない -->
             <label
               class="mb-1 flex items-start gap-2.5 rounded-md border p-2.5"
@@ -580,13 +657,17 @@ async function onRoundCreated() {
               あなた（GitHub @{{ githubLogin }}）が作成した PR
               で、レビューのあるものはまだありません。
             </p>
+            <p v-else-if="prQuery.trim() === ''">この状態の PR はありません。</p>
             <p v-else>
               「{{ prQuery.trim() }}」に一致する{{ mineApplied ? '、自分が作成した' : '' }} PR
               はありません。
             </p>
-            <Button v-if="mineApplied" variant="outline" size="sm" @click="setMineOnly(false)">
-              {{ prQuery.trim() === '' ? 'すべての PR を表示' : 'すべての PR から探す' }}
-            </Button>
+            <Button
+              v-if="mineApplied"
+              variant="tertiary"
+              :label="prQuery.trim() === '' ? 'すべての PR を表示' : 'すべての PR から探す'"
+              @click="setMineOnly(false)"
+            />
           </div>
 
           <template v-else>
@@ -625,6 +706,18 @@ async function onRoundCreated() {
             >
               <span class="flex items-center gap-2">
                 <span class="font-mono text-xs">#{{ pr.pr_number }}</span>
+                <span
+                  class="inline-flex items-center gap-1 text-xs"
+                  :class="pullRequestState(pr.state).class"
+                  data-testid="pr-state"
+                >
+                  <component
+                    :is="pullRequestState(pr.state).icon"
+                    class="size-3.5"
+                    aria-hidden="true"
+                  />
+                  {{ pullRequestState(pr.state).label }}
+                </span>
                 <!--
                   バッジは件数の事実だけを出す。可否の断定はしない——可否には鮮度と
                   連携の有無も要り（mergeVerdict の片道降格）、この一覧はその材料を
@@ -632,14 +725,23 @@ async function onRoundCreated() {
                   等と言う横で一覧だけ緑になる
                 -->
                 <span
-                  class="rounded-full px-2 py-0.5 text-xs"
-                  :class="
-                    pr.blocking === 0
-                      ? 'bg-green-600/10 text-green-700 dark:text-green-400'
-                      : 'bg-destructive/10 text-destructive'
-                  "
+                  v-if="pr.blocking === 0"
+                  class="rounded-full bg-green-600/10 px-2 py-0.5 text-xs text-green-700 dark:text-green-400"
                 >
-                  {{ pr.blocking === 0 ? '未解決なし' : `${pr.blocking} 件が未解決` }}
+                  未解決なし
+                </span>
+                <span
+                  v-else-if="pr.blocking > pr.blocking_fixed"
+                  class="bg-destructive/10 text-destructive rounded-full px-2 py-0.5 text-xs"
+                >
+                  {{ pr.blocking - pr.blocking_fixed }} 件が未解決
+                </span>
+                <!-- High / Medium がすべて fixed。直す側の作業は無く、レビュー側の確認を待つだけ -->
+                <span
+                  v-else
+                  class="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-400"
+                >
+                  {{ pr.blocking }} 件が承認待ち
                 </span>
               </span>
               <span class="line-clamp-2 font-medium">{{
@@ -660,13 +762,12 @@ async function onRoundCreated() {
             >
               <Button
                 variant="ghost"
-                size="sm"
                 :disabled="currentPage <= 1"
                 data-testid="pr-pager-prev"
+                label="前へ"
                 @click="goToPage(currentPage - 1)"
               >
-                <PhCaretLeft class="size-3.5" />
-                前へ
+                <template #icon><PhCaretLeft class="size-3.5" /></template>
               </Button>
               <p class="flex flex-1 flex-col text-center text-xs" aria-live="polite">
                 <strong class="font-medium">
@@ -678,13 +779,12 @@ async function onRoundCreated() {
               </p>
               <Button
                 variant="ghost"
-                size="sm"
                 :disabled="currentPage >= pageTotal"
                 data-testid="pr-pager-next"
+                label="次へ"
                 @click="goToPage(currentPage + 1)"
               >
-                次へ
-                <PhCaretRight class="size-3.5" />
+                <template #icon><PhCaretRight class="size-3.5" /></template>
               </Button>
             </div>
           </template>
@@ -747,75 +847,53 @@ async function onRoundCreated() {
             <!-- 絞り込みと起票 -->
             <div class="flex flex-wrap items-end gap-2">
               <div class="w-[110px]">
-                <label for="filter-round" class="mb-1.5 block text-xs font-medium">Round</label>
-                <Select
-                  :model-value="roundFilter === null ? 'all' : String(roundFilter)"
-                  @update:model-value="setRoundFilter"
-                >
-                  <SelectTrigger id="filter-round" size="sm" class="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">すべて</SelectItem>
-                    <SelectItem
-                      v-for="round in rounds"
-                      :key="round.id"
-                      :value="String(round.round)"
-                    >
-                      R{{ round.round }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+                <Field id="filter-round" label="Round">
+                  <Picker
+                    label="Round"
+                    :searchable="roundItems.length > 8"
+                    :items="roundItems"
+                    :selected-values="[roundFilter === null ? 'all' : String(roundFilter)]"
+                    :on-selection-change="(values: string[]) => setRoundFilter(values[0])"
+                  />
+                </Field>
               </div>
               <div class="w-[130px]">
-                <label for="filter-severity" class="mb-1.5 block text-xs font-medium">重大度</label>
-                <Select
-                  :model-value="severityFilter ?? 'all'"
-                  @update:model-value="setSeverityFilter"
-                >
-                  <SelectTrigger id="filter-severity" size="sm" class="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">すべて</SelectItem>
-                    <SelectItem v-for="severity in SEVERITIES" :key="severity" :value="severity">
-                      {{ SEVERITY_LABELS[severity] }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+                <Field id="filter-severity" label="重大度">
+                  <Picker
+                    label="重大度"
+                    :searchable="false"
+                    :items="severityItems"
+                    :selected-values="[severityFilter ?? 'all']"
+                    :on-selection-change="(values: string[]) => setSeverityFilter(values[0])"
+                  />
+                </Field>
               </div>
               <div class="w-[130px]">
-                <label for="filter-state" class="mb-1.5 block text-xs font-medium">状態</label>
-                <Select :model-value="stateFilter ?? 'all'" @update:model-value="setStateFilter">
-                  <SelectTrigger id="filter-state" size="sm" class="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">すべて</SelectItem>
-                    <SelectItem v-for="state in STATES" :key="state" :value="state">
-                      {{ STATE_LABELS[state] }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+                <Field id="filter-state" label="状態">
+                  <Picker
+                    label="状態"
+                    :searchable="false"
+                    :items="stateItems"
+                    :selected-values="[stateFilter ?? 'all']"
+                    :on-selection-change="(values: string[]) => setStateFilter(values[0])"
+                  />
+                </Field>
               </div>
               <Button
                 v-if="hasFilters"
                 type="button"
                 variant="ghost"
-                size="sm"
+                label="絞り込み解除"
                 @click="clearFilters"
-              >
-                絞り込み解除
-              </Button>
+              />
               <Button
                 v-if="!isComposerOpen"
                 type="button"
-                size="sm"
                 class="ml-auto"
+                label="指摘を起票"
                 @click="isComposerOpen = true"
               >
-                <PhPlus class="size-4" />
-                指摘を起票
+                <template #icon><PhPlus class="size-4" /></template>
               </Button>
             </div>
 
@@ -826,7 +904,8 @@ async function onRoundCreated() {
               :pr-number="selectedPr"
               :next-round="rounds.length + 1"
               @created="onRoundCreated"
-              @cancel="isComposerOpen = false"
+              @cancel="((isComposerOpen = false), (composerDirty = false))"
+              @dirty-change="(dirty: boolean) => (composerDirty = dirty)"
             />
 
             <p v-if="transitionError" role="alert" class="text-destructive text-sm">
@@ -869,6 +948,11 @@ async function onRoundCreated() {
             <p v-if="findingsQuery.isPending.value" class="text-muted-foreground text-sm">
               読み込み中…
             </p>
+            <LoadErrorState
+              v-else-if="findingsQuery.isError.value"
+              message="指摘の読み込みに失敗しました"
+              @retry="findingsQuery.refetch()"
+            />
             <p v-else-if="findings.length === 0" class="text-muted-foreground text-sm">
               {{ hasFilters ? '条件に合う指摘はありません。' : '指摘はありません。' }}
             </p>
@@ -903,7 +987,7 @@ async function onRoundCreated() {
                   </span>
                   <span class="text-muted-foreground text-xs">R{{ finding.round }}</span>
                   <a
-                    class="hover:text-primary min-w-0 flex-1 truncate font-medium underline-offset-4 hover:underline"
+                    class="hover:text-link min-w-0 flex-1 truncate font-medium underline-offset-4 hover:underline"
                     :href="findingHref(finding.id)"
                     :aria-label="`指摘「${finding.title}」へのリンク`"
                     @click="focusFinding($event, finding.id)"
@@ -918,20 +1002,22 @@ async function onRoundCreated() {
                 >
                   {{ findingLocation(finding) }}
                 </p>
-                <ReviewFindingBody :body="finding.body" :finding-id="finding.id" />
+                <ReviewFindingBody
+                  :body="finding.body"
+                  :finding-id="finding.id"
+                  :tenant="tenantSlug"
+                />
 
                 <div class="mt-3 flex flex-wrap items-center gap-2">
                   <Button
                     v-for="action in findingActions(finding)"
                     :key="action.to"
                     type="button"
-                    size="sm"
-                    :variant="action.to === 'verified' ? 'default' : 'outline'"
+                    :variant="action.to === 'verified' ? 'primary' : 'tertiary'"
                     :disabled="updateState.isPending.value"
+                    :label="action.label"
                     @click="transition(finding, action.to)"
-                  >
-                    {{ action.label }}
-                  </Button>
+                  />
                   <!-- 確認ボタンが出ない理由の説明だけ。出すかどうかは available_actions が決める -->
                   <span
                     v-if="finding.state === 'fixed' && finding.fixed_by === viewerId"
@@ -965,5 +1051,24 @@ async function onRoundCreated() {
         </div>
       </div>
     </template>
+
+    <ConfirmDialog
+      :open="pendingPr !== null"
+      title="下書きを破棄しますか？"
+      message="起票中の下書きは、別の PR を選ぶと失われます。"
+      confirm-label="破棄して移動"
+      destructive
+      :on-confirm="confirmSelectPr"
+      :on-cancel="() => (pendingPr = null)"
+    />
+    <ConfirmDialog
+      :open="pendingRestore !== null"
+      title="下書きを破棄しますか？"
+      message="起票中の下書きは、履歴を戻ると失われます。"
+      confirm-label="破棄して戻る"
+      destructive
+      :on-confirm="confirmRestore"
+      :on-cancel="cancelRestore"
+    />
   </div>
 </template>

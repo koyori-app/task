@@ -202,7 +202,7 @@ pub enum PublicShareErrors {
 
 #[derive(IntoResponses)]
 pub enum OAuthErrors {
-    #[response(status = 302, description = "リダイレクト")]
+    #[response(status = 307, description = "リダイレクト")]
     Redirect,
     #[response(status = 400, description = "リクエストが不正です")]
     BadRequest(#[to_schema] ServerError),

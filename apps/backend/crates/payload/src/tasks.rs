@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use sea_orm::prelude::Uuid;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -6,6 +6,8 @@ use validator::Validate;
 
 use crate::custom_fields::{CustomFieldValueInput, TaskCustomFieldValueResponse};
 use crate::labels::LabelResponse;
+use crate::mentions::{MentionMap, MentionedUser};
+use crate::or_unknown::OrUnknown;
 use crate::users::UserSummary;
 use entity::{task_assignees, task_relations, tasks};
 
@@ -21,7 +23,8 @@ pub struct TaskResponse {
     pub description: Option<String>,
     #[schema(value_type = String, format = "uuid")]
     pub status_id: Uuid,
-    pub priority: tasks::TaskPriority,
+    #[schema(inline)]
+    pub priority: OrUnknown<tasks::TaskPriority>,
     pub progress_pct: i16,
     #[schema(value_type = Option<String>, format = "uuid", nullable)]
     pub parent_task_id: Option<Uuid>,
@@ -33,6 +36,9 @@ pub struct TaskResponse {
     pub soft_deadline: Option<DateTime<Utc>>,
     #[schema(value_type = Option<String>, format = "date-time", nullable)]
     pub hard_deadline: Option<DateTime<Utc>>,
+    /// 開始予定日（`YYYY-MM-DD`）。計画用の値で、締切との前後関係は検証しない
+    #[schema(value_type = Option<String>, format = "date", nullable)]
+    pub planned_start_on: Option<NaiveDate>,
     #[schema(nullable)]
     pub estimated_minutes: Option<i32>,
     pub is_archived: bool,
@@ -71,13 +77,14 @@ impl TaskResponse {
             title: model.title,
             description: model.description,
             status_id: model.status_id,
-            priority: model.priority,
+            priority: model.priority.into(),
             progress_pct: model.progress_pct,
             parent_task_id: model.parent_task_id,
             milestone_id: model.milestone_id,
             sprint_id: model.sprint_id,
             soft_deadline: model.soft_deadline.map(|dt| dt.with_timezone(&Utc)),
             hard_deadline: model.hard_deadline.map(|dt| dt.with_timezone(&Utc)),
+            planned_start_on: model.planned_start_on,
             estimated_minutes: model.estimated_minutes,
             is_archived: model.is_archived,
             created_by,
@@ -97,10 +104,18 @@ pub struct AssigneeInput {
     pub role: String,
 }
 
+/// タスク説明文の上限（文字数。`validator` の `length` は chars で数え、`u64` を受ける）。
+/// SSR の Markdown 描画（同期）が長大な本文で塞がらないようにする。
+/// frontend のタスク詳細 `+data.ts` の `MAX_DESCRIPTION_LENGTH` を同じ値に手で合わせる。
+pub const MAX_DESCRIPTION_LEN: u64 = 100_000;
+
 #[derive(Validate, Deserialize, ToSchema, serde::Serialize)]
 pub struct CreateTaskRequest {
     #[validate(length(min = 1, max = 255))]
     pub title: String,
+    #[validate(length(max = MAX_DESCRIPTION_LEN))]
+    #[schema(max_length = 100_000)]
+    // utoipa はリテラルしか受けない。MAX_DESCRIPTION_LEN と同じ値
     pub description: Option<String>,
     #[schema(value_type = String, format = "uuid")]
     pub status_id: Uuid,
@@ -117,6 +132,9 @@ pub struct CreateTaskRequest {
     pub soft_deadline: Option<chrono::DateTime<chrono::Utc>>,
     #[schema(value_type = Option<String>, format = "date-time")]
     pub hard_deadline: Option<chrono::DateTime<chrono::Utc>>,
+    /// 開始予定日（`YYYY-MM-DD`）
+    #[schema(value_type = Option<String>, format = "date")]
+    pub planned_start_on: Option<NaiveDate>,
     #[validate(range(min = 1))]
     pub estimated_minutes: Option<i32>,
     #[serde(default)]
@@ -131,6 +149,9 @@ pub struct CreateTaskRequest {
 pub struct UpdateTaskRequest {
     #[validate(length(min = 1, max = 255))]
     pub title: Option<String>,
+    #[validate(length(max = MAX_DESCRIPTION_LEN))]
+    #[schema(max_length = 100_000)]
+    // utoipa はリテラルしか受けない。MAX_DESCRIPTION_LEN と同じ値
     pub description: Option<String>,
     #[serde(default)]
     pub clear_description: bool,
@@ -159,6 +180,10 @@ pub struct UpdateTaskRequest {
     pub hard_deadline: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(default)]
     pub clear_hard_deadline: bool,
+    #[schema(value_type = Option<String>, format = "date")]
+    pub planned_start_on: Option<NaiveDate>,
+    #[serde(default)]
+    pub clear_planned_start_on: bool,
     #[validate(range(min = 1))]
     pub estimated_minutes: Option<i32>,
     #[serde(default)]
@@ -181,12 +206,27 @@ pub struct UpdateTaskRequest {
 #[into_params(parameter_in = Query)]
 pub struct ListTasksQuery {
     pub status_id: Option<Uuid>,
+    /// 優先度で絞り込む。`critical_fire` / `critical` / `high` / `medium` / `low` / `trivial` のいずれか。
+    ///
+    /// JSON の `priority`（`High` など）とは綴りが違う。このクエリは小文字の綴りだけを受け付け、
+    /// `High` のような綴りや未知の値は 400 になる
     pub priority: Option<String>,
     pub assignee_id: Option<Uuid>,
+    /// 作成者のユーザー ID。指定するとその人が作ったタスクだけを返す
+    pub created_by: Option<Uuid>,
     pub label_id: Option<Uuid>,
     pub milestone_id: Option<Uuid>,
     pub sprint_id: Option<Uuid>,
     pub parent_task_id: Option<Uuid>,
+    /// 開始予定日がこの日以降のタスクだけを返す（両端含む、`YYYY-MM-DD`）。
+    /// 開始予定日が未設定のタスクは、`planned_start_from` / `planned_start_to` のどちらかを指定すると除外される
+    #[param(value_type = Option<String>, format = "date")]
+    #[schema(value_type = Option<String>, format = "date")]
+    pub planned_start_from: Option<NaiveDate>,
+    /// 開始予定日がこの日以前のタスクだけを返す（両端含む）。`planned_start_from` より前なら 400
+    #[param(value_type = Option<String>, format = "date")]
+    #[schema(value_type = Option<String>, format = "date")]
+    pub planned_start_to: Option<NaiveDate>,
     /// 親が現在の一覧に存在しないタスクだけを返す。
     ///
     /// 未指定時は従来どおり親子を区別せず返す。List 表示はこれを有効にし、
@@ -233,6 +273,31 @@ pub struct TaskDetailResponse {
     #[serde(flatten)]
     pub task: TaskResponse,
     pub custom_field_values: Vec<TaskCustomFieldValueResponse>,
+    /// 説明文に出る印（`<@利用者ID>`）の id から引ける表示情報（コメントの `mentions` と同じ形）。
+    #[serde(default)]
+    #[schema(value_type = HashMap<String, MentionedUser>)]
+    pub mentions: MentionMap,
+    /// タスク本体への絵文字リアクション（最初に付いた順）。
+    #[serde(default)]
+    #[schema(required)]
+    pub reactions: Vec<crate::reactions::ReactionSummary>,
+}
+
+/// 一括作成の 1 リクエストあたりの上限件数（handler の `BULK_MAX_TASKS` と同じ値）。
+pub const BULK_CREATE_MAX_TASKS: u64 = 100;
+
+#[derive(Validate, Deserialize, Serialize, ToSchema)]
+pub struct BulkCreateTasksRequest {
+    /// 作成するタスク（1〜100 件）。要素は単体作成と同じ形
+    #[validate(length(min = 1, max = BULK_CREATE_MAX_TASKS), nested)]
+    #[schema(min_items = 1, max_items = 100)]
+    pub tasks: Vec<CreateTaskRequest>,
+}
+
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct BulkCreateTasksResponse {
+    /// 入力と同じ順
+    pub tasks: Vec<TaskDetailResponse>,
 }
 
 #[derive(Validate, Deserialize, ToSchema, serde::Serialize)]

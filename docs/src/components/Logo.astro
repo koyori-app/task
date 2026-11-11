@@ -1,0 +1,8 @@
+---
+/* Koyori のマーク。色付きの絵なのでライトでもダークでもそのまま出す。
+   元の絵と焼き方は apps/frontend/design/app-icon/。 */
+interface Props { class?: string }
+// Callers give it a whole-pixel box and the drawing centres inside.
+const { class: cls = "h-5 w-8" } = Astro.props;
+---
+<img src="/logo.png" alt="" class:list={[cls, "object-contain"]} />
