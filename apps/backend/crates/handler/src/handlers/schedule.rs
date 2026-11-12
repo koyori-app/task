@@ -9,7 +9,8 @@ use chrono::NaiveDate;
 use common::cursor::{decode_cursor, encode_cursor};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, FromQueryResult, Order,
-    QueryFilter, QueryOrder, QuerySelect, QueryTrait, Value, prelude::Uuid, sea_query::Expr,
+    QueryFilter, QueryOrder, QuerySelect, QueryTrait, Statement, Value, prelude::Uuid,
+    sea_query::Expr,
 };
 use serde::{Deserialize, Serialize};
 
@@ -357,17 +358,24 @@ async fn fetch_schedule_relations<C: ConnectionTrait>(
     db: &C,
     task_ids: Vec<Uuid>,
 ) -> Result<ScheduleRelationsResponse, AppError> {
-    let relations = schedule_relations_query(task_ids).all(db).await?;
+    let relations = task_relations::Entity::find()
+        .from_raw_sql(schedule_relations_statement(task_ids))
+        .all(db)
+        .await?;
     Ok(schedule_relations_response(relations))
 }
 
-fn schedule_relations_query(task_ids: Vec<Uuid>) -> sea_orm::Select<task_relations::Entity> {
-    task_relations::Entity::find()
-        .filter(task_relations::Column::BlockerTaskId.is_in(task_ids.clone()))
-        .filter(task_relations::Column::BlockedTaskId.is_in(task_ids))
+fn schedule_relations_statement(task_ids: Vec<Uuid>) -> Statement {
+    let statement = task_relations::Entity::find()
+        .filter(Expr::cust(
+            r#""task_relations"."blocker_task_id" = ANY($1) AND "task_relations"."blocked_task_id" = ANY($1)"#,
+        ))
         .order_by_asc(task_relations::Column::CreatedAt)
         .order_by_asc(task_relations::Column::Id)
-        .limit(MAX_RELATIONS + 1)
+        .build(DatabaseBackend::Postgres);
+    let sql = format!("{} LIMIT {}", statement.sql, MAX_RELATIONS + 1);
+
+    Statement::from_sql_and_values(DatabaseBackend::Postgres, sql, [Value::from(task_ids)])
 }
 
 fn schedule_relations_response(
@@ -392,7 +400,7 @@ fn schedule_relations_response(
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use sea_orm::{DbBackend, DbErr, ExecResult, QueryResult, QueryTrait, Statement};
+    use sea_orm::{DbBackend, DbErr, ExecResult, QueryResult, Statement};
 
     use super::*;
 
@@ -447,6 +455,17 @@ mod tests {
     }
 
     #[test]
+    fn relation_query_uses_one_array_binding_for_more_than_postgres_parameter_limit() {
+        let task_ids = (0..32_769).map(|_| Uuid::new_v4()).collect();
+
+        let statement = schedule_relations_statement(task_ids);
+
+        assert_eq!(statement.values.unwrap().0.len(), 1);
+        assert_eq!(statement.sql.matches("$1").count(), 2);
+        assert!(!statement.sql.contains("$2"));
+    }
+
+    #[test]
     fn relation_limit_sets_truncated_and_returns_only_the_limit() {
         let rows = (0..=MAX_RELATIONS as usize)
             .map(relation)
@@ -465,9 +484,7 @@ mod tests {
         assert_eq!(response.relations[0].to_task_id, first.blocked_task_id);
         assert_eq!(response.relations[0].r#type, "blocks");
 
-        let sql = schedule_relations_query(task_ids)
-            .build(DbBackend::Postgres)
-            .to_string();
-        assert!(sql.contains("LIMIT 1001"));
+        let statement = schedule_relations_statement(task_ids);
+        assert!(statement.sql.contains("LIMIT 1001"));
     }
 }
