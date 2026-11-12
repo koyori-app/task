@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/vue3-vite';
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test';
 import { provide, reactive, nextTick } from 'vue';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
+import { KFM_STORY_INPUTS } from '@/lib/kfm-story-fixtures/inputs';
 import TaskTablePage from '@/pages/@tenant/projects/@projectKey/tasks/+Page.vue';
 
 const PAGE_CONTEXT_KEY = 'vike-vue:usePageContext';
@@ -944,6 +945,35 @@ export const ListView: Story = {
     await waitFor(() =>
       expect(titlesInProgress()).toEqual(['OAuth 対応を実装する', '通知メール送信機能']),
     );
+  },
+};
+
+// 共有の sampleTasks は書き換えない（既存の List 表示のストーリーの見た目が変わるため）
+export const ListViewChecklistProgress: Story = {
+  name: 'List 表示のチェックリスト達成率',
+  decorators: [storyDecorator(listContext)],
+  beforeEach: () =>
+    createMockFetch({
+      tasks: {
+        ...sampleTasks,
+        tasks: sampleTasks.tasks.map((task, index) =>
+          index === 0
+            ? { ...task, description: KFM_STORY_INPUTS['gfm-task-list'] }
+            : index === 1
+              ? { ...task, description: '- [x] 設計\n- [x] 実装' }
+              : task,
+        ),
+      },
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findAllByText('2 / 5')).resolves.not.toHaveLength(0);
+    await expect(canvas.findAllByText('2 / 2')).resolves.not.toHaveLength(0);
+    // 説明にタスクリストが無い行には出さない。1 行に広い幅・狭い幅の 2 つずつ（どちらかが隠れる）
+    const rows = [...canvasElement.querySelectorAll<HTMLElement>('[data-dnd-task]')];
+    const counts = rows.map((row) => row.querySelectorAll('[data-checklist-progress]').length);
+    expect(counts.filter((count) => count > 0)).toHaveLength(2);
+    expect(counts.filter((count) => count === 0)).toHaveLength(rows.length - 2);
   },
 };
 

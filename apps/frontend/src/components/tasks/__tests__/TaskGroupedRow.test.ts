@@ -334,3 +334,41 @@ describe('TaskGroupedRow の期限の表示', () => {
     expect(button.classes()).toContain('text-destructive');
   });
 });
+
+describe('TaskGroupedRow のチェックリスト達成率', () => {
+  function mountWithDescription(description: string | null | undefined) {
+    return mount(TaskGroupedRow, {
+      props: {
+        projectKey: 'TEST',
+        task: { ...task, description },
+        statuses: [status],
+        projectLabels: [],
+        members: [],
+        onComment: vi.fn(async () => true),
+      },
+    });
+  }
+
+  it('説明文のタスクリストを広い幅と狭い幅の 2 段目の両方に出す', () => {
+    const wrapper = mountWithDescription('- [x] a\n- [ ] b\n- [ ] c');
+
+    for (const selector of ['[data-row-labels]', '[data-row-summary]']) {
+      const badge = wrapper.get(`${selector} [data-checklist-progress]`);
+      expect(badge.text()).toContain('1 / 3');
+    }
+  });
+
+  it('説明文が無い、またはタスクリストが無ければ出さない', () => {
+    for (const description of [undefined, null, '', '普通の説明\n- 箇条書き']) {
+      const wrapper = mountWithDescription(description);
+      expect(wrapper.find('[data-checklist-progress]').exists()).toBe(false);
+    }
+  });
+
+  it('達成率を押しても詳細は開かない', async () => {
+    const wrapper = mountWithDescription('- [x] a\n- [ ] b');
+    await wrapper.get('[data-row-labels] [data-checklist-progress]').trigger('click');
+
+    expect(wrapper.emitted('open')).toBeUndefined();
+  });
+});

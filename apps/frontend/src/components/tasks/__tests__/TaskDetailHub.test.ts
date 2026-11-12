@@ -1210,3 +1210,55 @@ describe('TaskDetailHub 読み込みの失敗', () => {
     expect(calls).toBe(2);
   });
 });
+
+describe('TaskDetailHub のチェックリスト達成率', () => {
+  const CHECKLIST = '- [x] a\n- [x] b\n- [ ] c\n- [ ] d\n- [ ] e';
+
+  function mountWith(description: string | null, extra: Record<string, unknown> = {}) {
+    return mount(TaskDetailHub, {
+      props: {
+        task: { ...task, description },
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+        ...extra,
+      },
+    });
+  }
+
+  it('説明の見出しの隣に完了数 / 総数を出す', () => {
+    const wrapper = mountWith(CHECKLIST);
+    const badge = wrapper.get('[data-checklist-progress]');
+
+    expect(badge.text()).toContain('2 / 5');
+    expect(badge.element.previousElementSibling?.textContent).toBe('説明');
+  });
+
+  it('KFM 描画の表示でも同じ値を出す', () => {
+    const wrapper = mountWith(CHECKLIST, {
+      descriptionHtml: '<ul><li>a</li></ul>',
+      descriptionSource: CHECKLIST,
+    });
+
+    expect(wrapper.get('[data-checklist-progress]').text()).toContain('2 / 5');
+  });
+
+  it('タスクリストの無い説明・説明が null では出さない', () => {
+    expect(mountWith('普通の説明').find('[data-checklist-progress]').exists()).toBe(false);
+    expect(mountWith(null).find('[data-checklist-progress]').exists()).toBe(false);
+  });
+
+  it('progress_pct の「進捗」行は別の値のまま', () => {
+    const wrapper = mount(TaskDetailHub, {
+      props: {
+        task: { ...task, description: CHECKLIST, progress_pct: 30 },
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+      },
+    });
+
+    expect(wrapper.get('[data-checklist-progress]').text()).toContain('2 / 5');
+    expect(wrapper.text()).toContain('30%');
+  });
+});
