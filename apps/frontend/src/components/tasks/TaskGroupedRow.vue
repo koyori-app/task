@@ -299,10 +299,13 @@ function selectFromKeyboard(event: KeyboardEvent) {
           <!-- 広い幅の 2 段目。担当・期限・優先度は右の列にある -->
           <div class="mt-1 hidden flex-wrap items-center gap-1 @3xl:flex" data-row-labels>
             <TaskIdCopyButton class="mr-1" :project-key="projectKey" :seq-id="task.seq_id" />
-            <!-- 数字は隣のタスク ID と同じ等幅にする。書体が違うと字面の高さがずれて見える -->
+            <!--
+              数字は隣のタスク ID と同じ等幅にする。書体が違うと字面の高さがずれて見える。
+              数字には下へ伸びる部分が無く字面の中心が行の中心より上に来るので、輪も 1px 上げて揃える
+            -->
             <TaskChecklistProgress
               v-if="checklist"
-              class="mr-1 font-mono"
+              class="mr-1 font-mono [&>svg]:-translate-y-px"
               :done="checklist.done"
               :total="checklist.total"
             />
@@ -356,7 +359,7 @@ function selectFromKeyboard(event: KeyboardEvent) {
               />
               <TaskChecklistProgress
                 v-if="checklist"
-                class="font-mono"
+                class="font-mono [&>svg]:-translate-y-px"
                 :done="checklist.done"
                 :total="checklist.total"
               />
