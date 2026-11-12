@@ -29,7 +29,7 @@ import { useTenantStore } from '@/stores/tenant';
  *   戻っても取り直さぬ（`staleTime: Infinity`）。404 は null として同じくキャッシュされる
  * - 取得に AbortSignal を渡さぬので、取得の途中でカードを閉じても、別の人へ移っても取得は最後まで終わり、
  *   キャッシュに入る。同じ人の取得は 1 回で済む
- * - 失敗（403・5xx）した人は、キャッシュに残らず、次に開いたときに取り直す
+ * - 失敗（403・5xx・通信の失敗）した人は、キャッシュに残らず、次に開いたときに取り直す
  * - 閲覧者がそのテナントのゲストなら取りに行かぬ（プロフィール API はゲストの閲覧者に 403 を返す）。
  *   名前とアバターだけのカードを出す
  */
@@ -61,7 +61,7 @@ const viewerIsGuest = computed(
     tenantStore.tenants.find((tenant) => tenant.id === props.tenantId)?.membership === 'Guest',
 );
 
-// 取る人は開いているカードの人。閉じる・退会した者では空になり、取得は止まる（購読が外れ、キャッシュは gc まで残る）
+// 取る人は開いているカードの人。閉じる・退会した者では空になり、新たには取りに行かぬ（取得の途中のものは最後まで終わる。購読が外れ、キャッシュは gc まで残る）
 const profileQuery = useUserProfileQuery(
   () => (props.tenantId && !viewerIsGuest.value ? props.tenantId : null) as TenantUuid | null,
   () => (target.value && target.value.kind !== 'gone' ? target.value.userId : ''),

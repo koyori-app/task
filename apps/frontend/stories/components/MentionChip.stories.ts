@@ -1,6 +1,7 @@
 import { Mention } from '@koyori-app/ui-vue';
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
+import { createPinia, setActivePinia } from 'pinia';
 import { expect, userEvent, waitFor } from 'storybook/test';
 import { provide, ref } from 'vue';
 
@@ -46,9 +47,11 @@ const meta = {
   title: 'Tasks/MentionChip',
   parameters: { a11y: { test: 'error' } },
   decorators: [
-    // コメント本文の札は、プロフィールのカード（HoverCard）が QueryClient を要る（tenantId を渡さぬので取得はせぬ）
+    // コメント本文の札は、プロフィールのカード（HoverCard）が QueryClient と、閲覧者の関わり方を引くテナントのストア（Pinia）を要る
+    // （tenantId を渡さぬので取得はせぬ）
     () => ({
       setup() {
+        setActivePinia(createPinia());
         provide(VUE_QUERY_CLIENT, new QueryClient());
       },
       template: '<story />',

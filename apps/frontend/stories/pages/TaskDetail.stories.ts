@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/vue3-vite';
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test';
 import { provide, ref } from 'vue';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
+import { createPinia, setActivePinia } from 'pinia';
 import TaskDetailPage from '@/pages/@tenant/projects/@projectKey/tasks/@taskId/+Page.vue';
 import { KFM_STORY_INPUTS } from '@/lib/kfm-story-fixtures/inputs';
 import kfmDescriptionHtml from '@/lib/kfm-story-fixtures/rendered/task-detail-description.html?raw';
@@ -502,6 +503,8 @@ function storyDecorator(
 ) {
   return () => ({
     setup() {
+      // 札のプロフィールのカードが、閲覧者の関わり方をテナントのストア（Pinia）から引く
+      setActivePinia(createPinia());
       const queryClient = new QueryClient({
         defaultOptions: {
           queries: { retry: false, gcTime: 0, staleTime: 0 },
