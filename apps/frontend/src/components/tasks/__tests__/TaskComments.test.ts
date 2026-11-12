@@ -907,10 +907,10 @@ describe('TaskComments のメンション', () => {
       mentions: { [ALICE]: { status: 'member', name: 'alice' } },
     });
     await vi.waitFor(
-      () => expect(wrapper.find('[data-task-comment] .kfm-mention').exists()).toBe(true),
+      () => expect(wrapper.find('[data-task-comment] .koyori-mention').exists()).toBe(true),
       { timeout: 10_000 },
     );
-    expect(wrapper.get('[data-task-comment] .kfm-mention').text()).toBe('@alice');
+    expect(wrapper.get('[data-task-comment] .koyori-mention').text()).toBe('@alice');
     expect(wrapper.text()).not.toContain(ALICE);
 
     await wrapper
@@ -918,10 +918,10 @@ describe('TaskComments のメンション', () => {
       .find((b) => b.text() === '1件の返信')!
       .trigger('click');
     await vi.waitFor(
-      () => expect(wrapper.findAll('[data-task-comment] .kfm-mention')).toHaveLength(2),
+      () => expect(wrapper.findAll('[data-task-comment] .koyori-mention')).toHaveLength(2),
       { timeout: 10_000 },
     );
-    const chips = wrapper.findAll('[data-task-comment] .kfm-mention');
+    const chips = wrapper.findAll('[data-task-comment] .koyori-mention');
     expect(chips).toHaveLength(2);
     expect(chips.every((c) => c.text() === '@alice')).toBe(true);
   }, 30_000);

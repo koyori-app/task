@@ -158,9 +158,9 @@ GitHub 互換の境界仕様をテストで固定している。
 
 本文中のメンションのマーカー `<@利用者ID>`（ハイフン付き UUID）をチップ `@今の名` にする。形式は入力欄と backend の `payload::mentions` と同じで、壊れたマーカーは素のテキストのまま残す。
 
-- 表（id から状態、名前、アバターを引く）は `renderDescription` の `mentions` で渡し、vfile の `data.kfm.mentions` から読む。`mentions` を渡さない描画では何もせず、マーカーは素の文字のまま残る。空の表を渡すと、マーカーは「不明な利用者」のチップになる
+- 表（id から状態と名前を引く。API の表には `avatar_url` もあるが、チップの描画には使わない）は `renderDescription` の `mentions` で渡し、vfile の `data.kfm.mentions` から読む。`mentions` を渡さない描画では何もせず、マーカーは素の文字のまま残る。空の表を渡すと、マーカーは「不明な利用者」のチップになる
 - text ノードはチップへ分割する。code、inlineCode、link、linkReference の内側ではチップにせず `@今の名` の文字へ戻す。画像の alt、リンクと画像と定義の title、code の meta も同じである。URL と生の HTML は意味を変えない
-- 状態は class（`kfm-mention-member` / `-outside` / `-gone` / `-unknown`）で表す。`currentUserId` と同じ member には `kfm-mention-self` も付ける
+- 状態は koyori の固定 class（`koyori-mention-member` / `-outside` / `-gone` / `-unknown`。`mentionClassNames` が決める）で表す。`currentUserId` と同じ member には `koyori-mention-self` も付ける
 - `mentionTenant` を渡すと、今も参加しており名前の引けるチップを `/{tenant}/users/{利用者ID}` への link にする。`taskRef` とは別の引数なのは、コメントでは KEY-N をリンクにせずチップだけを link にするためである。`kfm-mention-tenant-routes.test.ts` が、表を渡す描画は必ずテナントも渡すことを固定している
 - 表の内容で出力が変わるので、表、`currentUserId`、`mentionTenant` はキャッシュキーに含まれる
 
@@ -321,7 +321,6 @@ import '@/lib/remark-koyori-alerts/style.css';
 import '@/lib/rehype-starry-night/style.css';
 import '@/lib/rehype-kfm-code/style.css';
 import '@/lib/remark-kfm-mermaid/style.css';
-import '@/lib/remark-kfm-mention/style.css'; // チップを描く呼び出し側のみ
 ```
 
 ```html
@@ -341,7 +340,8 @@ import '@/lib/remark-kfm-mention/style.css'; // チップを描く呼び出し�
 サイドカー CSS は、プラグインごとに置いて呼び出し側が明示的に import する CSS である。GFM CSS だけがラッパーのクラスを要し、他は import だけで当たる。
 
 - GFM CSS は import とラッパーのクラスの二点が要る。GFM の出力は素の ul/ol/blockquote/a/del で掴む class が無く、bare 要素へ当てるとアプリ全体へ漏れるので、全ルールが `.kfm-content` の子孫に限定されている。クラスを付け忘れると一行も当たらない
-- alerts CSS と mention CSS は、レンダラ自身が出力する名前空間クラス（`.kfm-alert`、`.kfm-mention` など）を直接指す
+- alerts CSS は、レンダラ自身が出力する名前空間クラス（`.kfm-alert` など）を直接指す
+- メンションのチップは koyori の固定 class で描き、GFM CSS の `a` の規則は `:not(.koyori-mention)` でチップを外す
 - 着色 CSS は starry-night が出力する `pl-*` の名前空間クラスを直接指す。実体は upstream の light シート固定と `.dark` ブリッジで、アプリの class 戦略のダークに追従する
 - kfm-code CSS は `kfm-code` 要素と `.pl-line` を直接指し、着色 CSS と同じ場所で import する
 - mermaid CSS は JS 無効時または描画失敗時の light DOM のソースを、`white-space: pre` と横スクロールで読める状態に保つ
