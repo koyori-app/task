@@ -1652,6 +1652,34 @@ mod tests {
     }
 
     #[test]
+    fn task_show_prints_attachments() {
+        // `attachments` が無い応答（古いサーバー）も読める
+        let without = task_detail_with("説明", json!({}));
+        assert!(without.attachments.is_empty());
+
+        let file_id = Uuid::new_v4();
+        let mut value = serde_json::to_value(&without).unwrap();
+        value["attachments"] = json!([{
+            "id": Uuid::new_v4(),
+            "drive_file_id": file_id,
+            "name": "spec.pdf",
+            "mime_type": "application/pdf",
+            "size": 1024,
+            "url": format!("/v1/drive/files/{file_id}/content"),
+            "created_at": "2026-01-02T00:00:00Z",
+            "source": "manual",
+        }]);
+        let detail: payload::tasks::TaskDetailResponse = serde_json::from_value(value).unwrap();
+        let shown = task_for_show(detail, false);
+
+        for json_mode in [false, true] {
+            let out = crate::output::render(&shown, OutputOptions::new(json_mode));
+            assert!(out.contains("spec.pdf"), "{out}");
+            assert!(out.contains("/v1/drive/files/"), "{out}");
+        }
+    }
+
+    #[test]
     fn task_output_has_names_instead_of_description_mention_markers() {
         let alice = Uuid::new_v4();
         let former = Uuid::new_v4();

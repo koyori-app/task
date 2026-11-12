@@ -126,6 +126,7 @@ task tasks show TASK-181 --raw               # 保存されたまま（<@利用�
 
 `tasks show` は説明文のメンションの印を `@今の名` に戻して出す。それを `tasks update --description` へ
 そのまま戻すとメンションが素の文字になるので、書き換えて戻すときは `--raw` で印のまま取る（`--json` でも同じ）。
+`tasks show` は添付ファイル（`attachments`。名前・MIME・サイズ・コンテンツ URL）も出す。本体の取得コマンドはまだ無い。
 
 `--status` / `--label` / `--assignee` / `--milestone` / `--sprint` は名前または UUID で指せる。
 名前は完全一致を優先し、それがなければ大文字小文字を無視して照合する。候補が複数あるときは
@@ -256,6 +257,7 @@ task auth token < token.txt
 ```bash
 task projects list                        # --project に渡せるキー
 task projects statuses --project TASK     # --status に渡せる名前（プロジェクトごとに違う）
+task projects labels --project TASK       # --label に渡せる名前（色と説明も並ぶ）
 ```
 
 固定の値は `--help` に列挙してある（`--priority`、`sprints list --status`、`review --state` / `--severity`、`my list --filter`）。

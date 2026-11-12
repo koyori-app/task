@@ -9,7 +9,8 @@ use chrono::NaiveDate;
 use common::cursor::{decode_cursor, encode_cursor};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, FromQueryResult, Order,
-    QueryFilter, QueryOrder, QuerySelect, QueryTrait, Value, prelude::Uuid, sea_query::Expr,
+    QueryFilter, QueryOrder, QuerySelect, QueryTrait, Statement, Value, prelude::Uuid,
+    sea_query::Expr,
 };
 use serde::{Deserialize, Serialize};
 
@@ -21,7 +22,8 @@ use crate::{
     openapi::CrudErrors,
 };
 use entity::{
-    milestones, project_statuses, projects, scopes::Scope, sprints, task_assignees, tasks, users,
+    milestones, project_statuses, projects, scopes::Scope, sprints, task_assignees, task_relations,
+    tasks, users,
 };
 use payload::{
     my_tasks::{MyTaskProjectInfo, MyTaskStatusInfo},
@@ -31,6 +33,7 @@ use payload::{
 const MAX_RANGE_DAYS: i64 = 92;
 const DEFAULT_LIMIT: u64 = 200;
 const MAX_LIMIT: u64 = 500;
+const MAX_RELATIONS: u64 = 1_000;
 
 // 開始予定日・Soft 締切・Hard 締切の日付のうち、最も早い日を始点・最も遅い日を終点にする。$1 はタイムゾーン。
 // tasks の CHECK で Soft ≤ Hard なので、締切の早い方は Soft → Hard、遅い方は Hard → Soft で取れる。
@@ -83,26 +86,7 @@ pub async fn get_schedule(
         .map(decode_cursor::<ScheduleCursor>)
         .transpose()?;
 
-    let candidates = projects::Entity::find()
-        .filter(projects::Column::TenantId.eq(tenant_id))
-        .filter(projects::Column::IsPersonal.eq(false))
-        .all(&state.db)
-        .await?;
-    let candidate_ids: Vec<Uuid> = candidates.iter().map(|p| p.id).collect();
-    // オーナーは全プロジェクトに入れる（dashboard / プロジェクト一覧と同じ）
-    let visible = if let Some(ids) = guest_ids {
-        ids
-    } else if is_tenant_owner(&state.db, tenant_id, auth.user_id).await? {
-        candidate_ids.into_iter().collect()
-    } else {
-        visible_project_ids(&state.db, candidate_ids, auth.user_id).await?
-    };
-    let requested: HashSet<Uuid> = q.project_id.iter().copied().collect();
-    let project_map: HashMap<Uuid, projects::Model> = candidates
-        .into_iter()
-        .filter(|p| visible.contains(&p.id) && (requested.is_empty() || requested.contains(&p.id)))
-        .map(|p| (p.id, p))
-        .collect();
+    let project_map = schedule_projects(&state, &auth, tenant_id, guest_ids, &q.project_id).await?;
     let project_ids: Vec<Uuid> = project_map.keys().copied().collect();
 
     let tz = || Value::from(timezone.to_owned());
@@ -273,4 +257,234 @@ pub async fn get_schedule(
         members,
         next_cursor,
     }))
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
+    get,
+    path = "/{tenant_id}/schedule/relations",
+    tag = "Schedule",
+    summary = "期間内のタスク同士のブロッキング関係",
+    params(("tenant_id" = Uuid, Path, description = "テナントID"), ScheduleQuery),
+    responses((status = 200, description = "スケジュールの関係", body = ScheduleRelationsResponse), CrudErrors)
+)]
+pub async fn get_schedule_relations(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(tenant_id): Path<Uuid>,
+    Query(q): Query<ScheduleQuery>,
+) -> Result<Json<ScheduleRelationsResponse>, AppError> {
+    auth.require_scope(Scope::ReadTask)?;
+    let guest_ids = auth
+        .ensure_tenant_access_or_guest_scope(&state, tenant_id)
+        .await?;
+    if q.from > q.to || (q.to - q.from).num_days() > MAX_RANGE_DAYS {
+        return Err(AppError::BadRequest);
+    }
+    let timezone = q.timezone.as_deref().unwrap_or("UTC");
+    if timezone.len() > 100 || !service::timezone::exists(&state.db, timezone).await? {
+        return Err(AppError::BadRequest);
+    }
+
+    let project_map = schedule_projects(&state, &auth, tenant_id, guest_ids, &q.project_id).await?;
+    let project_ids: Vec<Uuid> = project_map.keys().copied().collect();
+    let tz = || Value::from(timezone.to_owned());
+    let mut query = tasks::Entity::find()
+        .filter(tasks::Column::ProjectId.is_in(project_ids))
+        .filter(tasks::Column::DeletedAt.is_null())
+        .filter(tasks::Column::IsArchived.eq(false))
+        .filter(Expr::cust_with_values(
+            if q.include_overdue == Some(true) {
+                format!(
+                    "{START_DATE} <= $2 AND ({END_DATE} >= $3 OR (tasks.soft_deadline IS NOT NULL \
+                     AND tasks.planned_start_on IS NOT NULL AND tasks.estimated_minutes IS NOT NULL \
+                     AND {NOT_DONE}))"
+                )
+            } else {
+                format!("{START_DATE} <= $2 AND {END_DATE} >= $3")
+            },
+            [tz(), q.to.into(), q.from.into()],
+        ));
+    if !q.user_id.is_empty() {
+        query = query.filter(Expr::cust_with_values(
+            "EXISTS (SELECT 1 FROM task_assignees a WHERE a.task_id = tasks.id AND a.user_id = ANY($1))",
+            [Value::from(q.user_id.clone())],
+        ));
+    }
+    if q.include_done == Some(false) {
+        query = query.filter(Expr::cust(NOT_DONE));
+    }
+    let task_ids = query
+        .select_only()
+        .column(tasks::Column::Id)
+        .into_tuple::<Uuid>()
+        .all(&state.db)
+        .await?;
+
+    Ok(Json(fetch_schedule_relations(&state.db, task_ids).await?))
+}
+
+/// 予定に出してよいプロジェクト。テナントの個人でないプロジェクトのうち、オーナーは全部、
+/// 客分は明示のメンバーのもの、それ以外は見えるもの。`requested` が空でなければその中に絞る。
+async fn schedule_projects(
+    state: &AppState,
+    auth: &AuthUser,
+    tenant_id: Uuid,
+    guest_ids: Option<HashSet<Uuid>>,
+    requested: &[Uuid],
+) -> Result<HashMap<Uuid, projects::Model>, AppError> {
+    let candidates = projects::Entity::find()
+        .filter(projects::Column::TenantId.eq(tenant_id))
+        .filter(projects::Column::IsPersonal.eq(false))
+        .all(&state.db)
+        .await?;
+    let candidate_ids: Vec<Uuid> = candidates.iter().map(|p| p.id).collect();
+    let visible = if let Some(ids) = guest_ids {
+        ids
+    } else if is_tenant_owner(&state.db, tenant_id, auth.user_id).await? {
+        candidate_ids.into_iter().collect()
+    } else {
+        visible_project_ids(&state.db, candidate_ids, auth.user_id).await?
+    };
+    let requested: HashSet<Uuid> = requested.iter().copied().collect();
+    Ok(candidates
+        .into_iter()
+        .filter(|p| visible.contains(&p.id) && (requested.is_empty() || requested.contains(&p.id)))
+        .map(|p| (p.id, p))
+        .collect())
+}
+
+async fn fetch_schedule_relations<C: ConnectionTrait>(
+    db: &C,
+    task_ids: Vec<Uuid>,
+) -> Result<ScheduleRelationsResponse, AppError> {
+    let relations = task_relations::Entity::find()
+        .from_raw_sql(schedule_relations_statement(task_ids))
+        .all(db)
+        .await?;
+    Ok(schedule_relations_response(relations))
+}
+
+fn schedule_relations_statement(task_ids: Vec<Uuid>) -> Statement {
+    let statement = task_relations::Entity::find()
+        .filter(Expr::cust(
+            r#""task_relations"."blocker_task_id" = ANY($1) AND "task_relations"."blocked_task_id" = ANY($1)"#,
+        ))
+        .order_by_asc(task_relations::Column::CreatedAt)
+        .order_by_asc(task_relations::Column::Id)
+        .build(DatabaseBackend::Postgres);
+    let sql = format!("{} LIMIT {}", statement.sql, MAX_RELATIONS + 1);
+
+    Statement::from_sql_and_values(DatabaseBackend::Postgres, sql, [Value::from(task_ids)])
+}
+
+fn schedule_relations_response(
+    mut relations: Vec<task_relations::Model>,
+) -> ScheduleRelationsResponse {
+    let truncated = relations.len() as u64 > MAX_RELATIONS;
+    relations.truncate(MAX_RELATIONS as usize);
+    ScheduleRelationsResponse {
+        relations: relations
+            .into_iter()
+            .map(|relation| ScheduleRelation {
+                from_task_id: relation.blocker_task_id,
+                to_task_id: relation.blocked_task_id,
+                r#type: "blocks".to_owned(),
+            })
+            .collect(),
+        truncated,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use sea_orm::{DbBackend, DbErr, ExecResult, QueryResult, Statement};
+
+    use super::*;
+
+    #[derive(Default)]
+    struct CountingConnection {
+        queries: AtomicUsize,
+    }
+
+    #[sea_orm::entity::prelude::async_trait::async_trait]
+    impl ConnectionTrait for CountingConnection {
+        fn get_database_backend(&self) -> DbBackend {
+            DbBackend::Postgres
+        }
+
+        async fn execute_raw(&self, _: Statement) -> Result<ExecResult, DbErr> {
+            Err(DbErr::Custom("execute is not expected".to_owned()))
+        }
+
+        async fn execute_unprepared(&self, _: &str) -> Result<ExecResult, DbErr> {
+            Err(DbErr::Custom("execute is not expected".to_owned()))
+        }
+
+        async fn query_one_raw(&self, _: Statement) -> Result<Option<QueryResult>, DbErr> {
+            Err(DbErr::Custom("query_one is not expected".to_owned()))
+        }
+
+        async fn query_all_raw(&self, _: Statement) -> Result<Vec<QueryResult>, DbErr> {
+            self.queries.fetch_add(1, Ordering::SeqCst);
+            Ok(Vec::new())
+        }
+    }
+
+    fn relation(index: usize) -> task_relations::Model {
+        task_relations::Model {
+            id: Uuid::new_v4(),
+            blocker_task_id: Uuid::new_v4(),
+            blocked_task_id: Uuid::new_v4(),
+            created_at: (chrono::Utc::now() + chrono::TimeDelta::seconds(index as i64)).into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn relation_query_count_does_not_grow_with_task_count() {
+        for task_count in [2, 500] {
+            let db = CountingConnection::default();
+            let task_ids = (0..task_count).map(|_| Uuid::new_v4()).collect();
+
+            fetch_schedule_relations(&db, task_ids).await.unwrap();
+
+            assert_eq!(db.queries.load(Ordering::SeqCst), 1);
+        }
+    }
+
+    #[test]
+    fn relation_query_uses_one_array_binding_for_more_than_postgres_parameter_limit() {
+        let task_ids = (0..32_769).map(|_| Uuid::new_v4()).collect();
+
+        let statement = schedule_relations_statement(task_ids);
+
+        assert_eq!(statement.values.unwrap().0.len(), 1);
+        assert_eq!(statement.sql.matches("$1").count(), 2);
+        assert!(!statement.sql.contains("$2"));
+    }
+
+    #[test]
+    fn relation_limit_sets_truncated_and_returns_only_the_limit() {
+        let rows = (0..=MAX_RELATIONS as usize)
+            .map(relation)
+            .collect::<Vec<_>>();
+        let first = rows[0].clone();
+        let task_ids = rows
+            .iter()
+            .flat_map(|row| [row.blocker_task_id, row.blocked_task_id])
+            .collect();
+
+        let response = schedule_relations_response(rows);
+
+        assert_eq!(response.relations.len(), MAX_RELATIONS as usize);
+        assert!(response.truncated);
+        assert_eq!(response.relations[0].from_task_id, first.blocker_task_id);
+        assert_eq!(response.relations[0].to_task_id, first.blocked_task_id);
+        assert_eq!(response.relations[0].r#type, "blocks");
+
+        let statement = schedule_relations_statement(task_ids);
+        assert!(statement.sql.contains("LIMIT 1001"));
+    }
 }
