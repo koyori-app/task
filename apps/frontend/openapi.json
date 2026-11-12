@@ -29967,7 +29967,7 @@
       },
       "TenantMembershipKind": {
         "type": "string",
-        "description": "テナント一覧における、この利用者から見た関わり方の印。\n`TenantRole` と同じ流儀（PascalCase の文字列）で返す。",
+        "description": "テナントとの関わり方（オーナー・メンバー・ゲスト）。テナント一覧では閲覧者の、プロフィールでは対象の利用者の関わり方を表す。\n`TenantRole` と同じ流儀（PascalCase の文字列）で返す。",
         "enum": ["Owner", "Member", "Guest"]
       },
       "TenantResponse": {
@@ -30596,7 +30596,7 @@
       "UserProfileResponse": {
         "type": "object",
         "description": "他の利用者に見せるプロフィール。`UserResponse` からメール等の本人向け項目を落としたもの",
-        "required": ["id", "username"],
+        "required": ["id", "username", "membership"],
         "properties": {
           "account_kind": {
             "type": "string"
@@ -30614,6 +30614,19 @@
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "membership": {
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TenantMembershipKind"
+                  }
+                ],
+                "x-or-unknown": true
+              }
+            ],
+            "description": "このテナントとの関わり方。オーナー・メンバー・客分（Guest）"
           },
           "position": {
             "type": ["string", "null"],
