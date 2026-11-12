@@ -250,6 +250,59 @@ async fn projects_show_matches_a_key_regardless_of_case() {
     );
 }
 
+async fn mount_labels(harness: &Harness) {
+    Mock::given(method("GET"))
+        .and(path(project_path("labels")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            label_json(BUG_LABEL, "bug"),
+            label_json(STALE_LABEL, "stale"),
+        ])))
+        .expect(1)
+        .mount(&harness.server)
+        .await;
+}
+
+#[tokio::test]
+async fn projects_labels_lists_the_labels_of_the_resolved_project() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    mount_labels(&harness).await;
+
+    let code = harness
+        .run(&["task", "projects", "labels", "--project", "APP"])
+        .await
+        .unwrap();
+    assert_eq!(code, 0);
+    assert_eq!(harness.calls_to(&project_path("statuses")).await, 0);
+}
+
+#[tokio::test]
+async fn projects_labels_accepts_the_json_flag() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    mount_labels(&harness).await;
+
+    let code = harness
+        .run(&["task", "--json", "projects", "labels", "--project", "APP"])
+        .await
+        .unwrap();
+    assert_eq!(code, 0);
+    assert_eq!(harness.calls_to(&project_path("labels")).await, 1);
+}
+
+#[tokio::test]
+async fn projects_labels_reports_a_missing_project_without_calling_the_labels_endpoint() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+
+    let err = harness
+        .run(&["task", "projects", "labels", "--project", "NOPE"])
+        .await
+        .unwrap_err();
+    assert_eq!(err.exit_code, 5);
+    assert_eq!(harness.calls_to(&project_path("labels")).await, 0);
+}
+
 #[tokio::test]
 async fn projects_show_reports_a_key_that_does_not_exist() {
     let harness = harness().await;

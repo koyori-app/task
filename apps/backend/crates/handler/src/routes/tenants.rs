@@ -20,6 +20,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(crate::handlers::auth_2fa::set_tenant_require_2fa))
         .routes(routes!(crate::handlers::tenant_members::get_user_profile))
         .routes(routes!(crate::handlers::schedule::get_schedule))
+        .routes(routes!(crate::handlers::schedule::get_schedule_relations))
         .nest(
             "/{tenant_id}/drive/folders",
             crate::routes::drive::tenant_folder_routes(),
