@@ -818,9 +818,9 @@ export const DescriptionChecklistProgress: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const badge = await canvas.findByText('2 / 5');
-    expect(badge.closest('[data-checklist-progress]')).not.toBeNull();
+    await expect(badge.closest('[data-checklist-progress]')).not.toBeNull();
     const description = canvasElement.querySelector('[data-task-description-html]');
-    expect(description?.querySelectorAll('input[type="checkbox"]')).toHaveLength(5);
+    await expect(description?.querySelectorAll('input[type="checkbox"]')).toHaveLength(5);
     // 「進捗」行（progress_pct）は別の値のまま
     await expect(canvas.findByText('30%')).resolves.toBeInTheDocument();
   },

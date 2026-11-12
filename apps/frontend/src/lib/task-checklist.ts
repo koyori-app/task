@@ -11,7 +11,7 @@ const HEADING = /^#{1,6}(?:[ \t]|$)/;
 /** 構文上の字下げ・空行にあたる空白は半角空白とタブだけ（`trim` 系は全角空白や NBSP も除く） */
 const LEADING_WS = /^[ \t]+/;
 const BLANK = /^[ \t]*$/;
-/** 1 行に並べて外すリスト項目の印の数の上限。越えた行は数えない（長い入力で時間と項目が膨らむのを防ぐ） */
+/** 1 行に並べて外すリスト項目の印の数の上限。越えた印は本文として扱う（長い入力で時間と項目が膨らむのを防ぐ） */
 const MAX_MARKERS_PER_LINE = 100;
 
 /** 引用の中・リスト項目の中で開いた、閉じるまで集計から除く塊（フェンスと HTML コメント） */
@@ -76,6 +76,7 @@ function stripQuote(
  * - コメント以外の HTML ブロックの中
  * - 字下げコードの直後に書いた 1 以外の番号の項目（`    code\n2. [x] a`。描画器は項目にしない）
  * - 印の後ろに本文が次の行から始まる形（`- [x]\n  本文`。描画器はチェックボックスにする）
+ * - 1 行に 100 個を超えて並べた項目の印（101 個目以降は本文として扱い、チェックボックスにしない）
  * - 引用と入れ子の項目を重ねた形の字下げの細部、setext 見出しの下線など CommonMark の細部
  *
  * 正確にするには構文解析器が要る。
@@ -162,13 +163,8 @@ export function countChecklist(description: string | null | undefined): Checklis
     for (;;) {
       const m = MARKER.exec(text);
       if (!m) break;
-      if (items.length - itemsBefore >= MAX_MARKERS_PER_LINE) {
-        // 印が多すぎる行は数えず、この行で積んだ項目も捨てる
-        items.length = itemsBefore;
-        marked = false;
-        code = true;
-        break;
-      }
+      // 上限までの印は項目として積み、越えた残りはその行の本文として扱う（後続行の所属判定を保つ）
+      if (items.length - itemsBefore >= MAX_MARKERS_PER_LINE) break;
       const markerEnd = col + m[1]!.length;
       const empty = text.length === m[0].length;
       const gap = gapAfterMarker(m[2]!, markerEnd);

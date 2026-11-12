@@ -151,4 +151,17 @@ describe('入力の大きさ', () => {
   it('1 行の印が上限以内なら数える', () => {
     expect(countChecklist(`${'- '.repeat(50)}[x] a`)).toEqual({ done: 1, total: 1 });
   });
+
+  it('印 100 個の行は数え、101 個の行は数えない（境目）', () => {
+    expect(countChecklist(`${'- '.repeat(100)}[x] a`)).toEqual({ done: 1, total: 1 });
+    expect(countChecklist(`${'- '.repeat(101)}[x] a`)).toBeNull();
+  });
+
+  it('印が上限を超えた行でも、後続の行の所属判定を保つ', () => {
+    // 101 個の入れ子の項目の中でフェンスを開き、項目の外の次の行で閉じてから通常の項目が続く
+    expect(countChecklist(`${'- '.repeat(101)}a\n  \`\`\`\n- [x] real\n- [ ] real2`)).toEqual({
+      done: 1,
+      total: 2,
+    });
+  });
 });
