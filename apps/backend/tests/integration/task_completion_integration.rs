@@ -477,6 +477,25 @@ async fn assignee_changes_wait_for_the_task_row_lock() {
     let fx = setup(&mut app).await;
     let task = create_ok(&app, &fx, &[&fx.owner, &fx.b], true, fx.todo).await;
 
+    // ロール変更
+    let txn = hold_task_row(&app, task).await;
+    let role_path = format!("{}/assignees/{}", fx.task_path(task), fx.b.id);
+    let role = app.put_json_with_session(&role_path, json!({ "role": "reviewer" }));
+    tokio::pin!(role);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), &mut role)
+            .await
+            .is_err(),
+        "タスク行のロックが解けるまでロール変更は進まない"
+    );
+    txn.commit().await.expect("commit");
+    assert_eq!(role.await.status(), StatusCode::OK);
+    let rows = assignee_rows(&app, task).await;
+    assert!(
+        rows.iter()
+            .any(|a| a.user_id == fx.b.id && a.role == "reviewer")
+    );
+
     // 削除
     let txn = hold_task_row(&app, task).await;
     let remove_path = format!("{}/assignees/{}", fx.task_path(task), fx.b.id);
@@ -562,4 +581,122 @@ async fn completing_while_assignees_change_never_errors() {
             );
         }
     }
+}
+
+/// 完了済みで、全員が自分の分を完了にしているタスク（ルール on）。
+async fn done_task_with_completed_assignees(app: &TestApp, fx: &Fx) -> Uuid {
+    use sea_orm::{ActiveModelTrait, Set, sea_query::Expr};
+    let task = create_ok(app, fx, &[&fx.owner, &fx.b], false, fx.done).await;
+    tasks::Entity::update_many()
+        .col_expr(tasks::Column::RequireAllAssigneesDone, Expr::value(true))
+        .filter(tasks::Column::Id.eq(task))
+        .exec(&app.state.db)
+        .await
+        .expect("turn the rule on");
+    for row in assignee_rows(app, task).await {
+        let mut active: task_assignees::ActiveModel = row.into();
+        active.completed_at = Set(Some(chrono::Utc::now().into()));
+        active.update(&app.state.db).await.expect("complete");
+    }
+    assert_eq!(completed_count(app, task).await, 2);
+    task
+}
+
+/// 完了を巻き戻す側（`reset` ）が、担当者の削除（タスク行 → 担当者行の順）と重なってもデッドロックしない。
+///
+/// 削除側に見立てたトランザクションでタスク行を握っている間に `reset` を始め、
+/// そのあと同じトランザクションで担当者行を消す。`reset` が先に担当者行を更新する順序だと、
+/// 互いに相手の行を待ってデッドロックになり、どちらかがエラーになる。
+async fn assert_reset_does_not_deadlock_with_assignee_removal<F>(
+    app: &TestApp,
+    task: Uuid,
+    victim: Uuid,
+    reset: F,
+) -> reqwest::Response
+where
+    F: std::future::Future<Output = reqwest::Response>,
+{
+    use sea_orm::ConnectionTrait;
+    use std::time::Duration;
+    let txn = hold_task_row(app, task).await;
+    tokio::pin!(reset);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), &mut reset)
+            .await
+            .is_err(),
+        "タスク行のロックが解けるまで巻き戻しは進まない"
+    );
+    txn.execute_unprepared(&format!(
+        "DELETE FROM task_assignees WHERE task_id = '{task}' AND user_id = '{victim}'"
+    ))
+    .await
+    .expect("担当者の削除がデッドロックで失敗した");
+    txn.commit().await.expect("commit");
+    reset.await
+}
+
+/// 完了フラグを外すと、そのステータスのタスクの担当者の完了が消える。担当者の削除と重なってもエラーにならない。
+#[tokio::test]
+async fn demoting_done_status_does_not_deadlock_with_assignee_removal() {
+    let mut app = TestApp::new().await;
+    let fx = setup(&mut app).await;
+    let spare = app
+        .post_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{}/statuses",
+                fx.tenant_id, fx.project_id
+            ),
+            json!({ "name": "Closed", "color": "#336699", "position": 3, "is_done_state": true }),
+        )
+        .await;
+    assert_eq!(spare.status(), StatusCode::CREATED);
+    let task = done_task_with_completed_assignees(&app, &fx).await;
+
+    let status_path = format!(
+        "/v1/tenants/{}/projects/{}/statuses/{}",
+        fx.tenant_id, fx.project_id, fx.done
+    );
+    let res = assert_reset_does_not_deadlock_with_assignee_removal(
+        &app,
+        task,
+        fx.b.id,
+        app.put_json_with_session(&status_path, json!({ "is_done_state": false })),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(completed_count(&app, task).await, 0);
+    assert_eq!(assignee_rows(&app, task).await.len(), 1);
+}
+
+/// 完了ステータスを消して未完了へ移すときも同じ。
+#[tokio::test]
+async fn deleting_done_status_does_not_deadlock_with_assignee_removal() {
+    let mut app = TestApp::new().await;
+    let fx = setup(&mut app).await;
+    let spare = app
+        .post_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{}/statuses",
+                fx.tenant_id, fx.project_id
+            ),
+            json!({ "name": "Closed", "color": "#336699", "position": 3, "is_done_state": true }),
+        )
+        .await;
+    assert_eq!(spare.status(), StatusCode::CREATED);
+    let task = done_task_with_completed_assignees(&app, &fx).await;
+
+    let status_path = format!(
+        "/v1/tenants/{}/projects/{}/statuses/{}?migrate_to_status_id={}",
+        fx.tenant_id, fx.project_id, fx.done, fx.todo
+    );
+    let res = assert_reset_does_not_deadlock_with_assignee_removal(
+        &app,
+        task,
+        fx.b.id,
+        app.delete_with_session(&status_path),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    assert_eq!(task_row(&app, task).await.status_id, fx.todo);
+    assert_eq!(completed_count(&app, task).await, 0);
 }

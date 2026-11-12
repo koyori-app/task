@@ -179,12 +179,10 @@ pub async fn apply_issue(
             Some(status) if status.is_done_state == content.closed => task.status_id,
             _ => resolve_status(&txn, project_id, content.closed).await?.id,
         };
-        if reopened {
-            crate::task_completion::reset_assignee_completions(&txn, task.id).await?;
-        }
         // 完了済みのまま再同期されたときに完了日時を上書きしない。
         let completed_at = task.completed_at;
 
+        let linked_task_id = task.id;
         let mut active: tasks::ActiveModel = task.into();
         active.title = Set(content.title.clone());
         active.description = Set(description_of(&content.body));
@@ -196,6 +194,11 @@ pub async fn apply_issue(
         });
         active.updated_at = Set(chrono::Utc::now().into());
         active.update(&txn).await?;
+        // ロック順は「タスク行 → 担当者行」。担当者の削除・取り消しがこの順で取るので、
+        // 担当者行の更新はタスク行の更新より後に置く（逆順だとデッドロックする）
+        if reopened {
+            crate::task_completion::reset_assignee_completions(&txn, linked_task_id).await?;
+        }
 
         let task_id = link.task_id;
         let mut link_active: github_issue_links::ActiveModel = link.into();

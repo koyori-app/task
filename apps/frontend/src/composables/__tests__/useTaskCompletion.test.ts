@@ -46,12 +46,14 @@ vi.mock('@/lib/api-vue-query', async (importOriginal) => {
 
 describe('useTaskCompletion', () => {
   let completion: ReturnType<typeof useTaskCompletion>;
+  let queryClient: QueryClient;
   const task = { id: 'task-1', require_all_assignees_done: false } as never;
   const writes = () => requestLog.filter((entry) => entry.method !== 'GET');
 
   beforeEach(() => {
     control.fail = null;
     requestLog.length = 0;
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const Host = defineComponent({
       setup() {
         completion = useTaskCompletion({ tenantId: 'tenant-1', projectId: 'project-1' });
@@ -60,16 +62,7 @@ describe('useTaskCompletion', () => {
     });
     mount(Host, {
       global: {
-        plugins: [
-          [
-            VueQueryPlugin,
-            {
-              queryClient: new QueryClient({
-                defaultOptions: { queries: { retry: false } },
-              }),
-            },
-          ],
-        ],
+        plugins: [[VueQueryPlugin, { queryClient }]],
       },
     });
   });
@@ -120,6 +113,34 @@ describe('useTaskCompletion', () => {
 
     expect(completion.errors.value['task-1']).toBe(text);
     expect(completion.pending.value['task-1']).toBeUndefined();
+  });
+
+  it.each([
+    [404, 'not-found'],
+    [409, 'task-already-done'],
+    [409, 'completion-not-required'],
+  ])('%i（%s）の失敗では詳細などを取り直す', async (status, message) => {
+    const spy = vi.spyOn(queryClient, 'invalidateQueries');
+    control.fail = { status, message };
+
+    await completion.reopenMine(task, 'user-alpha');
+
+    expect(spy).toHaveBeenCalledWith({
+      queryKey: ['get', '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}'],
+    });
+  });
+
+  it.each([
+    [400, 'bad-request'],
+    [403, 'forbidden'],
+    [500, 'internal-error'],
+  ])('%i（%s）の失敗では取り直さない', async (status, message) => {
+    const spy = vi.spyOn(queryClient, 'invalidateQueries');
+    control.fail = { status, message };
+
+    await completion.completeMine(task, 'user-alpha');
+
+    expect(spy).not.toHaveBeenCalled();
   });
 
   it('次の操作を始めたら前のエラーを消す', async () => {

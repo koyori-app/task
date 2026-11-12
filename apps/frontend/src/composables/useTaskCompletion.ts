@@ -83,6 +83,10 @@ export function useTaskCompletion(params: TaskCompletionParams) {
       await invalidate();
     } catch (failure) {
       errors.value = { ...errors.value, [taskId]: failureText(failure) };
+      // 404（途中で担当者から外された）と 409（すでに完了済み・設定が off）は、画面が
+      // 古い担当者やボタンを見ているのが原因なので、詳細を取り直して最新にする
+      const { status } = failure as Partial<CompletionFailure>;
+      if (status === 404 || status === 409) await invalidate();
     } finally {
       const next = { ...pending.value };
       delete next[taskId];

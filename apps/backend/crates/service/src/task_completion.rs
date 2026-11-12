@@ -69,6 +69,22 @@ pub async fn reset_assignee_completions<C: ConnectionTrait>(
     Ok(())
 }
 
+/// あるステータスにいる全タスクの行を `FOR UPDATE` で取る（`ORDER BY id` で取る順を固定する）。
+/// 一括でタスクの `status_id` を書き換える前に担当者行を触る経路は、先にこれを呼んで
+/// 「タスク行 → 担当者行」の順に揃える。
+pub async fn lock_tasks_in_status<C: ConnectionTrait>(
+    db: &C,
+    status_id: Uuid,
+) -> Result<(), DbErr> {
+    common::db::execute_bound(
+        db,
+        "SELECT id FROM tasks WHERE status_id = $1 AND deleted_at IS NULL ORDER BY id FOR UPDATE",
+        vec![Value::from(status_id)],
+    )
+    .await?;
+    Ok(())
+}
+
 /// あるステータスにいる全タスクの担当者の完了を消す（ステータスの一括移行用）。
 pub async fn reset_assignee_completions_in_status<C: ConnectionTrait>(
     db: &C,
