@@ -33,6 +33,7 @@ const task: TaskDetail = {
   created_at: '2026-07-16T00:00:00Z',
   custom_field_values: [],
   reactions: [],
+  attachments: [],
   id: 'task-id',
   is_archived: false,
   labels: [],
