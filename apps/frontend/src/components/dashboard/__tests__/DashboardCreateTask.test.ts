@@ -31,7 +31,7 @@ const status = {
   is_default_done: false,
   created_at: '2026-09-22T00:00:00Z',
 };
-function setup(response: (request: Request) => Response) {
+function setup(response: (request: Request) => Response, extra: { currentUserId?: string } = {}) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (req: Request) => response(req)),
@@ -39,7 +39,7 @@ function setup(response: (request: Request) => Response) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return mount(DashboardCreateTask, {
     attachTo: document.body,
-    props: { open: true, tenantId, projects: [project] },
+    props: { open: true, tenantId, projects: [project], ...extra },
     global: {
       plugins: [[VueQueryPlugin, { queryClient: client }]],
       stubs: { CreateTaskDialog: true },
@@ -64,10 +64,31 @@ describe('DashboardCreateTask', () => {
       tenantId,
       statuses: [status],
     });
-    editor.vm.$emit('created', {});
+    const task = { id: 't', seq_id: 12 };
+    editor.vm.$emit('created', task);
     await flushPromises();
-    expect(wrapper.emitted('created')).toHaveLength(1);
+    expect(wrapper.emitted('created')).toEqual([[task, project]]);
     expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+  });
+  it('現在のユーザーを担当者の初期値として渡す。未指定なら空', async () => {
+    const respond = (req: Request) => json(req.url.endsWith('/statuses') ? [status] : []);
+    const withMe = setup(respond, { currentUserId: 'me' });
+    await flushPromises();
+    button('次へ').click();
+    await flushPromises();
+    expect(withMe.getComponent({ name: 'CreateTaskDialog' }).props('initialAssigneeIds')).toEqual([
+      'me',
+    ]);
+    withMe.unmount();
+    document.body.innerHTML = '';
+
+    const without = setup(respond);
+    await flushPromises();
+    button('次へ').click();
+    await flushPromises();
+    expect(without.getComponent({ name: 'CreateTaskDialog' }).props('initialAssigneeIds')).toEqual(
+      [],
+    );
   });
   it('ステータスの取得失敗を再試行でき、0件の場合は作成を始めない', async () => {
     let failed = true;

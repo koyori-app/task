@@ -44,6 +44,9 @@ async fn user_from_session(session: &Session, state: &AppState) -> Result<users:
         .await?
         .ok_or(AuthError::Unauthorized)?;
 
+    if user.is_bot() {
+        return Err(AuthError::Forbidden);
+    }
     if let Some(revoked_at) = user.sessions_revoked_at
         && issued_at_ms < revoked_at.timestamp_millis()
     {
@@ -314,15 +317,30 @@ async fn has_tenant_access(
 
 /// テナントが 2FA を強制していれば、利用者が 2FA を満たすかを確かめる
 /// （docs/dev/features/auth/2fa.md の「リクエストごとの判定」）。強制していないテナントでは DB を引かない。
+///
+/// BOT は強制の対象から外す。BOT は TOTP もパスキーも持てず（migration の制約と、登録が人の
+/// セッション限りであるため）、セッションにも入れない。2FA は人の対話のサインインを守る物で、
+/// BOT は PAT でしか入らない。BOT の PAT を発行できるのは 2FA を満たした人の Admin だけ
+/// （`handlers::bots`）なので、強制の意図は発行の所で保たれる。人の PAT は従来どおり止める。
 pub(crate) async fn ensure_tenant_2fa(
     state: &AppState,
     tenant: &tenants::Model,
     user_id: Uuid,
 ) -> Result<(), AppError> {
-    if tenant.require_2fa && !user_satisfies_2fa(&state.db, user_id).await? {
+    if !tenant.require_2fa || is_bot_user(state, user_id).await? {
+        return Ok(());
+    }
+    if !user_satisfies_2fa(&state.db, user_id).await? {
         return Err(AppError::ForbiddenDetail("2fa-setup-required".into()));
     }
     Ok(())
+}
+
+async fn is_bot_user(state: &AppState, user_id: Uuid) -> Result<bool, AppError> {
+    Ok(users::Entity::find_by_id(user_id)
+        .one(&state.db)
+        .await?
+        .is_some_and(|user| user.is_bot()))
 }
 
 /// `has_tenant_access` の所属判定（オーナー・テナントメンバー・客分）。
@@ -430,6 +448,17 @@ async fn authenticate(parts: &mut Parts, state: &AppState) -> Result<AuthUser, A
         if user.is_suspended {
             return Err(AuthError::Suspended);
         }
+        if user.is_bot() && user.bot_tenant_id != Some(record.tenant_id) {
+            return Err(AuthError::Forbidden);
+        }
+        let allowed_project_ids = match record.allowed_project_ids.as_ref() {
+            None => None,
+            Some(v) => entity::personal_tokens::parse_allowed_project_ids(v).map_err(|e| {
+                AuthError::Internal(anyhow::anyhow!("allowed_project_ids parse error: {e}"))
+            })?,
+        };
+        // すべての拒否を通った認証成功だけを使用として記録する（認可の 403 は使用に含む）
+        service::auth::record_personal_token_use(&state.db, &record).await?;
         Ok(AuthUser {
             user_id: record.user_id,
             username: user.username,
@@ -437,16 +466,7 @@ async fn authenticate(parts: &mut Parts, state: &AppState) -> Result<AuthUser, A
                 token_id: record.id,
                 token_name: record.name,
                 tenant_id: record.tenant_id,
-                allowed_project_ids: match record.allowed_project_ids.as_ref() {
-                    None => None,
-                    Some(v) => {
-                        entity::personal_tokens::parse_allowed_project_ids(v).map_err(|e| {
-                            AuthError::Internal(anyhow::anyhow!(
-                                "allowed_project_ids parse error: {e}"
-                            ))
-                        })?
-                    }
-                },
+                allowed_project_ids,
                 scopes: record.scopes,
                 expires_at: record.expires_at,
             },
@@ -457,7 +477,7 @@ async fn authenticate(parts: &mut Parts, state: &AppState) -> Result<AuthUser, A
             return Err(AuthError::Forbidden);
         }
         let user = user_from_session(&session, state).await?;
-        if user.is_suspended {
+        if user.is_bot() || user.is_suspended {
             return Err(AuthError::Suspended);
         }
         Ok(AuthUser {
@@ -475,7 +495,7 @@ async fn device_token_user(state: &AppState, token: &str) -> Result<AuthUser, Au
         .one(&state.db)
         .await?
         .ok_or(AuthError::Unauthorized)?;
-    if user.is_suspended {
+    if user.is_bot() || user.is_suspended {
         return Err(AuthError::Suspended);
     }
     // 交換中に全失効された場合も、コードの承認時刻を基準に端末を落とす。
@@ -522,7 +542,7 @@ impl FromRequestParts<AppState> for HalfAuthedUser {
             .await?
             .ok_or(AuthError::Unauthorized)?;
         // Suspend before session-revocation so admin suspend still returns 403 on 2FA verify.
-        if user.is_suspended {
+        if user.is_bot() || user.is_suspended {
             return Err(AuthError::Suspended);
         }
         if let Some(revoked_at) = user.sessions_revoked_at
@@ -552,7 +572,7 @@ impl FromRequestParts<AppState> for LoggedInUser {
         }
         let session = session_from_parts(parts, state).await?;
         let user = user_from_session(&session, state).await?;
-        if user.is_suspended {
+        if user.is_bot() || user.is_suspended {
             return Err(AuthError::Suspended);
         }
         sentry_context::set_user(user.id);
@@ -584,7 +604,7 @@ impl FromRequestParts<AppState> for AdminUser {
             return Err(AuthError::Forbidden);
         }
         let user = user_from_session(&session, state).await?;
-        if user.is_suspended {
+        if user.is_bot() || user.is_suspended {
             return Err(AuthError::Suspended);
         }
         if !user.is_admin {
@@ -625,7 +645,7 @@ impl FromRequestParts<AppState> for CurrentUser {
             return Err(AuthError::Forbidden);
         }
         let user = user_from_session(&session, state).await?;
-        if user.is_suspended {
+        if user.is_bot() || user.is_suspended {
             return Err(AuthError::Suspended);
         }
         sentry_context::set_user(user.id);

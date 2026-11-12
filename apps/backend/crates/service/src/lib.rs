@@ -35,6 +35,7 @@ pub mod reviews;
 pub mod smtp;
 pub mod storage;
 pub mod task_activities;
+pub mod task_attachments;
 pub mod task_responses;
 pub mod tasks;
 pub mod tenant_invitations;
@@ -47,3 +48,5 @@ pub mod webhooks;
 pub use common::db;
 pub use common::system_settings;
 pub use common::validation;
+
+pub mod bots;

@@ -25,7 +25,7 @@ import {
   type ApiPriority as TaskPriority,
 } from '@/lib/task-display';
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
-import { TASK_ROW_GRID } from '@/components/tasks/task-grouped-columns';
+import { TASK_HEADER_GRID } from '@/components/tasks/task-grouped-columns';
 import TaskListSortHeader from '@/components/tasks/TaskListSortHeader.vue';
 import {
   TASK_LIST_SORT_COLUMNS,
@@ -39,6 +39,8 @@ type ProjectMember = { id: string; username: string; avatar_url?: string | null 
 
 const props = defineProps<{
   groups: TaskGroup[];
+  /** タスク ID（`KEY-N`）を組み立てるプロジェクトキー */
+  projectKey: string;
   tenantId: string | null | undefined;
   projectId: string | null | undefined;
   labelId?: string | null;
@@ -381,7 +383,8 @@ async function commitAdding(statusId: string) {
 </script>
 
 <template>
-  <div class="flex flex-col">
+  <div class="@container flex flex-col">
+    <!-- 行の 2 段と列の切り替えは、この根の幅で決める（task-grouped-columns.ts） -->
     <!-- 群どうしの余白も落とし先に含めるので、gap ではなく群の padding で空ける -->
     <section
       v-for="group in groups"
@@ -435,12 +438,12 @@ async function commitAdding(statusId: string) {
         :class="collapsed[group.status.id] ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'"
       >
         <!--
-          開閉と横スクロールの枠が、行の Dropdown / 担当者の一覧を切り取る。
+          開閉の枠が、行の Dropdown / 担当者の一覧を切り取る。
           中の Dropdown と担当者の選択は top-layer で一覧をトップレイヤーに出す。
         -->
         <div class="overflow-hidden">
-          <div class="overflow-x-auto" :inert="collapsed[group.status.id] || undefined">
-            <div :class="[TASK_ROW_GRID, 'border-b text-xs text-muted-foreground']">
+          <div :inert="collapsed[group.status.id] || undefined">
+            <div :class="[TASK_HEADER_GRID, 'border-b text-xs text-muted-foreground']">
               <TaskListSortHeader
                 v-for="column in TASK_LIST_SORT_COLUMNS"
                 :key="column.id"
@@ -466,6 +469,7 @@ async function commitAdding(statusId: string) {
               <template v-for="task in dndTasksOf(group)" :key="task.id">
                 <TaskGroupedRow
                   data-dnd-task
+                  :project-key="projectKey"
                   :task="task"
                   :statuses="statuses"
                   :project-labels="projectLabels"
@@ -490,6 +494,7 @@ async function commitAdding(statusId: string) {
                 />
                 <TaskSubtaskBranch
                   v-if="expandedTaskIds[task.id]"
+                  :project-key="projectKey"
                   :parent-task="task"
                   :filters="{
                     status_id: group.status.id,
@@ -533,7 +538,7 @@ async function commitAdding(statusId: string) {
             </div>
 
             <!-- 失敗したページは取り直せるようにする。導線が無いと、以降のページへ進めない -->
-            <div v-if="group.isError" class="flex min-w-[42rem] items-center gap-2 px-3 py-2">
+            <div v-if="group.isError" class="flex items-center gap-2 px-3 py-2">
               <p class="text-sm text-destructive">読み込みに失敗しました</p>
               <Button
                 type="button"
@@ -545,25 +550,22 @@ async function commitAdding(statusId: string) {
             </div>
             <p
               v-else-if="group.isLoading && !group.tasks.length"
-              class="min-w-[42rem] px-3 py-2 text-sm text-muted-foreground"
+              class="px-3 py-2 text-sm text-muted-foreground"
             >
               読み込み中…
             </p>
-            <p
-              v-else-if="!group.tasks.length"
-              class="min-w-[42rem] px-3 py-2 text-sm text-muted-foreground"
-            >
+            <p v-else-if="!group.tasks.length" class="px-3 py-2 text-sm text-muted-foreground">
               タスクはありません
             </p>
 
-            <div class="min-w-[42rem]">
+            <div>
               <!--
                 追加中の行は、できあがるタスクの行と同じ見た目にする（参照）。
                 入力欄を枠で囲うと、行の並びから浮いて別の画面のように見える。
               -->
               <div
                 v-if="addingStatusId === group.status.id"
-                class="flex items-center gap-2 border-b border-border/60 px-2 py-1.5"
+                class="flex flex-wrap items-center gap-2 border-b border-border/60 px-2 py-1.5"
               >
                 <span
                   class="size-4 shrink-0 rounded-full border-2 border-dashed"
@@ -572,7 +574,7 @@ async function commitAdding(statusId: string) {
                 />
                 <Input
                   ref="draftInputRef"
-                  class="flex-1"
+                  class="min-w-48 flex-1"
                   placeholder="タスク名を入力"
                   :aria-label="`${group.status.name} にタスクを追加`"
                   :disabled="!!creatingStatusIds?.[group.status.id]"

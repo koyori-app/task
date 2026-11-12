@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import UserAvatar from '@/components/UserAvatar.vue';
+import TenantBotsSection from '@/components/tenants/TenantBotsSection.vue';
+import { rolesForAccount } from '@/lib/bot-roles';
 import { useQueryClient } from '@tanstack/vue-query';
 import { PhArrowClockwise, PhEnvelopeSimple, PhPaperPlaneTilt, PhX } from '@phosphor-icons/vue';
 import { computed, ref, useId } from 'vue';
@@ -250,10 +252,32 @@ async function onRevokeInvitation(invitation: TenantInvitationResponse) {
 // --- ロール変更 ---
 
 const roleError = ref<string | null>(null);
+/** 自分の Admin を落とす選択。確定すると管理操作をこの画面で取り戻せない */
+const demoteTarget = ref<{ member: TenantMemberResponse; role: TenantRole } | null>(null);
 
-async function onRoleChange(member: TenantMemberResponse, role: TenantRole) {
+function isSelfDemotion(member: TenantMemberResponse, role: TenantRole) {
+  return isSelf(member) && member.role === 'Admin' && role !== 'Admin';
+}
+
+const demoteDescription = computed(() => {
+  const target = demoteTarget.value;
+  if (!target) return '';
+  return `自分のロールを Admin から ${target.role} に変えます。メンバーの招待・ロール変更・所属の編集・除外、BOT の管理、共有プロジェクトの作成・設定変更・削除とメンバー・Webhook の管理、このテナントの PAT の発行ができなくなり、自分で Admin に戻すこともできません（プロジェクトの Admin に個別に指定されているプロジェクトでは、メンバーと Webhook の管理だけは続けられます）。Admin に戻すにはテナントオーナーか他の Admin に頼む必要があります。自分が送った保留中の招待は、自分が Admin に戻るか、テナントオーナーか他の Admin が再送するまで承諾できなくなります。`;
+});
+
+function onRoleChange(member: TenantMemberResponse, role: TenantRole) {
   if (!canManageMembers.value || isOwner(member) || busy.value) return;
   if (role === member.role) return;
+  if (isSelfDemotion(member, role)) {
+    roleError.value = null;
+    demoteTarget.value = { member, role };
+    return;
+  }
+  void changeRole(member, role);
+}
+
+/** PUT を送って一覧を取り直す。成功なら true */
+async function changeRole(member: TenantMemberResponse, role: TenantRole): Promise<boolean> {
   roleError.value = null;
   busy.value = true;
   try {
@@ -262,13 +286,25 @@ async function onRoleChange(member: TenantMemberResponse, role: TenantRole) {
       body: { role },
     });
     await invalidateMembers();
+    return true;
   } catch {
     roleError.value = 'ロールを変更できませんでした。';
     // 表示は membersQuery のデータに束縛しているので、再取得で元のロールへ戻る
     await invalidateMembers();
+    return false;
   } finally {
     busy.value = false;
   }
+}
+
+function onDemoteClose() {
+  if (!busy.value) demoteTarget.value = null;
+}
+
+async function confirmDemote() {
+  const target = demoteTarget.value;
+  if (!target || busy.value) return;
+  if (await changeRole(target.member, target.role)) demoteTarget.value = null;
 }
 
 // --- 所属（部署・役職・チーム） ---
@@ -350,15 +386,37 @@ function canRemove(member: TenantMemberResponse) {
   return canManageMembers.value && !isOwner(member) && !isSelf(member);
 }
 
-async function onRemove(member: TenantMemberResponse) {
+const removeTarget = ref<TenantMemberResponse | null>(null);
+
+function openRemove(member: TenantMemberResponse) {
   if (!canRemove(member) || busy.value) return;
+  removeError.value = null;
+  removeTarget.value = member;
+}
+
+// 警告も説明に含める。説明（aria-describedby）に入れないと、開いたときに読み上げられない
+const removeDescription = computed(() => {
+  const target = removeTarget.value;
+  if (!target) return '';
+  return `「${target.user.username}」をこのテナントから外します。テナントのプロジェクトとタスクは開けなくなります（プロジェクトのメンバーに直接指定されている場合、そのプロジェクトだけは引き続き開けます）。戻すには招待し直す必要があります。`;
+});
+
+function onRemoveClose() {
+  // 削除の最中は閉じない（結果を見逃さないため）
+  if (!busy.value) removeTarget.value = null;
+}
+
+async function confirmRemove() {
+  const target = removeTarget.value;
+  if (!target || !canRemove(target) || busy.value) return;
   removeError.value = null;
   busy.value = true;
   try {
     await removeMutation.mutateAsync({
-      params: { path: { tenant_id: props.tenant.id, user_id: member.user_id } },
+      params: { path: { tenant_id: props.tenant.id, user_id: target.user_id } },
     });
     await invalidateMembers();
+    removeTarget.value = null;
   } catch {
     removeError.value = 'メンバーを外せませんでした。';
   } finally {
@@ -379,6 +437,7 @@ async function onRemove(member: TenantMemberResponse) {
       </div>
 
       <!-- 招待 -->
+      <TenantBotsSection v-if="canManageMembers" :key="tenant.id" :tenant-id="tenant.id" />
       <section v-if="canManageMembers" class="mb-7 rounded-[10px] border p-4">
         <h2 class="mb-3 text-sm font-semibold">人を招待する</h2>
         <form class="flex flex-wrap items-stretch gap-2" @submit.prevent="onInvite">
@@ -503,9 +562,12 @@ async function onRemove(member: TenantMemberResponse) {
             メンバーの招待・ロール変更・除外ができるのは、テナントオーナーと Admin だけです。
           </p>
 
-          <p v-if="roleError" role="alert" class="mb-2 text-sm text-destructive">{{ roleError }}</p>
-          <p v-if="removeError" role="alert" class="mb-2 text-sm text-destructive">
-            {{ removeError }}
+          <p
+            v-if="roleError && demoteTarget === null"
+            role="alert"
+            class="mb-2 text-sm text-destructive"
+          >
+            {{ roleError }}
           </p>
 
           <ul class="rounded-[10px] border">
@@ -515,7 +577,7 @@ async function onRemove(member: TenantMemberResponse) {
               class="flex items-center gap-3 border-b px-3.5 py-2.5 last:border-b-0"
             >
               <UserAvatar
-                :user="{ name: member.user.username }"
+                :user="{ name: member.user.username, account_kind: member.user.account_kind }"
                 shape="lg"
                 class="text-white"
                 :style="{ background: avatarColor(member) }"
@@ -572,7 +634,7 @@ async function onRemove(member: TenantMemberResponse) {
                   class="w-[110px] shrink-0"
                   :searchable="false"
                   :disabled="!canManageMembers || busy"
-                  :items="ROLES"
+                  :items="rolesForAccount(ROLES, member.user.account_kind)"
                   :selected-values="[member.role]"
                   :on-selection-change="
                     (values: string[]) => onRoleChange(member, values[0] as TenantRole)
@@ -583,7 +645,7 @@ async function onRemove(member: TenantMemberResponse) {
                   :disabled="!canRemove(member) || busy"
                   class="shrink-0"
                   :ariaLabel="`${member.user.username}を外す`"
-                  @click="onRemove(member)"
+                  @click="openRemove(member)"
                 >
                   <template #icon><PhX class="size-3.5" /></template>
                 </Button>
@@ -629,6 +691,58 @@ async function onRemove(member: TenantMemberResponse) {
               @click="onOrgEditorClose"
             />
             <Button type="submit" :form="formId" :disabled="busy" label="保存" />
+          </template>
+        </Dialog>
+        <Dialog
+          :open="removeTarget !== null"
+          title="メンバーを外しますか？"
+          :description="removeDescription"
+          :on-close="onRemoveClose"
+        >
+          <p v-if="removeError && removeTarget" role="alert" class="text-sm text-destructive">
+            {{ removeError }}
+          </p>
+          <template #actions>
+            <Button
+              type="button"
+              variant="tertiary"
+              :disabled="busy"
+              label="キャンセル"
+              @click="onRemoveClose"
+            />
+            <Button
+              type="button"
+              variant="danger"
+              :disabled="busy"
+              :label="busy ? '外しています…' : '外す'"
+              @click="confirmRemove"
+            />
+          </template>
+        </Dialog>
+        <Dialog
+          :open="demoteTarget !== null"
+          title="自分のロールを変えますか？"
+          :description="demoteDescription"
+          :on-close="onDemoteClose"
+        >
+          <p v-if="roleError && demoteTarget" role="alert" class="text-sm text-destructive">
+            {{ roleError }}
+          </p>
+          <template #actions>
+            <Button
+              type="button"
+              variant="tertiary"
+              :disabled="busy"
+              label="キャンセル"
+              @click="onDemoteClose"
+            />
+            <Button
+              type="button"
+              variant="danger"
+              :disabled="busy"
+              :label="busy ? '変更中…' : '変更する'"
+              @click="confirmDemote"
+            />
           </template>
         </Dialog>
       </div>

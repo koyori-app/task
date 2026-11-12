@@ -79,7 +79,6 @@ export function breadcrumbRoute(pathname: string, params: Record<string, string 
           [`${projectBase}/tasks`, { kind: 'project', name: '' }],
           [`${projectBase}/settings`, { kind: 'project', name: 'プロジェクト設定' }],
           [`${projectBase}/reviews`, { kind: 'project', name: 'レビュー' }],
-          [`${projectBase}/labels`, { kind: 'project', name: 'ラベル' }],
           [`${projectBase}/docs`, { kind: 'project', name: 'ドキュメント' }],
           ...(file
             ? ([[`${projectBase}/docs/${file}`, { kind: 'document', name: '' }]] as const)

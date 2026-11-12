@@ -36,7 +36,7 @@
     "@lezer/highlight": "catalog:",
     "@lucide/vue": "1.48.0",
     "@phosphor-icons/vue": "2.2.1",
-    "@sentry/vue": "10.69.0",
+    "@sentry/vue": "10.78.0",
     "@tanstack/vue-form": "1.33.5",
     "@tanstack/vue-query": "5.104.0",
     "@tanstack/vue-table": "9.3.1",
@@ -82,7 +82,7 @@
     "@argos-ci/playwright": "7.7.1",
     "@chromatic-com/storybook": "5.5.1",
     "@koyori-app/oxlint-plugin-api-path-params": "workspace:*",
-    "@sentry/vite-plugin": "5.4.0",
+    "@sentry/vite-plugin": "5.4.1",
     "@storybook/addon-a11y": "10.6.1",
     "@storybook/addon-docs": "10.6.1",
     "@storybook/addon-vitest": "10.6.1",
@@ -97,8 +97,8 @@
     "@types/node": "24.19.2",
     "@vitejs/devtools": "0.7.6",
     "@vitejs/plugin-vue": "6.0.9",
-    "@vitest/browser-playwright": "4.1.11",
-    "@vitest/coverage-v8": "4.1.11",
+    "@vitest/browser-playwright": "5.1.0",
+    "@vitest/coverage-v8": "5.1.0",
     "@vue/test-utils": "2.5.1",
     "happy-dom": "21.0.3",
     "http-server": "14.1.1",
@@ -114,8 +114,8 @@
     "vite-plugin-inspect": "12.0.2",
     "vite-plugin-vue-devtools": "8.2.1",
     "vite-plus": "catalog:",
-    "vitest": "4.1.11",
+    "vitest": "5.1.0",
     "vue-tsc": "3.3.11"
   },
-  "packageManager": "pnpm@11.28.5"
+  "packageManager": "pnpm@11.28.11"
 }

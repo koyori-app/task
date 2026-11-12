@@ -46,6 +46,8 @@ const items = computed(() => [
     value: user.id,
     label: user.id === props.currentUserId ? `${user.username}（自分）` : user.username,
     src: user.avatar_url || undefined,
+    // 名は人と同じに保ち（絞り込みの字を変えぬ）、BOT であることは名の下の補足で示す
+    description: user.account_kind === 'bot' ? 'BOT アカウント' : undefined,
   })),
   ...groups.value.map(({ value, label, userIds }) => ({
     value,

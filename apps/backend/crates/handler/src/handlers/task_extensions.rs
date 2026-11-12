@@ -12,12 +12,10 @@ use axum::{
     http::StatusCode,
 };
 use axum_valid::Valid;
-use chrono::Utc;
 use entity::{
     drive_files, labels, project_statuses, project_task_views, sprints, task_assignees,
     task_attachments, task_labels, tasks,
 };
-use payload::drive_files::content_url;
 use payload::task_extensions::*;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
@@ -567,7 +565,7 @@ pub async fn bulk_update_tasks(
     Ok(Json(BulkUpdateResponse { updated, failed }))
 }
 
-fn bulk_error_reason(err: &AppError) -> String {
+pub(crate) fn bulk_error_reason(err: &AppError) -> String {
     match err {
         AppError::NotFound => "not-found".into(),
         AppError::Forbidden => "forbidden".into(),
@@ -952,29 +950,7 @@ pub async fn list_task_attachments(
         .await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
 
-    let rows = task_attachments::Entity::find()
-        .filter(task_attachments::Column::TaskId.eq(task.id))
-        .order_by_desc(task_attachments::Column::CreatedAt)
-        .find_also_related(drive_files::Entity)
-        .all(&state.db)
-        .await?;
-
-    let attachments = rows
-        .into_iter()
-        .map(|(row, file)| {
-            let file = file.ok_or(AppError::NotFound)?;
-            Ok(TaskAttachmentResponse {
-                id: row.id,
-                drive_file_id: row.drive_file_id,
-                name: file.name,
-                mime_type: file.mime_type,
-                size: file.size,
-                url: content_url(file.id),
-                created_at: row.created_at.with_timezone(&Utc),
-                source: row.source,
-            })
-        })
-        .collect::<Result<Vec<_>, AppError>>()?;
+    let attachments = service::task_attachments::list_for_task(&state.db, task.id).await?;
 
     Ok(Json(TaskAttachmentListResponse { attachments }))
 }
@@ -1083,16 +1059,7 @@ pub async fn attach_task_file(
 
     Ok((
         status,
-        Json(TaskAttachmentResponse {
-            id: model.id,
-            drive_file_id: file.id,
-            name: file.name,
-            mime_type: file.mime_type,
-            size: file.size,
-            url: content_url(file.id),
-            created_at: model.created_at.with_timezone(&Utc),
-            source: model.source,
-        }),
+        Json(TaskAttachmentResponse::from_parts(model, file)),
     ))
 }
 

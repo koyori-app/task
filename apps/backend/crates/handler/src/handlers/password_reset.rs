@@ -47,7 +47,7 @@ pub async fn password_reset_request(
         .one(&state.db)
         .await?
     {
-        if user.is_suspended {
+        if user.is_bot() || user.is_suspended {
             return Ok(Json(MessageResponse {
                 message: "入力されたメールアドレスにリセットリンクを送信しました（登録済みの場合）"
                     .into(),
@@ -80,15 +80,18 @@ pub async fn password_reset_verify(
     State(state): State<AppState>,
     Valid(Json(payload)): Valid<Json<PasswordResetVerifyBody>>,
 ) -> Result<StatusCode, AuthError> {
-    let valid = password_reset::lookup_token_user_id(&state.redis_client, &payload.token)
+    let user_id = password_reset::lookup_token_user_id(&state.redis_client, &payload.token)
         .await
         .map_err(AuthError::Internal)?
-        .is_some();
-    if valid {
-        Ok(StatusCode::OK)
-    } else {
-        Err(AuthError::PasswordResetTokenNotFound)
+        .ok_or(AuthError::PasswordResetTokenNotFound)?;
+    let user = users::Entity::find_by_id(user_id)
+        .one(&state.db)
+        .await?
+        .ok_or(AuthError::PasswordResetTokenNotFound)?;
+    if user.is_bot() {
+        return Err(AuthError::PasswordResetTokenNotFound);
     }
+    Ok(StatusCode::OK)
 }
 
 #[utoipa::path(
@@ -120,6 +123,9 @@ pub async fn password_reset_complete(
         .await?
         .ok_or_else(|| AuthError::Internal(anyhow::anyhow!("user missing for token")))?;
 
+    if user.is_bot() {
+        return Err(AuthError::Forbidden);
+    }
     let email_verified = user.email_verified;
     let mut active: users::ActiveModel = user.into();
     active.password_hash = Set(Some(password_hash));

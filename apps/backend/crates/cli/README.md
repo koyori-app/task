@@ -126,6 +126,7 @@ task tasks show TASK-181 --raw               # 保存されたまま（<@利用�
 
 `tasks show` は説明文のメンションの印を `@今の名` に戻して出す。それを `tasks update --description` へ
 そのまま戻すとメンションが素の文字になるので、書き換えて戻すときは `--raw` で印のまま取る（`--json` でも同じ）。
+`tasks show` は添付ファイル（`attachments`。名前・MIME・サイズ・コンテンツ URL）も出す。本体の取得コマンドはまだ無い。
 
 `--status` / `--label` / `--assignee` / `--milestone` / `--sprint` は名前または UUID で指せる。
 名前は完全一致を優先し、それがなければ大文字小文字を無視して照合する。候補が複数あるときは
@@ -142,6 +143,33 @@ task tasks create --project TASK --title 直す \
 task tasks update TASK-181 --progress 40 --sprint week-40 --add-label bug
 task tasks update TASK-181 --clear-sprint --archive
 ```
+
+### 一括作成
+
+```bash
+task tasks bulk-create --project TASK tasks.json [--status Todo] [--json]
+cat tasks.json | task tasks bulk-create --project TASK -
+```
+
+`FILE` は JSON 配列（`-` で標準入力。1〜100 件）。各要素は `tasks create` のフラグと同じ名前・値で、
+UUID でなく名前で書ける。`description_file` は無く、未知のキーは断る。
+
+```json
+[
+  { "title": "起票", "description": "本文", "priority": "high", "status": "Todo",
+    "labels": ["bug"], "assignees": ["yupix"], "parent": "TASK-480",
+    "soft_deadline": "2026-09-30", "hard_deadline": "2026-10-31", "planned_start": "2026-09-01",
+    "estimate": 60, "progress": 0, "milestone": "v1", "sprint": "week-40" }
+]
+```
+
+- 状態は要素の `status` を優先し、無い要素だけ `--status`、どちらも無ければプロジェクト既定
+- 送信前に全要素の名前を解決する。1 つでも解決できなければ API を叩かず `tasks[i]: …`（`i` は 0 始まり）
+  を出して終了コード 2 で終わる。解決の途中の認証・権限・通信の失敗は、位置を添えたうえで元の終了コード
+  （3 / 4 / 1）のまま返す。ラベル等の一覧はプロジェクト単位で 1 回だけ取る
+- API は全件作るか 1 件も作らないか。途中で落ちたときは入力を直して丸ごと再送する
+- 出力は入力順の `KEY-N  title`。`--json` は API の応答（`tasks` 配列）をそのまま出す
+- 作成は件数分の通知・`task.created` Webhook を出す（`tasks create` を件数分叩いたのと同じ）
 
 - 期限は RFC 3339（`2026-09-30T12:00:00Z`）か日付だけ（`2026-09-30` = その日の始まり `00:00:00Z`）。
   日付だけのときに何時になるかは Web UI と揃えている
@@ -229,6 +257,7 @@ task auth token < token.txt
 ```bash
 task projects list                        # --project に渡せるキー
 task projects statuses --project TASK     # --status に渡せる名前（プロジェクトごとに違う）
+task projects labels --project TASK       # --label に渡せる名前（色と説明も並ぶ）
 ```
 
 固定の値は `--help` に列挙してある（`--priority`、`sprints list --status`、`review --state` / `--severity`、`my list --filter`）。

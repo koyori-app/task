@@ -129,7 +129,7 @@ async fn send_one<C: ConnectionTrait>(
         return Ok(false);
     };
     // 未認証のアドレスへは送らない（本人のものか確かめられていない）
-    if !user.email_verified {
+    if user.is_bot() || !user.email_verified {
         abandon(db, notification, "email not verified").await?;
         return Ok(false);
     }

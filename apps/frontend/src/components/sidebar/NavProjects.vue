@@ -1,13 +1,7 @@
 <script setup lang="ts">
-import {
-  PhFiles,
-  PhGear,
-  PhGitPullRequest,
-  PhListChecks,
-  PhPlus,
-  PhTag,
-} from '@phosphor-icons/vue';
-import { computed } from 'vue';
+import { PhFiles, PhGear, PhGitPullRequest, PhListChecks, PhPlus } from '@phosphor-icons/vue';
+import { ChartGantt } from '@lucide/vue';
+import { type Component, computed } from 'vue';
 import type { components } from '@/generated/api';
 
 import { Accordion, Button, SidebarLink, Skeleton } from '@koyori-app/ui-vue';
@@ -21,6 +15,8 @@ const props = defineProps<{
   currentPath?: string;
   loading?: boolean;
   error?: boolean;
+  /** ガントの口を出すか（テナントのガントと同じく、実験的な機能の設定で出す） */
+  showGantt?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -47,15 +43,19 @@ function isProjectActive(project: ProjectNavItem) {
 interface ProjectChild {
   label: string;
   href: string;
-  icon: typeof PhListChecks;
+  icon: Component;
 }
 
 function projectChildren(project: ProjectNavItem): ProjectChild[] {
   const base = projectBaseUrl(project);
   const children: ProjectChild[] = [
     { label: 'タスク', href: `${base}/tasks`, icon: PhListChecks },
+    // ガントはタスクの別の見え方なので、タスクの次に置く。
+    // 予定の API は個人プロジェクトを返さないので、個人プロジェクトには出さない
+    ...(props.showGantt && !project.is_personal
+      ? [{ label: 'ガントチャート', href: `${base}/gantt`, icon: ChartGantt }]
+      : []),
     { label: 'ドキュメント', href: `${base}/docs`, icon: PhFiles },
-    { label: 'ラベル', href: `${base}/labels`, icon: PhTag },
   ];
   // 個人プロジェクト（個人 Inbox）はシステム管理のため設定を出さない。
   // レビューも、設定へ入れない＝GitHub 連携を張る手段が無いので出さない
