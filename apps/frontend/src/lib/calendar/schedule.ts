@@ -16,6 +16,8 @@ type ScheduleParams = {
     timezone: string;
     limit: number;
     include_overdue: boolean;
+    /** プロジェクトで絞る（プロジェクトのガント） */
+    project_id?: string[];
   };
 };
 

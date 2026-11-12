@@ -855,6 +855,8 @@ impl TestApp {
         let password_hash = create_password_hash(&password).expect("password hash");
 
         users::ActiveModel {
+            account_kind: Set("human".to_string()),
+            bot_tenant_id: Set(None),
             id: Set(id),
             username: Set(format!("test_{}", &id.to_string()[..8])),
             bio: Set(Some(String::new())),
@@ -1148,6 +1150,21 @@ impl TestApp {
             .expect("post request")
     }
 
+    pub async fn put_json_with_bearer(
+        &self,
+        path: &str,
+        body: serde_json::Value,
+        token: &str,
+    ) -> Response {
+        self.client
+            .put(format!("{}{path}", self.base_url))
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .json(&body)
+            .send()
+            .await
+            .expect("put request")
+    }
+
     pub async fn post_json_with_session_and_headers(
         &self,
         path: &str,
@@ -1281,6 +1298,8 @@ pub async fn insert_user(db: &DatabaseConnection, is_admin: bool, is_suspended: 
     let password_hash = create_password_hash(&password).expect("password hash");
 
     users::ActiveModel {
+        account_kind: Set("human".to_string()),
+        bot_tenant_id: Set(None),
         id: Set(id),
         username: Set(format!("test_{}", &id.to_string()[..8])),
         bio: Set(Some(String::new())),
@@ -1320,6 +1339,8 @@ pub async fn insert_passkey_user(
     };
 
     users::ActiveModel {
+        account_kind: Set("human".to_string()),
+        bot_tenant_id: Set(None),
         id: Set(id),
         username: Set(format!("test_{}", &id.to_string()[..8])),
         bio: Set(Some(String::new())),

@@ -281,6 +281,28 @@ pub struct TaskDetailResponse {
     #[serde(default)]
     #[schema(required)]
     pub reactions: Vec<crate::reactions::ReactionSummary>,
+    /// 添付ファイル（`GET /tasks/{id}/attachments` と同じ要素。新しい順）。
+    /// タスク一覧（`GET /tasks`）には載せない。
+    #[serde(default)]
+    #[schema(required)]
+    pub attachments: Vec<crate::task_extensions::TaskAttachmentResponse>,
+}
+
+/// 一括作成の 1 リクエストあたりの上限件数（handler の `BULK_MAX_TASKS` と同じ値）。
+pub const BULK_CREATE_MAX_TASKS: u64 = 100;
+
+#[derive(Validate, Deserialize, Serialize, ToSchema)]
+pub struct BulkCreateTasksRequest {
+    /// 作成するタスク（1〜100 件）。要素は単体作成と同じ形
+    #[validate(length(min = 1, max = BULK_CREATE_MAX_TASKS), nested)]
+    #[schema(min_items = 1, max_items = 100)]
+    pub tasks: Vec<CreateTaskRequest>,
+}
+
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct BulkCreateTasksResponse {
+    /// 入力と同じ順
+    pub tasks: Vec<TaskDetailResponse>,
 }
 
 #[derive(Validate, Deserialize, ToSchema, serde::Serialize)]

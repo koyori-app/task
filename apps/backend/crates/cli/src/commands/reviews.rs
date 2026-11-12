@@ -295,7 +295,7 @@ fn validate_repo(raw: Option<&str>) -> Result<Option<String>> {
 }
 
 /// ファイルか標準入力から JSON を読む。`-` は標準入力。
-fn read_json_input(file: &str) -> Result<Value> {
+pub(crate) fn read_json_input(file: &str) -> Result<Value> {
     let raw = if file == "-" {
         let mut buffer = String::new();
         std::io::stdin()

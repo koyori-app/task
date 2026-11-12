@@ -76,7 +76,7 @@ pub async fn list_comments(
 
     let user_ids: Vec<Uuid> = all.iter().map(|c| c.user_id).collect();
     // 名前とアイコンをまとめて引く（コメント一覧が両方を出す）
-    let users_map: HashMap<Uuid, (String, Option<String>)> = if user_ids.is_empty() {
+    let users_map: HashMap<Uuid, (String, Option<String>, String)> = if user_ids.is_empty() {
         HashMap::new()
     } else {
         users::Entity::find()
@@ -84,7 +84,7 @@ pub async fn list_comments(
             .all(&state.db)
             .await?
             .into_iter()
-            .map(|u| (u.id, (u.username, u.avatar_url)))
+            .map(|u| (u.id, (u.username, u.avatar_url, u.account_kind)))
             .collect()
     };
 
@@ -495,7 +495,7 @@ pub async fn list_activities(
     };
 
     let user_ids: Vec<Uuid> = rows.iter().filter_map(|a| a.user_id).collect();
-    let users_map: HashMap<Uuid, String> = if user_ids.is_empty() {
+    let users_map: HashMap<Uuid, (String, String)> = if user_ids.is_empty() {
         HashMap::new()
     } else {
         users::Entity::find()
@@ -503,7 +503,7 @@ pub async fn list_activities(
             .all(&state.db)
             .await?
             .into_iter()
-            .map(|u| (u.id, u.username))
+            .map(|u| (u.id, (u.username, u.account_kind)))
             .collect()
     };
 
@@ -512,9 +512,13 @@ pub async fn list_activities(
         .map(|row| {
             let user = row.user_id.map(|uid| ActivityUser {
                 id: uid,
+                account_kind: users_map
+                    .get(&uid)
+                    .map(|u| u.1.clone())
+                    .unwrap_or_else(|| "human".into()),
                 name: users_map
                     .get(&uid)
-                    .cloned()
+                    .map(|u| u.0.clone())
                     .unwrap_or_else(|| "unknown".into()),
             });
             ActivityItem {

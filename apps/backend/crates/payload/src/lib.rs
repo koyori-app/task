@@ -41,3 +41,5 @@ pub mod tenants;
 pub mod time_tracking;
 pub mod users;
 pub mod webhooks;
+
+pub mod bots;

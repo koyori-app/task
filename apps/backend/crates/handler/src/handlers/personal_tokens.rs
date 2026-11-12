@@ -5,7 +5,6 @@ use axum::{
 };
 use axum_valid::Valid;
 use sea_orm::prelude::Uuid;
-use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
     QueryOrder,
@@ -82,7 +81,19 @@ async fn get_owned_token(
     )
 )]
 pub async fn get_current_personal_token(
+    State(state): State<AppState>,
     auth: AuthUser,
+) -> Result<Json<PersonalTokenIdentityResponse>, AuthError> {
+    let user = entity::users::Entity::find_by_id(auth.user_id)
+        .one(&state.db)
+        .await?
+        .ok_or(AuthError::Unauthorized)?;
+    personal_token_identity(auth, user.account_kind).await
+}
+
+async fn personal_token_identity(
+    auth: AuthUser,
+    account_kind: String,
 ) -> Result<Json<PersonalTokenIdentityResponse>, AuthError> {
     let AuthMethod::PersonalToken {
         token_id,
@@ -101,6 +112,7 @@ pub async fn get_current_personal_token(
         name: token_name,
         user_id: auth.user_id,
         username: auth.username,
+        account_kind,
         tenant_id,
         scopes: scopes.0.into_iter().map(Into::into).collect(),
         allowed_project_ids,
@@ -143,7 +155,7 @@ mod identity_tests {
         let projects = vec![Uuid::new_v4()];
         let auth = personal_token_auth(ScopeList(vec![]), Some(projects.clone()));
 
-        let Json(identity) = get_current_personal_token(auth)
+        let Json(identity) = personal_token_identity(auth, "human".into())
             .await
             .expect("PAT identity");
 
@@ -159,7 +171,7 @@ mod identity_tests {
         let tenant_id = Uuid::new_v4();
         let auth = personal_token_auth_in(tenant_id, ScopeList(vec![]), None);
 
-        let Json(identity) = get_current_personal_token(auth)
+        let Json(identity) = personal_token_identity(auth, "human".into())
             .await
             .expect("PAT identity");
 
@@ -171,7 +183,7 @@ mod identity_tests {
     async fn identity_accepts_a_narrow_scope() {
         let auth = personal_token_auth(ScopeList(vec![Scope::ReadTask]), None);
 
-        let Json(identity) = get_current_personal_token(auth)
+        let Json(identity) = personal_token_identity(auth, "human".into())
             .await
             .expect("PAT identity");
 
@@ -187,7 +199,7 @@ mod identity_tests {
             method: AuthMethod::Session,
         };
 
-        let error = get_current_personal_token(auth)
+        let error = personal_token_identity(auth, "human".into())
             .await
             .expect_err("session must not use PAT identity");
 
@@ -375,12 +387,7 @@ pub async fn revoke_all_personal_tokens(
     // ——無いテナントは NotFound、主でなければ Forbidden で従前と同じ。
     require_tenant_owner(&state.db, payload.confirm_tenant_id, auth.user_id).await?;
 
-    personal_tokens::Entity::update_many()
-        .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
-        .filter(personal_tokens::Column::TenantId.eq(payload.confirm_tenant_id))
-        .filter(personal_tokens::Column::Revoked.eq(false))
-        .exec(&state.db)
+    service::bots::revoke_all_tenant_tokens(&state.db, payload.confirm_tenant_id, auth.user_id)
         .await?;
-
     Ok(StatusCode::NO_CONTENT)
 }

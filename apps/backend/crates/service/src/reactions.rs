@@ -286,7 +286,7 @@ async fn load_rows<C: ConnectionTrait>(
 async fn load_user_names<C: ConnectionTrait>(
     db: &C,
     user_ids: impl Iterator<Item = Uuid>,
-) -> Result<HashMap<Uuid, (String, Option<String>)>, AppError> {
+) -> Result<HashMap<Uuid, (String, Option<String>, String)>, AppError> {
     let mut user_ids: Vec<Uuid> = user_ids.collect();
     user_ids.sort_unstable();
     user_ids.dedup();
@@ -298,7 +298,7 @@ async fn load_user_names<C: ConnectionTrait>(
         .all(db)
         .await?
         .into_iter()
-        .map(|user| (user.id, (user.username, user.avatar_url)))
+        .map(|user| (user.id, (user.username, user.avatar_url, user.account_kind)))
         .collect())
 }
 
@@ -312,7 +312,10 @@ struct Draft {
 }
 
 impl Draft {
-    fn into_summary(self, names: &HashMap<Uuid, (String, Option<String>)>) -> ReactionSummary {
+    fn into_summary(
+        self,
+        names: &HashMap<Uuid, (String, Option<String>, String)>,
+    ) -> ReactionSummary {
         ReactionSummary {
             emoji: self.emoji,
             count: self.count,

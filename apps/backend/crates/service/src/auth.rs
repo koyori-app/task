@@ -20,7 +20,9 @@ use sha2::Sha256;
 use thiserror::Error;
 use tracing::{error, warn};
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
+use sea_orm::prelude::DateTimeWithTimeZone;
+use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
 use crate::error::{ServerError, internal_server_error};
@@ -447,6 +449,38 @@ pub async fn authenticate_personal_token(
     Ok(token)
 }
 
+/// PAT の `last_used_at` を書き直す間隔。CLI や BOT は短い間隔で連続して叩くので、毎回は書かない。
+const PERSONAL_TOKEN_LAST_USED_WRITE_INTERVAL_SECS: i64 = 300;
+
+/// 前回の使用から書き直す間隔が空いたか。未使用（None）は常に真。
+fn last_used_is_stale(last_used_at: Option<DateTimeWithTimeZone>, now: DateTime<Utc>) -> bool {
+    last_used_at.is_none_or(|t| {
+        now.signed_duration_since(t).num_seconds() >= PERSONAL_TOKEN_LAST_USED_WRITE_INTERVAL_SECS
+    })
+}
+
+/// 認証に成功した PAT の `last_used_at` を、間隔を空けて更新する。
+///
+/// 行は `update_many` で `id` を絞って書く。SELECT と UPDATE の間に行が消えても（テナントや
+/// 利用者の削除による Cascade）0 件更新で済み、使用記録のために要求を落とさない。
+pub async fn record_personal_token_use(
+    db: &DatabaseConnection,
+    token: &PersonalTokenRecord,
+) -> Result<(), sea_orm::DbErr> {
+    let now = Utc::now();
+    if last_used_is_stale(token.last_used_at, now) {
+        personal_tokens::Entity::update_many()
+            .col_expr(
+                personal_tokens::Column::LastUsedAt,
+                Expr::value(now.fixed_offset()),
+            )
+            .filter(personal_tokens::Column::Id.eq(token.id))
+            .exec(db)
+            .await?;
+    }
+    Ok(())
+}
+
 /// Bearer の Device Token を検証し、有効なレコードを返す。
 /// `users.sessions_revoked_at` との比較は利用者を引く側（extractor）で行う。
 pub async fn authenticate_device_token(
@@ -472,6 +506,18 @@ pub async fn authenticate_device_token(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn last_used_is_stale_respects_the_write_interval() {
+        let now = Utc::now();
+        let ago = |secs: i64| Some((now - chrono::Duration::seconds(secs)).fixed_offset());
+        assert!(last_used_is_stale(None, now));
+        assert!(!last_used_is_stale(ago(299), now));
+        assert!(last_used_is_stale(ago(300), now));
+        assert!(last_used_is_stale(ago(301), now));
+        // 時計のずれで未来の値が入っていても書かない
+        assert!(!last_used_is_stale(ago(-10), now));
+    }
 
     #[test]
     fn dummy_password_hash_is_valid_argon2() {

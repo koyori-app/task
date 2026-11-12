@@ -240,6 +240,12 @@ pub async fn add_member(
         .await?
         .ok_or(AppError::NotFound)?;
 
+    if user.is_bot() && user.bot_tenant_id != Some(tenant_id) {
+        return Err(AppError::Forbidden);
+    }
+    if user.is_bot() && !payload.role.allowed_for_bot() {
+        return Err(AppError::BadRequestDetail("bot-role-too-strong".into()));
+    }
     // 二重追加は UNIQUE (tenant_id, user_id) に任せる。
     // 事前に引いてから INSERT すると、同時に 2 回追加されたときに 500 になる
     let member = match (tenant_members::ActiveModel {
@@ -301,6 +307,14 @@ pub async fn update_member(
         .one(&state.db)
         .await?
         .ok_or_else(|| anyhow::anyhow!("tenant member {user_id} has no user row"))?;
+    if user.is_bot()
+        && payload
+            .role
+            .as_ref()
+            .is_some_and(|role| !role.allowed_for_bot())
+    {
+        return Err(AppError::BadRequestDetail("bot-role-too-strong".into()));
+    }
     let mut active: tenant_members::ActiveModel = member.into();
     if let Some(role) = payload.role {
         active.role = Set(role);
@@ -343,6 +357,13 @@ pub async fn remove_member(
     require_tenant_admin(&state.db, tenant_id, auth.user_id).await?;
 
     let member = find_member(&state, tenant_id, user_id).await?;
+    let user = users::Entity::find_by_id(user_id)
+        .one(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if user.is_bot() {
+        return Err(AppError::Forbidden);
+    }
 
     // プロジェクト側の「最後の Admin を残す」判定は、テナントに在籍している Admin だけを
     // 数える（`project_members::would_drop_last_admin`）。除名はその数え方の入力を変えるので、
