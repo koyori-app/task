@@ -91,7 +91,8 @@ pub async fn exchange_desktop_auth_token(
         .one(&state.db)
         .await?
         .ok_or(AuthError::Unauthorized)?;
-    if user.is_suspended
+    if user.is_bot()
+        || user.is_suspended
         || user
             .sessions_revoked_at
             .is_some_and(|revoked_at| revoked_at.timestamp_millis() >= pending.issued_at_ms)

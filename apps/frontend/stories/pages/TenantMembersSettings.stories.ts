@@ -101,6 +101,7 @@ function mockFetch(overrides: MockOptions = {}) {
       const url = typeof req === 'string' ? req : req.url;
       const method = typeof req === 'string' ? 'GET' : req.method;
       const pathname = new URL(url, 'http://localhost').pathname;
+      if (method === 'GET' && pathname.endsWith('/bots')) return jsonResponse([]);
 
       if (/\/v1\/tenants\/?$/.test(pathname) && method === 'GET') {
         return jsonResponse([sampleTenant]);
@@ -254,6 +255,11 @@ export const RemoveMember: Story = {
     const user = userEvent.setup();
 
     await user.click(await canvas.findByLabelText('asuka.kobayashiを外す'));
+    // 確認ダイアログを経てから送る
+    await expect(
+      canvas.findByRole('dialog', { name: 'メンバーを外しますか？' }),
+    ).resolves.toBeVisible();
+    await user.click(canvas.getByRole('button', { name: '外す' }));
 
     await waitFor(() => expect(canvas.queryByText('asuka.kobayashi')).not.toBeInTheDocument());
     const del = (fetchSpy!.mock.calls as [Request | string][])
@@ -286,8 +292,13 @@ export const RemoveError: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(await canvas.findByLabelText('daisuke.satoを外す'));
+    await userEvent.click(await canvas.findByRole('button', { name: '外す' }));
 
-    await expect(canvas.findByText('メンバーを外せませんでした。')).resolves.toBeInTheDocument();
+    // 失敗はダイアログの中に出し、ダイアログは閉じない
+    const dialog = await canvas.findByRole('dialog', { name: 'メンバーを外しますか？' });
+    await expect(
+      within(dialog).findByText('メンバーを外せませんでした。'),
+    ).resolves.toBeInTheDocument();
   },
 };
 

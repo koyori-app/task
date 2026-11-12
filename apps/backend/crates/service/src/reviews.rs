@@ -924,6 +924,25 @@ pub async fn latest_head_sha<C: ConnectionTrait>(
     Ok(latest)
 }
 
+/// `head_sha` に対するラウンドを出したレビュワー（重複なし）。
+/// マージ可でなくなったとき、承認を取り消す対象を決めるのに使う。
+pub async fn reviewer_ids_at_head<C: ConnectionTrait>(
+    db: &C,
+    project_id: Uuid,
+    repo: &RepoRef,
+    pr_number: i32,
+    head_sha: &str,
+) -> Result<Vec<Uuid>, sea_orm::DbErr> {
+    scoped_rounds(project_id, repo, pr_number)
+        .filter(reviews::Column::HeadSha.eq(head_sha))
+        .select_only()
+        .column(reviews::Column::ReviewerId)
+        .distinct()
+        .into_tuple()
+        .all(db)
+        .await
+}
+
 /// 要約ジョブが最後に GitHub で確かめた head と、その時刻。
 ///
 /// 画面はこれと最新ラウンドの `head_sha` を比べて「レビューが古い」を出す。
@@ -1181,6 +1200,10 @@ pub struct SummarySnapshot {
     pub latest_summary: String,
     /// task 側の指摘一覧への URL（設定が無ければ省く）
     pub findings_url: Option<String>,
+    /// task が承認を取り消したまま、今の head にラウンドを出していない人の GitHub login。
+    /// その人の変更要求が GitHub でマージを止めるので、空でなければマージ可にしない。
+    /// GitHub を読む要約ジョブが埋める（DB からは作れない）
+    pub awaiting_rereview: Vec<String>,
 }
 
 impl SummarySnapshot {
@@ -1200,8 +1223,15 @@ impl SummarySnapshot {
     ///
     /// 集計 API と同じ規則（レビューが 1 件も無い PR を可にしない）に加えて、
     /// レビュー後にコミットが積まれていないことを確かめる。確かめられないときも可にしない。
+    /// task が承認を取り消した人の再レビュー待ちが残っていても可にしない。
     #[must_use]
     pub fn merge_ready(&self) -> bool {
+        self.clean_and_fresh() && self.awaiting_rereview.is_empty()
+    }
+
+    /// High / Medium の未解決が無く、レビューした commit が今の head（再レビュー待ちは見ない）。
+    #[must_use]
+    pub fn clean_and_fresh(&self) -> bool {
         self.blocking == 0 && self.rounds > 0 && self.head_is_fresh() == Some(true)
     }
 }
@@ -1240,6 +1270,7 @@ pub async fn summary_snapshot<C: ConnectionTrait>(
         owner_override_rejections,
         latest_summary,
         findings_url,
+        awaiting_rereview: Vec::new(),
     })
 }
 
@@ -1265,6 +1296,19 @@ pub fn render_summary_comment(
 
     if snapshot.merge_ready() {
         let _ = writeln!(out, "**マージ可** — High / Medium の未解決はありません。");
+    } else if snapshot.clean_and_fresh() {
+        let names: Vec<String> = snapshot
+            .awaiting_rereview
+            .iter()
+            .map(|login| format!("`{login}`"))
+            .collect();
+        let _ = writeln!(
+            out,
+            "**再レビュー待ち** — High / Medium の未解決はありませんが、task が承認を取り消した \
+             {} の変更要求が残っています。今の HEAD（{}）をレビューしてください。",
+            names.join("、"),
+            short_sha(snapshot.latest_head_sha.as_deref())
+        );
     } else if snapshot.blocking == 0 && snapshot.rounds > 0 {
         let _ = match snapshot.head_is_fresh() {
             Some(false) => writeln!(
@@ -1603,6 +1647,7 @@ mod tests {
             owner_override_rejections: 0,
             latest_summary: "総評".into(),
             findings_url: Some("https://task.example/findings".into()),
+            awaiting_rereview: Vec::new(),
         }
     }
 
@@ -1691,6 +1736,31 @@ mod tests {
             "確かめられないときも可と書かない: {unknown}"
         );
         assert!(unknown.contains("鮮度不明"));
+    }
+
+    /// task が承認を取り消した人の再レビュー待ちが残っていれば「マージ可」と書かない。
+    #[test]
+    fn summary_comment_waits_for_the_revoked_reviewer() {
+        let waiting = SummarySnapshot {
+            awaiting_rereview: vec!["alice".into()],
+            ..snapshot(vec![(FindingSeverity::High, Verified, 1)])
+        };
+        assert!(!waiting.merge_ready());
+        let body = render_summary_comment(&waiting, MARKER, "2026-08-26 10:00");
+        assert!(!body.contains("マージ可"), "{body}");
+        assert!(body.contains("再レビュー待ち"), "{body}");
+        assert!(body.contains("`alice`"), "{body}");
+
+        // 指摘が残っていれば、再レビュー待ちより先にマージ不可を出す
+        let blocked = render_summary_comment(
+            &SummarySnapshot {
+                awaiting_rereview: vec!["alice".into()],
+                ..snapshot(vec![(FindingSeverity::High, Open, 1)])
+            },
+            MARKER,
+            "2026-08-26 10:00",
+        );
+        assert!(blocked.contains("マージ不可"), "{blocked}");
     }
 
     /// オーナー代行での棄却は件数を出す（0 なら出さない）。

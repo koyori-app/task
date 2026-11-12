@@ -44,6 +44,12 @@ vi.mock('@/lib/api-vue-query', () => ({
 }));
 
 import TenantSettingsMembers from '../TenantSettingsMembers.vue';
+import {
+  accessibleText,
+  pickerOption,
+  pickerOptions,
+  pickerTrigger,
+} from '@/components/__tests__/picker';
 import type { components } from '@/generated/api';
 
 type TenantMemberResponse = components['schemas']['TenantMemberResponse'];
@@ -53,13 +59,18 @@ const OWNER_ID = '22222222-2222-4222-8222-222222222222';
 const ADMIN_ID = '33333333-3333-4333-8333-333333333333';
 const MEMBER_ID = '44444444-4444-4444-8444-444444444444';
 
-function member(userId: string, username: string, role: 'Admin' | 'Member'): TenantMemberResponse {
+function member(
+  userId: string,
+  username: string,
+  role: 'Admin' | 'Member',
+  accountKind = 'human',
+): TenantMemberResponse {
   return {
     id: `row-${userId}`,
     tenant_id: TENANT_ID,
     user_id: userId,
     role,
-    user: { id: userId, username, avatar_url: null },
+    user: { id: userId, username, account_kind: accountKind, avatar_url: null },
     department: null,
     position: null,
     team: null,
@@ -89,9 +100,20 @@ function mountMembers(
           { queryClient: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
         ],
       ],
+      // BOT の欄は己の試験（TenantBotsSection.test.ts）で縛る。ここではメンバーの欄だけを見る
+      stubs: { TenantBotsSection: true },
     },
   });
   return wrapper;
+}
+
+function actionButton(label: string) {
+  const button = wrapper
+    .get('dialog[open]')
+    .findAll('button')
+    .find((b) => b.text().trim() === label);
+  if (!button) throw new Error(`button "${label}" not found`);
+  return button;
 }
 
 describe('TenantSettingsMembers', () => {
@@ -109,6 +131,22 @@ describe('TenantSettingsMembers', () => {
     vi.restoreAllMocks();
   });
 
+  it('BOT の行の役の選び手には Admin を出さず、人の行には出す', () => {
+    const BOT_ID = '55555555-5555-4555-8555-555555555555';
+    const wrapper = mountMembers(ADMIN_ID, [
+      member(OWNER_ID, 'owner', 'Admin'),
+      member(ADMIN_ID, 'admin', 'Admin'),
+      member(MEMBER_ID, 'member', 'Member'),
+      member(BOT_ID, 'release-bot', 'Member', 'bot'),
+    ]);
+    const roleNames = (label: string) =>
+      pickerOptions(pickerTrigger(wrapper.element, label)).map((option) => accessibleText(option));
+
+    expect(roleNames('release-botのロール').some((name) => name.startsWith('Admin'))).toBe(false);
+    expect(roleNames('release-botのロール').some((name) => name.startsWith('Member'))).toBe(true);
+    expect(roleNames('memberのロール').some((name) => name.startsWith('Admin'))).toBe(true);
+  });
+
   it('Admin 本人の除名は塞ぐが、他のメンバーは外せる', async () => {
     const wrapper = mountMembers();
 
@@ -121,6 +159,9 @@ describe('TenantSettingsMembers', () => {
     const other = wrapper.get('button[aria-label="memberを外す"]');
     expect(other.attributes('disabled')).toBeUndefined();
     await other.trigger('click');
+    await flushPromises();
+    expect(deleteMutateAsync).not.toHaveBeenCalled();
+    await actionButton('外す').trigger('click');
     await flushPromises();
     expect(deleteMutateAsync).toHaveBeenCalledWith({
       params: { path: { tenant_id: TENANT_ID, user_id: MEMBER_ID } },
@@ -139,12 +180,99 @@ describe('TenantSettingsMembers', () => {
 
     const other = wrapper.get('button[aria-label="memberを外す"]');
     await other.trigger('click');
-    await other.trigger('click');
+    await actionButton('外す').trigger('click');
+    await actionButton('外しています…').trigger('click');
+    expect(wrapper.find('dialog[open]').exists()).toBe(true);
     expect(deleteMutateAsync).toHaveBeenCalledTimes(1);
 
     finish();
     await flushPromises();
+    expect(wrapper.find('dialog[open]').exists()).toBe(false);
     expect(deleteMutateAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('除外は確認を経てから DELETE を送り、キャンセルすれば送らない', async () => {
+    mountMembers();
+    const remove = wrapper.get('button[aria-label="memberを外す"]');
+    await remove.trigger('click');
+    expect(deleteMutateAsync).not.toHaveBeenCalled();
+    expect(wrapper.get('dialog[open]').text()).toContain('「member」をこのテナントから外します');
+    await actionButton('キャンセル').trigger('click');
+    expect(deleteMutateAsync).not.toHaveBeenCalled();
+    expect(wrapper.find('dialog[open]').exists()).toBe(false);
+    await remove.trigger('click');
+    await actionButton('外す').trigger('click');
+    await flushPromises();
+    expect(deleteMutateAsync).toHaveBeenCalledTimes(1);
+    expect(wrapper.find('dialog[open]').exists()).toBe(false);
+  });
+
+  it('除外に失敗したら理由をダイアログに出し、閉じない', async () => {
+    deleteMutateAsync.mockRejectedValue(new Error('failed'));
+    mountMembers();
+    await wrapper.get('button[aria-label="memberを外す"]').trigger('click');
+    await actionButton('外す').trigger('click');
+    await flushPromises();
+    expect(wrapper.get('dialog[open] [role="alert"]').text()).toContain(
+      'メンバーを外せませんでした',
+    );
+  });
+
+  it('自分を Admin から降格するときは失う操作を説明して確認する', async () => {
+    mountMembers();
+    const select = async () => {
+      pickerOption(pickerTrigger(wrapper.element, 'adminのロール'), 'Member').click();
+      await flushPromises();
+    };
+    await select();
+    expect(updateMutateAsync).not.toHaveBeenCalled();
+    const text = wrapper.get('dialog[open]').text();
+    for (const lost of [
+      '招待・ロール変更・所属の編集・除外',
+      'BOT の管理',
+      '共有プロジェクトの作成・設定変更・削除とメンバー・Webhook の管理',
+      'PAT の発行',
+      'メンバーと Webhook の管理だけは続けられます',
+      '自分が Admin に戻るか、テナントオーナーか他の Admin が再送するまで承諾できなくなります',
+    ]) {
+      expect(text).toContain(lost);
+    }
+    await actionButton('キャンセル').trigger('click');
+    expect(updateMutateAsync).not.toHaveBeenCalled();
+    expect(pickerTrigger(wrapper.element, 'adminのロール').getAttribute('aria-label')).toBe(
+      'adminのロール: Admin',
+    );
+    await select();
+    await actionButton('変更する').trigger('click');
+    await flushPromises();
+    expect(updateMutateAsync).toHaveBeenCalledWith({
+      params: { path: { tenant_id: TENANT_ID, user_id: ADMIN_ID } },
+      body: { role: 'Member' },
+    });
+    expect(wrapper.find('dialog[open]').exists()).toBe(false);
+  });
+
+  it('他人のロール変更は確認なしで送る', async () => {
+    mountMembers();
+    pickerOption(pickerTrigger(wrapper.element, 'memberのロール'), 'Viewer').click();
+    await flushPromises();
+    expect(updateMutateAsync).toHaveBeenCalledWith({
+      params: { path: { tenant_id: TENANT_ID, user_id: MEMBER_ID } },
+      body: { role: 'Viewer' },
+    });
+    expect(wrapper.find('dialog[open]').exists()).toBe(false);
+  });
+
+  it('他人のロール変更の失敗は一覧に 1 回だけ出し、閉じたダイアログには描かない', async () => {
+    updateMutateAsync.mockRejectedValue(new Error('failed'));
+    mountMembers();
+    pickerOption(pickerTrigger(wrapper.element, 'memberのロール'), 'Viewer').click();
+    await flushPromises();
+    const alerts = wrapper
+      .findAll('[role="alert"]')
+      .filter((alert) => alert.text().includes('ロールを変更できませんでした'));
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]!.element.closest('dialog')).toBeNull();
   });
 
   it('メールアドレスとロールで招待を送り、入力を空にする', async () => {

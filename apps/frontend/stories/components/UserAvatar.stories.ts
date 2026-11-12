@@ -83,3 +83,31 @@ export const Inactive: Story = {
     </div>`,
   }),
 };
+
+/** BOT は丸の右下に札を重ねる。小さい段でも札が丸の幅を大きく越えぬこと、札を名と別に読むことを見せる。 */
+export const Bot: Story = {
+  render: () => ({
+    components: { UserAvatar },
+    setup: () => ({ SIZES, IMAGE_URL }),
+    template: `<div class="flex flex-col gap-4">
+      <div class="flex items-end gap-4" data-testid="bot-sizes">
+        <UserAvatar
+          v-for="size in SIZES"
+          :key="size"
+          :size="size"
+          :user="{ name: 'release-bot', account_kind: 'bot' }"
+        />
+      </div>
+      <div class="flex items-center gap-4">
+        <UserAvatar :user="{ name: 'release-bot', account_kind: 'bot', avatar_url: IMAGE_URL }" />
+        <UserAvatar :user="{ name: 'yupix', account_kind: 'human' }" />
+      </div>
+    </div>`,
+  }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getAllByRole('img', { name: 'BOT アカウント' })).toHaveLength(
+      SIZES.length + 1,
+    );
+  },
+};

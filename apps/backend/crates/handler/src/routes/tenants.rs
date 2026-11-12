@@ -6,6 +6,12 @@ use crate::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::<AppState>::new()
+        .routes(routes!(crate::handlers::bots::list_bots))
+        .routes(routes!(crate::handlers::bots::create_bot))
+        .routes(routes!(crate::handlers::bots::update_bot))
+        .routes(routes!(crate::handlers::bots::list_bot_tokens))
+        .routes(routes!(crate::handlers::bots::create_bot_token))
+        .routes(routes!(crate::handlers::bots::revoke_bot_token))
         .routes(routes!(crate::handlers::tenants::list_tenants))
         .routes(routes!(crate::handlers::tenants::create_tenant))
         .routes(routes!(crate::handlers::tenants::get_tenant))
@@ -93,6 +99,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::task_extensions::search_tasks))
                         .routes(routes!(crate::handlers::task_extensions::similar_tasks))
                         .routes(routes!(crate::handlers::task_extensions::bulk_update_tasks))
+                        .routes(routes!(crate::handlers::tasks::bulk_create_tasks))
                         .routes(routes!(crate::handlers::tasks::get_task))
                         .routes(routes!(crate::handlers::tasks::update_task))
                         .routes(routes!(crate::handlers::tasks::delete_task))

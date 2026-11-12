@@ -77,6 +77,7 @@ describe('TaskGroupedList の DnD の保存口が reject したとき', () => {
       });
       const wrapper = mount(TaskGroupedList, {
         props: {
+          projectKey: 'TEST',
           groups: [group(todo, [moved]), group(done, [])],
           tenantId: 'tenant-1',
           projectId: 'project-1',

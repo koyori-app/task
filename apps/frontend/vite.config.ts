@@ -126,7 +126,21 @@ function getBundleVisualizerPlugins() {
 
 // More info at: https://storybook.js.org/docs/next/writing-tests/integrations/vitest-addon
 
-export default defineConfig({
+// SSR の依存を dist/server に同梱すると、tr46 の require('punycode/')（npm の punycode を指す書き方）が
+// バンドル後に node:punycode/ になり、bun が「そんな組み込みは無い」と落ちる。
+// 組み込みの node:punycode で同じ API が使えるので、出力の文字列だけ直す。
+function punycodeBuiltinPlugin() {
+  return {
+    name: 'punycode-builtin',
+    renderChunk(code: string) {
+      return code.includes('"node:punycode/"')
+        ? code.replaceAll('"node:punycode/"', '"node:punycode"')
+        : null;
+    },
+  };
+}
+
+export default defineConfig(({ command }) => ({
   // Standalone build UI (vite build). Embedded client uses +onCreateApp inject.
   plugins: [
     ...getBundleVisualizerPlugins(),
@@ -135,6 +149,7 @@ export default defineConfig({
     ...(buildEnv.VUE_DEVTOOLS ? [VueDevTools({ appendTo: /\/src\/pages\/\+Layout\.vue/ })] : []),
     ...(buildEnv.VITE_INSPECT ? [Inspect({ build: false })] : []),
     vike(),
+    punycodeBuiltinPlugin(),
     ...(sentryPlugin ? [sentryPlugin] : []),
     tailwindcss(),
     vue(),
@@ -166,7 +181,17 @@ export default defineConfig({
     allowedHosts: ['localhost', '127.0.0.1', ...(coderAllowedHost ? [coderAllowedHost] : [])],
   },
   ssr: {
-    noExternal: ['@zxcvbn-ts/core', '@zxcvbn-ts/language-common', '@zxcvbn-ts/language-ja'],
+    // SSR の依存を dist/server に同梱し、配布イメージに node_modules を積まずに済ませる
+    // （apps/frontend/Dockerfile）。dev の module runner は CommonJS の依存をそのまま実行できず
+    // SSR が落ちるので、全部の同梱は build だけにし、dev は以前から同梱していた @zxcvbn-ts に留める
+    noExternal:
+      command === 'build'
+        ? true
+        : ['@zxcvbn-ts/core', '@zxcvbn-ts/language-common', '@zxcvbn-ts/language-ja'],
+    // jsdom は __dirname 相対で default-stylesheet.css 等を読むので同梱できない。
+    // isomorphic-dompurify ごと外部に残し、Dockerfile がその閉包だけを node_modules に置く。
+    // starry-night は実行時に vscode-oniguruma の onig.wasm を node_modules から読むので、同じく外部に残す
+    external: ['isomorphic-dompurify', '@wooorm/starry-night'],
   },
   build: {
     sourcemap: buildEnv.ANALYZE || process.env.NODE_ENV !== 'production',
@@ -188,6 +213,10 @@ export default defineConfig({
     },
     projects: [
       {
+        // vitest 5 から inline の project は root の設定を受け継ぐ（extends の既定が true になった）。
+        // unit は happy-dom で組むため、root の vike や tailwind の plugin を持ち込まず、これまでどおり
+        // 自前の plugin と alias だけで組む
+        extends: false,
         plugins: [vue()],
         resolve: {
           alias: {
@@ -262,4 +291,4 @@ export default defineConfig({
     ],
     options: { typeAware: true, typeCheck: true },
   },
-});
+}));

@@ -79,6 +79,13 @@ const props = defineProps<{
   membersError?: boolean;
   /** 開いたときのタイトルの初期値（ドキュメントの選択範囲から作るとき等） */
   initialTitle?: string;
+  /**
+   * 開いたときの担当者の初期値（ホームから作るときは自分）。
+   *
+   * 候補（members）を取得してから、候補にある ID だけを入れる。候補が未取得の間は入れない
+   * （担当者に指定できない利用者を送って 403 になるのを避ける）。利用者が担当者を変えたあとは上書きしない
+   */
+  initialAssigneeIds?: string[];
 }>();
 
 const emit = defineEmits<{
@@ -100,6 +107,26 @@ const estimate = ref<string | number>('');
 const priority = ref<Priority>('Medium');
 const selectedLabelIds = ref<string[]>([]);
 const selectedAssigneeIds = ref<string[]>([]);
+/** 候補と照合して入れた初期担当者。dirty の基準で、候補が届くまでは空 */
+const appliedAssigneeIds = ref<string[]>([]);
+
+/** 並びに依らず同じ ID の集合か */
+function sameIds(a: string[], b: string[]) {
+  return a.length === b.length && a.every((id) => b.includes(id));
+}
+
+/**
+ * 初期担当者を、候補にある ID だけ選択へ入れる。候補が未取得、または閉じているときは何もしない。
+ * 選択が入れた値のままの間（利用者がまだ触っていない間）だけ入れ直す。触ったあとは上書きしない
+ */
+function applyInitialAssignees() {
+  if (!props.open || !props.members) return;
+  if (!sameIds(selectedAssigneeIds.value, appliedAssigneeIds.value)) return;
+  const known = new Set(props.members.map((user) => user.id));
+  const ids = (props.initialAssigneeIds ?? []).filter((id) => known.has(id));
+  appliedAssigneeIds.value = ids;
+  selectedAssigneeIds.value = [...ids];
+}
 const validationMessage = ref<string | null>(null);
 // 文字列（YYYY-MM-DD）同士の比較で足りる。サーバーは前後関係を検証しない
 const plannedStartAfterSoft = computed(
@@ -193,6 +220,11 @@ watch(
   () => props.open,
   (open) => {
     if (open && props.initialTitle) title.value = props.initialTitle;
+    if (open) {
+      selectedAssigneeIds.value = [];
+      appliedAssigneeIds.value = [];
+      applyInitialAssignees();
+    }
   },
   { immediate: true },
 );
@@ -214,11 +246,12 @@ watch(
   },
 );
 
-// 候補の正常取得後、外れた ID を選択から落とす（ラベルと同じ理由）
+// 候補の正常取得後、初期担当者を入れ（触っていなければ入れ直し）、外れた ID を選択から落とす（ラベルと同じ理由）
 watch(
   () => props.members,
   (members) => {
     if (!members) return;
+    applyInitialAssignees();
     const ids = new Set(members.map((user) => user.id));
     selectedAssigneeIds.value = selectedAssigneeIds.value.filter((id) => ids.has(id));
   },
@@ -238,7 +271,7 @@ watch(
 
 /**
  * 入力があるか。フォームの全項目を、開いた直後の値（title は initialTitle、他は resetForm が入れる値）と
- * 比べる。項目を足したら resetForm とここを揃えること。あれば閉じる前に確認する
+ * 比べる（担当者は候補と照合して入れた初期値との差）。項目を足したら resetForm とここを揃えること。あれば閉じる前に確認する
  */
 const dirty = computed(
   () =>
@@ -251,7 +284,7 @@ const dirty = computed(
     String(estimate.value) !== '' ||
     priority.value !== 'Medium' ||
     selectedLabelIds.value.length > 0 ||
-    selectedAssigneeIds.value.length > 0,
+    !sameIds(selectedAssigneeIds.value, appliedAssigneeIds.value),
 );
 const discardConfirmOpen = ref(false);
 
@@ -317,6 +350,8 @@ function resetForm() {
   priority.value = 'Medium';
   selectedLabelIds.value = [];
   selectedAssigneeIds.value = [];
+  appliedAssigneeIds.value = [];
+  applyInitialAssignees();
   validationMessage.value = null;
   requestError.value = null;
   successMessage.value = null;

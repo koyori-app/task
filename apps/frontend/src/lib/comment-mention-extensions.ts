@@ -27,7 +27,15 @@ import {
   StateField,
   type Extension,
 } from '@codemirror/state';
-import { Decoration, EditorView, WidgetType, keymap, type DecorationSet } from '@codemirror/view';
+import {
+  Decoration,
+  EditorView,
+  WidgetType,
+  keymap,
+  tooltips,
+  type DecorationSet,
+  type Rect,
+} from '@codemirror/view';
 
 import {
   filterCandidates,
@@ -47,7 +55,33 @@ import { avatarInitials } from '@/lib/initials';
 // 札の見た目は説明文の KFM の札と同じ一枚（span.kfm-mention）を使う
 import '@/lib/remark-kfm-mention/style.css';
 
+/** メンション候補の `.cm-tooltip` に載せる z-index（ui-vue の menu 段）。 */
+export const MENTION_AUTOCOMPLETE_Z_INDEX = 'var(--koyori-z-menu)';
+
+/**
+ * 候補の箱を載せる親。`<dialog>` の top layer 内では `body` だと背後に隠れるため、
+ * 編集器の祖先に `dialog` がある時はそこへ、それ以外は `document.body` へ出す。
+ */
+export function resolveMentionAutocompleteTooltipParent(host: HTMLElement): HTMLElement {
+  return host.closest('dialog') ?? host.ownerDocument.body;
+}
+
+/**
+ * 候補の箱を収める範囲。CodeMirror はこの範囲に収まるよう箱の位置を寄せる。
+ * `dialog` へ出した箱は `dialog` の枠の外で切られる（Safari では箱が `position: absolute` になる）ので、
+ * `dialog` の中では `dialog` の枠を範囲にする。それ以外は CodeMirror の既定と同じく画面全体。
+ */
+export function mentionTooltipSpace(parent: HTMLElement): (view: EditorView) => Rect {
+  return (view) => {
+    if (parent.localName === 'dialog') return parent.getBoundingClientRect();
+    const root = view.dom.ownerDocument.documentElement;
+    return { left: 0, top: 0, right: root.clientWidth, bottom: root.clientHeight };
+  };
+}
+
 export interface MentionEditorOptions {
+  /** 候補の箱を載せる親（CommentEditor / MarkdownEditor が mount 時に決める） */
+  tooltipParent: HTMLElement;
   /** `@` で出す候補（呼ぶたびに最新を返す） */
   candidates: () => readonly MentionCandidate[];
   /** 札の字を引く表の初期値。以後は `setMentionNames` で替える */
@@ -147,6 +181,7 @@ function composingGuard(run: (v: EditorView) => boolean) {
 
 export const mentionTheme = EditorView.theme({
   '.cm-tooltip.cm-tooltip-autocomplete': {
+    zIndex: MENTION_AUTOCOMPLETE_Z_INDEX,
     border: '1px solid var(--border)',
     borderRadius: '0.375rem',
     backgroundColor: 'var(--popover)',
@@ -248,6 +283,10 @@ export function mentionExtensions(options: MentionEditorOptions): Extension[] {
   return [
     mentionField,
     namesCompartment.of(namesFacet.of(options.names)),
+    tooltips({
+      parent: options.tooltipParent,
+      tooltipSpace: mentionTooltipSpace(options.tooltipParent),
+    }),
     autocompletion({
       override: [mentionSource],
       activateOnTyping: true,

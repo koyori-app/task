@@ -123,6 +123,9 @@ impl SmtpClient {
         body_text: &str,
         body_html: Option<&str>,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        if entity::users::is_bot_email(to) {
+            return Ok(());
+        }
         let mailer = match &self.transport {
             Transport::Capture(sent) => {
                 sent.lock()

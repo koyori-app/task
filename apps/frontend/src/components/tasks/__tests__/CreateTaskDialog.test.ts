@@ -114,6 +114,7 @@ type MountOptions = {
   membersLoading?: boolean;
   membersError?: boolean;
   initialTitle?: string;
+  initialAssigneeIds?: string[];
 };
 
 function mountDialog(queryClient: QueryClient, options: MountOptions = {}) {
@@ -131,6 +132,7 @@ function mountDialog(queryClient: QueryClient, options: MountOptions = {}) {
       membersLoading: options.membersLoading,
       membersError: options.membersError,
       initialTitle: options.initialTitle,
+      initialAssigneeIds: options.initialAssigneeIds,
     },
     global: {
       plugins: [[VueQueryPlugin, { queryClient }]],
@@ -1428,6 +1430,158 @@ describe('CreateTaskDialog similar tasks', () => {
     await flushPromises();
     expect(mutateAsync).toHaveBeenCalledTimes(1);
     expect(wrapper.emitted('created')?.[0]).toEqual([createdTask]);
+    wrapper.unmount();
+  });
+});
+
+describe('CreateTaskDialog initialAssigneeIds', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    isHydrated.value = true;
+    isPending.value = false;
+    mutateAsync.mockReset();
+    mutateAsync.mockResolvedValue(createdTask);
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined as never);
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  const confirmOpen = () => !!findButton('破棄する')?.closest('dialog[open]');
+  const assigneeTrigger = () => document.getElementById('task-assignees')!;
+  const submit = async () => {
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+  };
+
+  it('初期担当者を assignees として送る', async () => {
+    const wrapper = mountDialog(queryClient, { members, initialAssigneeIds: ['user-1'] });
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('自分に割り当て');
+    expect(assigneeTrigger().textContent).toContain('yupix');
+
+    await submit();
+
+    expect(mutateAsync.mock.calls[0][0].body.assignees).toEqual([
+      { user_id: 'user-1', role: 'primary' },
+    ]);
+    wrapper.unmount();
+  });
+
+  it('初期担当者のままなら確認せずに閉じる', async () => {
+    const wrapper = mountDialog(queryClient, { members, initialAssigneeIds: ['user-1'] });
+    await nextTick();
+
+    pressEscape();
+    await nextTick();
+
+    expect(confirmOpen()).toBe(false);
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+    wrapper.unmount();
+  });
+
+  it('初期担当者を外すと確認し、送信では assignees を送らない', async () => {
+    const wrapper = mountDialog(queryClient, { members, initialAssigneeIds: ['user-1'] });
+    await nextTick();
+    pickerOption(assigneeTrigger(), 'yupix').click();
+    await nextTick();
+
+    pressEscape();
+    await nextTick();
+    expect(confirmOpen()).toBe(true);
+    clickButton('戻る');
+    await nextTick();
+
+    await new DOMWrapper(getTitleInput()).setValue('未割当で作成');
+    await submit();
+    expect(mutateAsync.mock.calls[0][0].body.assignees).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('候補に無い初期担当者は入れず、確認も出さない', async () => {
+    const wrapper = mountDialog(queryClient, { members, initialAssigneeIds: ['stranger'] });
+    await nextTick();
+
+    pressEscape();
+    await nextTick();
+    expect(confirmOpen()).toBe(false);
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+
+    await new DOMWrapper(getTitleInput()).setValue('候補外');
+    await submit();
+    expect(mutateAsync.mock.calls[0][0].body.assignees).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('閉じて開き直すと初期担当者が入り直す', async () => {
+    const wrapper = mountDialog(queryClient, { members, initialAssigneeIds: ['user-1'] });
+    await nextTick();
+    pickerOption(assigneeTrigger(), 'yupix').click();
+    await nextTick();
+    expect(assigneeTrigger().textContent).not.toContain('yupix');
+
+    await wrapper.setProps({ open: false });
+    await wrapper.setProps({ open: true });
+    await nextTick();
+
+    expect(assigneeTrigger().textContent).toContain('yupix');
+    wrapper.unmount();
+  });
+
+  it('候補が未取得の間は初期担当者を入れず、送信でも assignees を送らない', async () => {
+    const wrapper = mountDialog(queryClient, { initialAssigneeIds: ['user-1'] });
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('候補の取得前');
+
+    await submit();
+
+    expect(mutateAsync.mock.calls[0][0].body.assignees).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('候補が後から届くと初期担当者が入り、確認せずに閉じる', async () => {
+    const wrapper = mountDialog(queryClient, {
+      membersLoading: true,
+      initialAssigneeIds: ['user-1'],
+    });
+    await nextTick();
+
+    await wrapper.setProps({ members, membersLoading: false });
+    await nextTick();
+    expect(assigneeTrigger().textContent).toContain('yupix');
+
+    pressEscape();
+    await nextTick();
+    expect(confirmOpen()).toBe(false);
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+    wrapper.unmount();
+  });
+
+  it('候補が届いたあとに外した担当者は、候補が再取得されても入れ直さない', async () => {
+    // 候補が届く前は担当者の欄が出ず、利用者が触れない。触れるのは届いたあとなので、
+    // 触ったあとに候補の配列が差し替わる（再取得）場合で上書きされないことを確かめる
+    const wrapper = mountDialog(queryClient, {
+      membersLoading: true,
+      initialAssigneeIds: ['user-1'],
+    });
+    await wrapper.setProps({ members, membersLoading: false });
+    await nextTick();
+    pickerOption(assigneeTrigger(), 'yupix').click();
+    await nextTick();
+    expect(assigneeTrigger().textContent).not.toContain('yupix');
+
+    await wrapper.setProps({ members: members.map((user) => ({ ...user })) });
+    await nextTick();
+
+    expect(assigneeTrigger().textContent).not.toContain('yupix');
+    await new DOMWrapper(getTitleInput()).setValue('外したまま');
+    await submit();
+    expect(mutateAsync.mock.calls[0][0].body.assignees).toBeUndefined();
     wrapper.unmount();
   });
 });

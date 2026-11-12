@@ -41,6 +41,7 @@ const {
     // テストごとに差し替えるため、空配列（never[]）に推論させない
     labels: [] as Record<string, unknown>[],
     parent_task_id: null as string | null,
+    updated_at: '2026-07-01T00:00:00Z',
   };
 
   // 移動先のタスク。status_id と priority は baseTask と同じ
@@ -273,6 +274,75 @@ describe('useTaskDetail のキャッシュ同期', () => {
     expect(queryClient.getQueryState(searchQueryKey)?.isInvalidated).toBe(true);
   });
 
+  it('title の保存応答の updated_at が、詳細のキャッシュと displayTask に入る', async () => {
+    mountHost();
+    await flushPromises();
+
+    detail.onSaveTitle('新しいタイトル');
+    await flushPromises();
+    putControl.resolve!({
+      ...baseTask,
+      title: '新しいタイトル',
+      updated_at: '2026-07-20T00:00:00Z',
+    });
+    await flushPromises();
+
+    expect(queryClient.getQueryData(taskQueryKey)).toMatchObject({
+      updated_at: '2026-07-20T00:00:00Z',
+    });
+    expect(detail.displayTask.value?.updated_at).toBe('2026-07-20T00:00:00Z');
+  });
+
+  it.each([
+    ['status_id', () => detail.onStatusChange('status-done'), { status_id: 'status-done' }],
+    ['priority', () => detail.onPriorityChange('High'), { priority: 'High' }],
+    ['labels', () => detail.onSaveLabels([]), { labels: [] }],
+  ])('%s の保存でも、応答の updated_at がキャッシュへ入る', async (field, act, patch) => {
+    if (field === 'labels') {
+      baseTask.labels = [
+        {
+          id: '00000000-0000-0000-0000-000000000001',
+          name: 'a',
+          description: '',
+          color: '#111111',
+          icon_url: null,
+          project_id: PROJECT_ID,
+        },
+      ];
+    }
+    mountHost();
+    await flushPromises();
+
+    act();
+    await flushPromises();
+    putControl.resolve!({ ...baseTask, ...patch, updated_at: '2026-07-21T00:00:00Z' });
+    await flushPromises();
+
+    expect(queryClient.getQueryData(taskQueryKey)).toMatchObject({
+      updated_at: '2026-07-21T00:00:00Z',
+    });
+  });
+
+  it('別フィールドの古い応答が後から届いても、updated_at を巻き戻さない', async () => {
+    mountHost();
+    await flushPromises();
+
+    detail.onSaveTitle('1 回目');
+    await flushPromises();
+    const resolveFirst = putControl.resolve!;
+    detail.onPriorityChange('High');
+    await flushPromises();
+    putControl.resolve!({ ...baseTask, priority: 'High', updated_at: '2026-07-22T00:00:00Z' });
+    await flushPromises();
+    resolveFirst({ ...baseTask, title: '1 回目', updated_at: '2026-07-21T00:00:00Z' });
+    await flushPromises();
+
+    expect(queryClient.getQueryData(taskQueryKey)).toMatchObject({
+      title: '1 回目',
+      updated_at: '2026-07-22T00:00:00Z',
+    });
+  });
+
   it('状態を変えたら、応答の completed_at も詳細のキャッシュへ入る', async () => {
     mountHost();
     await flushPromises();
@@ -351,7 +421,14 @@ describe('useTaskDetail のキャッシュ同期', () => {
     expect(detail.savedField.value).toBeNull();
   });
 
-  it('通知の欄が無い優先度の保存では、表示中の savedField を置き換えない', async () => {
+  it.each([
+    ['status_id', () => detail.onStatusChange('status-done'), { status_id: 'status-done' }],
+    ['priority', () => detail.onPriorityChange('High'), { priority: 'High' }],
+    ['labels', () => detail.onSaveLabels([]), { labels: [] }],
+  ])('%s の保存が確定したら savedField がそのフィールドになる', async (field, act, patch) => {
+    if (field === 'labels') {
+      baseTask.labels = [{ id: '00000000-0000-0000-0000-000000000001', name: 'a' }];
+    }
     mountHost();
     await flushPromises();
 
@@ -361,12 +438,29 @@ describe('useTaskDetail のキャッシュ同期', () => {
     await flushPromises();
     expect(detail.savedField.value).toBe('title');
 
-    detail.onPriorityChange('High');
+    act();
     await flushPromises();
-    putControl.resolve!({ ...baseTask, title: '新しいタイトル', priority: 'High' });
+    expect(detail.savedField.value).toBe('title');
+    putControl.resolve!({ ...baseTask, title: '新しいタイトル', ...patch });
     await flushPromises();
 
-    expect(detail.savedField.value).toBe('title');
+    expect(detail.savedField.value).toBe(field);
+  });
+
+  it('移る前に始めた状態の保存が移った後に完了しても、savedField を立てない', async () => {
+    const taskId = ref(TASK_SEQ_KEY);
+    mountHost(taskId);
+    await flushPromises();
+
+    detail.onStatusChange('status-done');
+    await flushPromises();
+    const resolveFirst = putControl.resolve!;
+    taskId.value = OTHER_TASK_SEQ_KEY;
+    await flushPromises();
+    resolveFirst({ ...baseTask, status_id: 'status-done' });
+    await flushPromises();
+
+    expect(detail.savedField.value).toBeNull();
   });
 
   it('別のタスクへ移ったら、前のタスクの savedField を消す', async () => {
@@ -685,6 +779,19 @@ describe('useTaskDetail のキャッシュ同期', () => {
         { params: { path: { tenant_id: TENANT_ID, project_id: PROJECT_ID, id } } },
       ] as const;
     }
+
+    it('親の設定が確定したら savedField が parent_task_id になる', async () => {
+      mountHost();
+      await flushPromises();
+
+      detail.onChangeParent('parent-new');
+      await flushPromises();
+      baseTask.parent_task_id = 'parent-new';
+      putControl.resolve!({ ...baseTask });
+      await flushPromises();
+
+      expect(detail.savedField.value).toBe('parent_task_id');
+    });
 
     it('親が無いタスクへの設定は parent_task_id を送り、確定まで楽観値と進行中フラグを出す', async () => {
       mountHost();

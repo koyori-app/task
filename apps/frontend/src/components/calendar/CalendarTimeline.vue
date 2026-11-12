@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ChevronLeft, ChevronRight, Flag, TriangleAlert, UserRound } from '@lucide/vue';
 import { useQueryClient } from '@tanstack/vue-query';
-import { computed, nextTick, ref } from 'vue';
+import { useMediaQuery } from '@vueuse/core';
+import { computed, nextTick, ref, watch } from 'vue';
 
 import { Tooltip } from '@koyori-app/ui-vue';
 
@@ -92,9 +93,26 @@ const previewInvalid = computed(() => {
 });
 
 const dates = computed(() => rangeDates(props.from, props.days));
+// 狭い幅はメンバー列をアバターだけにして、1 日の幅へ回す（予定の名前が読める分を増やす）
+const isNarrow = useMediaQuery('(max-width: 768px)');
+const memberColumnRem = computed(() => (isNarrow.value ? 3 : 10));
+const dayColumnRem = computed(() => (isNarrow.value ? 6 : 4));
 const gridStyle = computed(() => ({
-  gridTemplateColumns: `10rem repeat(${props.days}, minmax(4rem, 1fr))`,
+  gridTemplateColumns: `${memberColumnRem.value}rem repeat(${props.days}, minmax(${dayColumnRem.value}rem, 1fr))`,
 }));
+const minWidthRem = computed(() => memberColumnRem.value + props.days * dayColumnRem.value);
+
+// 狭い幅は 2 週間が画面に収まらないので、今日を左端にして開く
+watch(
+  [isNarrow, () => props.from, root],
+  () => {
+    const index = dates.value.indexOf(props.today);
+    if (!isNarrow.value || !root.value || index < 0) return;
+    const rem = Number.parseFloat(getComputedStyle(root.value).fontSize) || 16;
+    root.value.scrollLeft = index * dayColumnRem.value * rem;
+  },
+  { flush: 'post' },
+);
 
 function dayLabel(date: string) {
   const [, month, day] = date.split('-');
@@ -199,6 +217,7 @@ const rows = computed(() => {
   const result = props.members.map((member) => ({
     id: member.id,
     name: member.username,
+    accountKind: member.account_kind,
     avatarUrl: member.avatar_url ?? null,
     ...entriesOf(rowsById.get(member.id) ?? []),
     loads: loadsOf(member.id),
@@ -208,6 +227,7 @@ const rows = computed(() => {
     result.push({
       id: UNASSIGNED_ID,
       name: '担当者なし',
+      accountKind: undefined,
       avatarUrl: null,
       ...entriesOf(unassigned),
       loads: [],
@@ -488,11 +508,11 @@ function spanStyle(placed: { startCol: number; endCol: number }, row: number) {
     {{ previewInvalid ? '期限より後になっています' : moveMessage }}
   </p>
   <div ref="root" class="overflow-x-auto rounded-md border" data-calendar-timeline>
-    <div :style="{ minWidth: `${10 + days * 4}rem` }">
+    <div :style="{ minWidth: `${minWidthRem}rem` }">
       <!-- 日付の見出し -->
       <div class="grid border-b text-xs" :style="gridStyle">
         <div class="sticky left-0 z-10 border-r bg-background px-2 py-1.5 text-muted-foreground">
-          メンバー
+          <span class="max-md:sr-only">メンバー</span>
         </div>
         <div
           v-for="date in dates"
@@ -520,7 +540,7 @@ function spanStyle(placed: { startCol: number; endCol: number }, row: number) {
           class="sticky left-0 z-10 flex items-center border-r bg-background px-2 text-xs text-muted-foreground"
           style="grid-column: 1; grid-row: 1 / -1"
         >
-          スプリント
+          <span class="max-md:sr-only">スプリント</span>
         </div>
         <div
           v-for="(date, col) in dates"
@@ -594,13 +614,18 @@ function spanStyle(placed: { startCol: number; endCol: number }, row: number) {
             </span>
             <UserAvatar
               v-else
-              :user="{ id: row.id, name: row.name, avatar_url: row.avatarUrl }"
+              :user="{
+                id: row.id,
+                name: row.name,
+                account_kind: row.accountKind,
+                avatar_url: row.avatarUrl,
+              }"
               size="sm"
               decorative
               class="shrink-0"
               data-member-avatar
             />
-            <span class="truncate">{{ row.name }}</span>
+            <span class="truncate max-md:sr-only">{{ row.name }}</span>
           </div>
           <div
             v-for="(date, col) in dates"

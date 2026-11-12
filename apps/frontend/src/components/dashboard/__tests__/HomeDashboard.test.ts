@@ -49,17 +49,20 @@ function fixture(): components['schemas']['DashboardResponse'] {
     activities: [],
   };
 }
-function setup(handler: (request: Request) => Response | Promise<Response>) {
+function setup(
+  handler: (request: Request) => Response | Promise<Response>,
+  props?: { canCreateProject?: boolean },
+) {
   const fetch = vi.fn(handler);
   vi.stubGlobal('fetch', fetch);
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   const wrapper = mount(HomeDashboard, {
-    props: { tenantId: tenant, tenantSlug: 'acme' },
+    props: { tenantId: tenant, tenantSlug: 'acme', ...props },
     global: {
       plugins: [createPinia(), [VueQueryPlugin, { queryClient: client }]],
-      stubs: { DashboardCreateTask: true },
+      stubs: { DashboardCreateTask: true, DashboardProjectsEmpty: true },
     },
   });
   return { wrapper, fetch, client };
@@ -76,6 +79,26 @@ const createOpen = (wrapper: ReturnType<typeof setup>['wrapper']) =>
   wrapper.getComponent({ name: 'DashboardCreateTask' }).props('open');
 
 describe('HomeDashboard', () => {
+  it.each([true, false, undefined])(
+    'プロジェクトが 0 件なら権限 %s に応じた初回案内を出す',
+    async (canCreateProject) => {
+      const { wrapper } = setup((req) => respond(req, { ...fixture(), projects: [] }), {
+        canCreateProject,
+      });
+      await flushPromises();
+      expect(wrapper.getComponent({ name: 'DashboardProjectsEmpty' }).props()).toEqual({
+        tenantSlug: 'acme',
+        canCreateProject: !!canCreateProject,
+      });
+    },
+  );
+
+  it('プロジェクトがあれば初回の案内を出さない', async () => {
+    const { wrapper } = setup((req) => respond(req, fixture()));
+    await flushPromises();
+    expect(wrapper.findComponent({ name: 'DashboardProjectsEmpty' }).exists()).toBe(false);
+  });
+
   it('サーバーの集計件数を表示し、表示中の行だけで数え直さない', async () => {
     const data = fixture();
     const { wrapper, fetch } = setup((req) => respond(req, data));
@@ -227,6 +250,38 @@ describe('HomeDashboard', () => {
         .find((b) => b.text() === 'タスクを作成')!
         .attributes('disabled'),
     ).toBeDefined();
+  });
+
+  it('作成したタスクへのリンクを出して一覧を再取得し、作成画面を開き直すと消す', async () => {
+    const { wrapper, fetch } = setup((req) => respond(req, fixture()));
+    await flushPromises();
+    expect(wrapper.find('[role="status"] a').exists()).toBe(false);
+    const dashboardCalls = () =>
+      fetch.mock.calls.filter(([req]) => req.url.includes('/dashboard')).length;
+    const before = dashboardCalls();
+
+    wrapper
+      .getComponent({ name: 'DashboardCreateTask' })
+      .vm.$emit('created', { id: 'new', seq_id: 12 }, project);
+    await flushPromises();
+
+    const link = wrapper.get('[role="status"] a');
+    expect(link.attributes('href')).toBe('/acme/projects/KOY/tasks/KOY-12');
+    expect(link.text()).toBe('KOY-12');
+    expect(wrapper.get('[role="status"]').text()).toContain('を作成しました');
+    expect(dashboardCalls()).toBeGreaterThan(before);
+
+    pressT();
+    await flushPromises();
+    expect(wrapper.find('[role="status"] a').exists()).toBe(false);
+  });
+
+  it('現在のユーザーを作成画面へ渡す', async () => {
+    const { wrapper } = setup((req) => respond(req, fixture()));
+    await flushPromises();
+    expect(wrapper.getComponent({ name: 'DashboardCreateTask' }).props('currentUserId')).toBe(
+      'user',
+    );
   });
 
   it('T でタスク作成モーダルを開く', async () => {

@@ -133,6 +133,7 @@ function closeOnNavigate(event: MouseEvent) {
       :current-path="pageContext.urlPathname"
       :loading="navProjectsLoading"
       :error="projectsQuery.isError.value"
+      :show-gantt="showExperiments"
       @retry="retryProjects"
       @create="onCreateProject"
     />

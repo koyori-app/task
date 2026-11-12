@@ -14,3 +14,4 @@ sidebar:
 - 認証メールとワーカーは[メール認証のフロー](/dev/design/email-verification-flow)、リセットは[パスワードリセットのフロー](/dev/design/password-reset-flow)に書く
 - 検索は[タスクの類似検索](/dev/design/task-similarity-search)、Redis の扱いは [Redis の信頼境界](/dev/design/redis-trust-boundary)に書く
 - タスクの変更を画面へ伝える仕組みは[プロジェクトのイベント](/dev/design/project-events)に書く
+- BOT アカウントの認証と管理は[テナント BOT の認証と管理](/dev/design/tenant-bots)に書く

@@ -10,3 +10,6 @@ node_modules
 # apps/frontend/src/components/reviews/ のような実装側まで無視してしまう）
 /.claude/
 /reviews/
+
+# macOS
+.DS_Store
