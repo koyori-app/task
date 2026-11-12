@@ -339,7 +339,12 @@ export const PullRequestRailOpenOnly: Story = {
     const badges = await canvas.findAllByTestId('pr-state');
     await expect(badges.map((b) => b.textContent?.trim())).toEqual(['Open']);
     await expect(canvas.queryByTestId('pr-pager')).not.toBeInTheDocument();
-    await expect(canvas.getByRole('button', { name: 'PR の状態: Open' })).toBeInTheDocument();
+    // ブラウザが計算するアクセシブル名は aria-label と完全には一致しないので、名前は前方一致で取り、
+    // 選ばれている値は aria-label で見る（単体テストと同じ物差し）
+    await expect(await canvas.findByRole('button', { name: /^PR の状態/ })).toHaveAttribute(
+      'aria-label',
+      'PR の状態: Open',
+    );
   },
 };
 
