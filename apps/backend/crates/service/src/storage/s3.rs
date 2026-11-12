@@ -58,13 +58,8 @@ impl S3StorageBackend {
             .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
             .unwrap_or(false);
 
-        let public_base_url = env::var("S3_PUBLIC_BASE_URL").unwrap_or_else(|_| {
-            format!(
-                "{}/{}",
-                endpoint.trim_end_matches('/'),
-                bucket.trim_start_matches('/')
-            )
-        });
+        let public_base_url =
+            resolve_public_base_url(env::var("S3_PUBLIC_BASE_URL").ok(), &endpoint, &bucket);
 
         let mut builder = AmazonS3Builder::new()
             .with_endpoint(&endpoint)
@@ -236,9 +231,41 @@ impl StorageBackend for S3StorageBackend {
     }
 }
 
+/// ブラウザに配る URL のベース。設定が無ければ `endpoint/bucket`。
+/// docker-compose の `${S3_PUBLIC_BASE_URL:-}` は未設定を空文字で渡すので、空は未設定として扱う
+fn resolve_public_base_url(configured: Option<String>, endpoint: &str, bucket: &str) -> String {
+    configured
+        .map(|v| v.trim().to_owned())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| {
+            format!(
+                "{}/{}",
+                endpoint.trim_end_matches('/'),
+                bucket.trim_start_matches('/')
+            )
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_public_base_url_falls_back_to_endpoint_and_bucket() {
+        let fallback = "https://s3.example.com/drive";
+        assert_eq!(
+            resolve_public_base_url(None, "https://s3.example.com/", "/drive"),
+            fallback
+        );
+        assert_eq!(
+            resolve_public_base_url(Some(String::new()), "https://s3.example.com/", "/drive"),
+            fallback
+        );
+        assert_eq!(
+            resolve_public_base_url(Some("https://cdn.example.com".into()), "x", "y"),
+            "https://cdn.example.com"
+        );
+    }
 
     // to_path: Path::parse は先頭スラッシュを正規化、バックスラッシュをパーセントエンコードするため
     // 拒否するのは空文字と ".." を含むパスのみ。

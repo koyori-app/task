@@ -105,7 +105,7 @@ fn response(user: users::Model, role: tenant_members::TenantRole, tenant_id: Uui
         username: user.username,
         account_kind: user.account_kind,
         is_suspended: user.is_suspended,
-        role,
+        role: role.into(),
     }
 }
 

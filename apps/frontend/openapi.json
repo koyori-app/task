@@ -25662,7 +25662,17 @@
             "type": "boolean"
           },
           "role": {
-            "$ref": "#/components/schemas/TenantRole"
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TenantRole"
+                  }
+                ],
+                "x-or-unknown": true
+              }
+            ],
+            "description": "知らない値（新しいサーバーが足した役）でも、ほかの欄は読めるように包む"
           },
           "tenant_id": {
             "type": "string",
@@ -29259,8 +29269,15 @@
           },
           {
             "type": "object",
-            "required": ["custom_field_values", "reactions"],
+            "required": ["custom_field_values", "reactions", "attachments"],
             "properties": {
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TaskAttachmentResponse"
+                },
+                "description": "添付ファイル（`GET /tasks/{id}/attachments` と同じ要素。新しい順）。\nタスク一覧（`GET /tasks`）には載せない。"
+              },
               "custom_field_values": {
                 "type": "array",
                 "items": {

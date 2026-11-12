@@ -7,7 +7,13 @@ import { Button } from '@koyori-app/ui-vue';
 
 const pageContext = usePageContext();
 const slug = computed(() => String(pageContext.routeParams.tenant ?? ''));
-const { tenantId, isError, isTenantNotFound, tenantsQuery } = useResolvedTenantId(slug);
+const { tenantId, resolvedTenant, isError, isTenantNotFound, tenantsQuery } =
+  useResolvedTenantId(slug);
+// 共有プロジェクトを作れるのはオーナーとテナント Admin（require_tenant_admin と同じ）。
+const canCreateProject = computed(() => {
+  const tenant = resolvedTenant.value;
+  return !!tenant && (tenant.membership === 'Owner' || tenant.member_role === 'Admin');
+});
 </script>
 
 <template>
@@ -18,6 +24,12 @@ const { tenantId, isError, isTenantNotFound, tenantsQuery } = useResolvedTenantI
   <div v-else-if="isTenantNotFound" class="p-6 text-sm text-muted-foreground">
     ワークスペースが見つかりません。<a href="/" class="underline">ホームへ戻る</a>
   </div>
-  <HomeDashboard v-else-if="tenantId" :key="tenantId" :tenant-id="tenantId" :tenant-slug="slug" />
+  <HomeDashboard
+    v-else-if="tenantId"
+    :key="tenantId"
+    :tenant-id="tenantId"
+    :tenant-slug="slug"
+    :can-create-project="canCreateProject"
+  />
   <p v-else role="status" class="p-6 text-sm text-muted-foreground">読み込み中…</p>
 </template>

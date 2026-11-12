@@ -614,11 +614,13 @@ async fn build_task_detail_response(
         service::mentions::resolve_in_bodies(&state.db, project_id, task.description.as_deref())
             .await?;
     let reactions = service::reactions::summaries_for_task(&state.db, task.id, viewer_id).await?;
+    let attachments = service::task_attachments::list_for_task(&state.db, task.id).await?;
     Ok(TaskDetailResponse {
         task: build_task_response(&state.db, task).await?,
         custom_field_values,
         mentions,
         reactions,
+        attachments,
     })
 }
 

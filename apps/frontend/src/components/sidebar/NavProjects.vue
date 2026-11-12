@@ -1,12 +1,5 @@
 <script setup lang="ts">
-import {
-  PhFiles,
-  PhGear,
-  PhGitPullRequest,
-  PhListChecks,
-  PhPlus,
-  PhTag,
-} from '@phosphor-icons/vue';
+import { PhFiles, PhGear, PhGitPullRequest, PhListChecks, PhPlus } from '@phosphor-icons/vue';
 import { ChartGantt } from '@lucide/vue';
 import { type Component, computed } from 'vue';
 import type { components } from '@/generated/api';
@@ -63,7 +56,6 @@ function projectChildren(project: ProjectNavItem): ProjectChild[] {
       ? [{ label: 'ガントチャート', href: `${base}/gantt`, icon: ChartGantt }]
       : []),
     { label: 'ドキュメント', href: `${base}/docs`, icon: PhFiles },
-    { label: 'ラベル', href: `${base}/labels`, icon: PhTag },
   ];
   // 個人プロジェクト（個人 Inbox）はシステム管理のため設定を出さない。
   // レビューも、設定へ入れない＝GitHub 連携を張る手段が無いので出さない
