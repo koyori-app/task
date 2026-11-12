@@ -256,6 +256,7 @@ task auth token < token.txt
 ```bash
 task projects list                        # --project に渡せるキー
 task projects statuses --project TASK     # --status に渡せる名前（プロジェクトごとに違う）
+task projects labels --project TASK       # --label に渡せる名前（色と説明も並ぶ）
 ```
 
 固定の値は `--help` に列挙してある（`--priority`、`sprints list --status`、`review --state` / `--severity`、`my list --filter`）。
