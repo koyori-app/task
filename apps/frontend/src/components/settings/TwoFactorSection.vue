@@ -78,6 +78,9 @@ function fail(e: unknown, enforcedReason = false) {
 }
 
 async function startSetup() {
+  // 初回コードの検証中に新しいセットアップを始めると、backend が秘密を入れ替え、
+  // 古い秘密で通った検証が新しい秘密を有効にしてしまう
+  if (verifySetupMutation.isPending.value) return;
   error.value = null;
   try {
     setupData.value = await setupMutation.mutateAsync({} as never);
@@ -140,7 +143,7 @@ async function onRegenerate(input: { code: string } | { recovery_code: string })
         {{
           user.totp_enabled
             ? '有効です。'
-            : '無効です。サインイン時に認証アプリのコードを求めます。'
+            : '無効です。有効にすると、サインイン時に認証アプリのコードも求めます。'
         }}
       </p>
     </div>
@@ -166,7 +169,12 @@ async function onRegenerate(input: { code: string } | { recovery_code: string })
         :locked="locked"
         @submit="mode === 'disable' ? onDisable($event) : onRegenerate($event)"
       />
-      <Button variant="secondary" label="キャンセル" @click="close" />
+      <Button
+        variant="secondary"
+        label="キャンセル"
+        :disabled="deleteMutation.isPending.value || regenerateMutation.isPending.value"
+        @click="close"
+      />
     </template>
     <div v-else class="flex flex-wrap gap-2">
       <template v-if="user.totp_enabled">
@@ -176,12 +184,18 @@ async function onRegenerate(input: { code: string } | { recovery_code: string })
       <Button
         v-else
         label="有効にする"
-        :disabled="setupMutation.isPending.value"
+        :disabled="setupMutation.isPending.value || verifySetupMutation.isPending.value"
         @click="startSetup"
       />
     </div>
     <p v-if="error && mode === 'idle'" class="text-destructive text-sm" role="alert">{{ error }}</p>
 
-    <Button v-if="mode === 'setup'" variant="secondary" label="キャンセル" @click="close" />
+    <Button
+      v-if="mode === 'setup'"
+      variant="secondary"
+      label="キャンセル"
+      :disabled="verifySetupMutation.isPending.value"
+      @click="close"
+    />
   </section>
 </template>

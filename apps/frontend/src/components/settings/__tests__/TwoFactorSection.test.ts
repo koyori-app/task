@@ -148,6 +148,54 @@ describe('TwoFactorSection 有効化', () => {
   });
 });
 
+describe('TwoFactorSection 応答待ちの操作', () => {
+  it('初回コードの検証中はキャンセルできず、セットアップを重ねて始めない', async () => {
+    let resolveVerify!: (r: Response) => void;
+    const calls = stubApi({
+      'POST /v1/auth/2fa/totp/setup': () => json(SETUP),
+      'POST /v1/auth/2fa/totp/verify-setup': () =>
+        new Promise<Response>((r) => (resolveVerify = r)),
+      [ME]: () => json(user(true)),
+    });
+    const w = mountSection(false);
+    await click(w, '有効にする');
+    await submitCode(w, '123456');
+
+    const cancel = w.findAll('button').find((b) => b.text().includes('キャンセル'));
+    expect(cancel?.attributes('disabled')).toBeDefined();
+    await cancel!.trigger('click');
+    await flushPromises();
+    expect(w.findAll('button').some((b) => b.text().includes('有効にする'))).toBe(false);
+    expect(calls.filter((c) => c.key === 'POST /v1/auth/2fa/totp/setup')).toHaveLength(1);
+
+    resolveVerify(json({ recovery_codes: CODES }));
+    await flushPromises();
+    expect(w.find('[data-testid="recovery-codes"]').text()).toContain(CODES[0]);
+  });
+
+  it('再生成の応答待ちのあいだはキャンセルできない', async () => {
+    stubApi({
+      'POST /v1/auth/2fa/recovery-codes/regenerate': () => new Promise<Response>(() => {}),
+      [ME]: () => json(user(true)),
+    });
+    const w = mountSection(true);
+    await click(w, 'リカバリーコードを再生成');
+    await submitCode(w, '123456');
+    const cancel = w.findAll('button').find((b) => b.text().includes('キャンセル'));
+    expect(cancel?.attributes('disabled')).toBeDefined();
+  });
+});
+
+describe('TwoFactorSection の状態表示', () => {
+  it('無効のときは、有効にした後の挙動として説明する', () => {
+    stubApi({ [ME]: () => json(user(false)) });
+    const w = mountSection(false);
+    expect(w.text()).toContain(
+      '無効です。有効にすると、サインイン時に認証アプリのコードも求めます。',
+    );
+  });
+});
+
 describe('TwoFactorSection 無効化', () => {
   it('TOTP で無効化し /me を取り直す', async () => {
     const calls = stubApi({
