@@ -458,6 +458,66 @@ mod tests {
     }
 
     #[test]
+    fn parent_with_hard_only_and_child_soft_only() {
+        let hard_only = parent(None, Some("2026-12-20T00:00:00Z"), None);
+        // 矛盾しなければ親の Hard を引き継ぐ
+        let (s, h, start) = schedule_with_parent_defaults(
+            Some(dt("2026-12-15T00:00:00Z")),
+            None,
+            None,
+            Some(&hard_only),
+        );
+        assert_eq!(s, Some(dt("2026-12-15T00:00:00Z")));
+        assert_eq!(h, Some(dt("2026-12-20T00:00:00Z")));
+        assert_eq!(start, None);
+        // Soft が親の Hard 以降なら入れない
+        let (s, h, _) = schedule_with_parent_defaults(
+            Some(dt("2026-12-25T00:00:00Z")),
+            None,
+            None,
+            Some(&hard_only),
+        );
+        assert_eq!(s, Some(dt("2026-12-25T00:00:00Z")));
+        assert_eq!(h, None);
+    }
+
+    #[test]
+    fn parent_with_soft_only_and_child_unspecified() {
+        let soft_only = parent(Some("2026-12-10T00:00:00Z"), None, Some("2026-12-01"));
+        let got = schedule_with_parent_defaults(None, None, None, Some(&soft_only));
+        assert_eq!(
+            got,
+            (
+                Some(dt("2026-12-10T00:00:00Z")),
+                None,
+                Some(d("2026-12-01"))
+            )
+        );
+    }
+
+    #[test]
+    fn parent_with_soft_only_and_child_hard_only() {
+        let soft_only = parent(Some("2026-12-10T00:00:00Z"), None, None);
+        let (s, h, _) = schedule_with_parent_defaults(
+            None,
+            Some(dt("2026-12-15T00:00:00Z")),
+            None,
+            Some(&soft_only),
+        );
+        assert_eq!(s, Some(dt("2026-12-10T00:00:00Z")));
+        assert_eq!(h, Some(dt("2026-12-15T00:00:00Z")));
+        // Hard が親の Soft 以前なら Soft は入れない
+        let (s, h, _) = schedule_with_parent_defaults(
+            None,
+            Some(dt("2026-12-05T00:00:00Z")),
+            None,
+            Some(&soft_only),
+        );
+        assert_eq!(s, None);
+        assert_eq!(h, Some(dt("2026-12-05T00:00:00Z")));
+    }
+
+    #[test]
     fn parent_without_schedule_leaves_child_empty() {
         let got = schedule_with_parent_defaults(None, None, None, Some(&parent(None, None, None)));
         assert_eq!(got, (None, None, None));

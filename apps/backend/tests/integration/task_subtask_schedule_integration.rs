@@ -246,3 +246,130 @@ async fn bulk_create_inherits_per_item() {
     assert_eq!(ts(&t[1]["hard_deadline"]), at(P_HARD));
     assert_eq!(t[1]["planned_start_on"], "2026-12-04");
 }
+
+async fn post_child(fx: &Fx, title: &str, extra: Value) -> reqwest::Response {
+    let mut body = json!({
+        "title": title,
+        "status_id": fx.status_id,
+    });
+    for (k, v) in extra.as_object().unwrap() {
+        body[k] = v.clone();
+    }
+    fx.app.post_json_with_session(&fx.base, body).await
+}
+
+async fn titles(fx: &Fx) -> Vec<String> {
+    let res = fx.app.get_with_session(&fx.base).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.unwrap();
+    body["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["title"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn parent_in_other_project_is_not_found_and_not_inherited() {
+    let fx = setup().await;
+    let other_id = crate::common::insert_extra_project(&fx.app, fx.tp.tenant_id).await;
+    let other_tp = TestTenantProject {
+        tenant_id: fx.tp.tenant_id,
+        project_id: other_id,
+    };
+    let other_status = crate::common::create_status(&fx.app, &other_tp, "Todo", false)
+        .await
+        .to_string();
+    let other_base = format!(
+        "/v1/tenants/{}/projects/{}/tasks",
+        other_tp.tenant_id, other_tp.project_id
+    );
+    let res = fx
+        .app
+        .post_json_with_session(
+            &other_base,
+            json!({
+                "title": "foreign parent",
+                "status_id": other_status,
+                "soft_deadline": P_SOFT,
+                "hard_deadline": P_HARD,
+                "planned_start_on": P_START,
+            }),
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let foreign: Value = res.json().await.unwrap();
+    let foreign_id = foreign["id"].as_str().unwrap();
+
+    let res = post_child(
+        &fx,
+        "orphaned-by-foreign",
+        json!({"parent_task_id": foreign_id}),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    assert!(
+        !titles(&fx)
+            .await
+            .contains(&"orphaned-by-foreign".to_string())
+    );
+
+    // 対照: 同じプロジェクトの親なら作られ、親の日付を引き継ぐ
+    let ok = create(&fx, json!({"title": "same-project-child"})).await;
+    assert_eq!(ts(&ok["soft_deadline"]), at(P_SOFT));
+    assert_eq!(ok["planned_start_on"], P_START);
+}
+
+#[tokio::test]
+async fn deleted_parent_is_not_found() {
+    let fx = setup().await;
+    // 対照: 削除前は作れる
+    let before = create(&fx, json!({"title": "before-delete"})).await;
+    assert_eq!(ts(&before["hard_deadline"]), at(P_HARD));
+
+    let res = fx
+        .app
+        .delete_with_session(&format!("{}/{}", fx.base, fx.parent_id))
+        .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    let res = post_child(&fx, "after-delete", json!({"parent_task_id": fx.parent_id})).await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    assert!(!titles(&fx).await.contains(&"after-delete".to_string()));
+}
+
+#[tokio::test]
+async fn contradictory_request_deadlines_stay_bad_request_with_parent() {
+    let fx = setup().await;
+    // 親が日付を持っていても、リクエスト自身の Soft >= Hard は 400（Soft == Hard も）
+    for (soft, hard) in [
+        ("2026-12-15T00:00:00Z", "2026-12-12T00:00:00Z"),
+        ("2026-12-15T00:00:00Z", "2026-12-15T00:00:00Z"),
+    ] {
+        let res = post_child(
+            &fx,
+            "contradiction",
+            json!({
+                "parent_task_id": fx.parent_id,
+                "soft_deadline": soft,
+                "hard_deadline": hard,
+            }),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    }
+    assert!(!titles(&fx).await.contains(&"contradiction".to_string()));
+
+    // 対照: 矛盾しない組は通り、指定値が優先される
+    let ok = create(
+        &fx,
+        json!({
+            "soft_deadline": "2026-12-12T00:00:00Z",
+            "hard_deadline": "2026-12-15T00:00:00Z",
+        }),
+    )
+    .await;
+    assert_eq!(ts(&ok["soft_deadline"]), at("2026-12-12T00:00:00Z"));
+    assert_eq!(ts(&ok["hard_deadline"]), at("2026-12-15T00:00:00Z"));
+}
