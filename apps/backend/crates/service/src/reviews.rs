@@ -651,6 +651,7 @@ pub async fn create_deferred_task<C: ConnectionTrait>(
         soft_deadline: Set(None),
         hard_deadline: Set(None),
         planned_start_on: Set(None),
+        require_all_assignees_done: Set(false),
         estimated_minutes: Set(None),
         is_archived: Set(false),
         created_by: Set(actor_id),

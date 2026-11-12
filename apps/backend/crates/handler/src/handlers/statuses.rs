@@ -232,7 +232,8 @@ pub async fn update_status(
             .await?;
     }
     if demoting_done {
-        // 完了でなくなったので、このステータスに居るタスクの完了時刻を消す。
+        // 完了でなくなったので、このステータスに居るタスクの完了時刻と担当者の完了を消す。
+        service::task_completion::reset_assignee_completions_in_status(&txn, id).await?;
         tasks::Entity::update_many()
             .col_expr(
                 tasks::Column::CompletedAt,
@@ -446,6 +447,10 @@ pub async fn delete_status(
 
         let mut update =
             tasks::Entity::update_many().col_expr(tasks::Column::StatusId, Expr::value(migrate_to));
+        // 完了から未完了へ移すタスクは、担当者の完了も消す
+        if status.is_done_state && !target_status.is_done_state {
+            service::task_completion::reset_assignee_completions_in_status(&txn, id).await?;
+        }
         update = if target_status.is_done_state {
             update.col_expr(
                 tasks::Column::CompletedAt,

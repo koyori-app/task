@@ -303,7 +303,11 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     pendingFieldRevisions.value = nextPending;
 
     if (field === 'status_id') {
-      statusError.value = 'ステータスの更新に失敗しました';
+      const status = error instanceof OpenApiVueQueryError ? error.response?.status : undefined;
+      statusError.value =
+        status === 409
+          ? '担当者全員が完了にするまで完了へ移せません'
+          : 'ステータスの更新に失敗しました';
       const currentStatusId = taskQuery.data.value?.status_id;
       if (currentStatusId) selectedStatusId.value = currentStatusId;
       return;

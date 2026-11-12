@@ -38,6 +38,7 @@ pub struct Model {
     )]
     pub search_vector: Option<String>,
     pub planned_start_on: Option<Date>,
+    pub require_all_assignees_done: bool,
     #[sea_orm(has_many)]
     pub forge_branch_links: HasMany<super::forge_branch_links::Entity>,
     #[sea_orm(has_many)]

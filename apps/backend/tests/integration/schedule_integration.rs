@@ -119,6 +119,7 @@ async fn task(
         soft_deadline: Set(soft.map(Into::into)),
         hard_deadline: Set(hard.map(Into::into)),
         planned_start_on: Set(planned),
+        require_all_assignees_done: Set(false),
         estimated_minutes: Set(None),
         is_archived: Set(false),
         created_by: Set(creator),
@@ -152,6 +153,7 @@ async fn assign(app: &TestApp, task: Uuid, user: Uuid, role: &str) {
         user_id: Set(user),
         role: Set(role.into()),
         assigned_at: Set(Utc::now().into()),
+        completed_at: Set(None),
     }
     .insert(&app.state.db)
     .await

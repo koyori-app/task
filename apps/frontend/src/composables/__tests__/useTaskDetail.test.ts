@@ -941,6 +941,23 @@ describe('useTaskDetail のキャッシュ同期', () => {
     });
   });
 
+  // 担当者全員の完了が必要なタスクを、未完了の担当者が残るまま完了へ移すと backend が 409 で止める
+  it.each([
+    [409, '担当者全員が完了にするまで完了へ移せません'],
+    [500, 'ステータスの更新に失敗しました'],
+  ])('ステータス変更が %i で拒まれたら巻き戻し、専用の文言を出す', async (status, message) => {
+    mountHost();
+    await flushPromises();
+
+    detail.onStatusChange('status-done');
+    await flushPromises();
+    putControl.fail!(status);
+    await flushPromises();
+
+    expect(detail.statusError.value).toBe(message);
+    expect(detail.selectedStatusId.value).toBe(baseTask.status_id);
+  });
+
   it('削除成功時に検索キャッシュとカレンダーの予定が invalidate され、詳細キャッシュは除去される', async () => {
     mountHost();
     await flushPromises();

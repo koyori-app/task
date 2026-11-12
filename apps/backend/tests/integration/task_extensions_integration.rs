@@ -6,7 +6,7 @@
 
 use crate::common::TestApp;
 use axum::http::StatusCode;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -567,4 +567,75 @@ async fn task_detail_embeds_attachments_and_list_does_not() {
         app.get_with_session(&attachments_path).await.status(),
         StatusCode::FORBIDDEN
     );
+}
+
+/// 担当者全員の完了が必要なタスクは、未完了の担当者が残るかぎり一括更新でも完了へ移せない。
+/// 同じ要求の通常タスクは更新される。
+#[tokio::test]
+async fn bulk_update_rejects_done_while_assignees_are_pending() {
+    let mut app = TestApp::new().await;
+    let fx = setup_task(&mut app).await;
+    let member = app.insert_user(false, false).await;
+    crate::common::ensure_tenant_member_for_project(&app.state.db, fx.project_id, member.id).await;
+
+    let tasks_path = format!(
+        "/v1/tenants/{}/projects/{}/tasks",
+        fx.tenant_id, fx.project_id
+    );
+    let backlog_id = entity::tasks::Entity::find_by_id(Uuid::parse_str(&fx.task_id).expect("uuid"))
+        .one(&app.state.db)
+        .await
+        .expect("query")
+        .expect("row")
+        .status_id
+        .to_string();
+    let blocked = app
+        .post_json_with_session(
+            &tasks_path,
+            serde_json::json!({
+                "title": "needs everyone",
+                "status_id": backlog_id,
+                "require_all_assignees_done": true,
+                "assignees": [{ "user_id": member.id, "role": "assignee" }],
+            }),
+        )
+        .await;
+    assert_eq!(blocked.status(), StatusCode::CREATED);
+    let blocked_id = Uuid::parse_str(
+        blocked.json::<Value>().await.expect("task json")["id"]
+            .as_str()
+            .expect("id"),
+    )
+    .expect("uuid");
+    let plain_id = Uuid::parse_str(&fx.task_id).expect("task uuid");
+
+    let bulk = app
+        .post_json_with_session(
+            &format!("{tasks_path}/bulk"),
+            serde_json::json!({
+                "task_ids": [blocked_id, plain_id],
+                "update": { "status_id": fx.status_done_id }
+            }),
+        )
+        .await;
+    assert_eq!(bulk.status(), StatusCode::OK);
+    let body: Value = bulk.json().await.expect("bulk json");
+    assert_eq!(body["updated"], 1);
+    let failed = body["failed"].as_array().expect("failed");
+    assert_eq!(failed.len(), 1);
+    assert_eq!(failed[0]["task_id"], blocked_id.to_string());
+    assert_eq!(failed[0]["reason"], "assignees-not-done");
+
+    let blocked_row = entity::tasks::Entity::find_by_id(blocked_id)
+        .one(&app.state.db)
+        .await
+        .expect("query")
+        .expect("row");
+    assert_eq!(blocked_row.status_id.to_string(), backlog_id);
+    let plain_row = entity::tasks::Entity::find_by_id(plain_id)
+        .one(&app.state.db)
+        .await
+        .expect("query")
+        .expect("row");
+    assert_eq!(plain_row.status_id.to_string(), fx.status_done_id);
 }

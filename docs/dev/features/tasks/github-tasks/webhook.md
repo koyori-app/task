@@ -160,6 +160,7 @@ PR 行をロックし、`merge_effects_processed_at IS NULL` の場合だけ、�
 
 - 完了先はタスクのプロジェクトの `is_default_done` のステータス、無ければ `is_done_state` の先頭である
 - 完了系ステータスが 1 つも無いプロジェクトのタスクは完了させずログに残す
+- [担当者全員の完了が必要](/dev/features/tasks/core#担当者)なタスクで、未完了の担当者が残るものは完了にせず、開いたままログに残す。PR は処理済みになり再処理されないので、そのタスクは手で完了にする
 - 遷移したタスクには `forge_pull_request_merged` と `status_changed` を積む。どちらも `user_id` は NULL である
 - 通常のステータス変更と同じく `status_changed` の通知を出す
 - 必須カスタムフィールドの検査は GitHub Issue の同期と同じく行わない
