@@ -453,3 +453,113 @@ async fn last_completion_fails_when_required_custom_field_is_missing() {
     assert_eq!(completed_count(&app, task).await, 1);
     assert_eq!(task_row(&app, task).await.status_id, fx.todo);
 }
+
+/// タスク行を `FOR NO KEY UPDATE` でロックして保持するトランザクション。
+/// 担当者の追加・削除が先にタスク行を `FOR UPDATE` で取るなら、これが解けるまで待つ。
+/// （外部キーの検査が取る `FOR KEY SHARE` とは衝突しないので、タスク行を先に取らない旧実装は待たずに終わる）
+async fn hold_task_row(app: &TestApp, task: Uuid) -> sea_orm::DatabaseTransaction {
+    use sea_orm::{ConnectionTrait, TransactionTrait};
+    let txn = app.state.db.begin().await.expect("begin");
+    txn.execute_unprepared(&format!(
+        "SELECT id FROM tasks WHERE id = '{task}' FOR NO KEY UPDATE"
+    ))
+    .await
+    .expect("lock task row");
+    txn
+}
+
+/// 担当者の追加・削除・ロール変更は、完了処理と同じ順（タスク行 → 担当者行）でロックする。
+/// タスク行が他で掴まれている間は進まず、解けると完了する。
+#[tokio::test]
+async fn assignee_changes_wait_for_the_task_row_lock() {
+    use std::time::Duration;
+    let mut app = TestApp::new().await;
+    let fx = setup(&mut app).await;
+    let task = create_ok(&app, &fx, &[&fx.owner, &fx.b], true, fx.todo).await;
+
+    // 削除
+    let txn = hold_task_row(&app, task).await;
+    let remove_path = format!("{}/assignees/{}", fx.task_path(task), fx.b.id);
+    let remove = app.delete_with_session(&remove_path);
+    tokio::pin!(remove);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), &mut remove)
+            .await
+            .is_err(),
+        "タスク行のロックが解けるまで削除は進まない"
+    );
+    txn.commit().await.expect("commit");
+    assert_eq!(remove.await.status(), StatusCode::NO_CONTENT);
+    assert_eq!(assignee_rows(&app, task).await.len(), 1);
+
+    // 追加
+    let txn = hold_task_row(&app, task).await;
+    let add_path = format!("{}/assignees", fx.task_path(task));
+    let add =
+        app.post_json_with_session(&add_path, json!({ "user_id": fx.c.id, "role": "assignee" }));
+    tokio::pin!(add);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), &mut add)
+            .await
+            .is_err(),
+        "タスク行のロックが解けるまで追加は進まない"
+    );
+    txn.commit().await.expect("commit");
+    assert_eq!(add.await.status(), StatusCode::CREATED);
+    assert_eq!(assignee_rows(&app, task).await.len(), 2);
+}
+
+/// 「自分の分の完了」と、同じ担当者の削除・別の担当者の追加が同時に来ても、
+/// デッドロックや 500 にならず、どちらの順でも矛盾しない状態に収まる。
+#[tokio::test]
+async fn completing_while_assignees_change_never_errors() {
+    let mut app = TestApp::new().await;
+    let fx = setup(&mut app).await;
+
+    for _ in 0..8 {
+        // (a)(b) 完了と、同じ担当者の削除
+        let task = create_ok(&app, &fx, &[&fx.owner, &fx.b], true, fx.todo).await;
+        let remove_path = format!("{}/assignees/{}", fx.task_path(task), fx.owner.id);
+        let (done, removed) = tokio::join!(
+            complete(&app, &fx, task, fx.owner.id),
+            app.delete_with_session(&remove_path),
+        );
+        assert_eq!(removed.status(), StatusCode::NO_CONTENT);
+        // 先に消えていれば 404（500 ではない）、先に完了していれば 200
+        assert!(
+            matches!(done.status(), StatusCode::OK | StatusCode::NOT_FOUND),
+            "完了は 200 か 404: {}",
+            done.status()
+        );
+
+        // (c) 最後の 1 人の完了と、担当者の追加
+        let task = create_ok(&app, &fx, &[&fx.owner], true, fx.todo).await;
+        let add_path = format!("{}/assignees", fx.task_path(task));
+        let (done, added) = tokio::join!(
+            complete(&app, &fx, task, fx.owner.id),
+            app.post_json_with_session(
+                &add_path,
+                json!({ "user_id": fx.c.id, "role": "assignee" }),
+            ),
+        );
+        assert_eq!(done.status(), StatusCode::OK);
+        assert_eq!(added.status(), StatusCode::CREATED);
+        let row = task_row(&app, task).await;
+        let rows = assignee_rows(&app, task).await;
+        assert_eq!(rows.len(), 2);
+        if row.status_id == fx.done {
+            // 追加より先に完了した（完了済みのタスクは担当者の増減で動かさない）
+            assert!(
+                rows.iter()
+                    .any(|a| a.user_id == fx.owner.id && a.completed_at.is_some())
+            );
+        } else {
+            // 追加が先なら、追加された人が未完了のまま完了へ移らない
+            assert_eq!(row.status_id, fx.todo);
+            assert!(
+                rows.iter()
+                    .any(|a| a.user_id == fx.c.id && a.completed_at.is_none())
+            );
+        }
+    }
+}

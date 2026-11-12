@@ -112,9 +112,7 @@ pub async fn apply_merge_effects(
         }
         // 担当者全員の完了が必要なタスクは、未完了の担当者が残るかぎり完了にしない。
         // PR は処理済みになり再処理されないので、タスクは手で完了にする
-        if task.require_all_assignees_done
-            && crate::task_completion::pending_assignee_count(&txn, task_id).await? > 0
-        {
+        if crate::task_completion::has_pending_assignees(&txn, &task).await? {
             tracing::info!(
                 %task_id,
                 %pull_request_id,

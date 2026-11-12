@@ -31,13 +31,22 @@ pub async fn pending_assignee_count<C: ConnectionTrait>(
         .await
 }
 
+/// 未完了の担当者が残っていて、完了へ入れないタスクか。
+/// 設定が off、または担当者 0 人なら false。完了へ入る経路の判定はすべてこれを使う。
+pub async fn has_pending_assignees<C: ConnectionTrait>(
+    db: &C,
+    task: &tasks::Model,
+) -> Result<bool, DbErr> {
+    Ok(task.require_all_assignees_done && pending_assignee_count(db, task.id).await? > 0)
+}
+
 /// 未完了のタスクを完了ステータスへ直接移してよいか。
 /// 設定が on で未完了の担当者が 1 人でもいれば 409 `assignees-not-done`。担当者 0 人は通す。
 pub async fn ensure_can_enter_done<C: ConnectionTrait>(
     db: &C,
     task: &tasks::Model,
 ) -> Result<(), AppError> {
-    if task.require_all_assignees_done && pending_assignee_count(db, task.id).await? > 0 {
+    if has_pending_assignees(db, task).await? {
         return Err(AppError::ConflictDetail(ASSIGNEES_NOT_DONE.into()));
     }
     Ok(())
@@ -81,26 +90,39 @@ pub struct CompletionOutcome {
     pub pending_push: bool,
 }
 
-/// タスクと本人の担当者行をロック付きで取る。同時に 2 人が完了にしても、このロックで直列になる。
+/// タスク行を `FOR UPDATE` で取る。担当者・完了に触る経路は、必ず最初にこれを呼ぶ
+/// （ロック順は「タスク行 → 担当者行」で統一する。逆順があるとデッドロックする）。
+pub async fn lock_task<C: ConnectionTrait>(
+    txn: &C,
+    project_id: Uuid,
+    task_id: Uuid,
+) -> Result<tasks::Model, AppError> {
+    tasks::Entity::find_by_id(task_id)
+        .filter(tasks::Column::ProjectId.eq(project_id))
+        .filter(tasks::Column::DeletedAt.is_null())
+        .lock(LockType::Update)
+        .one(txn)
+        .await?
+        .ok_or(AppError::NotFound)
+}
+
+/// タスクと本人の担当者行をロック付き（タスク行 → 担当者行の順）で取る。
+/// 同時に 2 人が完了にしても、担当者の追加・削除と重なっても、このロックで直列になる。
+/// 担当者が既に外されていれば 404。
 async fn lock_task_and_assignee<C: ConnectionTrait>(
     txn: &C,
     project_id: Uuid,
     task_id: Uuid,
     user_id: Uuid,
 ) -> Result<(tasks::Model, task_assignees::Model), AppError> {
-    let task = tasks::Entity::find_by_id(task_id)
-        .filter(tasks::Column::ProjectId.eq(project_id))
-        .filter(tasks::Column::DeletedAt.is_null())
-        .lock(LockType::Update)
-        .one(txn)
-        .await?
-        .ok_or(AppError::NotFound)?;
+    let task = lock_task(txn, project_id, task_id).await?;
     if !task.require_all_assignees_done {
         return Err(AppError::ConflictDetail(COMPLETION_NOT_REQUIRED.into()));
     }
     let assignee = task_assignees::Entity::find()
         .filter(task_assignees::Column::TaskId.eq(task_id))
         .filter(task_assignees::Column::UserId.eq(user_id))
+        .lock(LockType::Update)
         .one(txn)
         .await?
         .ok_or(AppError::NotFound)?;

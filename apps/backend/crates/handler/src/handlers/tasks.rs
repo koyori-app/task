@@ -875,7 +875,7 @@ pub async fn bulk_create_tasks(
             .filter(entity::sprints::Column::ProjectId.eq(project_id))
             .filter(entity::sprints::Column::Id.is_in(sprint_ids))
             .order_by_asc(entity::sprints::Column::Id)
-            .lock(sea_orm::sea_query::LockType::Update)
+            .lock(LockType::Update)
             .all(&txn)
             .await?;
     }
@@ -1481,16 +1481,18 @@ pub async fn add_assignee(
         .await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     require_project_access(&state.db, tenant_id, project_id, payload.user_id).await?;
+    let role = payload.role.clone();
+    let txn = state.db.begin().await?;
+    // 「自分の分の完了」と重なっても判定がずれないよう、先にタスク行をロックする
+    service::task_completion::lock_task(&txn, project_id, task.id).await?;
     let duplicate = task_assignees::Entity::find()
         .filter(task_assignees::Column::TaskId.eq(task.id))
         .filter(task_assignees::Column::UserId.eq(payload.user_id))
-        .one(&state.db)
+        .one(&txn)
         .await?;
     if duplicate.is_some() {
         return Err(AppError::Conflict);
     }
-    let role = payload.role.clone();
-    let txn = state.db.begin().await?;
     let assignee = task_assignees::ActiveModel {
         id: Set(Uuid::new_v4()),
         task_id: Set(task.id),
@@ -1553,15 +1555,19 @@ pub async fn update_assignee(
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
+    let txn = state.db.begin().await?;
+    service::task_completion::lock_task(&txn, project_id, task.id).await?;
     let assignee = task_assignees::Entity::find()
         .filter(task_assignees::Column::TaskId.eq(task.id))
         .filter(task_assignees::Column::UserId.eq(user_id))
-        .one(&state.db)
+        .one(&txn)
         .await?
         .ok_or(AppError::NotFound)?;
     let mut active: task_assignees::ActiveModel = assignee.into();
     active.role = Set(payload.role);
-    Ok(Json(active.update(&state.db).await?.into()))
+    let updated = active.update(&txn).await?;
+    txn.commit().await?;
+    Ok(Json(updated.into()))
 }
 
 #[axum::debug_handler]
@@ -1590,13 +1596,16 @@ pub async fn remove_assignee(
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
+    let txn = state.db.begin().await?;
+    // 完了処理と同じ順（タスク行 → 担当者行）でロックする
+    service::task_completion::lock_task(&txn, project_id, task.id).await?;
     let assignee = task_assignees::Entity::find()
         .filter(task_assignees::Column::TaskId.eq(task.id))
         .filter(task_assignees::Column::UserId.eq(user_id))
-        .one(&state.db)
+        .lock(LockType::Update)
+        .one(&txn)
         .await?
         .ok_or(AppError::NotFound)?;
-    let txn = state.db.begin().await?;
     task_assignees::Entity::delete_by_id(assignee.id)
         .exec(&txn)
         .await?;

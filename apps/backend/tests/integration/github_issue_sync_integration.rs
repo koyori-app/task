@@ -3,7 +3,10 @@ use axum::http::StatusCode;
 use backend::utils::github::sync::{
     apply_issue_event, import_project, mark_pending_push, push_task,
 };
-use entity::{github_integrations, github_issue_links, project_statuses, task_activities, tasks};
+use entity::{
+    github_integrations, github_issue_links, project_statuses, task_activities, task_assignees,
+    tasks,
+};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait,
     QueryFilter, QueryOrder, Statement,
@@ -533,6 +536,84 @@ async fn github_issue_sync_suite() {
         )
         .await;
 
+        app.cleanup_user(owner.id).await;
+    }
+
+    // 4b. 担当者ごとの完了 — Issue の close では担当者の完了を残し、reopen（完了から未完了）で全員分消す
+    {
+        let owner = app.insert_user(false, false).await;
+        let tp = app.insert_tenant_project(owner.id).await;
+        let (_, done_id) = seed_statuses(&app, tp.project_id).await;
+        insert_integration(&app, tp.project_id, owner.id).await;
+        import_project(
+            &app.state.db,
+            &app.state.http_client,
+            &github,
+            tp.project_id,
+        )
+        .await
+        .expect("import");
+        let task = project_tasks(&app, tp.project_id).await.remove(0);
+        let mut active: tasks::ActiveModel = task.clone().into();
+        active.require_all_assignees_done = Set(true);
+        active.update(&app.state.db).await.expect("set rule");
+        let other = app.insert_user(false, false).await;
+        for user_id in [owner.id, other.id] {
+            task_assignees::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                task_id: Set(task.id),
+                user_id: Set(user_id),
+                role: Set("assignee".into()),
+                assigned_at: Set(chrono::Utc::now().into()),
+                completed_at: Set(Some(chrono::Utc::now().into())),
+            }
+            .insert(&app.state.db)
+            .await
+            .expect("insert assignee");
+        }
+        let completed = || async {
+            task_assignees::Entity::find()
+                .filter(task_assignees::Column::TaskId.eq(task.id))
+                .filter(task_assignees::Column::CompletedAt.is_not_null())
+                .all(&app.state.db)
+                .await
+                .expect("query assignees")
+                .len()
+        };
+
+        apply_issue_event(
+            &app.state.db,
+            tp.project_id,
+            &serde_json::json!({
+                "action": "closed",
+                "issue": issue_json(1, "ログインできない", Some("再現手順"), "closed", T_EVENT),
+            }),
+        )
+        .await
+        .expect("apply closed event");
+        assert_eq!(
+            project_tasks(&app, tp.project_id).await[0].status_id,
+            done_id
+        );
+        assert_eq!(completed().await, 2, "close では担当者の完了を消さない");
+
+        apply_issue_event(
+            &app.state.db,
+            tp.project_id,
+            &serde_json::json!({
+                "action": "reopened",
+                "issue": issue_json(1, "ログインできない", Some("再現手順"), "open", T_ECHO),
+            }),
+        )
+        .await
+        .expect("apply reopened event");
+        assert_ne!(
+            project_tasks(&app, tp.project_id).await[0].status_id,
+            done_id
+        );
+        assert_eq!(completed().await, 0, "reopen で担当者の完了を全員分消す");
+
+        app.cleanup_user(other.id).await;
         app.cleanup_user(owner.id).await;
     }
 

@@ -585,14 +585,9 @@ async fn apply_bulk_update(
     user_id: Uuid,
     update: &BulkUpdateFields,
 ) -> Result<(), AppError> {
-    let task = tasks::Entity::find_by_id(task_id)
-        .filter(tasks::Column::ProjectId.eq(project_id))
-        .filter(tasks::Column::DeletedAt.is_null())
-        .one(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
     let txn = state.db.begin().await?;
+    // 担当者ごとの完了の判定がずれないよう、タスク行をロックしてから読む
+    let task = service::task_completion::lock_task(&txn, project_id, task_id).await?;
     let snapshot = task.clone();
     let mut active: tasks::ActiveModel = task.into();
     // ステータスが変わるときの (変更前が完了, 変更後が完了)。担当者ごとの完了の判定に使う

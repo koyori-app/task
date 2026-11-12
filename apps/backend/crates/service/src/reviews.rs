@@ -576,6 +576,8 @@ async fn find_live_deferred_task<C: ConnectionTrait>(
     tasks::Entity::find_by_id(task_id)
         .filter(tasks::Column::ProjectId.eq(project_id))
         .filter(tasks::Column::DeletedAt.is_null())
+        // 完了・再開は担当者ごとの完了と合わせて判定するので、タスク行を先にロックする
+        .lock(LockType::Update)
         .one(db)
         .await
 }
@@ -596,11 +598,20 @@ async fn reopen_deferred_task<C: ConnectionTrait>(
         .await?
         .ok_or(ReviewError::NoDefaultStatus(project_id))?;
 
+    // 完了から戻すときは、担当者ごとの完了も全員やり直しにする
+    let was_done = project_statuses::Entity::find_by_id(task.status_id)
+        .one(db)
+        .await?
+        .is_some_and(|status| status.is_done_state);
+    let task_id = task.id;
     let mut active: tasks::ActiveModel = task.into();
     active.status_id = Set(default_status.id);
     active.completed_at = Set(None);
     active.updated_at = Set(chrono::Utc::now().into());
     active.update(db).await?;
+    if was_done {
+        crate::task_completion::reset_assignee_completions(db, task_id).await?;
+    }
     Ok(())
 }
 
@@ -678,6 +689,7 @@ pub async fn close_deferred_task<C: ConnectionTrait>(
     let Some(task) = tasks::Entity::find_by_id(task_id)
         .filter(tasks::Column::ProjectId.eq(project_id))
         .filter(tasks::Column::DeletedAt.is_null())
+        .lock(LockType::Update)
         .one(db)
         .await?
     else {
@@ -692,6 +704,16 @@ pub async fn close_deferred_task<C: ConnectionTrait>(
         .order_by_asc(project_statuses::Column::Position)
         .one(db)
         .await?;
+
+    // 担当者全員の完了が必要なタスクは、未完了の担当者が残るかぎり完了にしない
+    // （PR マージの自動完了と同じ判定）。タスクは開いたまま残り、手で完了にする
+    if done.is_some() && crate::task_completion::has_pending_assignees(db, &task).await? {
+        tracing::info!(
+            task_id = %task.id,
+            "deferred task still has assignees who have not completed their part; leaving it open"
+        );
+        return Ok(());
+    }
 
     let now = chrono::Utc::now();
     let mut active: tasks::ActiveModel = task.into();
