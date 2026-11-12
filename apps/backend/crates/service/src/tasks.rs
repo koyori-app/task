@@ -1,9 +1,12 @@
 //! タスクの共通ロジック。
 
+use chrono::NaiveDate;
 use sea_orm::sea_query::LockType;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ConnectionTrait, DbBackend, DbErr, EntityTrait,
-    FromQueryResult, QuerySelect, Statement, prelude::Uuid,
+    ActiveModelTrait,
+    ActiveValue::Set,
+    ConnectionTrait, DbBackend, DbErr, EntityTrait, FromQueryResult, QuerySelect, Statement,
+    prelude::{DateTimeWithTimeZone, Uuid},
 };
 
 use common::error::AppError;
@@ -63,6 +66,32 @@ pub struct CreateTaskContext {
     pub actor_id: Uuid,
 }
 
+/// 作成時の締切（Soft / Hard）と開始予定日。リクエストに無い項目は親の値を初期値にする。
+/// 片方の締切だけを指定し、親から引き継ぐもう片方と Soft < Hard にならないときは、
+/// 引き継ぐ側を入れない（指定された値を優先し、引き継ぎで 400 を増やさない）。
+fn schedule_with_parent_defaults(
+    soft: Option<DateTimeWithTimeZone>,
+    hard: Option<DateTimeWithTimeZone>,
+    planned_start_on: Option<NaiveDate>,
+    parent: Option<&tasks::Model>,
+) -> (
+    Option<DateTimeWithTimeZone>,
+    Option<DateTimeWithTimeZone>,
+    Option<NaiveDate>,
+) {
+    let Some(parent) = parent else {
+        return (soft, hard, planned_start_on);
+    };
+    let planned_start_on = planned_start_on.or(parent.planned_start_on);
+    let (soft, hard) = match (soft, hard) {
+        (Some(s), Some(h)) => (Some(s), Some(h)),
+        (None, None) => (parent.soft_deadline, parent.hard_deadline),
+        (Some(s), None) => (Some(s), parent.hard_deadline.filter(|ph| s < *ph)),
+        (None, Some(h)) => (parent.soft_deadline.filter(|ps| *ps < h), Some(h)),
+    };
+    (soft, hard, planned_start_on)
+}
+
 /// 単体作成の本体。検証・採番・担当者・ラベル・カスタムフィールド・
 /// メンション通知・アクティビティ・Webhook まで行う。
 /// 呼び出し側がトランザクションを開き、commit する（採番の行ロックのため）。
@@ -84,14 +113,17 @@ pub async fn create_task_in_txn<C: ConnectionTrait>(
         .ok_or(AppError::NotFound)?;
 
     // parent_task_id / milestone_id が同一プロジェクトに属することを検証
-    if let Some(pid) = payload.parent_task_id {
-        tasks::Entity::find_by_id(pid)
-            .filter(tasks::Column::ProjectId.eq(ctx.project_id))
-            .filter(tasks::Column::DeletedAt.is_null())
-            .one(txn)
-            .await?
-            .ok_or(AppError::NotFound)?;
-    }
+    let parent = match payload.parent_task_id {
+        Some(pid) => Some(
+            tasks::Entity::find_by_id(pid)
+                .filter(tasks::Column::ProjectId.eq(ctx.project_id))
+                .filter(tasks::Column::DeletedAt.is_null())
+                .one(txn)
+                .await?
+                .ok_or(AppError::NotFound)?,
+        ),
+        None => None,
+    };
     if let Some(mid) = payload.milestone_id {
         milestones::Entity::find_by_id(mid)
             .filter(milestones::Column::ProjectId.eq(ctx.project_id))
@@ -114,6 +146,13 @@ pub async fn create_task_in_txn<C: ConnectionTrait>(
         }
     }
 
+    let (soft_deadline, hard_deadline, planned_start_on) = schedule_with_parent_defaults(
+        payload.soft_deadline.map(Into::into),
+        payload.hard_deadline.map(Into::into),
+        payload.planned_start_on,
+        parent.as_ref(),
+    );
+
     let model = tasks::ActiveModel {
         id: Set(Uuid::new_v4()),
         project_id: Set(ctx.project_id),
@@ -126,9 +165,9 @@ pub async fn create_task_in_txn<C: ConnectionTrait>(
         parent_task_id: Set(payload.parent_task_id),
         milestone_id: Set(payload.milestone_id),
         sprint_id: Set(payload.sprint_id),
-        soft_deadline: Set(payload.soft_deadline.map(Into::into)),
-        hard_deadline: Set(payload.hard_deadline.map(Into::into)),
-        planned_start_on: Set(payload.planned_start_on),
+        soft_deadline: Set(soft_deadline),
+        hard_deadline: Set(hard_deadline),
+        planned_start_on: Set(planned_start_on),
         estimated_minutes: Set(payload.estimated_minutes),
         is_archived: Set(false),
         created_by: Set(ctx.actor_id),
@@ -279,4 +318,148 @@ pub async fn find_similar(
     ))
     .all(db)
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dt(s: &str) -> DateTimeWithTimeZone {
+        s.parse().unwrap()
+    }
+
+    fn d(s: &str) -> NaiveDate {
+        s.parse().unwrap()
+    }
+
+    fn parent(soft: Option<&str>, hard: Option<&str>, start: Option<&str>) -> tasks::Model {
+        tasks::Model {
+            id: Uuid::nil(),
+            project_id: Uuid::nil(),
+            seq_id: 1,
+            title: "parent".into(),
+            description: None,
+            status_id: Uuid::nil(),
+            priority: tasks::TaskPriority::Medium,
+            progress_pct: 0,
+            parent_task_id: None,
+            milestone_id: None,
+            sprint_id: None,
+            soft_deadline: soft.map(dt),
+            hard_deadline: hard.map(dt),
+            planned_start_on: start.map(d),
+            estimated_minutes: None,
+            is_archived: false,
+            created_by: Uuid::nil(),
+            created_at: dt("2026-11-01T00:00:00Z"),
+            updated_at: dt("2026-11-01T00:00:00Z"),
+            completed_at: None,
+            deleted_at: None,
+            search_vector: None,
+        }
+    }
+
+    fn p() -> tasks::Model {
+        parent(
+            Some("2026-12-10T00:00:00Z"),
+            Some("2026-12-20T00:00:00Z"),
+            Some("2026-12-01"),
+        )
+    }
+
+    #[test]
+    fn no_parent_returns_arguments_unchanged() {
+        let got = schedule_with_parent_defaults(
+            Some(dt("2026-12-01T00:00:00Z")),
+            None,
+            Some(d("2026-12-02")),
+            None,
+        );
+        assert_eq!(
+            got,
+            (
+                Some(dt("2026-12-01T00:00:00Z")),
+                None,
+                Some(d("2026-12-02"))
+            )
+        );
+        assert_eq!(
+            schedule_with_parent_defaults(None, None, None, None),
+            (None, None, None)
+        );
+    }
+
+    #[test]
+    fn both_unset_copies_parent() {
+        let got = schedule_with_parent_defaults(None, None, None, Some(&p()));
+        assert_eq!(
+            got,
+            (
+                Some(dt("2026-12-10T00:00:00Z")),
+                Some(dt("2026-12-20T00:00:00Z")),
+                Some(d("2026-12-01"))
+            )
+        );
+    }
+
+    #[test]
+    fn both_given_wins_over_parent() {
+        let got = schedule_with_parent_defaults(
+            Some(dt("2026-12-12T00:00:00Z")),
+            Some(dt("2026-12-18T00:00:00Z")),
+            Some(d("2026-12-03")),
+            Some(&p()),
+        );
+        assert_eq!(
+            got,
+            (
+                Some(dt("2026-12-12T00:00:00Z")),
+                Some(dt("2026-12-18T00:00:00Z")),
+                Some(d("2026-12-03"))
+            )
+        );
+    }
+
+    #[test]
+    fn soft_only_takes_parent_hard_when_consistent() {
+        let (s, h, _) =
+            schedule_with_parent_defaults(Some(dt("2026-12-15T00:00:00Z")), None, None, Some(&p()));
+        assert_eq!(s, Some(dt("2026-12-15T00:00:00Z")));
+        assert_eq!(h, Some(dt("2026-12-20T00:00:00Z")));
+    }
+
+    #[test]
+    fn soft_only_skips_parent_hard_when_not_after_soft() {
+        // 親の Hard と同時刻でも Soft < Hard にならないので入れない
+        for soft in ["2026-12-20T00:00:00Z", "2026-12-25T00:00:00Z"] {
+            let (s, h, start) =
+                schedule_with_parent_defaults(Some(dt(soft)), None, None, Some(&p()));
+            assert_eq!(s, Some(dt(soft)));
+            assert_eq!(h, None);
+            assert_eq!(start, Some(d("2026-12-01")));
+        }
+    }
+
+    #[test]
+    fn hard_only_takes_parent_soft_when_consistent() {
+        let (s, h, _) =
+            schedule_with_parent_defaults(None, Some(dt("2026-12-15T00:00:00Z")), None, Some(&p()));
+        assert_eq!(s, Some(dt("2026-12-10T00:00:00Z")));
+        assert_eq!(h, Some(dt("2026-12-15T00:00:00Z")));
+    }
+
+    #[test]
+    fn hard_only_skips_parent_soft_when_not_before_hard() {
+        for hard in ["2026-12-10T00:00:00Z", "2026-12-05T00:00:00Z"] {
+            let (s, h, _) = schedule_with_parent_defaults(None, Some(dt(hard)), None, Some(&p()));
+            assert_eq!(s, None);
+            assert_eq!(h, Some(dt(hard)));
+        }
+    }
+
+    #[test]
+    fn parent_without_schedule_leaves_child_empty() {
+        let got = schedule_with_parent_defaults(None, None, None, Some(&parent(None, None, None)));
+        assert_eq!(got, (None, None, None));
+    }
 }
