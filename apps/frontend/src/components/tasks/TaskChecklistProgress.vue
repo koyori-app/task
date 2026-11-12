@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
-// 説明文のタスクリストの達成率（完了数 / 総数）。表示だけで、押しても何も起きない
+// 説明文のタスクリストの達成率（完了数 / 総数）。表示だけで、押しても何も起きない。
+// 根を role="img" にして読み上げ文を aria-label に一本化する（中の文字と輪は読み上げない）
 const props = defineProps<{ done: number; total: number }>();
 
 const RADIUS = 6;
@@ -15,6 +16,8 @@ const label = computed(() => `チェックリスト ${props.total} 件中 ${prop
   <span
     class="inline-flex shrink-0 items-center gap-1 text-xs whitespace-nowrap text-muted-foreground tabular-nums"
     data-checklist-progress
+    role="img"
+    :aria-label="label"
     :title="label"
   >
     <svg class="size-3.5" viewBox="0 0 16 16" aria-hidden="true">
@@ -42,7 +45,6 @@ const label = computed(() => `チェックリスト ${props.total} 件中 ${prop
         transform="rotate(-90 8 8)"
       />
     </svg>
-    <span aria-hidden="true">{{ done }} / {{ total }}</span>
-    <span class="sr-only">{{ label }}</span>
+    <span>{{ done }} / {{ total }}</span>
   </span>
 </template>
