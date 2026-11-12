@@ -140,7 +140,7 @@ function punycodeBuiltinPlugin() {
   };
 }
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   // Standalone build UI (vite build). Embedded client uses +onCreateApp inject.
   plugins: [
     ...getBundleVisualizerPlugins(),
@@ -182,8 +182,12 @@ export default defineConfig({
   },
   ssr: {
     // SSR の依存を dist/server に同梱し、配布イメージに node_modules を積まずに済ませる
-    // （apps/frontend/Dockerfile）。@zxcvbn-ts は以前から同梱していた
-    noExternal: true,
+    // （apps/frontend/Dockerfile）。dev の module runner は CommonJS の依存をそのまま実行できず
+    // SSR が落ちるので、全部の同梱は build だけにし、dev は以前から同梱していた @zxcvbn-ts に留める
+    noExternal:
+      command === 'build'
+        ? true
+        : ['@zxcvbn-ts/core', '@zxcvbn-ts/language-common', '@zxcvbn-ts/language-ja'],
     // jsdom は __dirname 相対で default-stylesheet.css 等を読むので同梱できない。
     // isomorphic-dompurify ごと外部に残し、Dockerfile がその閉包だけを node_modules に置く。
     // starry-night は実行時に vscode-oniguruma の onig.wasm を node_modules から読むので、同じく外部に残す
@@ -287,4 +291,4 @@ export default defineConfig({
     ],
     options: { typeAware: true, typeCheck: true },
   },
-});
+}));
