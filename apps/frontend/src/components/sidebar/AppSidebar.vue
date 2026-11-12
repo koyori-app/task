@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Sidebar } from '@koyori-app/ui-vue';
-import { usePreference } from '@/composables/useLocalSettings';
+import { useExperimentFlag } from '@/composables/useLocalSettings';
 import { useRouteAlignedTenantId } from '@/composables/useRouteAlignedTenantId';
 import { useTenantStore } from '@/stores/tenant';
 import { useProjectsQuery } from '@/lib/api-vue-query';
@@ -37,9 +37,9 @@ const tenantSlug = computed(
   () => routeTenantSlug.value || (tenantStore.selectedTenant?.display_id ?? ''),
 );
 
-// ガントは arc が alpha なので、環境設定の「実験的機能を表示する」を入れた人にだけ出す。
-// 残った値は SSR で読めぬので、mount の後に出る（usePreference が mount の前は既定値＝無効を返す）
-const showExperiments = usePreference('showExperiments');
+// ガントは arc が alpha なので、実験的機能の「ガントチャート」を有効にした人にだけ出す。
+// 残った値は SSR で読めないので、mount の後に出る（useExperimentFlag が mount の前は既定値＝無効を返す）
+const showGantt = useExperimentFlag('gantt');
 
 const myTasksUrl = computed(() => (tenantSlug.value ? `/${tenantSlug.value}/my-tasks` : '#'));
 
@@ -93,7 +93,7 @@ const data = computed(() => ({
       icon: Calendar,
       isActive: pageContext.urlPathname === `/${pageContext.routeParams.tenant}/calendar`,
     },
-    ...(showExperiments.value
+    ...(showGantt.value
       ? [
           {
             title: 'ガント',
@@ -133,7 +133,7 @@ function closeOnNavigate(event: MouseEvent) {
       :current-path="pageContext.urlPathname"
       :loading="navProjectsLoading"
       :error="projectsQuery.isError.value"
-      :show-gantt="showExperiments"
+      :show-gantt="showGantt"
       @retry="retryProjects"
       @create="onCreateProject"
     />

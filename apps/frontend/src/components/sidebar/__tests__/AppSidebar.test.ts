@@ -200,11 +200,12 @@ describe('AppSidebar のプロジェクト作成導線', () => {
 });
 
 /**
- * ガントは arc が alpha なので、環境設定の「実験的機能を表示する」を入れた人にだけ出す。
+ * ガントは arc が alpha なので、実験的機能の「ガントチャート」を有効にした人にだけ出す。
+ * 環境設定の「実験的機能を表示する」はナビに実験的機能の頁を出すだけで、ガントは出さない。
  * 全員に出すと、横の導きが写る頁の数だけ VRT の基準が動く。
  */
 describe('AppSidebar のガントの導き', () => {
-  it('既定（実験的機能を表示しない）では出さない', async () => {
+  it('既定（フラグが無効）では出さない', async () => {
     mountSidebar(vi.fn());
     await flushPromises();
 
@@ -213,8 +214,26 @@ describe('AppSidebar のガントの導き', () => {
     expect(nav.textContent).not.toContain('ガント');
   });
 
-  it('実験的機能を表示するなら、カレンダーのすぐ下に出す', async () => {
+  it('実験的機能を表示するだけでは出さない', async () => {
     seedSettings({ preferences: { showExperiments: true } });
+    mountSidebar(vi.fn());
+    await flushPromises();
+
+    const nav = document.body.querySelector('nav[aria-label="ナビゲーション"]')!;
+    expect(nav.querySelector('a[href="/acme/gantt"]')).toBeNull();
+    expect(nav.textContent).not.toContain('ガント');
+  });
+
+  it('表示を無効に戻しても、有効にしたフラグがあれば出す', async () => {
+    seedSettings({ preferences: { showExperiments: false }, experiments: { gantt: true } });
+    mountSidebar(vi.fn());
+    await flushPromises();
+
+    expect(findLink('/acme/gantt').textContent?.trim()).toBe('ガント');
+  });
+
+  it('ガントチャートを有効にすると、カレンダーのすぐ下に出す', async () => {
+    seedSettings({ preferences: { showExperiments: true }, experiments: { gantt: true } });
     mountSidebar(vi.fn());
     await flushPromises();
 
@@ -225,7 +244,7 @@ describe('AppSidebar のガントの導き', () => {
   });
 
   it('ガントの頁にいる間は現在地として強調する', async () => {
-    seedSettings({ preferences: { showExperiments: true } });
+    seedSettings({ experiments: { gantt: true } });
     pageContextStub.urlPathname = '/acme/gantt';
     mountSidebar(vi.fn());
     await flushPromises();
@@ -236,14 +255,14 @@ describe('AppSidebar のガントの導き', () => {
 });
 
 /**
- * プロジェクトのガントも、テナントのガントと同じ設定で出す（arc が alpha であるのは同じ）。
+ * プロジェクトのガントも、テナントのガントと同じフラグで出す（arc が alpha であるのは同じ）。
  */
 describe('AppSidebar のプロジェクトのガントの導き', () => {
   beforeEach(() => {
     projectsControl.data = [ALPHA_PROJECT];
   });
 
-  it('既定（実験的機能を表示しない）では、プロジェクトの並びにも出さない', async () => {
+  it('既定（フラグが無効）では、プロジェクトの並びにも出さない', async () => {
     pageContextStub.urlPathname = '/acme/projects/ALPHA/tasks';
     mountSidebar(vi.fn());
     await flushPromises();
@@ -251,8 +270,17 @@ describe('AppSidebar のプロジェクトのガントの導き', () => {
     expect(document.body.querySelector('a[href="/acme/projects/ALPHA/gantt"]')).toBeNull();
   });
 
-  it('実験的機能を表示するなら出し、その頁にいる間は現在地として強調する', async () => {
+  it('実験的機能を表示するだけでは、プロジェクトの並びにも出さない', async () => {
     seedSettings({ preferences: { showExperiments: true } });
+    pageContextStub.urlPathname = '/acme/projects/ALPHA/tasks';
+    mountSidebar(vi.fn());
+    await flushPromises();
+
+    expect(document.body.querySelector('a[href="/acme/projects/ALPHA/gantt"]')).toBeNull();
+  });
+
+  it('ガントチャートを有効にすると出し、その頁にいる間は現在地として強調する', async () => {
+    seedSettings({ preferences: { showExperiments: true }, experiments: { gantt: true } });
     pageContextStub.urlPathname = '/acme/projects/ALPHA/gantt';
     mountSidebar(vi.fn());
     await flushPromises();

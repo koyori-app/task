@@ -12,6 +12,11 @@ export const EXPERIMENT_TABLE = {
       'koyori-arc との連携を試せるようにします。統合は開発中で、いまはこの切り替えの口だけがあります。',
     default: false,
   },
+  gantt: {
+    name: 'ガントチャート',
+    description: 'サイドバーにガントチャートへのリンクを出します。タスクの予定を棒で見られます。',
+    default: false,
+  },
 } as const satisfies SettingTable;
 
 export type ExperimentKey = keyof typeof EXPERIMENT_TABLE;

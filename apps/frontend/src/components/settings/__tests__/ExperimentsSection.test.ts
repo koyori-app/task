@@ -40,6 +40,15 @@ describe('ExperimentsSection（実験的機能の画面）: 表示が有効', ()
     expect(row.get('[role="switch"]').attributes('aria-checked')).toBe('false');
   });
 
+  it('ガントチャートのフラグも並び、既定は無効', async () => {
+    const { wrapper } = await mountSection();
+
+    const row = wrapper.get('[data-setting="gantt"]');
+    expect(row.text()).toContain('ガントチャート');
+    expect(row.text()).toContain(EXPERIMENT_TABLE.gantt.description);
+    expect(row.get('[role="switch"]').attributes('aria-checked')).toBe('false');
+  });
+
   it('切り替えると store と localStorage に残る', async () => {
     const { wrapper, pinia } = await mountSection();
 
