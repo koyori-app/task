@@ -62,6 +62,20 @@ describe('review PR rail', () => {
     expect(initialPrStateFilter([])).toBe('open');
   });
 
+  it('URL のページが Open の一覧には無く「すべて」なら在るときは「すべて」で開く', () => {
+    // Open 1 件（1 ページ）と Merged 20 件。「すべて」は 21 件で 3 ページ
+    const mixed = [
+      pr(300, null, null),
+      ...Array.from({ length: 20 }, (_, i) => pr(200 + i, null, null, 'merged')),
+    ];
+    expect(initialPrStateFilter(mixed, 2)).toBe('all');
+    expect(initialPrStateFilter(mixed, 3)).toBe('all');
+    // Open の一覧に在るページ、どちらにも無いページ、ページ指定なしは既定のまま
+    expect(initialPrStateFilter(mixed, 1)).toBe('open');
+    expect(initialPrStateFilter(mixed, 4)).toBe('open');
+    expect(initialPrStateFilter(mixed, null)).toBe('open');
+  });
+
   it('番号・タイトルの部分一致で探し、先頭の # は無視する', () => {
     expect(filterPullRequests(list, '#23', null).map((p) => p.pr_number)).toEqual([231]);
     expect(filterPullRequests(list, '共有リンク', null).map((p) => p.pr_number)).toEqual([231]);

@@ -313,7 +313,8 @@ watch(
 const summary = computed(() => summaryQuery.data.value ?? null);
 
 /**
- * 一覧が初めて届いたら、既定の「PR の状態」を確かめる（Open が無ければ「すべて」）。
+ * 一覧が初めて届いたら、既定の「PR の状態」を確かめる（Open が無いか、URL のページが
+ * Open の一覧には無く「すべて」なら在るときは「すべて」）。
  * 初期 PR の指定が無ければ、その絞り込みで一覧の先頭に出る PR（最後にレビューされた
  * Open の PR）を開く。絞り込みに合う PR が無ければ全体の先頭を開く。
  * `mine` は連携一覧の到着を待つため、候補には作成者の絞り込みを掛けない。
@@ -324,7 +325,7 @@ watch(
     if (list.length === 0) return;
     if (!prStateDecided.value) {
       prStateDecided.value = true;
-      prStateFilter.value = initialPrStateFilter(list);
+      prStateFilter.value = initialPrStateFilter(list, prPage.value);
     }
     if (selectedPr.value === null) {
       const first = filterPullRequests(list, '', null, prStateFilter.value)[0] ?? list[0];

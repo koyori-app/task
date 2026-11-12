@@ -1052,7 +1052,8 @@ describe('ReviewFindingsView', () => {
         expectPage2Kept(again);
       });
 
-      it('Open の PR があるときは、Open だけで数えた範囲外のページを補正する', async () => {
+      it('Open の PR があっても、Open の一覧に無く「すべて」なら在るページは「すべて」で開く', async () => {
+        // 「すべて」でページを送った URL を開き直したり共有したりした場合
         stubFetch({
           findings: [finding({ pr_number: 701 })],
           prNumbers: twelveMerged,
@@ -1061,8 +1062,23 @@ describe('ReviewFindingsView', () => {
         const wrapper = mountView({ initialUrlState: page2 });
         await flushPromises();
 
+        expectPage2Kept(wrapper);
+      });
+
+      it('どちらの一覧にも無いページは、Open の一覧で数えて補正する', async () => {
+        stubFetch({
+          findings: [finding({ pr_number: 701 })],
+          prNumbers: twelveMerged,
+          prStates: { ...mergedStates, '712': 'open' },
+        });
+        const wrapper = mountView({ initialUrlState: { ...page2, page: 3 } });
+        await flushPromises();
+
         expect(wrapper.get('[data-testid="url-warning"]').text()).toContain(
-          'URL のページ 2 はありません（全 1 ページ）',
+          'URL のページ 3 はありません（全 1 ページ）',
+        );
+        expect(pickerTrigger(document.body, 'PR の状態').getAttribute('aria-label')).toBe(
+          'PR の状態: Open',
         );
         expect(new URL(window.location.href).searchParams.get('page')).toBe('1');
       });
