@@ -8,6 +8,11 @@ const FENCE_OPEN = /^(`{3,}|~{3,})(.*)$/;
 const FENCE_CLOSE = /^(`{3,}|~{3,})[ \t]*$/;
 const QUOTE_MARK = /^( {0,3})>[ \t]?/;
 const HEADING = /^#{1,6}(?:[ \t]|$)/;
+/** 構文上の字下げ・空行にあたる空白は半角空白とタブだけ（`trim` 系は全角空白や NBSP も除く） */
+const LEADING_WS = /^[ \t]+/;
+const BLANK = /^[ \t]*$/;
+/** 1 行に並べて外すリスト項目の印の数の上限。越えた行は数えない（長い入力で時間と項目が膨らむのを防ぐ） */
+const MAX_MARKERS_PER_LINE = 100;
 
 /** 引用の中・リスト項目の中で開いた、閉じるまで集計から除く塊（フェンスと HTML コメント） */
 type Block =
@@ -29,6 +34,15 @@ function indentWidth(line: string): number {
     else break;
   }
   return width;
+}
+
+/** 桁 `start` に置いた印の直後の空白（半角空白・タブ）が占める桁数。字下げを文字列で作らず桁だけを進める */
+function gapAfterMarker(space: string, start: number): number {
+  let width = start;
+  for (let i = 0; i < space.length; i += 1) {
+    width += space[i] === '\t' ? 4 - (width % 4) : 1;
+  }
+  return width - start;
 }
 
 /**
@@ -88,11 +102,11 @@ export function countChecklist(description: string | null | undefined): Checklis
   for (const raw of description.split(/\r?\n/)) {
     if (open) {
       const { rest, depth } = stripQuote(raw, open.q);
-      const blank = rest.trim() === '';
+      const blank = BLANK.test(rest);
       // 引用の印が足りない行は引用の外。字下げが足りない空でない行は項目の外
       if (depth === open.q && (blank || indentWidth(rest) >= open.col)) {
         if (open.kind === 'fence') {
-          const close = rest.trim().match(FENCE_CLOSE);
+          const close = FENCE_CLOSE.exec(rest.replace(LEADING_WS, ''));
           if (
             close &&
             indentWidth(rest) - open.col <= 3 &&
@@ -111,7 +125,7 @@ export function countChecklist(description: string | null | undefined): Checklis
 
     const { rest, depth: q, leads } = stripQuote(raw);
     const indent = indentWidth(rest);
-    const text0 = rest.trimStart();
+    const text0 = rest.replace(LEADING_WS, '');
     if (text0 === '') {
       // 空行は項目を閉じない。ただし引用の印だけの行は、そこから引用が始まるので外側の項目を閉じる
       if (q > 0) closeItems(items, q, leads, Infinity);
@@ -144,12 +158,20 @@ export function countChecklist(description: string | null | undefined): Checklis
     let col = indent;
     let marked = false;
     let code = false;
+    const itemsBefore = items.length;
     for (;;) {
       const m = MARKER.exec(text);
       if (!m) break;
+      if (items.length - itemsBefore >= MAX_MARKERS_PER_LINE) {
+        // 印が多すぎる行は数えず、この行で積んだ項目も捨てる
+        items.length = itemsBefore;
+        marked = false;
+        code = true;
+        break;
+      }
       const markerEnd = col + m[1]!.length;
       const empty = text.length === m[0].length;
-      const gap = indentWidth(' '.repeat(markerEnd) + m[2]!) - markerEnd;
+      const gap = gapAfterMarker(m[2]!, markerEnd);
       // 印の後ろが 5 桁以上空くと、本文は字下げコード
       const codeAfter = !empty && gap >= 5;
       items.push({
@@ -199,7 +221,7 @@ export function countChecklist(description: string | null | undefined): Checklis
       continue;
     }
 
-    paragraph = text.trim() !== '';
+    paragraph = !BLANK.test(text);
   }
 
   return total > 0 ? { done, total } : null;

@@ -972,8 +972,8 @@ export const ListViewChecklistProgress: Story = {
     // 説明にタスクリストが無い行には出さない。1 行に広い幅・狭い幅の 2 つずつ（どちらかが隠れる）
     const rows = [...canvasElement.querySelectorAll<HTMLElement>('[data-dnd-task]')];
     const counts = rows.map((row) => row.querySelectorAll('[data-checklist-progress]').length);
-    expect(counts.filter((count) => count > 0)).toHaveLength(2);
-    expect(counts.filter((count) => count === 0)).toHaveLength(rows.length - 2);
+    await expect(counts.filter((count) => count > 0)).toHaveLength(2);
+    await expect(counts.filter((count) => count === 0)).toHaveLength(rows.length - 2);
   },
 };
 

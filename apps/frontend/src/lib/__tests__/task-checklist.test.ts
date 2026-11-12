@@ -116,6 +116,14 @@ describe('描画器との一致', () => {
     ['印の後ろ 5 空白のコード', '-     [ ] a'],
     ['4 桁字下げの閉じフェンス', '```\n- [ ] a\n    ```\n- [x] b\n```'],
     ['引用の中のリストのフェンス', '> - ```\n>   - [ ] a\n>   ```\n> - [x] b'],
+    ['行頭の全角空白は字下げではない', '\u3000- [ ] a'],
+    ['行頭の NBSP は字下げではない', '\u00a0- [x] a'],
+    ['行頭の全角空白の段落の後', '段落\n\u3000- [ ] a'],
+    ['全角空白付きの閉じフェンスは閉じない', '```\n- [ ] a\n\u3000```\n- [x] b\n```'],
+    ['NBSP 付きの閉じフェンスは閉じない', '```\n- [ ] a\n\u00a0```\n- [x] b\n```'],
+    ['全角空白だけの行はフェンスの中で空行ではない', '- ```\n\u3000\n  - [ ] a\n  ```\n- [x] b'],
+    ['全角空白だけの行は項目を閉じない扱いにならない', '- a\n\u3000\n  - [x] b'],
+    ['印の後ろの全角空白は空白ではない', '-\u3000[ ] a'],
   ];
 
   it.each(cases)('%s', async (_name, md) => {
@@ -124,5 +132,23 @@ describe('描画器との一致', () => {
     const total = boxes.length;
     const done = boxes.filter((tag) => /\bchecked\b/.test(tag)).length;
     expect(countChecklist(md) ?? { done: 0, total: 0 }).toEqual({ done, total });
+  });
+});
+
+describe('入力の大きさ', () => {
+  // 1 行に印を大量に並べても、数える時間が入力の長さの 2 乗にならない
+  it.each([
+    ['未チェックの印の列', `${'- '.repeat(49999)}[ ] a`],
+    ['チェック済みの印の列', `${'- '.repeat(40000)}[x] a`],
+    ['番号の印の列', `${'1. '.repeat(30000)}[ ] a`],
+  ])('%s が短い時間で返り、件数が膨らまない', (_name, md) => {
+    const start = performance.now();
+    const result = countChecklist(md);
+    expect(performance.now() - start).toBeLessThan(100);
+    expect(result === null || result.total <= 1).toBe(true);
+  });
+
+  it('1 行の印が上限以内なら数える', () => {
+    expect(countChecklist(`${'- '.repeat(50)}[x] a`)).toEqual({ done: 1, total: 1 });
   });
 });
