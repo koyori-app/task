@@ -32,7 +32,7 @@ import {
 import { computed, nextTick, ref, watch } from 'vue';
 import type { ComponentPublicInstance } from 'vue';
 import type { components } from '@/generated/api';
-import type { EditableField } from '@/components/tasks/editable-field';
+import type { EditableField, MutatingField } from '@/components/tasks/editable-field';
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
 import TaskPropertyRow from '@/components/tasks/TaskPropertyRow.vue';
 import {
@@ -101,7 +101,7 @@ const props = defineProps<{
   fieldUpdating?: Partial<Record<EditableField, boolean>>;
   fieldErrors?: Partial<Record<EditableField, string>>;
   /** 直近に保存が確定したフィールド。該当箇所に「保存しました」を出す（失敗表示が優先） */
-  savedField?: EditableField | null;
+  savedField?: MutatingField | null;
   loading?: boolean;
   notFound?: boolean;
   error?: boolean;
@@ -692,6 +692,13 @@ function clearDescription() {
                     </Button>
                   </div>
                   <p v-if="statusError" class="mt-1 text-xs text-destructive">{{ statusError }}</p>
+                  <p
+                    v-else-if="savedField === 'status_id'"
+                    role="status"
+                    class="mt-1 text-xs text-muted-foreground"
+                  >
+                    保存しました
+                  </p>
                 </TaskPropertyRow>
 
                 <!-- 日付は 1 行に 2 つ（参照の Start → Due） -->
@@ -951,6 +958,13 @@ function clearDescription() {
                     <p v-if="labelsError" class="mt-1 text-xs text-destructive">
                       {{ labelsError }}
                     </p>
+                    <p
+                      v-else-if="savedField === 'labels'"
+                      role="status"
+                      class="mt-1 text-xs text-muted-foreground"
+                    >
+                      保存しました
+                    </p>
                   </TaskPropertyRow>
                 </div>
               </div>
@@ -1033,6 +1047,13 @@ function clearDescription() {
                   </Dropdown>
                   <p v-if="priorityError" class="mt-1 text-xs text-destructive">
                     {{ priorityError }}
+                  </p>
+                  <p
+                    v-else-if="savedField === 'priority'"
+                    role="status"
+                    class="mt-1 text-xs text-muted-foreground"
+                  >
+                    保存しました
                   </p>
                 </TaskPropertyRow>
 

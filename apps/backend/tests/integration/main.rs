@@ -39,6 +39,7 @@ mod pat_revoke_all_integration;
 mod pat_scope_integration;
 mod pat_tenant_membership_integration;
 mod personal_token_identity_integration;
+mod personal_token_last_used_integration;
 mod personal_tokens_create_auth_integration;
 mod personal_tokens_list_integration;
 mod profile_update_integration;
