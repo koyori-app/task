@@ -19,6 +19,12 @@ export const PREFERENCE_TABLE = {
     choices: EMOJI_FONT_CHOICES,
     default: DEFAULT_EMOJI_FONT,
   },
+  expandSubtasksInList: {
+    name: 'タスク一覧でサブタスクを最初から展開する',
+    description:
+      'プロジェクトのタスク一覧の List 表示で、親タスクの行の下にサブタスクを開いた状態で出します。行の矢印で個別に閉じられます。',
+    default: false,
+  },
 } as const satisfies SettingTable;
 
 export type PreferenceKey = keyof typeof PREFERENCE_TABLE;

@@ -1,6 +1,23 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
-import { nextTick } from 'vue';
+import { defineComponent, nextTick, type Component } from 'vue';
+
+// 実物の TaskSubtaskBranch を使う試験のため、取得だけをリアクティブな値に差し替える
+const subtasksState = await vi.hoisted(async () => {
+  const { ref } = await import('vue');
+  return {
+    loading: ref(false),
+    pending: ref(false),
+    error: ref(false),
+    subtasks: ref<unknown[]>([]),
+    createPending: ref(false),
+    createError: ref<string | null>(null),
+    createSubtask: async () => true,
+    refetch: () => {},
+  };
+});
+
+vi.mock('@/composables/useTaskSubtasks', () => ({ useTaskSubtasks: () => subtasksState }));
 
 import TaskGroupedList from '@/components/tasks/TaskGroupedList.vue';
 import type { TaskGroup } from '@/components/tasks/task-grouped-columns';
@@ -80,9 +97,12 @@ function mountList(
   onCreate = vi.fn(async (_input: CreateTaskInput) => true),
   groups: TaskGroup[] = [group],
   statuses: StatusResponse[] = [status],
+  options: { expandSubtasks?: boolean; stubs?: Record<string, Component> } = {},
 ) {
   const wrapper = mount(TaskGroupedList, {
+    global: options.stubs ? { stubs: options.stubs } : undefined,
     props: {
+      expandSubtasks: options.expandSubtasks,
       groups,
       tenantId: 'tenant-1',
       projectId: 'project-1',
@@ -344,5 +364,265 @@ describe('TaskGroupedList のタスク追加', () => {
 
     const input = wrapper.get<HTMLInputElement>('input[aria-label="Todo にタスクを追加"]');
     expect(document.activeElement).toBe(input.element);
+  });
+});
+
+describe('TaskGroupedList のサブタスクの初期展開', () => {
+  const BranchStub = defineComponent({
+    name: 'TaskSubtaskBranch',
+    props: { parentTask: { type: Object, required: true }, implicit: Boolean },
+    emits: ['empty', 'collapse'],
+    template:
+      '<div data-subtask-branch :data-task-id="parentTask.id" :data-implicit="String(implicit)" />',
+  });
+
+  const twoRows: TaskGroup[] = [
+    { ...group, tasks: [taskFixture('task-a', 'A'), taskFixture('task-b', 'B')], total: 2 },
+  ];
+
+  type Wrapper = ReturnType<typeof mountList>['wrapper'];
+
+  function mountExpanded(expandSubtasks: boolean | undefined) {
+    return mountList(undefined, twoRows, [status], {
+      expandSubtasks,
+      stubs: { TaskSubtaskBranch: BranchStub },
+    }).wrapper;
+  }
+
+  function branchOf(wrapper: Wrapper, id: string) {
+    return wrapper.find(`[data-subtask-branch][data-task-id="${id}"]`);
+  }
+
+  /** index 番目の親行の矢印（展開中は「折りたたむ」、閉じていれば「展開」）。 */
+  function arrowOf(wrapper: Wrapper, index: number) {
+    return sectionOf(wrapper, 'Todo')
+      .findAll('button[aria-expanded]')
+      .filter((b) => b.attributes('aria-label')?.startsWith('サブタスクを'))[index];
+  }
+
+  it('既定（prop 無し）では枝を描かず、矢印は閉じている', () => {
+    const wrapper = mountExpanded(undefined);
+
+    expect(wrapper.findAll('[data-subtask-branch]')).toHaveLength(0);
+    expect(arrowOf(wrapper, 0).attributes('aria-expanded')).toBe('false');
+  });
+
+  it('有効にすると、すべての親行の下に暗黙の枝を描き、矢印は開いている', () => {
+    const wrapper = mountExpanded(true);
+
+    expect(branchOf(wrapper, 'task-a').attributes('data-implicit')).toBe('true');
+    expect(branchOf(wrapper, 'task-b').attributes('data-implicit')).toBe('true');
+    expect(arrowOf(wrapper, 0).attributes('aria-expanded')).toBe('true');
+    expect(arrowOf(wrapper, 1).attributes('aria-expanded')).toBe('true');
+  });
+
+  it('展開中に増えた行（もっと見る）にも枝を描く', async () => {
+    const wrapper = mountExpanded(true);
+    await wrapper.setProps({
+      groups: [{ ...group, tasks: [...twoRows[0].tasks, taskFixture('task-c', 'C')], total: 3 }],
+    });
+
+    expect(branchOf(wrapper, 'task-c').exists()).toBe(true);
+  });
+
+  it('矢印で閉じた行だけが閉じ、もう一度押すと明示的な展開で戻る', async () => {
+    const wrapper = mountExpanded(true);
+
+    await arrowOf(wrapper, 0).trigger('click');
+    expect(branchOf(wrapper, 'task-a').exists()).toBe(false);
+    expect(branchOf(wrapper, 'task-b').exists()).toBe(true);
+    expect(arrowOf(wrapper, 0).attributes('aria-expanded')).toBe('false');
+
+    await arrowOf(wrapper, 0).trigger('click');
+    expect(branchOf(wrapper, 'task-a').attributes('data-implicit')).toBe('false');
+    expect(arrowOf(wrapper, 0).attributes('aria-expanded')).toBe('true');
+  });
+
+  it('設定を切り替えると上書きを捨て、全行が設定に従う', async () => {
+    const wrapper = mountExpanded(true);
+    await arrowOf(wrapper, 0).trigger('click'); // task-a を閉じる
+    await arrowOf(wrapper, 0).trigger('click'); // task-a を明示的に開く
+    await arrowOf(wrapper, 1).trigger('click'); // task-b を閉じる
+
+    await wrapper.setProps({ expandSubtasks: false });
+    expect(wrapper.findAll('[data-subtask-branch]')).toHaveLength(0);
+
+    await wrapper.setProps({ expandSubtasks: true });
+    expect(branchOf(wrapper, 'task-a').attributes('data-implicit')).toBe('true');
+    expect(branchOf(wrapper, 'task-b').attributes('data-implicit')).toBe('true');
+  });
+
+  it('子が 0 件と報告された暗黙の枝は矢印だけ閉じて見せ、枝は残す', async () => {
+    const wrapper = mountExpanded(true);
+    const branchA = wrapper.findAllComponents(BranchStub)[0];
+
+    branchA.vm.$emit('empty', true);
+    await nextTick();
+    expect(arrowOf(wrapper, 0).attributes('aria-expanded')).toBe('false');
+    expect(branchOf(wrapper, 'task-a').exists()).toBe(true);
+
+    branchA.vm.$emit('empty', false);
+    await nextTick();
+    expect(arrowOf(wrapper, 0).attributes('aria-expanded')).toBe('true');
+  });
+
+  it('空の暗黙の枝の矢印は 1 回で明示的な展開になる', async () => {
+    const wrapper = mountExpanded(true);
+    wrapper.findAllComponents(BranchStub)[0].vm.$emit('empty', true);
+    await nextTick();
+
+    await arrowOf(wrapper, 0).trigger('click');
+    expect(branchOf(wrapper, 'task-a').attributes('data-implicit')).toBe('false');
+    expect(arrowOf(wrapper, 0).attributes('aria-expanded')).toBe('true');
+  });
+
+  it('枝が collapse を返した行は閉じる', async () => {
+    const wrapper = mountExpanded(true);
+    await arrowOf(wrapper, 0).trigger('click');
+    await arrowOf(wrapper, 0).trigger('click'); // 明示的に開く
+
+    wrapper.findAllComponents(BranchStub)[0].vm.$emit('collapse');
+    await nextTick();
+    expect(branchOf(wrapper, 'task-a').exists()).toBe(false);
+  });
+});
+
+describe('TaskGroupedList のサブタスクの子の有無（実物の枝）', () => {
+  const oneRow: TaskGroup[] = [{ ...group, tasks: [taskFixture('task-a', 'A')], total: 1 }];
+  const doingMoved: TaskGroup[] = [
+    { ...group, tasks: [], total: 0 },
+    { ...doingGroup, tasks: [taskFixture('task-a', 'A')], total: 1 },
+  ];
+
+  type Wrapper = ReturnType<typeof mountList>['wrapper'];
+
+  function mountReal(expandSubtasks: boolean, groups: TaskGroup[] = oneRow) {
+    return mountList(undefined, groups, [status, doingStatus], { expandSubtasks }).wrapper;
+  }
+
+  function arrowOf(wrapper: Wrapper, statusName = 'Todo') {
+    return sectionOf(wrapper, statusName)
+      .findAll('button[aria-expanded]')
+      .find((b) => b.attributes('aria-label')?.startsWith('サブタスクを'))!;
+  }
+
+  beforeEach(() => {
+    subtasksState.loading.value = false;
+    subtasksState.pending.value = false;
+    subtasksState.error.value = false;
+    subtasksState.subtasks.value = [];
+  });
+
+  it('取得が成功して 0 件なら暗黙の枝の矢印は閉じて見える（対照: 子がいれば開いて見える）', async () => {
+    const empty = mountReal(true);
+    await flushPromises();
+    expect(arrowOf(empty).attributes('aria-expanded')).toBe('false');
+
+    subtasksState.subtasks.value = [taskFixture('child', '子')];
+    const filled = mountReal(true);
+    expect(arrowOf(filled).attributes('aria-expanded')).toBe('true');
+  });
+
+  it('取得に失敗した暗黙の枝は空として扱わず、矢印は開いたまま失敗を出す', async () => {
+    subtasksState.error.value = true;
+    const wrapper = mountReal(true);
+    await flushPromises();
+
+    expect(arrowOf(wrapper).attributes('aria-expanded')).toBe('true');
+    expect(wrapper.text()).toContain('サブタスクを読み込めませんでした');
+  });
+
+  it('取得結果がまだ無い間は空として扱わず、届いて 0 件なら閉じて見える', async () => {
+    subtasksState.pending.value = true;
+    const wrapper = mountReal(true);
+    await flushPromises();
+    expect(arrowOf(wrapper).attributes('aria-expanded')).toBe('true');
+
+    subtasksState.pending.value = false;
+    await flushPromises();
+    expect(arrowOf(wrapper).attributes('aria-expanded')).toBe('false');
+  });
+
+  it('子 0 件と記録された行が別のグループへ移っても、古い記録で矢印を閉じて見せない', async () => {
+    const wrapper = mountReal(true);
+    await flushPromises();
+    expect(arrowOf(wrapper).attributes('aria-expanded')).toBe('false');
+
+    // 移動先の枝は取り直し中（結果が無い）
+    subtasksState.pending.value = true;
+    await wrapper.setProps({ groups: doingMoved });
+    await flushPromises();
+
+    expect(arrowOf(wrapper, 'Doing').attributes('aria-expanded')).toBe('true');
+  });
+
+  it('子 0 件の行が前方のグループへ移っても（移動先が取得済みで即 0 件）、矢印は閉じて見え、1 回で作成欄が出る', async () => {
+    const inDoing: TaskGroup[] = [
+      { ...group, tasks: [], total: 0 },
+      { ...doingGroup, tasks: [taskFixture('task-a', 'A')], total: 1 },
+    ];
+    const inTodo: TaskGroup[] = [
+      { ...group, tasks: [taskFixture('task-a', 'A')], total: 1 },
+      { ...doingGroup, tasks: [], total: 0 },
+    ];
+    // 結果 0 件・pending でない（キャッシュが残っていて移動先の枝は mount 直後に空と報告する）
+    const wrapper = mountReal(true, inDoing);
+    await flushPromises();
+    expect(arrowOf(wrapper, 'Doing').attributes('aria-expanded')).toBe('false');
+
+    await wrapper.setProps({ groups: inTodo });
+    await flushPromises();
+    expect(arrowOf(wrapper, 'Todo').attributes('aria-expanded')).toBe('false');
+
+    await arrowOf(wrapper, 'Todo').trigger('click');
+    await flushPromises();
+    expect(arrowOf(wrapper, 'Todo').attributes('aria-expanded')).toBe('true');
+    expect(wrapper.find('[data-subtask-branch]').exists()).toBe(true);
+  });
+
+  it('子 0 件の行が後方のグループへ移っても（移動先が即 0 件）、矢印は閉じて見え、1 回で作成欄が出る', async () => {
+    const wrapper = mountReal(true);
+    await flushPromises();
+    expect(arrowOf(wrapper).attributes('aria-expanded')).toBe('false');
+
+    await wrapper.setProps({ groups: doingMoved });
+    await flushPromises();
+    expect(arrowOf(wrapper, 'Doing').attributes('aria-expanded')).toBe('false');
+
+    await arrowOf(wrapper, 'Doing').trigger('click');
+    await flushPromises();
+    expect(arrowOf(wrapper, 'Doing').attributes('aria-expanded')).toBe('true');
+    expect(wrapper.find('[data-subtask-branch]').exists()).toBe(true);
+  });
+
+  it('手動で開いた子 0 件の行は、設定を有効にしても矢印を 1 回で作成欄まで開ける', async () => {
+    const wrapper = mountReal(false);
+    // 手動で開く。明示的な展開なので 0 件でも作成欄を出す
+    await arrowOf(wrapper).trigger('click');
+    await flushPromises();
+    expect(arrowOf(wrapper).attributes('aria-expanded')).toBe('true');
+    expect(wrapper.find('[data-subtask-branch]').exists()).toBe(true);
+
+    // 設定を有効にする。上書きは捨てられ、枝は暗黙になる（0 件なので何も描かず、矢印は閉じて見える）
+    await wrapper.setProps({ expandSubtasks: true });
+    await flushPromises();
+    expect(arrowOf(wrapper).attributes('aria-expanded')).toBe('false');
+    expect(wrapper.find('[data-subtask-branch]').exists()).toBe(false);
+
+    // 1 回で明示的な展開になり、作成欄が出る
+    await arrowOf(wrapper).trigger('click');
+    await flushPromises();
+    expect(arrowOf(wrapper).attributes('aria-expanded')).toBe('true');
+    expect(wrapper.find('[data-subtask-branch]').exists()).toBe(true);
+  });
+
+  it('子がいる行は設定を有効にしても矢印が開いたまま（対照）', async () => {
+    subtasksState.subtasks.value = [taskFixture('child', '子')];
+    const wrapper = mountReal(false);
+    await arrowOf(wrapper).trigger('click');
+    await wrapper.setProps({ expandSubtasks: true });
+    await flushPromises();
+
+    expect(arrowOf(wrapper).attributes('aria-expanded')).toBe('true');
   });
 });
