@@ -36,7 +36,9 @@ function userRow(id: string, over: Record<string, unknown> = {}) {
   };
 }
 
-function stubFetch(opts: { me?: { is_admin: boolean }; failWith?: number } = {}) {
+function stubFetch(
+  opts: { me?: { is_admin: boolean }; failWith?: number; authMethodsFail?: boolean } = {},
+) {
   const calls: string[] = [];
   vi.stubGlobal(
     'fetch',
@@ -54,6 +56,7 @@ function stubFetch(opts: { me?: { is_admin: boolean }; failWith?: number } = {})
         ]);
       }
       if (req.method === 'GET' && key.endsWith('/auth-methods')) {
+        if (opts.authMethodsFail) return json({ message: 'x' }, 500);
         if (key.includes(OTHER)) {
           return json({
             passkeys: [],
@@ -109,6 +112,21 @@ enableAutoUnmount(afterEach);
 afterEach(() => {
   vi.unstubAllGlobals();
   document.body.innerHTML = '';
+});
+
+describe('AdminUserDetail の認証方法の取得失敗', () => {
+  it('取得に失敗したら、パスキーと OAuth 連携の欄に「無い」ではなくエラーを出す', async () => {
+    stubFetch({ authMethodsFail: true });
+    mountDetail();
+    await flushPromises();
+
+    const alerts = [...document.body.querySelectorAll('[role="alert"]')].filter((el) =>
+      el.textContent?.includes('認証方法を取得できませんでした'),
+    );
+    expect(alerts).toHaveLength(2);
+    expect(document.body.textContent).not.toContain('連携はありません');
+    expect(document.body.textContent).not.toContain('登録されたパスキーはありません');
+  });
 });
 
 describe('AdminUserDetail の確認ダイアログ', () => {

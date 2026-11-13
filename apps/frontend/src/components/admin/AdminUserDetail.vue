@@ -294,6 +294,9 @@ function formatDate(value: string | null | undefined) {
       <div class="flex flex-col gap-3 rounded-lg border p-4">
         <h3 class="text-base font-semibold">OAuth 連携</h3>
         <Skeleton v-if="authMethodsQuery.isLoading.value" height="2.25rem" />
+        <p v-else-if="authMethodsQuery.isError.value" role="alert" class="text-destructive text-sm">
+          認証方法を取得できませんでした。
+        </p>
         <p
           v-else-if="!authMethodsQuery.data.value?.oauth.length"
           class="text-muted-foreground text-sm"
