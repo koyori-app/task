@@ -36,6 +36,7 @@ import {
   type DecorationSet,
   type Rect,
 } from '@codemirror/view';
+import { mentionClassNames } from '@koyori-app/ui-vue';
 
 import {
   filterCandidates,
@@ -51,9 +52,6 @@ import {
   type MentionTable,
   type MentionUser,
 } from '@/lib/comment-mention';
-import { avatarInitials } from '@/lib/initials';
-// 札の見た目は説明文の KFM の札と同じ一枚（span.kfm-mention）を使う
-import '@/lib/remark-kfm-mention/style.css';
 
 /** メンション候補の `.cm-tooltip` に載せる z-index（ui-vue の menu 段）。 */
 export const MENTION_AUTOCOMPLETE_Z_INDEX = 'var(--koyori-z-menu)';
@@ -140,32 +138,21 @@ class MentionWidget extends WidgetType {
     return (
       other.id === this.id &&
       other.user?.status === this.user?.status &&
-      other.user?.name === this.user?.name &&
-      other.user?.avatar_url === this.user?.avatar_url
+      other.user?.name === this.user?.name
     );
   }
 
-  /** 説明文の KFM の札と同じ形（丸い地・頭のアバター・`@名`）。clipboard の形式は doc の文から作るので変わらぬ */
+  /** 説明文の KFM の札と同じ形（`@名` を包んだ span 1 つ）。clipboard の形式は doc の文から作るので変わらぬ */
   override toDOM(): HTMLElement {
     const chip = mentionChip(this.user, this.id);
     const el = document.createElement('span');
-    el.className = `cm-mention kfm-mention kfm-mention-${chip.state}`;
+    el.className = ['cm-mention', ...mentionClassNames(chip.state, chip.self)].join(' ');
     el.dataset.mention = '';
     el.dataset.mentionStatus = chip.state;
-    if (chip.avatar) {
-      const avatar = document.createElement('span');
-      avatar.className = 'kfm-mention-avatar';
-      avatar.dataset.initials = avatarInitials(chip.avatar.name);
-      avatar.setAttribute('aria-hidden', 'true');
-      if (chip.avatar.src) {
-        const img = document.createElement('img');
-        img.src = chip.avatar.src;
-        img.alt = '';
-        avatar.append(img);
-      }
-      el.append(avatar);
-    }
-    el.append(chip.label);
+    const label = document.createElement('span');
+    label.className = 'koyori-mention-label';
+    label.textContent = chip.label;
+    el.append(label);
     return el;
   }
 

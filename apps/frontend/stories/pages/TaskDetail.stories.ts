@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/vue3-vite';
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test';
 import { provide, ref } from 'vue';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
+import { createPinia, setActivePinia } from 'pinia';
 import TaskDetailPage from '@/pages/@tenant/projects/@projectKey/tasks/@taskId/+Page.vue';
 import { KFM_STORY_INPUTS } from '@/lib/kfm-story-fixtures/inputs';
 import kfmDescriptionHtml from '@/lib/kfm-story-fixtures/rendered/task-detail-description.html?raw';
@@ -502,6 +503,8 @@ function storyDecorator(
 ) {
   return () => ({
     setup() {
+      // 札のプロフィールのカードが、閲覧者の関わり方をテナントのストア（Pinia）から引く
+      setActivePinia(createPinia());
       const queryClient = new QueryClient({
         defaultOptions: {
           queries: { retry: false, gcTime: 0, staleTime: 0 },
@@ -1453,6 +1456,29 @@ export const ReactionInDialogIdle: Story = {
 };
 
 /**
+ * Dialog の中では本文とアクティビティの列だけがスクロールし、Dialog 自体はスクロールしない。
+ * CodeMirror がメンション候補の器を Dialog 直下に置くので、器が高さを持つと Dialog が
+ * 2 倍の高さにスクロールして下に空白が出る（TASK-505）。
+ */
+export const DialogScrollsOnlyInsideColumns: Story = {
+  name: 'Dialog 自体はスクロールしない',
+  beforeEach: () => createMockFetch({ comments: sampleComments }),
+  render: reactionDialogRender,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
+    ).resolves.toBeInTheDocument();
+    // コメント欄（CodeMirror）が起動し、候補の器が dialog に載ってから測る
+    await expect(
+      canvas.findByRole('textbox', { name: 'コメントを入力' }),
+    ).resolves.toBeInTheDocument();
+    const dialog = canvasElement.querySelector('dialog')!;
+    await waitFor(() => expect(dialog.scrollHeight).toBe(dialog.clientHeight));
+  },
+};
+
+/**
  * ピッカーと一覧はタスク詳細の Dialog（`<dialog showModal>`）の中でも、自分だけを閉じる。
  * play の keydown は合成イベントで Chromium の cancel を起こさないので、Dialog を止めている
  * 根拠の `defaultPrevented` を確かめ、札の無い場所の Esc が止まらないことを対照に置く。
@@ -1603,18 +1629,20 @@ export const CommentsKfmRendered: Story = {
     );
     // コメントの見出しは説明文（h1 は 2em）より詰める: 14px の器の 1.25em で 20px を超えぬ
     await expect(parseFloat(getComputedStyle(heading).fontSize)).toBeLessThanOrEqual(20);
-    await expect(body.querySelector('.kfm-mention-self')).not.toBeNull();
+    await expect(body.querySelector('.koyori-mention-self')).not.toBeNull();
     // 全画面でも、いま入れる者の札はプロフィールへの link になる（分割ビューと同じ）。
     // 外の者と退会済みの札は link にしない。
-    await expect(body.querySelector('.kfm-mention-self')?.tagName).toBe('A');
-    await expect(body.querySelector('.kfm-mention-self')).toHaveAttribute(
+    await expect(body.querySelector('.koyori-mention-self')?.tagName).toBe('A');
+    await expect(body.querySelector('.koyori-mention-self')).toHaveAttribute(
       'href',
       `/tenant-123/users/${mockUsers.alpha.id}`,
     );
-    await expect(body.querySelector('.kfm-mention-outside')?.tagName).toBe('SPAN');
-    await expect(body.querySelector('.kfm-mention-gone')?.tagName).toBe('SPAN');
-    await expect(body.querySelector('.kfm-mention-outside')?.textContent).toBe('@プロジェクト外');
-    await expect(body.querySelector('.kfm-mention-gone')?.textContent).toBe('@退会済み');
+    await expect(body.querySelector('.koyori-mention-outside')?.tagName).toBe('SPAN');
+    await expect(body.querySelector('.koyori-mention-gone')?.tagName).toBe('SPAN');
+    await expect(body.querySelector('.koyori-mention-outside')?.textContent).toBe(
+      '@プロジェクト外',
+    );
+    await expect(body.querySelector('.koyori-mention-gone')?.textContent).toBe('@退会済み');
     // 生の HTML は要素にならず、字として見える
     await expect(body.querySelector('script')).toBeNull();
     await expect(body.textContent).toContain('<script>alert(1)</script>');
