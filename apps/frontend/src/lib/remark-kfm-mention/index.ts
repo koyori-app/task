@@ -7,14 +7,14 @@
  * - text ノードは札へ分割する。code / inlineCode と link / linkReference の内側は札にせず
  *   `@今の名` の字へ戻す。画像の alt、リンク・画像・定義の title、code の meta も同じ
  * - URL と生の HTML は意味を変えない
- * - 札の字は `mentionLabel`（コメントの札と同じ）。id は HTML に出さない
+ * - 札の字は `mentionLabel`（コメントの札と同じ）。札の字・コピー・読み上げに id は出さない。
+ *   プロフィールのカードを開く札（いま入れる者と、名の引ける外れた者）の根にだけ `data-user-id` を付ける
  * - いま入れる者で名が引ける札は、`data.kfm.mentionTenant` があればプロフィールへの link
- *   （`<a class="kfm-mention …" href="/{tenant}/users/{利用者ID}">`）にする。道は表に在る id とテナントだけで組む。
+ *   （`<a class="koyori-mention koyori-mention-member" href="/{tenant}/users/{利用者ID}">`）にする。道は表に在る id とテナントだけで組む。
  *   外れた者・退会した者・名の引けぬ者の札は link にせぬ
- * - 名で出る札は頭にアバター（`span.kfm-mention-avatar`。画像は `safeAvatarUrl` を通った URL だけ）を置く。
- *   定型の句の札にはアバターを出さない（`mentionChip` の判じ。入力欄・コメントの札と同じ）
- * - 状態は class（`kfm-mention-member` / `-outside` / `-gone` / `-unknown`）で運ぶ。ログイン中の
- *   member と同じ id なら `kfm-mention-self` も付ける。見た目は `style.css` に集約する
+ * - 札は `span.koyori-mention-label`（`@名`）を 1 つだけ持ち、アバターは出さない（入力欄の札と同じ形）
+ * - 状態は koyori の固定 class（`mentionClassNames`）で運ぶ。ログイン中の member と同じ id なら
+ *   `koyori-mention-self` も付く。見た目は `@koyori-app/ui-vue/style.css`（`tailwind.css` が全体で読む）
  *
  * 表（id → 状態・名前）はプラグインの options ではなく vfile の `data.kfm.mentions` から読む
  * （processor は profile ごとに memoize されるため、`remark-kfm-task-ref` と同じ理由）。
@@ -24,8 +24,10 @@
  * 出力は mdast ノード ＋ data.hName / hProperties の型付き emit のみ（生 html・inline style なし）。
  */
 import type { Nodes, Parent, PhrasingContent, Root, Text } from 'mdast';
+import { MENTION_CLASS_NAMES, mentionClassNames } from '@koyori-app/ui-vue';
 import { SKIP, visit } from 'unist-util-visit';
 
+import { mentionCardUserId } from '@/lib/mention-card';
 import {
   findMarkers,
   lookup,
@@ -33,7 +35,6 @@ import {
   toPlainText,
   type MentionTable,
 } from '@/lib/comment-mention';
-import { avatarInitials } from '@/lib/initials';
 
 /** vfile の data.kfm に載せる描画時コンテキスト（_renderer.ts が process 時に渡す） */
 export type KfmMentionData = {
@@ -62,43 +63,8 @@ function profileHref(
   id: string,
   chip: ReturnType<typeof mentionChip>,
 ): string | undefined {
-  if (!tenant || chip.state !== 'member' || !chip.avatar || !USER_ID_RE.test(id)) return undefined;
+  if (!tenant || chip.state !== 'member' || !chip.named || !USER_ID_RE.test(id)) return undefined;
   return `/${tenant}/users/${id}`;
-}
-
-/** 札の class。状態は既知の 4 つに限る（表の値をそのまま class にしない） */
-const STATUS_CLASS = {
-  member: 'kfm-mention-member',
-  outside: 'kfm-mention-outside',
-  gone: 'kfm-mention-gone',
-} as const;
-
-/**
- * 札の頭のアバター（`UserAvatar` の xs と同じ丸）。頭文字は字の node にせず `data-initials` に載せ、
- * CSS の `::before` で描く（コピーした文・読み上げに頭文字が混ざらぬ）。画像は安全な URL の時だけ
- * `<img alt="">` を重ね、読み込めねば下の頭文字が見える。丸ごと `aria-hidden`（名は隣の字が担う）。
- */
-function avatarNode(name: string, src: string | null): PhrasingContent {
-  return {
-    type: 'emphasis',
-    data: {
-      hName: 'span',
-      hProperties: {
-        className: ['kfm-mention-avatar'],
-        dataInitials: avatarInitials(name),
-        ariaHidden: 'true',
-      },
-    },
-    children: src
-      ? [
-          {
-            type: 'emphasis',
-            data: { hName: 'img', hProperties: { src, alt: '' } },
-            children: [],
-          },
-        ]
-      : [],
-  };
 }
 
 function readTable(data: Readonly<Record<string, unknown>>): MentionTable | undefined {
@@ -162,27 +128,28 @@ function splitText(
     if (marker.from > last)
       parts.push({ type: 'text', value: node.value.slice(last, marker.from) });
     const user = lookup(table, marker.id);
-    const statusClass =
-      user && Object.hasOwn(STATUS_CLASS, user.status)
-        ? STATUS_CLASS[user.status]
-        : 'kfm-mention-unknown';
-    const className = ['kfm-mention', statusClass];
-    if (user?.status === 'member' && currentUserId && marker.id === currentUserId.toLowerCase()) {
-      className.push('kfm-mention-self');
-    }
     const chip = mentionChip(user, marker.id, currentUserId);
-    const children: PhrasingContent[] = [];
-    if (chip.avatar) children.push(avatarNode(chip.avatar.name, chip.avatar.src));
-    children.push({ type: 'text', value: chip.label });
+    // 状態の class は koyori が決める（知らない値は unknown、self は member の時だけ。表の値をそのまま class にしない）
+    const className = mentionClassNames(chip.state, chip.self);
+    const children: PhrasingContent[] = [
+      {
+        // 札の唯一の子。字を span で包む（koyori の固定 class の形）
+        type: 'emphasis',
+        data: { hName: 'span', hProperties: { className: ['koyori-mention-label'] } },
+        children: [{ type: 'text', value: chip.label }],
+      },
+    ];
+    const cardUserId = mentionCardUserId(user, marker.id);
+    const hProperties = cardUserId ? { className, dataUserId: cardUserId } : { className };
     const href = profileHref(tenant, marker.id, chip);
     parts.push(
       href
         ? // プロフィールへの link（mdast の link。href は上で組んだ道だけ）
-          { type: 'link', url: href, data: { hProperties: { className } }, children }
+          { type: 'link', url: href, data: { hProperties }, children }
         : {
             // span を出すための入れ物（hName で置き換わる）。意味を持つ mdast ノードではない
             type: 'emphasis',
-            data: { hName: 'span', hProperties: { className } },
+            data: { hName: 'span', hProperties },
             children,
           },
     );
@@ -222,17 +189,8 @@ export function remarkKfmMention() {
 }
 
 /**
- * 本プラグインが emit する class トークン（完全一致 allowlist）。`span`・`a`・`img` と、その `href`・`src`・`alt` は
- * DOMPurify 既定で通る（札の link のために足した許可は無い）
+ * 本プラグインが emit する class トークン（完全一致 allowlist）。koyori の固定 class の全集合をそのまま許す。
+ * `span`・`a` と `href` は DOMPurify の既定で通る。
+ * `data-user-id` も DOMPurify の既定（`ALLOW_DATA_ATTR`）で通る（生の HTML は字に escape されるので、本文からは書けない）
  */
-export const kfmMentionSanitizeSchema = {
-  classTokens: [
-    'kfm-mention',
-    'kfm-mention-member',
-    'kfm-mention-outside',
-    'kfm-mention-gone',
-    'kfm-mention-unknown',
-    'kfm-mention-self',
-    'kfm-mention-avatar',
-  ],
-} as const;
+export const kfmMentionSanitizeSchema = { classTokens: MENTION_CLASS_NAMES } as const;

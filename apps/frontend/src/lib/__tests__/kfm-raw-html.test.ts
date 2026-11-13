@@ -112,7 +112,7 @@ describe.each(PROFILES)('生の HTML は字として出る（%s profile）', (pr
       profile,
       mentions: { [id]: { status: 'member', name: 'alice' } },
     });
-    expect(html).toContain('kfm-mention');
+    expect(html).toContain('koyori-mention');
     expect(html).toContain('@alice');
     expect(html).toContain('&lt;b&gt;');
   });

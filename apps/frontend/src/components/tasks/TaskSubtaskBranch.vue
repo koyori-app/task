@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Loader2, Plus, RotateCcw } from '@lucide/vue';
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
 import TaskGroupedRow from '@/components/tasks/TaskGroupedRow.vue';
 import TaskSubtaskComposer from '@/components/tasks/TaskSubtaskComposer.vue';
@@ -29,17 +29,30 @@ const props = defineProps<{
   errors: Record<string, string | undefined>;
   commentPendingTaskIds?: Record<string, boolean>;
   onComment: (task: TaskResponse, body: string) => Promise<boolean>;
+  /**
+   * 環境設定で開いた枝。利用者が開いた枝と違い、子が 0 件なら作成欄を出さず何も描かない。
+   * 読み込み中の表示も出さない（行ごとに並ぶため）。失敗は出す
+   */
+  implicit?: boolean;
 }>();
 
 const emit = defineEmits<{
   open: [task: TaskResponse];
   collapse: [];
+  /**
+   * 取得が成功して 0 件かを返す。未取得・取得中・失敗・枝の破棄では false を返す
+   * （暗黙の枝を描くかの判断は親に任せる）
+   */
+  empty: [empty: boolean];
   'update:status': [task: TaskResponse, statusId: string];
   'update:priority': [task: TaskResponse, priority: TaskResponse['priority']];
   'update:softDeadline': [task: TaskResponse, iso: string | null];
   'toggle:assignee': [task: TaskResponse, userId: string, checked: boolean];
   'toggle:label': [task: TaskResponse, labelId: string, checked: boolean];
 }>();
+
+/** 暗黙の枝の取得結果を新鮮とみなす時間 */
+const IMPLICIT_BRANCH_STALE_TIME_MS = 30_000;
 
 const adding = ref(false);
 const statusUpdating = computed(() => props.pending[props.parentTask.id] === 'status_id');
@@ -50,7 +63,26 @@ const subtasks = useTaskSubtasks({
   taskUuid: () => props.parentTask.id,
   parentTaskId: () => props.parentTask.parent_task_id,
   filters: () => ({ is_archived: false, ...props.filters }),
+  // 親行の数だけ枝が並ぶので、暗黙の枝はフォーカス復帰のたびに全行を取り直さない。
+  // 行の変更による invalidate は staleTime に関係なく再取得されるので、子の反映は遅れない
+  queryOptions: () =>
+    props.implicit
+      ? { staleTime: IMPLICIT_BRANCH_STALE_TIME_MS, refetchOnWindowFocus: false }
+      : undefined,
 });
+
+// 取得結果がまだ無い間（クエリが無効な間も含む）。0 件の成功とは区別する
+const waiting = computed(() => subtasks.loading.value || subtasks.pending.value);
+// 取得が成功して 0 件のときだけ空とみなす（失敗や未取得は空ではない）
+const confirmedEmpty = computed(
+  () => !waiting.value && !subtasks.error.value && !subtasks.subtasks.value.length,
+);
+// 暗黙の枝は子が無いと何も描かない
+const hidden = computed(() => !!props.implicit && confirmedEmpty.value);
+
+watch(confirmedEmpty, (empty) => emit('empty', empty), { immediate: true });
+// 枝が消えたら親の「空」の記録も残さない（行が別グループへ移ったとき、古い記録で矢印が閉じて見えないように）
+onBeforeUnmount(() => emit('empty', false));
 
 function openComposer() {
   if (props.parentTask.parent_task_id || statusUpdating.value) return;
@@ -73,14 +105,17 @@ function createSubtask(title: string) {
 </script>
 
 <template>
-  <div class="ml-5 border-l border-border/70 bg-muted/10" data-subtask-branch>
+  <div v-if="!hidden" class="ml-5 border-l border-border/70 bg-muted/10" data-subtask-branch>
     <div
-      v-if="subtasks.loading.value"
+      v-if="waiting && !implicit"
       class="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground"
     >
       <Loader2 class="size-4 animate-spin" aria-hidden="true" />
       サブタスクを読み込み中…
     </div>
+
+    <!-- 暗黙の枝は読み込み中に何も出さない -->
+    <template v-else-if="waiting" />
 
     <div v-else-if="subtasks.error.value" class="flex items-center gap-2 px-3 py-2">
       <p class="text-sm text-destructive">サブタスクを読み込めませんでした</p>

@@ -71,6 +71,25 @@ describe('メンションの候補の箱の置き場と段', () => {
     dialog.remove();
   });
 
+  it('dialog へ出した器は高さを持たず、dialog 自体をスクロールさせない（TASK-505）', () => {
+    const dialog = document.createElement('dialog');
+    document.body.append(dialog);
+    const wrapper = mount(CommentEditor, {
+      props: { modelValue: '', candidates: CANDIDATES },
+      attachTo: dialog,
+    });
+    // CodeMirror は起動時に、tooltipParent（この dialog）の末尾へ候補の箱の器を置く
+    const holder = [...dialog.children].find((el) => !el.contains(wrapper.element))!;
+    expect(holder).toBeDefined();
+
+    // 編集器本体は器（grid）いっぱいに広がり、候補の箱の器は高さを持たない
+    expect(getComputedStyle(wrapper.element.querySelector('.cm-editor')!).height).toBe('100%');
+    expect(getComputedStyle(holder).height).not.toBe('100%');
+
+    wrapper.unmount();
+    dialog.remove();
+  });
+
   it('欄を外すと、body へ出した器も一緒に消え、箱が取り残されない', async () => {
     const before = document.body.childElementCount;
     const wrapper = mount(CommentEditor, {

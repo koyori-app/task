@@ -239,6 +239,8 @@ function openSimilarTask(seqId: number) {
     :current-user-id="currentUserId"
     :task="displayTask"
     :profile-href="profileHref"
+    :tenant-id="tenantId"
+    :mention-tenant="tenantDisplayId"
     :description-html="data?.descriptionHtml ?? null"
     :description-source="data?.descriptionSource ?? null"
     :project-key="projectKey"

@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { nextTick } from 'vue';
+import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import { createPinia, setActivePinia } from 'pinia';
 import TaskComments from '../TaskComments.vue';
 import { useAuthStore } from '@/stores/auth';
@@ -19,6 +20,12 @@ vi.mock('@/components/tasks/CommentEditor.vue', async () => ({
 }));
 
 enableAutoUnmount(afterEach);
+// happy-dom に ResizeObserver が無い（HoverCard が位置の追従に使う）
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
 let pinia: ReturnType<typeof createPinia>;
 beforeEach(() => {
   resetCommentDrafts();
@@ -73,7 +80,8 @@ function activity(id: string, created_at: string, overrides: Partial<ActivityIte
 
 function mountComments(props: Partial<InstanceType<typeof TaskComments>['$props']> = {}) {
   return mount(TaskComments, {
-    global: { plugins: [pinia] },
+    // 札のある本文は MentionHoverCard を置く（プロフィールの取得に QueryClient を使う）
+    global: { plugins: [pinia, [VueQueryPlugin, { queryClient: new QueryClient() }]] },
     props: {
       threads: [],
       onSubmit: vi.fn(async () => true),
@@ -907,10 +915,10 @@ describe('TaskComments のメンション', () => {
       mentions: { [ALICE]: { status: 'member', name: 'alice' } },
     });
     await vi.waitFor(
-      () => expect(wrapper.find('[data-task-comment] .kfm-mention').exists()).toBe(true),
+      () => expect(wrapper.find('[data-task-comment] .koyori-mention').exists()).toBe(true),
       { timeout: 10_000 },
     );
-    expect(wrapper.get('[data-task-comment] .kfm-mention').text()).toBe('@alice');
+    expect(wrapper.get('[data-task-comment] .koyori-mention').text()).toBe('@alice');
     expect(wrapper.text()).not.toContain(ALICE);
 
     await wrapper
@@ -918,10 +926,10 @@ describe('TaskComments のメンション', () => {
       .find((b) => b.text() === '1件の返信')!
       .trigger('click');
     await vi.waitFor(
-      () => expect(wrapper.findAll('[data-task-comment] .kfm-mention')).toHaveLength(2),
+      () => expect(wrapper.findAll('[data-task-comment] .koyori-mention')).toHaveLength(2),
       { timeout: 10_000 },
     );
-    const chips = wrapper.findAll('[data-task-comment] .kfm-mention');
+    const chips = wrapper.findAll('[data-task-comment] .koyori-mention');
     expect(chips).toHaveLength(2);
     expect(chips.every((c) => c.text() === '@alice')).toBe(true);
   }, 30_000);

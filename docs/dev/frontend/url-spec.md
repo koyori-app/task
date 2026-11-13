@@ -1,7 +1,7 @@
 ---
 title: URL
 description: フロントエンドの URL と識別子、それを定義する Vike のページファイルの対応
-updated: 2026-11-11
+updated: 2026-11-12
 sidebar:
   order: 1
 ---
@@ -51,6 +51,16 @@ sidebar:
 | `/settings/preferences` | 環境設定 |
 | `/settings/experiments` | 実験的機能の設定 |
 
+### 管理者画面（テナント外）
+
+`is_admin = true` の利用者だけが使う（[サービス管理者](/dev/features/admin)）。
+
+| URL | 説明 |
+|-----|------|
+| `/admin/users` | 全利用者の一覧と利用者の作成 |
+| `/admin/users/{id}` | 利用者の詳細と、認証の復旧の操作 |
+| `/admin/settings` | 一般の利用者登録の有効と無効 |
+
 ### ルート
 
 | URL | 説明 |
@@ -64,7 +74,7 @@ sidebar:
 | `/{tenant}` | テナントホーム（ダッシュボード） |
 | `/{tenant}/my-tasks` | 自分のタスク |
 | `/{tenant}/calendar` | テナントのタイムライン（[スケジュール](/dev/features/tasks/schedule)）。`?from=YYYY-MM-DD`（起点の月曜。省略時は今週）、`?member=` / `?project=`（ID。繰り返し指定可）で絞り込み、`?selected=KEY-N`（詳細のオーバーレイで開いているタスク）を持つ。URL は replaceState で書き、履歴を増やさない |
-| `/{tenant}/gantt` | ガントチャート。サイドバーの入口は環境設定の `showExperiments` が有効なときだけ出る。URL からページを開くこと自体は設定に関係なくできる |
+| `/{tenant}/gantt` | ガントチャート。サイドバーの入口は実験的機能の「ガントチャート」（`koyoriArcIntegration`）を有効にしたときだけ出る。URL からページを開くこと自体は設定に関係なくできる |
 | `/{tenant}/settings` | テナント設定 |
 | `/{tenant}/settings/members` | テナントメンバー管理 |
 | `/{tenant}/users/{user_id}` | 利用者のプロフィール（閲覧のみ） |
@@ -101,6 +111,9 @@ sidebar:
 | `/settings/tokens` | `settings/tokens/+Page.vue` |
 | `/settings/preferences` | `settings/preferences/+Page.vue` |
 | `/settings/experiments` | `settings/experiments/+Page.vue` |
+| `/admin/users` | `admin/users/+Page.vue` |
+| `/admin/users/{id}` | `admin/users/@userId/+Page.vue` |
+| `/admin/settings` | `admin/settings/+Page.vue` |
 | `/{tenant}` | `@tenant/+Page.vue` |
 | `/{tenant}/my-tasks` | `@tenant/my-tasks/+Page.vue` |
 | `/{tenant}/calendar` | `@tenant/calendar/+Page.vue` |
@@ -151,7 +164,7 @@ URL を持たないファイルは次のとおりである。
 | `/{tenant}/projects/{key}` | プロジェクトホーム | ページなし。プロジェクトの入口は `/tasks` である |
 | `/{tenant}/projects/{key}/milestones` | マイルストーン一覧 | ページなし |
 | `/{tenant}/projects/{key}/members` | プロジェクトメンバー | ページなし。`settings` の節で扱う |
-| `/admin`、`/admin/users`、`/admin/tenants`、`/admin/audit-logs` | 管理者画面（`is_admin = true` の利用者のみ） | 画面は未実装（[サービス管理者](/dev/features/admin)） |
+| `/admin`、`/admin/tenants`、`/admin/audit-logs` | 管理者ダッシュボード、テナントの管理、監査ログ（`is_admin = true` の利用者のみ） | ページなし（[サービス管理者](/dev/features/admin)） |
 
 テナント直下のルートと `/signin` などの固定ルートは同じ階層にある。`display_id` に予約語の検査は無いので、固定ルートと同じ名前のテナントを作ると、そのテナントのホームと固定ルートが同じ URL になる。
 
