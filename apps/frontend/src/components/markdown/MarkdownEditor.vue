@@ -54,6 +54,11 @@ const props = withDefaults(
     candidates?: readonly MentionCandidate[];
     /** 本文に出る印の id から引ける表示情報（API の `mentions`）。`candidates` を渡した時だけ使う */
     mentions?: MentionTable;
+    /**
+     * 見た目。`outlined` は枠・影・フォーカスのリング付き（既定）、`plain` は枠なしで本文の左右の余白も
+     * 持たない（タイトルなど周りの文字の左端に揃える）。マウント時に 1 回だけ読み、途中で切り替えても反映しない
+     */
+    variant?: 'outlined' | 'plain';
   }>(),
   {
     placeholder: '',
@@ -62,6 +67,7 @@ const props = withDefaults(
     ariaLabel: undefined,
     candidates: undefined,
     mentions: () => ({}),
+    variant: 'outlined',
   },
 );
 
@@ -124,32 +130,38 @@ function inCode(state: EditorState, pos: number): boolean {
 }
 
 /** 器 (Tailwind) に配色と枠を任せ、CodeMirror 側は寸法と余白だけ持つ */
-const theme = EditorView.theme({
-  // 器 (min-h-*) いっぱいに広がるよう高さを引き取る。器は grid なので子は既定で伸びるが、
-  // cm-editor 自身が内容高で止まらないように height を明示する。`&` は候補の箱の器（dialog 直下に
-  // CodeMirror が作る空の div）にも当たるので、高さは .cm-editor だけに与える（TASK-505）
-  '&.cm-editor': { height: '100%' },
-  '&': { backgroundColor: 'transparent', color: 'inherit', fontSize: 'inherit' },
-  '&.cm-focused': { outline: 'none' },
-  '.cm-content': {
-    padding: '0.5rem 0.75rem',
-    fontFamily: 'var(--font-mono, ui-monospace, monospace)',
-    caretColor: 'var(--foreground)',
-  },
-  '.cm-line': { padding: '0' },
-  '.cm-scroller': { lineHeight: '1.6', overflow: 'auto' },
-  '.cm-placeholder': { color: 'var(--muted-foreground)' },
-  '&.cm-editor .cm-selectionBackground, & .cm-selectionBackground': {
-    backgroundColor: 'color-mix(in oklab, var(--primary) 25%, transparent)',
-  },
-  '&.cm-focused .cm-cursor': { borderLeftColor: 'var(--foreground)' },
-  // 候補の箱は編集器の外（body か dialog）に置くので、器の字の大きさ（text-base、md 以上は text-sm）を
-  // 引き継がない。編集器の中に置いていた時と同じ大きさを、ここで与える
-  '.cm-tooltip.cm-tooltip-autocomplete': { fontSize: '1rem', lineHeight: '1.5rem' },
-  '@media (min-width: 48rem)': {
-    '.cm-tooltip.cm-tooltip-autocomplete': { fontSize: '0.875rem', lineHeight: '1.25rem' },
-  },
-});
+function editorTheme(plain: boolean) {
+  return EditorView.theme({
+    // 器 (min-h-*) いっぱいに広がるよう高さを引き取る。器は grid なので子は既定で伸びるが、
+    // cm-editor 自身が内容高で止まらないように height を明示する。`&` は候補の箱の器（dialog 直下に
+    // CodeMirror が作る空の div）にも当たるので、高さは .cm-editor だけに与える（TASK-505）
+    '&.cm-editor': { height: '100%' },
+    '&': { backgroundColor: 'transparent', color: 'inherit', fontSize: 'inherit' },
+    '&.cm-focused': { outline: 'none' },
+    '.cm-content': {
+      padding: plain ? '0.25rem 0' : '0.5rem 0.75rem',
+      fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+      caretColor: 'var(--foreground)',
+    },
+    '.cm-line': { padding: '0' },
+    '.cm-scroller': { lineHeight: '1.6', overflow: 'auto' },
+    '.cm-placeholder': { color: 'var(--muted-foreground)' },
+    '&.cm-editor .cm-selectionBackground, & .cm-selectionBackground': {
+      backgroundColor: 'color-mix(in oklab, var(--primary) 25%, transparent)',
+    },
+    '&.cm-focused .cm-cursor': { borderLeftColor: 'var(--foreground)' },
+    // 候補の箱は編集器の外（body か dialog）に置くので、器の字の大きさ（text-base、md 以上は text-sm）を
+    // 引き継がない。編集器の中に置いていた時と同じ大きさを、ここで与える
+    '.cm-tooltip.cm-tooltip-autocomplete': { fontSize: '1rem', lineHeight: '1.5rem' },
+    '@media (min-width: 48rem)': {
+      '.cm-tooltip.cm-tooltip-autocomplete': { fontSize: '0.875rem', lineHeight: '1.25rem' },
+    },
+  });
+}
+
+/** 枠・影・リングを付ける（`outlined` のときだけ）。完成した文字列で書き、Tailwind に拾わせる */
+const OUTLINED_CLASS =
+  'border-input focus-within:border-ring focus-within:ring-ring/50 dark:bg-input/30 overflow-hidden rounded-md border shadow-xs transition-[color,box-shadow] focus-within:ring-[3px]';
 
 /**
  * 字下げが意味を持つ文脈 (リスト項目・コードブロック・引用) にカーソルがあるか。
@@ -243,7 +255,7 @@ function extensions(): Extension[] {
     markdown({ base: markdownLanguage }),
     syntaxHighlighting(highlightStyle),
     EditorView.lineWrapping,
-    theme,
+    editorTheme(props.variant === 'plain'),
     EditorState.readOnly.of(props.disabled),
     EditorView.editable.of(!props.disabled),
     ...(props.placeholder ? [placeholderExt(props.placeholder)] : []),
@@ -336,7 +348,12 @@ defineExpose({ focus, openMentionPicker });
   <div
     ref="host"
     data-markdown-editor
-    class="border-input focus-within:border-ring focus-within:ring-ring/50 dark:bg-input/30 grid w-full overflow-hidden rounded-md border bg-transparent text-base shadow-xs transition-[color,box-shadow] focus-within:ring-[3px] md:text-sm"
-    :class="[minHeightClass, disabled ? 'cursor-not-allowed opacity-50' : '']"
+    :data-variant="variant"
+    class="grid w-full bg-transparent text-base md:text-sm"
+    :class="[
+      variant === 'plain' ? '' : OUTLINED_CLASS,
+      minHeightClass,
+      disabled ? 'cursor-not-allowed opacity-50' : '',
+    ]"
   />
 </template>

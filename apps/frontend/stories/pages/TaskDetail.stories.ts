@@ -1626,18 +1626,20 @@ export const CommentsKfmRendered: Story = {
     );
     // コメントの見出しは説明文（h1 は 2em）より詰める: 14px の器の 1.25em で 20px を超えぬ
     await expect(parseFloat(getComputedStyle(heading).fontSize)).toBeLessThanOrEqual(20);
-    await expect(body.querySelector('.kfm-mention-self')).not.toBeNull();
+    await expect(body.querySelector('.koyori-mention-self')).not.toBeNull();
     // 全画面でも、いま入れる者の札はプロフィールへの link になる（分割ビューと同じ）。
     // 外の者と退会済みの札は link にしない。
-    await expect(body.querySelector('.kfm-mention-self')?.tagName).toBe('A');
-    await expect(body.querySelector('.kfm-mention-self')).toHaveAttribute(
+    await expect(body.querySelector('.koyori-mention-self')?.tagName).toBe('A');
+    await expect(body.querySelector('.koyori-mention-self')).toHaveAttribute(
       'href',
       `/tenant-123/users/${mockUsers.alpha.id}`,
     );
-    await expect(body.querySelector('.kfm-mention-outside')?.tagName).toBe('SPAN');
-    await expect(body.querySelector('.kfm-mention-gone')?.tagName).toBe('SPAN');
-    await expect(body.querySelector('.kfm-mention-outside')?.textContent).toBe('@プロジェクト外');
-    await expect(body.querySelector('.kfm-mention-gone')?.textContent).toBe('@退会済み');
+    await expect(body.querySelector('.koyori-mention-outside')?.tagName).toBe('SPAN');
+    await expect(body.querySelector('.koyori-mention-gone')?.tagName).toBe('SPAN');
+    await expect(body.querySelector('.koyori-mention-outside')?.textContent).toBe(
+      '@プロジェクト外',
+    );
+    await expect(body.querySelector('.koyori-mention-gone')?.textContent).toBe('@退会済み');
     // 生の HTML は要素にならず、字として見える
     await expect(body.querySelector('script')).toBeNull();
     await expect(body.textContent).toContain('<script>alert(1)</script>');

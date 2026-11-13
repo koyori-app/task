@@ -1,7 +1,7 @@
 ---
 title: URL
 description: フロントエンドの URL と識別子、それを定義する Vike のページファイルの対応
-updated: 2026-11-04
+updated: 2026-11-11
 sidebar:
   order: 1
 ---
@@ -80,7 +80,6 @@ sidebar:
 | `/{tenant}/projects/{key}/tasks/{KEY-N}` | タスク詳細 |
 | `/{tenant}/projects/{key}/docs` | ドキュメント一覧（[Drive](/dev/features/drive)のドキュメント画面）。`?q=` でタイトル検索 |
 | `/{tenant}/projects/{key}/docs/{file_id}` | ドキュメント詳細。`{file_id}` は Drive ファイルの UUID。`?edit=1` で編集モード |
-| `/{tenant}/projects/{key}/labels` | ラベル管理 |
 | `/{tenant}/projects/{key}/settings` | プロジェクト設定。メンバー管理もこの画面の節である |
 | `/{tenant}/projects/{key}/reviews` | [レビュー指摘](/dev/features/review-findings)の画面。`?pr=618`、`?round=`、`?severity=`、`?state=`、`?finding=`、`?mine=1`、`?page=` を持つ |
 
@@ -114,7 +113,6 @@ sidebar:
 | `/{tenant}/projects/{key}/tasks/{KEY-N}` | `@tenant/projects/@projectKey/tasks/@taskId/+Page.vue` |
 | `/{tenant}/projects/{key}/docs` | `@tenant/projects/@projectKey/docs/+Page.vue` |
 | `/{tenant}/projects/{key}/docs/{file_id}` | `@tenant/projects/@projectKey/docs/@fileId/+Page.vue` |
-| `/{tenant}/projects/{key}/labels` | `@tenant/projects/@projectKey/labels/+Page.vue` |
 | `/{tenant}/projects/{key}/settings` | `@tenant/projects/@projectKey/settings/+Page.vue` |
 | `/{tenant}/projects/{key}/reviews` | `@tenant/projects/@projectKey/reviews/+Page.vue` |
 | （エラー） | `_error/+Page.vue` |
@@ -134,12 +132,13 @@ URL を持たないファイルは次のとおりである。
 
 ## 移行済みの URL
 
-仮ページの `/labels` と `/tasks` はプロジェクトスコープへ移行済みで、ページは残っていない。
+仮ページの `/labels` と `/tasks` はプロジェクトスコープへ移した。その後、プロジェクト配下の表示専用のラベルページは削除した（ラベルの管理は設定のラベル節にある）。いずれもページは残っておらず、転送はしない。
 
 | 旧 URL | 移行先 |
 |--------|--------|
-| `/labels` | `/{tenant}/projects/{key}/labels` |
+| `/labels` | `/{tenant}/projects/{key}/settings?section=labels` |
 | `/tasks` | `/{tenant}/projects/{key}/tasks` |
+| `/{tenant}/projects/{key}/labels` | `/{tenant}/projects/{key}/settings?section=labels` |
 
 ## 未実装と既知の制限
 
@@ -168,3 +167,4 @@ URL を持たないファイルは次のとおりである。
 | 2026-05-31 | 管理者ページは `/admin/*` に分離する | `is_admin` フラグで保護し、テナントスコープから独立させる |
 | 2026-08-19 | アカウント設定は `/settings/*` に分離する | テナントに紐づかない |
 | 2026-11-04 | パスワードリセットの URL を `/forgot-password` と `/reset-password` の二つに分けず、`/auth/reset-password` の一つにまとめる | 記録なし（日付は不明） |
+| 2026-11-11 | プロジェクト配下の `/labels` ページを消し、転送は置かない | 表示専用でラベル管理は設定の節に重複していた。ページへの導線はサイドバーだけで、既存の `/labels` `/tasks` の廃止と同じく転送を持たない |

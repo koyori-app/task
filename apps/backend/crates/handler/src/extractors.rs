@@ -451,6 +451,14 @@ async fn authenticate(parts: &mut Parts, state: &AppState) -> Result<AuthUser, A
         if user.is_bot() && user.bot_tenant_id != Some(record.tenant_id) {
             return Err(AuthError::Forbidden);
         }
+        let allowed_project_ids = match record.allowed_project_ids.as_ref() {
+            None => None,
+            Some(v) => entity::personal_tokens::parse_allowed_project_ids(v).map_err(|e| {
+                AuthError::Internal(anyhow::anyhow!("allowed_project_ids parse error: {e}"))
+            })?,
+        };
+        // すべての拒否を通った認証成功だけを使用として記録する（認可の 403 は使用に含む）
+        service::auth::record_personal_token_use(&state.db, &record).await?;
         Ok(AuthUser {
             user_id: record.user_id,
             username: user.username,
@@ -458,16 +466,7 @@ async fn authenticate(parts: &mut Parts, state: &AppState) -> Result<AuthUser, A
                 token_id: record.id,
                 token_name: record.name,
                 tenant_id: record.tenant_id,
-                allowed_project_ids: match record.allowed_project_ids.as_ref() {
-                    None => None,
-                    Some(v) => {
-                        entity::personal_tokens::parse_allowed_project_ids(v).map_err(|e| {
-                            AuthError::Internal(anyhow::anyhow!(
-                                "allowed_project_ids parse error: {e}"
-                            ))
-                        })?
-                    }
-                },
+                allowed_project_ids,
                 scopes: record.scopes,
                 expires_at: record.expires_at,
             },

@@ -120,6 +120,12 @@ pub enum ProjectsCommand {
         #[arg(long)]
         project: String,
     },
+    /// List the labels a project's tasks can have (name, color, description)
+    Labels {
+        /// Project key or UUID
+        #[arg(long)]
+        project: String,
+    },
     /// Show a project by key or UUID
     Show {
         /// Project key or UUID

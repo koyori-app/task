@@ -12,6 +12,7 @@ const task: TaskDetail = {
   created_at: '2026-07-16T00:00:00Z',
   custom_field_values: [],
   reactions: [],
+  attachments: [],
   id: 'task-id',
   is_archived: false,
   labels: [],
@@ -80,6 +81,7 @@ vi.mock('@/composables/useTaskDetail', () => ({
 }));
 
 import TaskDetailPane from '../TaskDetailPane.vue';
+import TaskBlockingPanel from '../TaskBlockingPanel.vue';
 import TaskSubtaskPanel from '../TaskSubtaskPanel.vue';
 
 enableAutoUnmount(afterEach);
@@ -161,6 +163,12 @@ describe('TaskDetailPane', () => {
     const wrapper = mountPane();
     wrapper.getComponent(TaskSubtaskPanel).vm.$emit('change-parent', 'parent-id');
     expect(onChangeParent).toHaveBeenCalledWith('parent-id');
+  });
+
+  it('ブロック関係欄で開いたタスクを open-task として emit する', () => {
+    const wrapper = mountPane();
+    wrapper.getComponent(TaskBlockingPanel).vm.$emit('open', { id: 'other-id' });
+    expect(wrapper.emitted('open-task')?.[0]).toEqual([{ id: 'other-id' }]);
   });
 
   /*

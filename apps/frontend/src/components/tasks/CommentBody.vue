@@ -9,7 +9,6 @@ import '@/lib/remark-koyori-alerts/style.css';
 import '@/lib/rehype-starry-night/style.css';
 import '@/lib/rehype-kfm-code/style.css';
 import '@/lib/remark-kfm-mermaid/style.css';
-import '@/lib/remark-kfm-mention/style.css';
 
 /**
  * コメント本文の唯一の描画境界。

@@ -78,19 +78,70 @@ function postedRequest() {
     .find((request) => request.method === 'POST') as Request;
 }
 
-/** 日付欄のカレンダーを開いて日を選ぶ（カレンダーは preview が固定した今日の月で開く） */
+type User = ReturnType<typeof userEvent.setup>;
+type Canvas = ReturnType<typeof within>;
+
+const DATE_PANEL = '[role="dialog"][aria-label="日付"]';
+
+/** 日付チップのパネルを開き、行を選んで日を押す（カレンダーは preview が固定した今日の月で開く） */
 async function pickDate(
-  user: ReturnType<typeof userEvent.setup>,
-  trigger: HTMLElement,
+  user: User,
+  canvas: Canvas,
+  field: 'plannedStartOn' | 'softDeadline' | 'hardDeadline',
   date: string,
 ) {
-  await user.click(trigger);
+  const doc = document;
+  if (!doc.querySelector(DATE_PANEL))
+    await user.click(canvas.getByRole('button', { name: /^日付/ }));
+  const row = await waitFor(() => {
+    const el = doc.querySelector<HTMLElement>(`[data-date-field="${field}"]`);
+    if (!el) throw new Error(`${field} の行がまだ出ていない`);
+    return el;
+  });
+  await user.click(row);
   const day = await waitFor(() => {
-    const cell = trigger.ownerDocument.querySelector<HTMLElement>(`[data-date="${date}"]`);
+    const cell = doc.querySelector<HTMLElement>(`[data-date="${date}"]`);
     if (!cell) throw new Error(`${date} がカレンダーに無い`);
     return cell;
   });
   await user.click(day);
+}
+
+/** 似ているタスクの候補（タイトルを入力すると出る） */
+const similarTasks = [
+  { id: 'task-7', seq_id: 7, title: 'ログイン画面の修正', score: 0.62 },
+  { id: 'task-12', seq_id: 12, title: 'ログインフォームの文言を直す', score: 0.5 },
+];
+
+/** 開いたあと、全項目を入力する。日付のパネルと一覧は閉じた状態で終える */
+async function fillAll(canvas: Canvas, user: User) {
+  const titleInput = await canvas.findByLabelText(/タイトル/);
+  await user.type(titleInput, 'ログイン画面のエラー表示を直す');
+  await user.type(
+    canvas.getByLabelText('説明'),
+    '概要{Enter}- 入力欄の下に出す{Enter}文言を揃える',
+  );
+
+  await user.click(canvas.getByRole('button', { name: /^優先度/ }));
+  await user.click(await canvas.findByRole('option', { name: '高' }));
+
+  await user.click(canvas.getByRole('button', { name: /^担当者/ }));
+  await user.click(await canvas.findByRole('option', { name: 'yupix' }));
+  await user.click(titleInput);
+
+  await user.click(canvas.getByRole('button', { name: /^ラベル/ }));
+  await user.click(await canvas.findByRole('menuitemcheckbox', { name: 'bug' }));
+  await user.click(await canvas.findByRole('menuitemcheckbox', { name: 'feature' }));
+  await user.click(titleInput);
+
+  await pickDate(user, canvas, 'plannedStartOn', '2026-07-13');
+  await pickDate(user, canvas, 'softDeadline', '2026-07-15');
+  await pickDate(user, canvas, 'hardDeadline', '2026-07-31');
+  await user.click(titleInput);
+  await waitFor(() => expect(document.querySelector(DATE_PANEL)).toBeNull());
+
+  await user.type(canvas.getByLabelText('見積もり'), '90');
+  await user.type(canvas.getByLabelText('進捗率'), '30');
 }
 
 let invalidateQueriesSpy: ReturnType<typeof fn>;
@@ -113,12 +164,12 @@ function decorator() {
   });
 }
 
-function mockCreate(status = 201) {
+function mockCreate(status = 201, similar: typeof similarTasks = []) {
   const originalFetch = globalThis.fetch;
   const fetchSpy = fn(async (request: RequestInfo | URL) =>
-    // タイトル入力中に似ているタスク（GET）も問い合わせる。候補は 0 件で返す
+    // タイトル入力中に似ているタスク（GET）も問い合わせる。既定は 0 件で返す
     (request as Request).method === 'GET'
-      ? new Response(JSON.stringify({ tasks: [] }), {
+      ? new Response(JSON.stringify({ tasks: similar }), {
           headers: { 'Content-Type': 'application/json' },
         })
       : new Response(JSON.stringify(status === 201 ? createdTask : { message: 'server error' }), {
@@ -162,12 +213,144 @@ export const Default: Story = {
     await expect(canvas.findByRole('dialog', { name: '新規タスク' })).resolves.toBeInTheDocument();
     await expect(canvas.getByLabelText(/タイトル/)).toBeInTheDocument();
     await expect(canvas.getByRole('button', { name: /^ステータス/ })).toHaveTextContent('Backlog');
-    // 右列の選択欄は未設定を薄い文字で出す
-    await expect(canvas.getByRole('button', { name: /^担当者/ })).toHaveTextContent('未割り当て');
-    await expect(canvas.getByRole('button', { name: /^ラベル/ })).toHaveTextContent('ラベルなし');
+    // チップ列は未設定を項目名で出す
+    await expect(canvas.getByRole('button', { name: /^担当者/ })).toHaveTextContent('担当者');
+    await expect(canvas.getByRole('button', { name: /^ラベル/ })).toHaveTextContent('ラベル');
+    await expect(canvas.getByRole('button', { name: /^日付/ })).toHaveTextContent('日付');
+    await expect(canvas.getByLabelText('見積もり').closest('label')).toHaveTextContent('見積');
+    await expect(canvas.getByLabelText('進捗率').closest('label')).toHaveTextContent('進捗');
     // 説明欄の CodeMirror が候補の器を dialog 直下に置いても、dialog 自体はスクロールしない（TASK-505）
     const dialog = canvasElement.ownerDocument.querySelector('dialog[open]')!;
     await waitFor(() => expect(dialog.scrollHeight).toBe(dialog.clientHeight));
+  },
+};
+
+/** 全項目を入力した状態（似ているタスクの囲みも出す） */
+export const Filled: Story = {
+  beforeEach() {
+    const mock = mockCreate(201, similarTasks);
+    return mock.restore;
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const user = userEvent.setup();
+    await fillAll(canvas, user);
+    await expect(canvas.getByRole('button', { name: /^優先度/ })).toHaveTextContent('高');
+    await expect(canvas.getByRole('button', { name: /^担当者/ })).toHaveTextContent('yupix');
+    await expect(canvas.getByRole('button', { name: /^日付/ })).toHaveTextContent('7/13');
+    await expect(canvas.getByRole('button', { name: /^日付/ })).toHaveTextContent('7/31');
+    await waitFor(() =>
+      expect(canvasElement.ownerDocument.querySelector('[data-similar-tasks]')).not.toBeNull(),
+    );
+  },
+};
+
+/** 日付のパネルを開いたまま（期限の行が選択中。× とカレンダーが見える） */
+export const DateMenuOpen: Story = {
+  beforeEach() {
+    const mock = mockCreate(201, similarTasks);
+    return mock.restore;
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const user = userEvent.setup();
+    await fillAll(canvas, user);
+    await user.click(canvas.getByRole('button', { name: /^日付/ }));
+    await waitFor(() =>
+      expect(canvasElement.ownerDocument.querySelector(DATE_PANEL)).not.toBeNull(),
+    );
+    await expect(canvas.getByRole('button', { name: '期限を消す' })).toBeInTheDocument();
+  },
+};
+
+/**
+ * 日付を設定して × で消したあとの Esc は、パネルだけ閉じてダイアログを閉じない。
+ * × は消すと DOM から外れるので、フォーカスが body に落ちると Esc がパネルを通らず dialog の cancel になる。
+ * user-event の Esc は合成で cancel を起こさないため、フォーカスがパネルの中に残り、Esc でパネルが閉じることで見る
+ */
+export const DateClearThenEscape: Story = {
+  beforeEach() {
+    openChangeSpy.mockClear();
+    const mock = mockCreate();
+    return mock.restore;
+  },
+  play: async ({ canvasElement }) => {
+    const doc = canvasElement.ownerDocument;
+    const canvas = within(doc.body);
+    const user = userEvent.setup();
+    await canvas.findByLabelText(/タイトル/);
+    await pickDate(user, canvas, 'softDeadline', '2026-07-15');
+    // 日を選んだあとも、フォーカスはパネルの中に残る
+    await waitFor(() =>
+      expect(doc.querySelector(DATE_PANEL)!.contains(doc.activeElement)).toBe(true),
+    );
+
+    await user.click(canvas.getByRole('button', { name: '期限を消す' }));
+    await waitFor(() => expect(canvas.queryByRole('button', { name: '期限を消す' })).toBeNull());
+    await expect(doc.activeElement).toBe(doc.querySelector('[data-date-field="softDeadline"]'));
+
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(doc.querySelector(DATE_PANEL)).toBeNull());
+    await expect(openChangeSpy).not.toHaveBeenCalled();
+    // 日付チップへ戻る
+    await expect(doc.activeElement).toBe(canvas.getByRole('button', { name: /^日付/ }));
+  },
+};
+
+/** 優先度のメニューを開いたまま（色の旗と、選択中のチェック印） */
+export const PriorityMenuOpen: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const user = userEvent.setup();
+    await user.click(await canvas.findByRole('button', { name: /^優先度/ }));
+    await expect(await canvas.findByRole('option', { name: '中' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    // 各行に優先度の色の旗が出る（引き金のチップと同じ旗。行の名前には混ざらない）
+    const high = await canvas.findByRole('option', { name: '高' });
+    // 行の中は「旗 → label → チェック印」の順で、最初の装飾の svg が旗。
+    // 高の色（PRIORITY_CONFIG の #f97316）。style.color は rgb に正規化されて返る
+    const flag = high.querySelector<SVGElement>('svg[aria-hidden="true"]');
+    await expect(flag?.style.color).toBe('rgb(249, 115, 22)');
+  },
+};
+
+/** 幅 390px。本文だけがスクロールし、チップ列とフッターは下に留まる */
+export const Narrow390: Story = {
+  beforeEach() {
+    const mock = mockCreate();
+    return mock.restore;
+  },
+  parameters: {
+    viewport: {
+      options: { narrow390: { name: '390', styles: { width: '390px', height: '844px' } } },
+    },
+  },
+  globals: { viewport: { value: 'narrow390', isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const user = userEvent.setup();
+    await user.type(await canvas.findByLabelText(/タイトル/), 'ログイン画面のエラー表示を直す');
+    await user.click(canvas.getByLabelText('説明'));
+    for (let i = 1; i <= 30; i += 1) {
+      // 先頭の「- 」は Enter で次の行に引き継がれる
+      await user.keyboard(`${i === 1 ? '- ' : ''}手順 ${i}: 入力欄の下にエラーを出す{Enter}`);
+    }
+    const doc = canvasElement.ownerDocument;
+    const chips = doc.querySelector<HTMLElement>('[data-task-chips]')!;
+    const submit = canvas.getByRole('button', { name: '作成' });
+    // 説明が長くても、チップ列とフッターは画面の中に残る
+    await waitFor(() => {
+      for (const el of [chips, submit]) {
+        if (el.getBoundingClientRect().bottom > window.innerHeight) {
+          throw new Error('チップ列かフッターが画面の外に出ている');
+        }
+      }
+    });
+    // 説明の冒頭はスクロールの中なので、本文の領域は内容より低い
+    const body = chips.parentElement!.previousElementSibling as HTMLElement;
+    await expect(body.scrollHeight).toBeGreaterThan(body.clientHeight);
   },
 };
 
@@ -182,9 +365,10 @@ export const Success201: Story = {
     const user = userEvent.setup();
     await user.type(await canvas.findByLabelText(/タイトル/), '  新しいタスク  ');
     await user.type(canvas.getByLabelText('説明'), 'Storybook から作成');
-    await pickDate(user, canvas.getByRole('button', { name: /^期限/ }), '2026-07-15');
-    await pickDate(user, canvas.getByRole('button', { name: /^最終期限/ }), '2026-07-31');
+    await pickDate(user, canvas, 'softDeadline', '2026-07-15');
+    await pickDate(user, canvas, 'hardDeadline', '2026-07-31');
     await user.type(canvas.getByLabelText('見積もり'), '90');
+    await user.type(canvas.getByLabelText('進捗率'), '30');
     await user.click(canvas.getByRole('button', { name: /^優先度/ }));
     await user.click(await canvas.findByRole('option', { name: '高' }));
     const submit = await canvas.findByRole('button', { name: '作成' });
@@ -204,6 +388,7 @@ export const Success201: Story = {
       priority: 'High',
       soft_deadline: '2026-07-15T00:00:00.000Z',
       estimated_minutes: 90,
+      progress_pct: 30,
       hard_deadline: '2026-07-31T00:00:00.000Z',
     });
     await expect(invalidateQueriesSpy).toHaveBeenCalledWith({
