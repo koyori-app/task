@@ -3,9 +3,34 @@ import type { ReviewedPullRequest } from '@/lib/review-findings';
 
 type OAuthConnectionItem = components['schemas']['OAuthConnectionItem'];
 
-/** PR 一覧の状態（ホスト上の PR の状態）の絞り込み。`all` は絞らない。 */
+/** PR 一覧の状態（ホスト上の PR の状態）の絞り込み。`all` は絞らない。既定は `open`。 */
 export const PR_STATE_FILTERS = ['all', 'open', 'merged', 'closed', 'unknown'] as const;
 export type PrStateFilter = (typeof PR_STATE_FILTERS)[number];
+
+/** 開いた直後の「PR の状態」。 */
+export const DEFAULT_PR_STATE_FILTER: PrStateFilter = 'open';
+
+/**
+ * 開いた直後の「PR の状態」。既定は Open だけだが、Open の PR が 1 件も無い一覧
+ * （全件マージ済み、webhook を受けておらず全件 `unknown` の CLI 運用など）では
+ * 空の一覧を見せず「すべて」で開く。
+ *
+ * 状態の絞り込みは URL に載らないので、URL の `page`（`urlPage`）が Open の一覧には無く
+ * 「すべて」の一覧なら在るときは、「すべて」でページを送った URL とみなして「すべて」で開く。
+ * 作成者の絞り込み（`mine`）は連携一覧を待つため、ここでは数えない。
+ */
+export function initialPrStateFilter(
+  list: readonly ReviewedPullRequest[],
+  urlPage: number | null = null,
+): PrStateFilter {
+  if (list.length === 0) return DEFAULT_PR_STATE_FILTER;
+  const openCount = list.filter((pr) => pr.state === DEFAULT_PR_STATE_FILTER).length;
+  if (openCount === 0) return 'all';
+  if (urlPage !== null && urlPage > pageCount(openCount) && urlPage <= pageCount(list.length)) {
+    return 'all';
+  }
+  return DEFAULT_PR_STATE_FILTER;
+}
 
 /** PR 一覧の 1 ページの件数。 */
 export const PR_PAGE_SIZE = 10;
