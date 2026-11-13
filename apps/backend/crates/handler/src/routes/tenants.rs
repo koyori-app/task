@@ -110,6 +110,8 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::tasks::add_assignee))
                         .routes(routes!(crate::handlers::tasks::update_assignee))
                         .routes(routes!(crate::handlers::tasks::remove_assignee))
+                        .routes(routes!(crate::handlers::tasks::complete_assignee))
+                        .routes(routes!(crate::handlers::tasks::reopen_assignee))
                         .routes(routes!(crate::handlers::tasks::list_relations))
                         .routes(routes!(crate::handlers::tasks::add_relation))
                         .routes(routes!(crate::handlers::tasks::remove_relation))

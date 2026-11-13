@@ -73,6 +73,7 @@ async fn seed(
             )),
             hard_deadline: Set(None),
             planned_start_on: Set(None),
+            require_all_assignees_done: Set(false),
             estimated_minutes: Set(None),
             is_archived: Set(false),
             created_by: Set(user),
@@ -92,6 +93,7 @@ async fn seed(
         user_id: Set(user),
         role: Set("primary".into()),
         assigned_at: Set(now.into()),
+        completed_at: Set(None),
     }))
     .exec(&app.state.db)
     .await

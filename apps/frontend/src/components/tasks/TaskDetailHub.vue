@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  CheckCheck,
   CircleDashed,
   Copy,
   EllipsisVertical,
@@ -35,6 +36,7 @@ import type { components } from '@/generated/api';
 import type { EditableField, MutatingField } from '@/components/tasks/editable-field';
 import MentionHoverCard from '@/components/tasks/MentionHoverCard.vue';
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
+import TaskCompletionRule from '@/components/tasks/TaskCompletionRule.vue';
 import TaskPropertyRow from '@/components/tasks/TaskPropertyRow.vue';
 import {
   AvatarGroup,
@@ -85,6 +87,9 @@ const props = defineProps<{
   /** 担当者の更新中。ピッカーを止める（止めないと 2 回目が無言で捨てられる） */
   assigneeUpdating?: boolean;
   assigneeError?: string | null;
+  /** 完了条件（担当者ごとの完了）の更新中。切り替えと自分の分の操作を止める */
+  completionUpdating?: boolean;
+  completionError?: string | null;
   /** 候補の取得状態。取得中・失敗を「候補 0 人」と混ぜない */
   membersState?: { loading?: boolean; error?: boolean; onRetry?: () => void };
   /** 担当者のプロフィール画面の URL。渡すと担当者名をリンクで並べる */
@@ -153,6 +158,9 @@ const emit = defineEmits<{
   'save:hard_deadline': [value: string | null];
   'save:label_ids': [value: string[]];
   'toggle:assignee': [userId: string, checked: boolean];
+  'update:require-all': [value: boolean];
+  'complete:mine': [];
+  'reopen:mine': [];
   'delete-request': [];
 }>();
 
@@ -175,7 +183,7 @@ const statusItems = computed<DropdownItem[]>(() =>
     label: status.name,
     kind: 'radio',
     checked: status.id === props.statusId,
-    disabled: props.statusUpdating,
+    disabled: props.statusUpdating || (doneBlocked.value && status.is_done_state),
   })),
 );
 
@@ -187,6 +195,17 @@ const priorityItems = computed<DropdownItem[]>(() =>
     checked: value === props.task?.priority,
     disabled: props.priorityUpdating,
   })),
+);
+
+/**
+ * 担当者全員の完了が必要なタスクで、未完了の担当者が残っている間は完了へ直接移せない
+ * （backend が 409 で止める）。移せないボタンは出さず、メニューの項目は無効にする。
+ */
+const doneBlocked = computed(
+  () =>
+    !!props.task?.require_all_assignees_done &&
+    props.task.assignees.some((assignee) => !assignee.completed_at) &&
+    !resolvedStatus.value?.is_done_state,
 );
 
 /** 「完了にする」の移動先。既定の完了に印が無ければ並び順で最初の完了へ倒す。 */
@@ -678,7 +697,7 @@ function clearDescription() {
                         class="inline-flex h-7 items-center rounded-r border-l border-background/60 px-1.5 hover:bg-muted-foreground/10 disabled:opacity-50"
                         :aria-label="`${nextStatus.name} にする`"
                         :title="`次へ: ${nextStatus.name}`"
-                        :disabled="statusUpdating"
+                        :disabled="statusUpdating || (nextStatus.is_done_state && doneBlocked)"
                         @click="emit('update:statusId', nextStatus.id)"
                       >
                         <ChevronRight class="size-3.5 opacity-70" aria-hidden="true" />
@@ -687,7 +706,7 @@ function clearDescription() {
 
                     <!-- ✓ は完了扱いのステータスへ一手で移す -->
                     <Button
-                      v-if="doneStatus && doneStatus.id !== statusId"
+                      v-if="doneStatus && doneStatus.id !== statusId && !doneBlocked"
                       type="button"
                       variant="ghost"
                       :ariaLabel="`${doneStatus.name} にする（完了）`"
@@ -1022,6 +1041,19 @@ function clearDescription() {
                   <p v-if="assigneeError" class="mt-1 text-xs text-destructive">
                     {{ assigneeError }}
                   </p>
+                </TaskPropertyRow>
+
+                <TaskPropertyRow label="完了条件" :icon="CheckCheck">
+                  <TaskCompletionRule
+                    :task="task"
+                    :current-user-id="currentUserId"
+                    :task-done="!!resolvedStatus?.is_done_state"
+                    :updating="completionUpdating"
+                    :error="completionError"
+                    @update:require-all="(value) => emit('update:require-all', value)"
+                    @complete="emit('complete:mine')"
+                    @reopen="emit('reopen:mine')"
+                  />
                 </TaskPropertyRow>
 
                 <TaskPropertyRow label="優先度" :icon="Flag">
