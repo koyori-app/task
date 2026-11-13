@@ -50,6 +50,37 @@ export const ExperimentsShown: Story = {
   },
 };
 
+/** タスク一覧でサブタスクを最初から展開する設定。既定は無効で、有効にした値は mount の後に出る。 */
+export const ExpandSubtasksInList: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const toggle = await canvas.findByRole('switch', {
+      name: 'タスク一覧でサブタスクを最初から展開する',
+    });
+    await waitFor(() => expect(toggle).toBeEnabled());
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await expect(
+      canvas.getByText(/List 表示で、親タスクの行の下にサブタスクを開いた状態で出します/),
+    ).toBeInTheDocument();
+    await userEvent.click(toggle);
+    await expect(toggle).toHaveAttribute('aria-checked', 'true');
+  },
+};
+
+export const ExpandSubtasksInListEnabled: Story = {
+  beforeEach: () => {
+    setActivePinia(createPinia());
+    usePreferencesStore().set('expandSubtasksInList', true);
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const toggle = await canvas.findByRole('switch', {
+      name: 'タスク一覧でサブタスクを最初から展開する',
+    });
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'true'));
+  },
+};
+
 /** 表示を無効にしたまま有効のフラグが残る時は、働き続けていることを画面で知らせる。 */
 export const HiddenFlagStillEnabled: Story = {
   beforeEach: () => {
