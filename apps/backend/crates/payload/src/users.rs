@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::{Validate, ValidationError};
 
+use crate::or_unknown::OrUnknown;
 use crate::tenant_members::OrgProfile;
+use crate::tenants::TenantMembershipKind;
 
 /// Public user profile — excludes password_hash, sessions_revoked_at, and other secrets.
 #[derive(Debug, Clone, Serialize, ToSchema, serde::Deserialize)]
@@ -64,10 +66,17 @@ pub struct UserProfileResponse {
     /// このテナントでのチーム。未設定・客分では null
     #[schema(nullable)]
     pub team: Option<String>,
+    /// このテナントとの関わり方。オーナー・メンバー・客分（Guest）
+    #[schema(inline)]
+    pub membership: OrUnknown<TenantMembershipKind>,
 }
 
 impl UserProfileResponse {
-    pub fn from_parts(user: entity::users::Model, org: OrgProfile) -> Self {
+    pub fn from_parts(
+        user: entity::users::Model,
+        org: OrgProfile,
+        membership: TenantMembershipKind,
+    ) -> Self {
         Self {
             id: user.id,
             username: user.username,
@@ -77,6 +86,7 @@ impl UserProfileResponse {
             department: org.department,
             position: org.position,
             team: org.team,
+            membership: membership.into(),
         }
     }
 }
