@@ -219,6 +219,9 @@ export const Default: Story = {
     await expect(canvas.getByRole('button', { name: /^日付/ })).toHaveTextContent('日付');
     await expect(canvas.getByLabelText('見積もり').closest('label')).toHaveTextContent('見積');
     await expect(canvas.getByLabelText('進捗率').closest('label')).toHaveTextContent('進捗');
+    // 説明欄の CodeMirror が候補の器を dialog 直下に置いても、dialog 自体はスクロールしない（TASK-505）
+    const dialog = canvasElement.ownerDocument.querySelector('dialog[open]')!;
+    await waitFor(() => expect(dialog.scrollHeight).toBe(dialog.clientHeight));
   },
 };
 
