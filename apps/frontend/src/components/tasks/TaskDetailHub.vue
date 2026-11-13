@@ -65,7 +65,6 @@ import '@/lib/rehype-starry-night/style.css';
 import '@/lib/rehype-kfm-code/style.css';
 import '@/lib/rehype-kfm-link-favicon/style.css';
 import '@/lib/remark-kfm-mermaid/style.css';
-import '@/lib/remark-kfm-mention/style.css';
 
 type TaskDetail = components['schemas']['TaskDetailResponse'];
 type StatusOption = components['schemas']['ProjectStatusResponse'];

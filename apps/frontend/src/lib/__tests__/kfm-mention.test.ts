@@ -1,7 +1,9 @@
 // メンションのチップ（マーカーの形、除外ノード、状態、link、アバター）
+import { MENTION_CLASS_NAMES } from '@koyori-app/ui-vue';
 import { describe, expect, it } from 'vitest';
 import type { MentionTable } from '../comment-mention';
 import { renderDescription } from '../markup-renderer';
+import { kfmMentionSanitizeSchema } from '../remark-kfm-mention';
 import { favicon } from './kfm-favicon-html';
 
 const A = '11111111-1111-4111-8111-111111111111';
@@ -21,17 +23,15 @@ const mentions: MentionTable = {
 const render = (text: string, table: MentionTable | null = mentions) =>
   renderDescription(text, table === null ? {} : { mentions: table });
 
-// 名で出る札は頭にアバター（頭文字は data-initials。画像が無ければ img は出ない）
-const chip = (status: string, label: string, initials?: string) =>
-  initials === undefined
-    ? `<span class="kfm-mention kfm-mention-${status}">${label}</span>`
-    : `<span class="kfm-mention kfm-mention-${status}"><span class="kfm-mention-avatar" data-initials="${initials}" aria-hidden="true"></span>${label}</span>`;
+// 札は `@名` を span で包んだ 1 つの要素（koyori の固定 class の形。アバターは出さない）
+const chip = (status: string, label: string) =>
+  `<span class="koyori-mention koyori-mention-${status}"><span class="koyori-mention-label">${label}</span></span>`;
 
 describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
   it('印を札にする（id は HTML に出ず、状態は class で運ぶ）', async () => {
     const html = await render(`見て <@${A}> と <@${B}> へ`);
     expect(html).toBe(
-      `<p>見て ${chip('member', '@alice', 'AL')} と ${chip('outside', '@former', 'FO')} へ</p>`,
+      `<p>見て ${chip('member', '@alice')} と ${chip('outside', '@former')} へ</p>`,
     );
     expect(html).not.toContain(A);
     expect(html).not.toContain('&lt;@');
@@ -63,13 +63,13 @@ describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
       mentions,
       currentUserId: B,
     });
-    expect(self).toContain('kfm-mention-member kfm-mention-self');
-    expect(otherViewer).not.toContain('kfm-mention-member kfm-mention-self');
+    expect(self).toContain('koyori-mention-member koyori-mention-self');
+    expect(otherViewer).not.toContain('koyori-mention-member koyori-mention-self');
     expect(self).not.toBe(otherViewer);
   });
 
   it('強調・リスト・見出しの内側でも札にする', async () => {
-    const alice = chip('member', '@alice', 'AL');
+    const alice = chip('member', '@alice');
     expect(await render(`**<@${A}>**`)).toBe(`<p><strong>${alice}</strong></p>`);
     expect(await render(`- <@${A}>`)).toContain(alice);
     expect(await render(`# <@${A}>`)).toContain(alice);
@@ -78,9 +78,9 @@ describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
   it('コードブロックとインラインコードの中の印は札にせず、現在の名前へ戻す', async () => {
     const inline = await render(`\`<@${A}>\``);
     expect(inline).toBe('<p><code>@alice</code></p>');
-    expect(inline).not.toContain('kfm-mention');
+    expect(inline).not.toContain('koyori-mention');
     const block = await render(`\`\`\`\n<@${A}>\n\`\`\``);
-    expect(block).not.toContain('kfm-mention');
+    expect(block).not.toContain('koyori-mention');
     expect(block).toContain('@alice');
     expect(block).not.toContain(A);
   });
@@ -90,7 +90,7 @@ describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
     expect(inline).toContain(
       `<a href="https://example.com">${favicon('example.com')}<strong>@alice</strong></a>`,
     );
-    expect(inline).not.toContain('kfm-mention');
+    expect(inline).not.toContain('koyori-mention');
     expect(inline).not.toContain(A);
 
     const titled = await render(`[<@${A}>](https://example.com "担当 <@${B}>")`);
@@ -138,14 +138,14 @@ describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
       '@alice さん',
       'bob@example.com',
     ]) {
-      expect(await render(text), text).not.toContain('kfm-mention');
+      expect(await render(text), text).not.toContain('koyori-mention');
     }
     expect(await render('@alice さん')).toBe('<p>@alice さん</p>');
   });
 
   it('表を渡さぬ描画は何も変えない（印は素の文字のまま。他の消費側の描き方を変えない）', async () => {
     const html = await render(`<@${A}>`, null);
-    expect(html).not.toContain('kfm-mention');
+    expect(html).not.toContain('koyori-mention');
     expect(html).toContain(A);
   });
 
@@ -153,9 +153,9 @@ describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
     const first = await render(`<@${A}>`, { [A]: { status: 'member', name: 'alice' } });
     const renamed = await render(`<@${A}>`, { [A]: { status: 'member', name: 'alice_renamed' } });
     const left = await render(`<@${A}>`, { [A]: { status: 'outside', name: 'alice' } });
-    expect(first).toContain('@alice<');
+    expect(first).toContain('@alice</span>');
     expect(renamed).toContain('@alice_renamed');
-    expect(left).toContain('kfm-mention-outside');
+    expect(left).toContain('koyori-mention-outside');
     expect(first).not.toBe(renamed);
     expect(first).not.toBe(left);
   });
@@ -167,76 +167,48 @@ describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
     expect(html).not.toContain('<img');
     expect(html).toContain('&lt;img');
   });
-  it('アバターの画像は安全な URL の時だけ img にし、alt は空（名は隣の字が担う）', async () => {
-    const html = await render(`<@${A}>`, {
-      [A]: { status: 'member', name: 'alice', avatar_url: 'https://cdn.example.com/a.png' },
-    });
-    expect(html).toBe(
-      '<p><span class="kfm-mention kfm-mention-member"><span class="kfm-mention-avatar" data-initials="AL" aria-hidden="true">' +
-        '<img src="https://cdn.example.com/a.png" alt=""></span>@alice</span></p>',
-    );
-    const local = await render(`<@${A}>`, {
-      [A]: { status: 'member', name: 'alice', avatar_url: '/v1/avatars/a.png' },
-    });
-    expect(local).toContain('<img src="/v1/avatars/a.png" alt="">');
-  });
-
-  it('危ない URL のアバターは img にせず頭文字の丸に倒す', async () => {
+  it('avatar_url を渡しても札に画像・頭文字・aria-hidden を出さない', async () => {
     for (const url of [
+      'https://cdn.example.com/a.png',
       'javascript:alert(1)',
-      'data:image/svg+xml,<svg onload=alert(1)>',
-      '//evil.example.com/a.png',
-      'avatar.png',
-      'vbscript:msgbox(1)',
+      '" onerror="alert(1)',
     ]) {
-      const html = await render(`<@${A}>`, {
+      const html = await render(`<@${A}> <@${B}>`, {
         [A]: { status: 'member', name: 'alice', avatar_url: url },
+        [B]: { status: 'outside', name: 'former', avatar_url: url },
       });
       expect(html, url).not.toContain('<img');
-      expect(html, url).toContain('data-initials="AL"');
+      expect(html, url).not.toContain('data-initials');
+      expect(html, url).not.toContain('aria-hidden');
+      expect(html, url).not.toContain('onerror');
     }
   });
 
-  it('URL や名に混ぜた字は属性の外へ出ない（img に別の属性が生えぬ）', async () => {
-    const html = await render(`<@${A}>`, {
-      [A]: {
-        status: 'member',
-        name: '"><img src=x onerror=alert(1)>',
-        avatar_url: 'https://cdn.example.com/a.png" onerror="alert(1)',
-      },
-    });
-    expect(html).not.toContain('onerror="');
-    expect(html).not.toContain('<img src=x');
-    expect(html.match(/<img /g)).toHaveLength(1);
-    expect(html).toContain('src="https://cdn.example.com/a.png%22%20onerror=%22alert(1)"');
+  it('link の札の子は字の span 1 つだけ', async () => {
+    const html = await renderDescription(`<@${A}>`, { mentions, mentionTenant: 'acme' });
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const a = doc.querySelector('a.koyori-mention');
+    expect(a).not.toBeNull();
+    expect(a?.childNodes).toHaveLength(1);
+    expect(a?.innerHTML).toBe('<span class="koyori-mention-label">@alice</span>');
   });
 
-  it('外れた者は灰色の札に灰色のアバター、名の引けぬ者と退会した者はアバター無し', async () => {
-    const html = await render(`<@${B}> <@${C}>`, {
-      [B]: { status: 'outside', name: 'former', avatar_url: 'https://cdn.example.com/b.png' },
-      [C]: { status: 'outside', name: null, avatar_url: null },
+  it('表の status が知らない値なら unknown の札（値は class に出ず、self も付かない）', async () => {
+    const html = await renderDescription(`<@${A}>`, {
+      mentions: { [A]: { status: 'bot' as never, name: 'alice' } },
+      currentUserId: A,
     });
-    expect(html).toContain(
-      '<span class="kfm-mention kfm-mention-outside"><span class="kfm-mention-avatar"',
-    );
-    expect(html).toContain('<img src="https://cdn.example.com/b.png" alt="">');
-    expect(html).toContain(chip('outside', '@（このプロジェクトの外の利用者）'));
-    expect(await render(`<@${A}>`, { [A]: { status: 'gone', name: null } })).not.toContain(
-      'kfm-mention-avatar',
-    );
-    expect(await render(`<@${A}>`, {})).not.toContain('kfm-mention-avatar');
+    expect(html).toContain('class="koyori-mention koyori-mention-unknown"');
+    expect(html).not.toContain('bot');
+    expect(html).not.toContain('koyori-mention-self');
   });
 
-  it('アイコンが替われば別の HTML（キャッシュが画像を取り違えない）', async () => {
-    const before = await render(`<@${A}>`, {
-      [A]: { status: 'member', name: 'alice', avatar_url: 'https://cdn.example.com/1.png' },
-    });
-    const after = await render(`<@${A}>`, {
-      [A]: { status: 'member', name: 'alice', avatar_url: 'https://cdn.example.com/2.png' },
-    });
-    expect(before).toContain('1.png');
-    expect(after).toContain('2.png');
+  it('許可リストは koyori の固定 class と過不足なく一致する', () => {
+    expect([...kfmMentionSanitizeSchema.classTokens].sort()).toEqual(
+      [...MENTION_CLASS_NAMES].sort(),
+    );
   });
+
   describe('札のプロフィールへの link', () => {
     const ORIGIN = 'https://task.example';
     const withTenant = (text: string, tenant: string | undefined, table: MentionTable = mentions) =>
@@ -256,7 +228,7 @@ describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
       const html = await withTenant(`見て <@${A}>`, 'acme');
       const [link] = links(html);
       expect(link.raw).toBe(`/acme/users/${A}`);
-      expect(link.className).toBe('kfm-mention kfm-mention-member');
+      expect(link.className).toBe('koyori-mention koyori-mention-member');
       expect(link.text).toBe('@alice');
       expect(link.url.origin).toBe(ORIGIN);
     });
@@ -264,7 +236,7 @@ describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
     it('テナントを渡さぬ描画は今どおり span（link にせぬ）', async () => {
       const html = await render(`<@${A}>`);
       expect(html).not.toContain('<a');
-      expect(html).toContain('<span class="kfm-mention kfm-mention-member">');
+      expect(html).toContain('<span class="koyori-mention koyori-mention-member">');
     });
 
     it('外れた者・名の引けぬ者・退会した者・表に無い者の札は link にせぬ', async () => {
@@ -273,7 +245,7 @@ describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
         [GONE_ID]: { status: 'gone', name: null },
       });
       expect(links(html)).toHaveLength(0);
-      expect(html.match(/class="kfm-mention /g)).toHaveLength(4);
+      expect(html.match(/class="koyori-mention /g)).toHaveLength(4);
     });
 
     it('字種外のテナントでは link にせず、他の scheme・他の origin へ向かう href を作らぬ', async () => {
@@ -299,13 +271,13 @@ describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
         `[<@${A}>](https://evil.example.com) <@${A}> [x](javascript:alert(1)) <@${A}>`,
         'acme',
       );
-      for (const link of links(html).filter((l) => l.className.includes('kfm-mention'))) {
+      for (const link of links(html).filter((l) => l.className.includes('koyori-mention'))) {
         expect(link.raw).toBe(`/acme/users/${A}`);
         expect(link.url.origin).toBe(ORIGIN);
         expect(link.url.protocol).toBe('https:');
       }
       // link の記法の内の印は札にせぬ（今どおり）
-      expect(links(html).filter((l) => l.className.includes('kfm-mention'))).toHaveLength(2);
+      expect(links(html).filter((l) => l.className.includes('koyori-mention'))).toHaveLength(2);
     });
 
     it('本人への札も link（self の強調を保つ）', async () => {
@@ -314,7 +286,9 @@ describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
         mentionTenant: 'acme',
         currentUserId: A,
       });
-      expect(links(html)[0].className).toBe('kfm-mention kfm-mention-member kfm-mention-self');
+      expect(links(html)[0].className).toBe(
+        'koyori-mention koyori-mention-member koyori-mention-self',
+      );
     });
 
     it('テナントが替われば別の HTML（キャッシュが link の先を取り違えない）', async () => {

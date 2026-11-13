@@ -1,23 +1,25 @@
+import { Mention } from '@koyori-app/ui-vue';
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
 import { expect, userEvent, waitFor } from 'storybook/test';
 import { ref } from 'vue';
 
 import CommentBody from '@/components/tasks/CommentBody.vue';
-import UserAvatar from '@/components/UserAvatar.vue';
 import CommentEditor from '@/components/tasks/CommentEditor.vue';
 import type { MentionTable } from '@/lib/comment-mention';
 import { renderDescription } from '@/lib/markup-renderer';
 import { KFM_CONTENT_CLASS } from '@/lib/remark-gfm/content-class';
 import '@/lib/remark-gfm/style.css';
-import '@/lib/remark-kfm-mention/style.css';
 
 /**
- * メンションの札（アバターと `@今の名` の丸い札）を、コメント・説明文（KFM）・入力欄（CodeMirror）の
- * 三つの描き手で並べる。三つは同じ一枚の CSS（`remark-kfm-mention/style.css`）を使うので、
- * 同じ状態の札は同じ見た目になる。play で次を固定する:
- * - 札に頭のアバター（画像か頭文字）と名、名の引けぬ者は定型の句だけ
- * - 灰色の札（外れた者・退会した者・名の引けぬ者）の字と地の対比が 4.5:1 以上で、縁が破線
+ * メンションの札（`@今の名`）を、コメント・説明文（KFM）・入力欄（CodeMirror）の三つの描き手で並べる。
+ * 三つは koyori の固定 class（`@koyori-app/ui-vue/style.css`）で描くので、同じ状態の札は同じ見た目になる。
+ * 札は `@名` の色の字と薄い地で、アバターは出さない。play で次を固定する:
+ * - 札にアバターが無く、字は `koyori-mention-label` の span に入る。名の引けぬ者は定型の句だけ
+ * - いま入れる者（本人を含む）の地は不透明で、字との対比が 4.5:1 以上。本人の強調はコメント・説明文だけ
+ * - 灰色の札（外れた者・退会した者・名の引けぬ者）は地なしで、破線の下線。字・下線の対比が地に対して足りる
  * - 札を含む行の高さが、札の無い行と同じ（札で行が広がらぬ）
+ * - link の札が、層の外の `.kfm-content a`（青い字・下線）に負けない
+ * - task が組む札の HTML が、koyori の `<Mention>` と同じ形・見た目になる
  * a11y の検査は todo にせず落とす。
  */
 const ME = '11111111-1111-4111-8111-111111111111';
@@ -26,7 +28,7 @@ const HANAKO = '33333333-3333-4333-8333-333333333333';
 const STRANGER = '44444444-4444-4444-8444-444444444444';
 const UNKNOWN = '55555555-5555-4555-8555-555555555555';
 
-/** 外へ出ぬ 1px の PNG（画像のある札を見せる）。 */
+/** 外へ出ぬ 1px の PNG（avatar_url を渡しても札に画像が出ないことを見る）。 */
 const IMAGE =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 
@@ -49,7 +51,7 @@ type Story = StoryObj<typeof meta>;
 
 /**
  * 色を 1px の canvas に塗って sRGB の値を読む（oklch 等の表記のままでも比べられる）。
- * 半透明の地（強調色を薄く敷いた札）は、明るい theme の画面の地（白）の上に重ねた色で比べる。
+ * 半透明の色は白に重ねた色で測る（不透明な色には効かぬ）。
  */
 function toRgb(color: string): [number, number, number] {
   const canvas = document.createElement('canvas');
@@ -78,41 +80,73 @@ function contrast(fg: string, bg: string): number {
   return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
 
-/** 三つの描き手に共通の確かめ。`root` の下の札と、札の有る行・無い行の高さを見る。 */
+/**
+ * 札の後ろの地の色。自分から祖先へたどり、最初に不透明な `backgroundColor` を持つ要素の色を返す。
+ * 見つからなければ body の色。地の無い札（灰色の 3 状態）の対比は、この色に対して測る。
+ */
+function backdrop(el: Element): string {
+  for (let node: Element | null = el.parentElement; node; node = node.parentElement) {
+    const color = getComputedStyle(node).backgroundColor;
+    const [, alpha] = /^rgba\(.*,\s*([\d.]+)\)$/.exec(color) ?? [];
+    if (color !== 'transparent' && (alpha === undefined || Number(alpha) === 1)) return color;
+  }
+  return getComputedStyle(document.body).backgroundColor;
+}
+
+/**
+ * 三つの描き手に共通の確かめ。`root` の下の札と、札の有る行・無い行の高さを見る。
+ * 本人の強調（`self`）はコメント・説明文だけで、入力欄は付けぬ。
+ */
 async function expectChips(
   root: HTMLElement,
   lines: { withChip: HTMLElement; without: HTMLElement },
+  { self }: { self: boolean },
 ): Promise<void> {
-  const chips = [...root.querySelectorAll<HTMLElement>('.kfm-mention')];
-  await expect(chips.map((chip) => chip.textContent)).toEqual([
+  const chips = [...root.querySelectorAll<HTMLElement>('.koyori-mention')];
+  const labels = [
     '@taro',
     '@aki',
     '@hanako',
     '@（このプロジェクトの外の利用者）',
     '@（不明な利用者）',
-  ]);
-  const [taro, aki, hanako, stranger, unknown] = chips;
-  // 画像のある者は img、無い者は頭文字の丸。定型の句の札はアバター無し
-  await expect(taro.querySelector('.kfm-mention-avatar img')).not.toBeNull();
-  await expect(aki.querySelector('.kfm-mention-avatar')?.getAttribute('data-initials')).toBe('AK');
-  await expect(hanako.querySelector('.kfm-mention-avatar img')).not.toBeNull();
-  await expect(stranger.querySelector('.kfm-mention-avatar')).toBeNull();
-  await expect(unknown.querySelector('.kfm-mention-avatar')).toBeNull();
-  // 外れた者のアバターは灰色
-  await expect(getComputedStyle(hanako.querySelector('.kfm-mention-avatar')!).filter).toContain(
-    'grayscale',
-  );
-  // 灰色の札は対比 4.5:1 以上、縁は破線（色の薄さだけで分けぬ）
-  for (const chip of [hanako, stranger, unknown]) {
-    const style = getComputedStyle(chip);
-    await expect(contrast(style.color, style.backgroundColor)).toBeGreaterThanOrEqual(4.5);
-    await expect(style.borderTopStyle).toBe('dashed');
+  ];
+  await expect(chips.map((chip) => chip.textContent)).toEqual(labels);
+  // アバターは出さず、子は字の span 1 つだけ
+  for (const [i, chip] of chips.entries()) {
+    await expect(chip.querySelector('img, [data-initials]')).toBeNull();
+    await expect(chip.children).toHaveLength(1);
+    await expect(chip.children[0].classList.contains('koyori-mention-label')).toBe(true);
+    await expect(chip.children[0].textContent).toBe(labels[i]);
   }
-  // いま入れる者の札も字が読める
+  const [taro, aki, hanako, stranger, unknown] = chips;
+  // いま入れる者の札: 地は不透明、字との対比が 4.5:1 以上、下線は無い
   for (const chip of [taro, aki]) {
     const style = getComputedStyle(chip);
+    await expect(style.backgroundColor).toMatch(/^rgb\(\d+, \d+, \d+\)$/);
     await expect(contrast(style.color, style.backgroundColor)).toBeGreaterThanOrEqual(4.5);
-    await expect(style.borderTopStyle).not.toBe('dashed');
+    await expect(style.textDecorationLine).toBe('none');
+  }
+  // 本人の強調
+  const own = getComputedStyle(aki);
+  const other = getComputedStyle(taro);
+  if (self) {
+    await expect(aki.classList.contains('koyori-mention-self')).toBe(true);
+    await expect(own.fontWeight).toBe('600');
+    await expect(own.color).not.toBe(other.color);
+  } else {
+    await expect(aki.classList.contains('koyori-mention-self')).toBe(false);
+    await expect(own.color).toBe(other.color);
+    await expect(own.backgroundColor).toBe(other.backgroundColor);
+  }
+  // 灰色の札: 地なし・破線の下線（色の薄さだけで分けぬ）。字は 4.5:1、下線は 3:1 以上
+  for (const chip of [hanako, stranger, unknown]) {
+    const style = getComputedStyle(chip);
+    const ground = backdrop(chip);
+    await expect(style.backgroundColor).toBe('rgba(0, 0, 0, 0)');
+    await expect(style.textDecorationLine).toBe('underline');
+    await expect(style.textDecorationStyle).toBe('dashed');
+    await expect(contrast(style.color, ground)).toBeGreaterThanOrEqual(4.5);
+    await expect(contrast(style.textDecorationColor, ground)).toBeGreaterThanOrEqual(3);
   }
   // 札で行が広がらぬ
   await expect(lines.withChip.getBoundingClientRect().height).toBe(
@@ -139,16 +173,20 @@ export const Comment: Story = {
           3,
         );
         await expect(
-          canvasElement.querySelectorAll('[data-testid="body"] .kfm-mention'),
+          canvasElement.querySelectorAll('[data-testid="body"] .koyori-mention'),
         ).toHaveLength(5);
       },
       { timeout: 10_000 },
     );
     const pick = (id: string) =>
       canvasElement.querySelector<HTMLElement>(`[data-testid="${id}"] .kfm-content p`)!;
-    await expectChips(pick('body'), { withChip: pick('with'), without: pick('without') });
-    // 本人へのメンションは強調（反転の地）
-    const self = pick('body').querySelector<HTMLElement>('.kfm-mention-self');
+    await expectChips(
+      pick('body'),
+      { withChip: pick('with'), without: pick('without') },
+      { self: true },
+    );
+    // 本人へのメンションは強調
+    const self = pick('body').querySelector<HTMLElement>('.koyori-mention-self');
     await expect(self?.textContent).toBe('@aki');
   },
 };
@@ -175,8 +213,12 @@ export const Description: Story = {
   play: async ({ canvasElement }) => {
     const pick = (id: string) =>
       canvasElement.querySelector<HTMLElement>(`[data-testid="${id}"] p`)!;
-    await expectChips(pick('body'), { withChip: pick('with'), without: pick('without') });
-    await expect(pick('body').querySelector('.kfm-mention-self')?.textContent).toBe('@aki');
+    await expectChips(
+      pick('body'),
+      { withChip: pick('with'), without: pick('without') },
+      { self: true },
+    );
+    await expect(pick('body').querySelector('.koyori-mention-self')?.textContent).toBe('@aki');
   },
 };
 
@@ -199,54 +241,76 @@ export const Editor: Story = {
       await expect(found[0].querySelectorAll('.cm-mention')).toHaveLength(5);
       return found;
     });
-    await expectChips(lines[0], { withChip: lines[1], without: lines[2] });
+    await expectChips(lines[0], { withChip: lines[1], without: lines[2] }, { self: false });
   },
 };
 
 /**
- * 札のアバターと、本物の UserAvatar の xs（頭文字・灰色）を並べ、描かれた値が同じことを縛る。
- * 札は CSS の写しなので、UserAvatar の直径・頭文字の地と字の色・灰色のどれかが替われば、ここが落ちる。
- * 頭文字の字とその大きさは UserAvatar では koyori の Avatar が決めるので、札とは比べない。
+ * task が組む札の HTML（CommentBody）と、koyori の `<Mention>` を並べ、形と描かれた値が同じことを縛る。
+ * task の札は koyori の固定 class の HTML を手で組む（v-html・CodeMirror は Vue の部品を置けぬ）ので、
+ * 要素・class・子の形、色・地・太さ・下線・余白・角丸・行の高さのどれかが食い違えば、ここが落ちる。
+ * 札は flex の子に直に置かず、`data-case` を付けた入れ物で包む（koyori docs の注意）。
  */
-export const AvatarMatchesUserAvatar: Story = {
+export const MatchesKoyoriMention: Story = {
   render: () => ({
-    components: { CommentBody, UserAvatar },
-    setup: () => ({ ME, HANAKO, mentions }),
+    components: { CommentBody, Mention },
+    setup: () => ({ ME, TARO, HANAKO, STRANGER, UNKNOWN, mentions }),
     template: `
-      <div class="flex items-center gap-4 text-sm">
-        <div data-testid="chip-active"><CommentBody comment-id="parity-active" :body="'<@' + ME + '>'" :mentions="mentions" /></div>
-        <UserAvatar data-testid="avatar-active" size="xs" :user="{ name: 'aki' }" decorative />
-        <div data-testid="chip-inactive"><CommentBody comment-id="parity-inactive" :body="'<@' + HANAKO + '>'" :mentions="{ [HANAKO]: { status: 'outside', name: 'hanako', avatar_url: null } }" /></div>
-        <UserAvatar data-testid="avatar-inactive" size="xs" :user="{ name: 'hanako' }" decorative inactive />
+      <div class="grid grid-cols-2 gap-4 text-sm" style="width: 800px">
+        <div data-side="task">
+          <div data-case="member"><CommentBody comment-id="m-member" :body="'<@' + TARO + '>'" :mentions="mentions" mention-tenant="acme" :current-user-id="ME" /></div>
+          <div data-case="self"><CommentBody comment-id="m-self" :body="'<@' + ME + '>'" :mentions="mentions" mention-tenant="acme" :current-user-id="ME" /></div>
+          <div data-case="outside"><CommentBody comment-id="m-outside" :body="'<@' + HANAKO + '>'" :mentions="mentions" mention-tenant="acme" :current-user-id="ME" /></div>
+          <div data-case="gone"><CommentBody comment-id="m-gone" :body="'<@' + STRANGER + '>'" :mentions="{ [STRANGER]: { status: 'gone', name: null } }" mention-tenant="acme" :current-user-id="ME" /></div>
+          <div data-case="unknown"><CommentBody comment-id="m-unknown" :body="'<@' + UNKNOWN + '>'" :mentions="mentions" mention-tenant="acme" :current-user-id="ME" /></div>
+        </div>
+        <div data-side="koyori">
+          <div data-case="member"><Mention label="@taro" status="member" :href="'/acme/users/' + TARO" /></div>
+          <div data-case="self"><Mention label="@aki" status="member" self :href="'/acme/users/' + ME" /></div>
+          <div data-case="outside"><Mention label="@hanako" status="outside" /></div>
+          <div data-case="gone"><Mention label="@（退会した利用者）" status="gone" /></div>
+          <div data-case="unknown"><Mention label="@（不明な利用者）" status="unknown" /></div>
+        </div>
       </div>`,
   }),
   play: async ({ canvasElement }) => {
     await waitFor(
       async () =>
-        expect(
-          canvasElement.querySelectorAll('[data-testid^="chip-"] .kfm-mention-avatar'),
-        ).toHaveLength(2),
+        expect(canvasElement.querySelectorAll('[data-side="task"] .koyori-mention')).toHaveLength(
+          5,
+        ),
       { timeout: 10_000 },
     );
-    const chipAvatar = (id: string) =>
-      canvasElement.querySelector<HTMLElement>(`[data-testid="${id}"] .kfm-mention-avatar`)!;
-    const userAvatar = (id: string) =>
-      canvasElement.querySelector<HTMLElement>(`[data-testid="${id}"]`)!;
-    for (const state of ['active', 'inactive']) {
-      const chip = chipAvatar(`chip-${state}`);
-      const root = userAvatar(`avatar-${state}`);
-      const c = getComputedStyle(chip);
-      const r = getComputedStyle(root);
-      // 丸の大きさ・地と字の色
-      await expect(c.width).toBe(r.width);
-      await expect(c.height).toBe(r.height);
-      await expect(contrast(c.backgroundColor, r.backgroundColor)).toBe(1);
-      await expect(contrast(c.color, r.color)).toBe(1);
-      // 灰色（不透明度と grayscale）
-      await expect(c.opacity).toBe(r.opacity);
-      await expect(c.filter).toBe(r.filter);
+    const pick = (side: string, name: string) =>
+      canvasElement.querySelector<HTMLElement>(
+        `[data-side="${side}"] [data-case="${name}"] .koyori-mention`,
+      )!;
+    for (const name of ['member', 'self', 'outside', 'gone', 'unknown']) {
+      const mine = pick('task', name);
+      const theirs = pick('koyori', name);
+      await expect(mine.tagName, name).toBe(theirs.tagName);
+      await expect([...mine.classList], name).toEqual([...theirs.classList]);
+      await expect(mine.children, name).toHaveLength(1);
+      await expect(theirs.children, name).toHaveLength(1);
+      await expect(mine.children[0].tagName, name).toBe(theirs.children[0].tagName);
+      await expect(mine.children[0].className, name).toBe(theirs.children[0].className);
+      await expect(mine.textContent, name).toBe(theirs.textContent);
+      const a = getComputedStyle(mine);
+      const b = getComputedStyle(theirs);
+      for (const prop of [
+        'color',
+        'backgroundColor',
+        'fontWeight',
+        'textDecorationLine',
+        'textDecorationStyle',
+        'textDecorationColor',
+        'paddingLeft',
+        'borderTopLeftRadius',
+        'lineHeight',
+      ] as const) {
+        await expect(a[prop], `${name}: ${prop}`).toBe(b[prop]);
+      }
     }
-    await expect(getComputedStyle(chipAvatar('chip-inactive')).filter).toContain('grayscale');
   },
 };
 
@@ -296,7 +360,7 @@ export const ProfileLinks: Story = {
   play: async ({ canvasElement }) => {
     const links = await waitFor(
       async () => {
-        const found = [...canvasElement.querySelectorAll<HTMLAnchorElement>('a.kfm-mention')];
+        const found = [...canvasElement.querySelectorAll<HTMLAnchorElement>('a.koyori-mention')];
         // 説明文の taro・コメントの taro と aki（外れた hanako は link にせぬ）
         await expect(found).toHaveLength(3);
         return found;
@@ -308,12 +372,21 @@ export const ProfileLinks: Story = {
       `/acme/users/${TARO}`,
       `/acme/users/${ME}`,
     ]);
-    await expect(canvasElement.querySelector('span.kfm-mention-outside')?.textContent).toBe(
+    await expect(canvasElement.querySelector('span.koyori-mention-outside')?.textContent).toBe(
       '@hanako',
     );
     // 入力欄の札は link にせぬ
     await expect(canvasElement.querySelector('.cm-content a')).toBeNull();
-    await expect(canvasElement.querySelector('.cm-content .kfm-mention')).not.toBeNull();
+    await expect(canvasElement.querySelector('.cm-content .koyori-mention')).not.toBeNull();
+
+    // 層の外の `.kfm-content a`（青い字・下線）に負けず、入力欄の member の札と同じ見た目（focus の前に測る）
+    const link = getComputedStyle(links[0]);
+    const editorChip = getComputedStyle(
+      canvasElement.querySelector<HTMLElement>('.cm-content .koyori-mention-member')!,
+    );
+    await expect(link.textDecorationLine).toBe('none');
+    await expect(link.color).toBe(editorChip.color);
+    await expect(link.backgroundColor).toBe(editorChip.backgroundColor);
 
     // キーボードで最初の札へ focus し、輪が見え、Enter で飛ぶ
     (document.activeElement as HTMLElement | null)?.blur();
@@ -322,8 +395,8 @@ export const ProfileLinks: Story = {
     const style = getComputedStyle(links[0]);
     await expect(style.outlineStyle).toBe('solid');
     await expect(Number.parseFloat(style.outlineWidth)).toBeGreaterThanOrEqual(2);
-    // 輪の色は地（白）に対して 3:1 以上
-    await expect(contrast(style.outlineColor, '#fff')).toBeGreaterThanOrEqual(3);
+    // 輪の色は札の後ろの地に対して 3:1 以上
+    await expect(contrast(style.outlineColor, backdrop(links[0]))).toBeGreaterThanOrEqual(3);
     await userEvent.keyboard('{Enter}');
     await waitFor(async () =>
       expect(canvasElement.querySelector('[data-testid="clicked"]')?.textContent).toBe(
