@@ -39,7 +39,7 @@ const tenantSlug = computed(
 
 // ガントは arc が alpha なので、実験的機能の「ガントチャート」を有効にした人にだけ出す。
 // 残った値は SSR で読めないので、mount の後に出る（useExperimentFlag が mount の前は既定値＝無効を返す）
-const showGantt = useExperimentFlag('gantt');
+const showGantt = useExperimentFlag('koyoriArcIntegration');
 
 const myTasksUrl = computed(() => (tenantSlug.value ? `/${tenantSlug.value}/my-tasks` : '#'));
 

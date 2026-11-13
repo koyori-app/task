@@ -34,7 +34,7 @@ export const FlagList: Story = {
     await expect(
       await canvas.findByText('この端末のこのブラウザだけで有効です。不安定な機能を含みます。'),
     ).toBeInTheDocument();
-    const toggle = canvas.getByRole('switch', { name: 'koyori-arc の統合' });
+    const toggle = canvas.getByRole('switch', { name: 'ガントチャート' });
     await expect(toggle).toHaveAttribute('aria-checked', 'false');
   },
 };
@@ -47,7 +47,7 @@ export const FlagEnabled: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    const toggle = await canvas.findByRole('switch', { name: 'koyori-arc の統合' });
+    const toggle = await canvas.findByRole('switch', { name: 'ガントチャート' });
     await expect(toggle).toHaveAttribute('aria-checked', 'true');
     await userEvent.click(canvas.getByRole('button', { name: 'すべて既定に戻す' }));
     await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'false'));

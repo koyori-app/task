@@ -7,14 +7,9 @@ import type { SettingTable } from '@/lib/local-settings';
  */
 export const EXPERIMENT_TABLE = {
   koyoriArcIntegration: {
-    name: 'koyori-arc の統合',
-    description:
-      'koyori-arc との連携を試せるようにします。統合は開発中で、いまはこの切り替えの口だけがあります。',
-    default: false,
-  },
-  gantt: {
     name: 'ガントチャート',
-    description: 'サイドバーにガントチャートへのリンクを出します。タスクの予定を棒で見られます。',
+    description:
+      'サイドバーにガントチャートへのリンクを出します。タスクの予定を棒で見られます。描画には開発中の koyori-arc を使います。',
     default: false,
   },
 } as const satisfies SettingTable;

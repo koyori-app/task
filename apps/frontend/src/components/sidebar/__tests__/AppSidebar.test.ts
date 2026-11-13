@@ -225,7 +225,10 @@ describe('AppSidebar のガントの導き', () => {
   });
 
   it('表示を無効に戻しても、有効にしたフラグがあれば出す', async () => {
-    seedSettings({ preferences: { showExperiments: false }, experiments: { gantt: true } });
+    seedSettings({
+      preferences: { showExperiments: false },
+      experiments: { koyoriArcIntegration: true },
+    });
     mountSidebar(vi.fn());
     await flushPromises();
 
@@ -233,7 +236,10 @@ describe('AppSidebar のガントの導き', () => {
   });
 
   it('ガントチャートを有効にすると、カレンダーのすぐ下に出す', async () => {
-    seedSettings({ preferences: { showExperiments: true }, experiments: { gantt: true } });
+    seedSettings({
+      preferences: { showExperiments: true },
+      experiments: { koyoriArcIntegration: true },
+    });
     mountSidebar(vi.fn());
     await flushPromises();
 
@@ -244,7 +250,7 @@ describe('AppSidebar のガントの導き', () => {
   });
 
   it('ガントの頁にいる間は現在地として強調する', async () => {
-    seedSettings({ experiments: { gantt: true } });
+    seedSettings({ experiments: { koyoriArcIntegration: true } });
     pageContextStub.urlPathname = '/acme/gantt';
     mountSidebar(vi.fn());
     await flushPromises();
@@ -280,7 +286,10 @@ describe('AppSidebar のプロジェクトのガントの導き', () => {
   });
 
   it('ガントチャートを有効にすると出し、その頁にいる間は現在地として強調する', async () => {
-    seedSettings({ preferences: { showExperiments: true }, experiments: { gantt: true } });
+    seedSettings({
+      preferences: { showExperiments: true },
+      experiments: { koyoriArcIntegration: true },
+    });
     pageContextStub.urlPathname = '/acme/projects/ALPHA/gantt';
     mountSidebar(vi.fn());
     await flushPromises();
