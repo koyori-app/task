@@ -50,7 +50,7 @@ NTFS では「継承を無効にする」が明示の操作である。ここで
 ### ゲスト（project-only guest）の定め
 
 - ゲストが入れるのは `project_members` に明示指定されたプロジェクトだけである。「メンバー未指定＝テナント全体に開放」の規則はテナントメンバー限りで、ゲストには開かない
-- テナント全体のエンドポイントのうち、プロジェクト一覧（`GET /v1/tenants/{id}/projects`）と My Tasks（`GET /v1/tenants/{id}/users/me/tasks`）だけは、ゲストには自分が明示 member の project の分に絞って返す。公開 project は含めない。判定は `AuthUser::ensure_tenant_access_or_guest_scope` と `access::explicit_member_project_ids` に集約し、ハンドラーには散らさない
+- テナント全体のエンドポイントのうち、プロジェクト一覧（`GET /v1/tenants/{id}/projects`）、My Tasks（`GET /v1/tenants/{id}/users/me/tasks`）、スケジュール（`GET /v1/tenants/{id}/schedule`）だけは、ゲストには自分が明示 member の project の分に絞って返す。公開 project は含めない。判定は `AuthUser::ensure_tenant_access_or_guest_scope` と `access::explicit_member_project_ids` に集約し、ハンドラーには散らさない
 - その他のテナント全体のエンドポイント（テナント取得・メンバー一覧・Drive・テナント設定など）は 403 である。frontend は 403 を空表示・案内文で穏当に受ける（下の表）
 - テナント一覧（`GET /v1/tenants`）にはゲストとして関わるテナントが `membership: "Guest"` を付けて出る（[テナント一覧の membership](#テナント一覧の-membership)）
 - ゲストは 2 つの経路で生まれる。1 つはテナントに居ない利用者をプロジェクトへ直接招く経路（`project_members::add_member`。GitHub の outside collaborator に相当）である。もう 1 つはテナントメンバーへ明示 ACE を置いた後にテナントから外す経路で、残った `project_members` の行がゲストの指定になる。`list_explicit_projects` がその行を挙げる
@@ -69,6 +69,7 @@ NTFS では「継承を無効にする」が明示の操作である。ここで
 | `GET /v1/tenants` | stores/tenant.ts（TenantSwitcher の一覧）・useResolvedTenantId（URL の display_id から UUID を解決） | `membership` を Guest にして返す。テナント設定の欄は null |
 | `GET /v1/tenants/{id}/projects` | api-vue-query の useProjectsQuery（AppSidebar の NavProjects・useResolvedProjectId の projectKey から UUID を解決）、ProjectCreateForm / DeleteProjectDialog / ProjectSettingsView（cache 更新） | **自分の明示 member の project に絞って 200** |
 | `GET /v1/tenants/{id}/users/me/tasks` | pages/@tenant/my-tasks（テナント選択直後の着地） | **自分の project の分に絞って 200** |
+| `GET /v1/tenants/{id}/schedule` | pages/@tenant/calendar・pages/@tenant/gantt | 自分の明示 member の project に絞って 200。明示 member の project が無ければ 403 |
 | `GET /v1/tenants/{id}/members` | ProjectSettingsView の MembersSection | 403 のまま。MembersSection は 403 を「権限なし」表示で受け、画面は壊れない |
 | `GET /v1/tenants/{id}/users/{user_id}` | pages/@tenant/users/@userId（タスクの担当者・コメント投稿者・メンバー一覧の名前から開く） | 403 のまま。画面は「閲覧できません」と出す |
 | `GET /v1/tenants/{id}` | 呼び元なし（一覧で足りる） | 403 のまま |
@@ -168,7 +169,7 @@ NTFS では「継承を無効にする」が明示の操作である。ここで
 
 ### 入口は 1 つ
 
-ハンドラーは `AuthUser::ensure_tenant_access` だけを呼ぶ。これがセッション・PAT の双方を `has_tenant_access`（`extractors.rs`）に合流させる。例外はテナント一覧系の 2 エンドポイント（プロジェクト一覧・My Tasks）で、こちらは `ensure_tenant_access_or_guest_scope` を呼ぶ。通常判定に加えてゲストを通し、絞り込み用の project id 集合を返す。呼び方は次のとおりである。
+ハンドラーは `AuthUser::ensure_tenant_access` だけを呼ぶ。これがセッション・PAT の双方を `has_tenant_access`（`extractors.rs`）に合流させる。例外はテナント一覧系の 3 エンドポイント（プロジェクト一覧・My Tasks・スケジュール）で、こちらは `ensure_tenant_access_or_guest_scope` を呼ぶ。通常判定に加えてゲストを通し、絞り込み用の project id 集合を返す。呼び方は次のとおりである。
 
 ```rust
 auth.require_scope(Scope::ReadTask)?;
@@ -213,6 +214,7 @@ Drive にはファイル ID だけで引ける経路がある（`GET /v1/drive/f
 | テナントの取得（`GET /v1/tenants/{id}`） | テナントに入れる人全員（ゲストは含まない） |
 | プロジェクト一覧（`GET /v1/tenants/{id}/projects`） | owner は全件。member は公開規則どおり。ゲストは明示 member の分だけ |
 | My Tasks（`GET /v1/tenants/{id}/users/me/tasks`） | 所属者には全体を返す。ゲストには自分の project の分に絞る |
+| スケジュール（`GET /v1/tenants/{id}/schedule`。カレンダーとガント） | owner は個人プロジェクトを除く全件。member は公開規則どおり（ロールは見ない。個人プロジェクトは除く）。ゲストは明示 member の分だけ。PAT は `read:task` |
 | テナントの更新・削除 | オーナーのみ |
 | メンバー一覧の閲覧 | テナントに入れる人全員（ゲストは含まない） |
 | 利用者のプロフィール（`GET /v1/tenants/{id}/users/{user_id}`） | テナントに入れる人全員（ゲストは含まない）。対象はそのテナントのオーナー・メンバー・ゲストのいずれかで、それ以外は 404。返すのは id / username / account_kind / bio / avatar_url と、このテナントでの department / position / team（未設定・ゲストでは null）、このテナントとの関わり方の `membership`（`Owner` / `Member` / `Guest`）だけ。閲覧者はテナントに入れる人に限られるので、`membership` で誰がゲストかを見られるのはテナントのオーナー・メンバーだけである。PAT は `read:tenant` |
