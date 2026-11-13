@@ -2,25 +2,28 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { computed, type Ref } from 'vue';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 
-const { navigateSpy, pageContextStub, projectsControl, tenantStoreStub } = vi.hoisted(() => ({
-  navigateSpy: vi.fn(),
-  pageContextStub: { routeParams: {} as Record<string, string>, urlPathname: '' },
-  projectsControl: {
-    data: [] as unknown[],
-    isLoading: false,
-    isError: false,
-    tenantId: null as Ref<string | null> | null,
-  },
-  tenantStoreStub: {
-    tenants: [] as unknown[],
-    selectedTenantId: null as string | null,
-    selectedTenant: null as unknown,
-    isLoading: false,
-    error: null as string | null,
-    loadTenants: vi.fn(),
-    selectTenant: vi.fn(),
-  },
-}));
+const { navigateSpy, pageContextStub, projectsControl, tenantStoreStub, meControl } = vi.hoisted(
+  () => ({
+    navigateSpy: vi.fn(),
+    meControl: { isAdmin: false },
+    pageContextStub: { routeParams: {} as Record<string, string>, urlPathname: '' },
+    projectsControl: {
+      data: [] as unknown[],
+      isLoading: false,
+      isError: false,
+      tenantId: null as Ref<string | null> | null,
+    },
+    tenantStoreStub: {
+      tenants: [] as unknown[],
+      selectedTenantId: null as string | null,
+      selectedTenant: null as unknown,
+      isLoading: false,
+      error: null as string | null,
+      loadTenants: vi.fn(),
+      selectTenant: vi.fn(),
+    },
+  }),
+);
 
 vi.mock('vike/client/router', () => ({ navigate: navigateSpy }));
 
@@ -32,6 +35,7 @@ vi.mock('@/lib/api-vue-query', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api-vue-query')>();
   return {
     ...actual,
+    useMeQuery: () => ({ data: computed(() => ({ is_admin: meControl.isAdmin })) }),
     useProjectsQuery: (tenantId: Ref<string | null>) => {
       projectsControl.tenantId = tenantId;
       return {
@@ -104,6 +108,7 @@ beforeEach(() => {
   projectsControl.isLoading = false;
   projectsControl.isError = false;
   projectsControl.tenantId = null;
+  meControl.isAdmin = false;
   tenantStoreStub.tenants = [ACME];
   tenantStoreStub.selectedTenant = ACME;
 });
@@ -257,6 +262,20 @@ describe('AppSidebar のガントの導き', () => {
 
     expect(findLink('/acme/gantt').getAttribute('aria-current')).toBe('page');
     expect(findLink('/acme/calendar').getAttribute('aria-current')).toBeNull();
+  });
+});
+
+describe('AppSidebar の管理ナビ', () => {
+  it('管理者にだけ管理画面へのリンクを出す', () => {
+    mountSidebar(vi.fn());
+    expect(document.body.querySelector('a[href="/admin/users"]')).toBeNull();
+  });
+
+  it('管理者には管理画面へのリンクを出す', () => {
+    meControl.isAdmin = true;
+    mountSidebar(vi.fn());
+    expect(findLink('/admin/users')).toBeTruthy();
+    expect(findLink('/admin/settings')).toBeTruthy();
   });
 });
 

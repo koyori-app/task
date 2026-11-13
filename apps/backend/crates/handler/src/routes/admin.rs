@@ -17,6 +17,7 @@ fn admin_users_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(crate::handlers::admin_users::create_user))
         .routes(routes!(crate::handlers::admin_users::update_user))
         .routes(routes!(crate::handlers::admin_users::delete_user))
+        .routes(routes!(crate::handlers::admin_users::get_auth_methods))
         .routes(routes!(crate::handlers::admin_users::password_reset))
         .routes(routes!(crate::handlers::admin_users::reset_2fa))
         .routes(routes!(crate::handlers::admin_users::delete_passkey))

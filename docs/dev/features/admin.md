@@ -2,7 +2,7 @@
 title: サービス管理者と監査ログ
 description: テナントを横断するサービス管理者のフラグ、管理者専用 API、管理者操作の監査ログ
 status: partial
-updated: 2026-11-04
+updated: 2026-11-12
 sidebar:
   order: 4
 ---
@@ -234,6 +234,7 @@ flowchart TD
 | POST | `/v1/admin/users/{id}/reset-2fa` | 2FA を強制リセットする |
 | DELETE | `/v1/admin/users/{id}/passkeys/{passkey_id}` | パスキーを強制削除する |
 | DELETE | `/v1/admin/users/{id}/oauth/{provider}` | OAuth 連携を強制解除する |
+| GET | `/v1/admin/users/{id}/auth-methods` | パスキーと OAuth 連携の一覧。利用者がいなければ `404` |
 
 テナントと閲覧は次のとおりである。
 
@@ -244,6 +245,8 @@ flowchart TD
 | DELETE | `/v1/admin/tenants/{id}` | テナントを強制削除する |
 | GET | `/v1/admin/tenants/{id}/projects` | テナント配下のプロジェクト一覧（読み取り専用） |
 | GET | `/v1/admin/tenants/{id}/projects/{pid}/tasks` | プロジェクト配下のタスク一覧（読み取り専用）。`id` / `project_id` / `title` のみを返し、削除済みを除く |
+
+`GET /v1/admin/users/{id}/auth-methods` は、パスキーの削除と OAuth 連携の解除に要る `passkey_id` と `provider` を画面が得るための API である。パスキーは `id`・`name`・`created_at`・`last_used_at`、OAuth 連携は `provider`・`provider_login`・`provider_email`・`instance_url`・`created_at` だけを返す。公開鍵・`credential_id`・`sign_count`・トークン・`provider_user_id` は返さない。並びはどちらも `created_at` の昇順である。
 
 監査ログとシステム設定は次のとおりである。
 
@@ -285,11 +288,23 @@ flowchart TD
 
 ## 画面
 
-フロントエンドにあるのは、`GET /v1/auth/me` の応答に含まれる `is_admin` の型だけである。URL は [URL 仕様](/dev/frontend/url-spec)に予定として載っている。
+利用者の認証の復旧と一般登録の設定を扱う画面がある。どのページも `AdminShell`（`apps/frontend/src/components/admin/AdminShell.vue`）で包み、`GET /v1/auth/me` の `is_admin` が `false` なら中身を描かずに案内だけを出す。権限の判定は API の `AdminUser` が行う。
+
+| URL | 内容 |
+|---|---|
+| `/admin/users` | 全利用者の一覧（名前・メール・管理者・停止・2FA）と、利用者の作成のフォーム。作成した利用者はメール確認済みにする |
+| `/admin/users/{id}` | 1 人の利用者の詳細。状態の表示と、管理者権限の付け外し・停止と解除・パスワードリセットメールの送信・2FA の強制リセット・パスキーの削除・OAuth 連携の解除 |
+| `/admin/settings` | 一般の利用者登録（`user_registration_enabled`）の有効と無効 |
+
+- サイドバーには `is_admin` の利用者にだけ「管理」の欄を出し、上の 2 つの一覧へのリンクを置く（`components/sidebar/NavAdmin.vue`）
+- 利用者の詳細の操作は、どれも確認ダイアログを経る。ダイアログには対象の名前とメールを並べ、操作の影響を書く
+- 自分自身の降格と停止のボタンは押せなくする。最後の管理者の降格と停止は API の拒否をそのまま伝える
+- 失敗は操作ごとに `403`・`404`・`409` の文言を分けて出す（`lib/admin-users.ts` の `adminErrorMessage`）
+- 表示中の利用者が変わったら、前の利用者の認証方法と確認待ちの操作を捨てる
 
 ## 未実装と既知の制限
 
-- 管理画面が無い。`/admin` 配下のページも、管理者用のコンポーネントも無い
+- 管理者ダッシュボード（`/admin`）、テナントの管理、監査ログの画面が無い。利用者の強制削除とシステム設定の Drive のクォータも画面から操作できない
 - 監査ログの保持期間によるアーカイブ・物理削除が無く、行は残り続ける
 - システム設定の `drive_default_quota_mb` / `drive_system_max_quota_mb` は保存されるだけである。Drive の有効クォータは環境変数 `DRIVE_DEFAULT_QUOTA_MB` / `DRIVE_SYSTEM_MAX_QUOTA_MB` だけで決まる（[Drive のクォータ](/dev/features/drive/quota#未実装と既知の制限)）
 
@@ -350,3 +365,4 @@ flowchart TD
 | 2026-11-04 | 強制削除で `project_members` の行を消さない | 消すと、その人しか指定されていなかったプロジェクトがメンバー 0 件になり、テナント全体に開放されてしまう |
 | 2026-11-04 | `AdminUser` は有効な Bearer を `401` でなく `403` にする | Desktop は Device Token への `401` を失効とみなしてログアウトする |
 | 2026-11-04 | `tenant.delete` の監査ログを削除と同じトランザクションで、削除より前に INSERT する | 削除の後に同じ `tenant_id` で挿入すると外部キー違反で失敗し、削除が成立したまま `500` になってログも残らない。先に挿入すれば `ON DELETE SET NULL` で確定後に `tenant_id` が NULL になるだけで済む |
+| 2026-11-07 | 管理者向けに対象の認証方法を返す API（`GET /v1/admin/users/{id}/auth-methods`）を足し、秘密値を返さない | パスキーの削除と OAuth 連携の解除には `passkey_id` と `provider` が要るが、管理者が対象の値を知る手段が無かった |
