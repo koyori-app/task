@@ -7,7 +7,8 @@
  * - text ノードは札へ分割する。code / inlineCode と link / linkReference の内側は札にせず
  *   `@今の名` の字へ戻す。画像の alt、リンク・画像・定義の title、code の meta も同じ
  * - URL と生の HTML は意味を変えない
- * - 札の字は `mentionLabel`（コメントの札と同じ）。id は HTML に出さない
+ * - 札の字は `mentionLabel`（コメントの札と同じ）。札の字・コピー・読み上げに id は出さない。
+ *   プロフィールのカードを開く札（いま入れる者と、名の引ける外れた者）の根にだけ `data-user-id` を付ける
  * - いま入れる者で名が引ける札は、`data.kfm.mentionTenant` があればプロフィールへの link
  *   （`<a class="koyori-mention koyori-mention-member" href="/{tenant}/users/{利用者ID}">`）にする。道は表に在る id とテナントだけで組む。
  *   外れた者・退会した者・名の引けぬ者の札は link にせぬ
@@ -26,6 +27,7 @@ import type { Nodes, Parent, PhrasingContent, Root, Text } from 'mdast';
 import { MENTION_CLASS_NAMES, mentionClassNames } from '@koyori-app/ui-vue';
 import { SKIP, visit } from 'unist-util-visit';
 
+import { mentionCardUserId } from '@/lib/mention-card';
 import {
   findMarkers,
   lookup,
@@ -137,15 +139,17 @@ function splitText(
         children: [{ type: 'text', value: chip.label }],
       },
     ];
+    const cardUserId = mentionCardUserId(user, marker.id);
+    const hProperties = cardUserId ? { className, dataUserId: cardUserId } : { className };
     const href = profileHref(tenant, marker.id, chip);
     parts.push(
       href
         ? // プロフィールへの link（mdast の link。href は上で組んだ道だけ）
-          { type: 'link', url: href, data: { hProperties: { className } }, children }
+          { type: 'link', url: href, data: { hProperties }, children }
         : {
             // span を出すための入れ物（hName で置き換わる）。意味を持つ mdast ノードではない
             type: 'emphasis',
-            data: { hName: 'span', hProperties: { className } },
+            data: { hName: 'span', hProperties },
             children,
           },
     );
@@ -186,6 +190,7 @@ export function remarkKfmMention() {
 
 /**
  * 本プラグインが emit する class トークン（完全一致 allowlist）。koyori の固定 class の全集合をそのまま許す。
- * `span`・`a` と `href` は DOMPurify の既定で通る
+ * `span`・`a` と `href` は DOMPurify の既定で通る。
+ * `data-user-id` も DOMPurify の既定（`ALLOW_DATA_ATTR`）で通る（生の HTML は字に escape されるので、本文からは書けない）
  */
 export const kfmMentionSanitizeSchema = { classTokens: MENTION_CLASS_NAMES } as const;

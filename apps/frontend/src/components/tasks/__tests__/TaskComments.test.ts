@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { nextTick } from 'vue';
+import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import { createPinia, setActivePinia } from 'pinia';
 import TaskComments from '../TaskComments.vue';
 import { useAuthStore } from '@/stores/auth';
@@ -19,6 +20,12 @@ vi.mock('@/components/tasks/CommentEditor.vue', async () => ({
 }));
 
 enableAutoUnmount(afterEach);
+// happy-dom に ResizeObserver が無い（HoverCard が位置の追従に使う）
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
 let pinia: ReturnType<typeof createPinia>;
 beforeEach(() => {
   resetCommentDrafts();
@@ -73,7 +80,8 @@ function activity(id: string, created_at: string, overrides: Partial<ActivityIte
 
 function mountComments(props: Partial<InstanceType<typeof TaskComments>['$props']> = {}) {
   return mount(TaskComments, {
-    global: { plugins: [pinia] },
+    // 札のある本文は MentionHoverCard を置く（プロフィールの取得に QueryClient を使う）
+    global: { plugins: [pinia, [VueQueryPlugin, { queryClient: new QueryClient() }]] },
     props: {
       threads: [],
       onSubmit: vi.fn(async () => true),

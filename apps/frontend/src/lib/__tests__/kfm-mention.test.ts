@@ -23,16 +23,18 @@ const render = (text: string, table: MentionTable | null = mentions) =>
   renderDescription(text, table === null ? {} : { mentions: table });
 
 // 札は `@名` を span で包んだ 1 つの要素（koyori の固定 class の形。アバターは出さない）
-const chip = (status: string, label: string) =>
-  `<span class="koyori-mention koyori-mention-${status}"><span class="koyori-mention-label">${label}</span></span>`;
+// id を渡せば、カードを開く札の根に付く `data-user-id` も含める
+const chip = (status: string, label: string, id?: string) =>
+  `<span class="koyori-mention koyori-mention-${status}"${id ? ` data-user-id="${id}"` : ''}><span class="koyori-mention-label">${label}</span></span>`;
 
 describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
-  it('印を札にする（id は HTML に出ず、状態は class で運ぶ）', async () => {
+  it('印を札にする（id は札の字に出ず、カードを開く札の data-user-id にだけ出る。状態は class で運ぶ）', async () => {
     const html = await render(`見て <@${A}> と <@${B}> へ`);
     expect(html).toBe(
-      `<p>見て ${chip('member', '@alice')} と ${chip('outside', '@former')} へ</p>`,
+      `<p>見て ${chip('member', '@alice', A)} と ${chip('outside', '@former', B)} へ</p>`,
     );
-    expect(html).not.toContain(A);
+    const rest = html.replaceAll(`data-user-id="${A}"`, '').replaceAll(`data-user-id="${B}"`, '');
+    expect(rest).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/);
     expect(html).not.toContain('&lt;@');
   });
 
@@ -68,7 +70,7 @@ describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
   });
 
   it('強調・リスト・見出しの内側でも札にする', async () => {
-    const alice = chip('member', '@alice');
+    const alice = chip('member', '@alice', A);
     expect(await render(`**<@${A}>**`)).toBe(`<p><strong>${alice}</strong></p>`);
     expect(await render(`- <@${A}>`)).toContain(alice);
     expect(await render(`# <@${A}>`)).toContain(alice);
@@ -181,6 +183,48 @@ describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
     }
   });
 
+  describe('カードを開く札の data-user-id', () => {
+    const ids = (html: string) =>
+      [
+        ...new DOMParser().parseFromString(html, 'text/html').querySelectorAll('.koyori-mention'),
+      ].map((el) => el.getAttribute('data-user-id'));
+
+    it('いま入れる者・名の引ける外れた者の札の根にだけ付く（リンクの札も同じ）', async () => {
+      const text = `<@${A}> <@${B}>`;
+      expect(ids(await render(text))).toEqual([A, B]);
+      const linked = await renderDescription(text, { mentions, mentionTenant: 'acme' });
+      expect(ids(linked)).toEqual([A, B]);
+    });
+
+    it('退会した者・名の無い外れた者・表に無い id・知らない status の札には付かない', async () => {
+      const html = await render(`<@${A}> <@${C}> <@${UNKNOWN_ID}> <@${GONE_ID}> <@${B}>`, {
+        [A]: { status: 'bot' as never, name: 'alice' },
+        [B]: { status: 'gone', name: 'former' },
+        [C]: { status: 'outside', name: null },
+        [GONE_ID]: { status: 'gone', name: null },
+      });
+      expect(ids(html)).toEqual([null, null, null, null, null]);
+      expect(html).not.toContain('data-user-id');
+    });
+
+    it('印の id が大文字でも値は小文字', async () => {
+      const lower = 'abcdef01-abcd-4bcd-8bcd-abcdef012345';
+      const upper = lower.toUpperCase();
+      const html = await render(`<@${upper}>`, { [lower]: { status: 'member', name: 'alice' } });
+      expect(ids(html)).toEqual([lower]);
+      expect(html).not.toContain(upper);
+    });
+
+    it('本文の生の HTML は字に escape され、data-user-id を持つ要素にならない', async () => {
+      const html = await render(
+        `<span class="koyori-mention koyori-mention-member" data-user-id="${A}">@x</span>`,
+      );
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      expect(doc.querySelector('[data-user-id]')).toBeNull();
+      expect(html).toContain('&lt;span');
+    });
+  });
+
   it('link の札の子は字の span 1 つだけ', async () => {
     const html = await renderDescription(`<@${A}>`, { mentions, mentionTenant: 'acme' });
     const doc = new DOMParser().parseFromString(html, 'text/html');
@@ -217,6 +261,7 @@ describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
         raw: a.getAttribute('href') ?? '',
         url: new URL(a.getAttribute('href') ?? '', ORIGIN),
         className: a.className,
+        userId: a.getAttribute('data-user-id'),
         text: a.textContent,
       }));
     };
@@ -226,6 +271,7 @@ describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
       const [link] = links(html);
       expect(link.raw).toBe(`/acme/users/${A}`);
       expect(link.className).toBe('koyori-mention koyori-mention-member');
+      expect(link.userId).toBe(A);
       expect(link.text).toBe('@alice');
       expect(link.url.origin).toBe(ORIGIN);
     });
@@ -233,7 +279,9 @@ describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
     it('テナントを渡さぬ描画は今どおり span（link にせぬ）', async () => {
       const html = await render(`<@${A}>`);
       expect(html).not.toContain('<a');
-      expect(html).toContain('<span class="koyori-mention koyori-mention-member">');
+      expect(html).toContain(
+        `<span class="koyori-mention koyori-mention-member" data-user-id="${A}">`,
+      );
     });
 
     it('外れた者・名の引けぬ者・退会した者・表に無い者の札は link にせぬ', async () => {

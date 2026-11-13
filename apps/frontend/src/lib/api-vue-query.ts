@@ -174,10 +174,18 @@ const USER_PROFILE_PATH = '/v1/tenants/{tenant_id}/users/{user_id}' as const;
  *
  * テナントに関わらない利用者も 404 で返る（存在を明かさない）。
  * それ以外の失敗は `status` を付けて投げる（閲覧者が客分なら 403）。
+ *
+ * `options.staleTime` はキャッシュを新鮮と見なす間（ms）。メンションの札のカードは `Infinity` を渡し、
+ * 同じ人を開き直しても取りに行かない。プロフィールの画面は渡さず、開くたびに取り直す。
+ *
+ * `options.abortable` を偽にすると、取得に AbortSignal を渡さない。TanStack Query は signal を使わぬ取得を、
+ * 最後の購読者が外れても（カードを閉じる・別の人へ移る）中断せず、結果をキャッシュに入れる。
+ * 既定は渡す（プロフィールの画面を離れたら中断する）。
  */
 export function useUserProfileQuery(
   tenantId: MaybeRefOrGetter<TenantUuid | null | undefined>,
   userId: MaybeRefOrGetter<string>,
+  options?: { staleTime?: number; abortable?: boolean },
 ) {
   return useQuery(
     computed(() => {
@@ -187,10 +195,11 @@ export function useUserProfileQuery(
       const params = { params: { path: { tenant_id: tenantUuid!, user_id: userUuid } } };
       return {
         queryKey: ['get', USER_PROFILE_PATH, params],
-        queryFn: async ({ signal }: { signal: AbortSignal }) => {
+        // signal は context の getter で、触れた時点で「使った」と見なされる（分割代入で受けない）
+        queryFn: async (context: { signal: AbortSignal }) => {
           const { data, error, response } = await fetchClient.GET(USER_PROFILE_PATH, {
             ...params,
-            signal,
+            ...(options?.abortable === false ? {} : { signal: context.signal }),
           });
           if (response.status === 404) return null;
           if (error) throw Object.assign(new Error(error.message), { status: response.status });
@@ -198,6 +207,7 @@ export function useUserProfileQuery(
         },
         enabled: !!tenantUuid && !!userUuid,
         retry: false,
+        ...(options?.staleTime !== undefined ? { staleTime: options.staleTime } : {}),
       };
     }),
   );

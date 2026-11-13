@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watchEffect } from 'vue';
 
+import MentionHoverCard from '@/components/tasks/MentionHoverCard.vue';
 import type { MentionTable } from '@/lib/comment-mention';
 import { lookup, toPlainText } from '@/lib/comment-mention';
+import { hasMentionCards } from '@/lib/mention-card';
 import { KFM_CONTENT_CLASS } from '@/lib/remark-gfm/content-class';
 import '@/lib/remark-gfm/style.css';
 import '@/lib/remark-koyori-alerts/style.css';
@@ -26,6 +28,8 @@ const props = defineProps<{
   currentUserId?: string | null;
   /** 渡せば、いま入れる者の札をそのテナントのプロフィールへの link にする（表示用 id） */
   mentionTenant?: string;
+  /** プロフィールのカードがプロフィール API を引くテナント（UUID）。無ければカードは名前と画像だけ */
+  tenantId?: string | null;
 }>();
 
 /**
@@ -36,6 +40,8 @@ const props = defineProps<{
 const MAX_RENDER_LENGTH = 65_536;
 
 const html = ref<string | null>(null);
+/** v-html の容れ物。札のカード（HoverCard）の委譲先。client で mount した後に入る */
+const bodyEl = ref<HTMLElement | null>(null);
 let renderVersion = 0;
 const plainBody = computed(() => toPlainText(props.body, (id) => lookup(props.mentions ?? {}, id)));
 
@@ -70,6 +76,7 @@ watchEffect(async () => {
 <template>
   <div
     v-if="html !== null"
+    ref="bodyEl"
     :class="KFM_CONTENT_CLASS"
     class="kfm-comment text-sm leading-relaxed"
     data-comment-body
@@ -78,6 +85,14 @@ watchEffect(async () => {
   <p v-else class="whitespace-pre-wrap text-sm leading-relaxed" data-comment-body>
     {{ plainBody }}
   </p>
+  <MentionHoverCard
+    v-if="html !== null && bodyEl && hasMentionCards(html)"
+    :container="bodyEl"
+    :mentions="mentions"
+    :current-user-id="currentUserId"
+    :tenant-id="tenantId"
+    :mention-tenant="mentionTenant"
+  />
 </template>
 
 <style>
