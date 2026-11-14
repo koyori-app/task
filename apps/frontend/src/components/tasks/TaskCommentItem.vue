@@ -35,6 +35,8 @@ const props = defineProps<{
   currentUserId?: string | null;
   /** 本文の札をプロフィールへの link にするテナント（表示用 id。CommentBody 参照） */
   mentionTenant?: string;
+  /** プロフィールのカードがプロフィール API を引くテナント（UUID）。無ければカードは名前と画像だけ */
+  tenantId?: string | null;
   /** このコメントの更新失敗メッセージ（対象コメントの中に出す） */
   updateError?: string | null;
   /** このコメントの削除失敗メッセージ（対象コメントの中に出す） */
@@ -228,6 +230,7 @@ async function confirmDelete() {
         :mentions="mentions"
         :current-user-id="currentUserId"
         :mention-tenant="mentionTenant"
+        :tenant-id="tenantId"
       />
 
       <ReactionBar

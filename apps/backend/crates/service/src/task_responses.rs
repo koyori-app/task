@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use chrono::Utc;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, prelude::Uuid};
 
 use crate::error::AppError;
@@ -72,6 +73,7 @@ pub async fn build_task_responses<C: ConnectionTrait>(
                 .push(TaskAssigneeSummary {
                     role: a.role,
                     user: user.clone(),
+                    completed_at: a.completed_at.map(|dt| dt.with_timezone(&Utc)),
                 });
         }
     }

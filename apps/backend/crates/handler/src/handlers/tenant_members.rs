@@ -20,6 +20,7 @@ use entity::{
     users,
 };
 use payload::tenant_members::*;
+use payload::tenants::TenantMembershipKind;
 use payload::users::UserProfileResponse;
 use service::access::visible_project_ids;
 use service::db::is_postgres_unique_violation;
@@ -208,7 +209,15 @@ pub async fn get_user_profile(
         .ok_or(AppError::NotFound)?;
     // 部署・役職・チームはメンバーなら所属行、オーナーならテナントの行。客分では null
     let org = OrgProfile::resolve(&tenant, user_id, member.as_ref());
-    Ok(Json(UserProfileResponse::from_parts(user, org)))
+    // ここに来るのはオーナー・所属行あり・明示のプロジェクトメンバーのどれかなので、残りは客分
+    let membership = if user_id == tenant.owner_id {
+        TenantMembershipKind::Owner
+    } else if member.is_some() {
+        TenantMembershipKind::Member
+    } else {
+        TenantMembershipKind::Guest
+    };
+    Ok(Json(UserProfileResponse::from_parts(user, org, membership)))
 }
 
 #[axum::debug_handler]

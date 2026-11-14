@@ -9,7 +9,6 @@ import {
   mentionChip,
   mentionLabel,
   mentionTrigger,
-  safeAvatarUrl,
   toClipboardHtml,
   toPlainText,
   type MentionTable,
@@ -135,7 +134,7 @@ describe('クリップボードの札（toClipboardHtml / fromClipboardHtml）',
 describe('mentionChip（札の見た目の判じ。KFM・入力欄・コメントの札が共に通る）', () => {
   const ID = '11111111-1111-4111-8111-111111111111';
 
-  it('いま入れる者はアバター付き、本人なら self', () => {
+  it('いま入れる者は名で出る札、本人なら self', () => {
     const user = {
       status: 'member',
       name: 'alice',
@@ -145,51 +144,24 @@ describe('mentionChip（札の見た目の判じ。KFM・入力欄・コメン�
       state: 'member',
       self: true,
       label: '@alice',
-      avatar: { name: 'alice', src: 'https://cdn.example.com/a.png', inactive: false },
+      named: true,
     });
     expect(mentionChip(user, ID, null).self).toBe(false);
   });
 
-  it('外れた者は灰色のアバター、本人でも self にせぬ', () => {
+  it('外れた者も名が引ければ名で出る札、本人でも self にせぬ', () => {
     const chip = mentionChip({ status: 'outside', name: 'former', avatar_url: null }, ID, ID);
     expect(chip.self).toBe(false);
-    expect(chip.avatar).toEqual({ name: 'former', src: null, inactive: true });
+    expect(chip.named).toBe(true);
   });
 
-  it('名の引けぬ者・表に無い者は定型の句だけでアバター無し', () => {
-    expect(mentionChip({ status: 'outside', name: null }, ID).avatar).toBeNull();
-    expect(mentionChip({ status: 'gone', name: null }, ID).avatar).toBeNull();
+  it('名の引けぬ者・表に無い者は定型の句（named でない）', () => {
+    expect(mentionChip({ status: 'outside', name: null }, ID).named).toBe(false);
+    expect(mentionChip({ status: 'gone', name: null }, ID).named).toBe(false);
     expect(mentionChip(undefined, ID)).toMatchObject({
       state: 'unknown',
       label: '@（不明な利用者）',
-      avatar: null,
+      named: false,
     });
-  });
-});
-
-describe('safeAvatarUrl', () => {
-  it('http(s) の絶対 URL と同じ origin の道だけを通す', () => {
-    expect(safeAvatarUrl('https://cdn.example.com/a.png')).toBe('https://cdn.example.com/a.png');
-    expect(safeAvatarUrl('http://cdn.example.com/a.png')).toBe('http://cdn.example.com/a.png');
-    expect(safeAvatarUrl('/v1/avatars/a.png')).toBe('/v1/avatars/a.png');
-    expect(safeAvatarUrl('data:image/png;base64,iVBORw0KGgo=')).toBe(
-      'data:image/png;base64,iVBORw0KGgo=',
-    );
-    for (const url of [
-      null,
-      undefined,
-      '',
-      'javascript:alert(1)',
-      'JAVASCRIPT:alert(1)',
-      'data:image/svg+xml;base64,PHN2Zz4=',
-      'data:image/svg+xml,<svg onload=alert(1)>',
-      'data:text/html;base64,PHNjcmlwdD4=',
-      'data:image/png;base64,AA"onerror="x',
-      '//evil.example.com/a.png',
-      '/\\evil.example.com/a.png',
-      'a.png',
-    ]) {
-      expect(safeAvatarUrl(url), String(url)).toBeNull();
-    }
   });
 });

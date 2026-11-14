@@ -62,7 +62,8 @@
   color: inherit;
 }
 
-.kfm-content a {
+/* メンションのチップは koyori の CSS（components 層）が描く。層の外のこの規則は詳細度に関係なく層に勝つので、チップを外す */
+.kfm-content a:not(.koyori-mention) {
   color: #0969da;
   text-decoration: underline;
   /* 長い URL は単語境界を持たないため、折り返さないと器を突き抜ける */
@@ -179,6 +180,6 @@
   background: var(--muted);
 }
 
-.dark .kfm-content a {
+.dark .kfm-content a:not(.koyori-mention) {
   color: #4493f8;
 }

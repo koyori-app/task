@@ -102,7 +102,9 @@ pub async fn resolve_url(
     Ok((parsed, addresses))
 }
 
-fn validate_addresses(allow_loopback: bool, addresses: &[SocketAddr]) -> Result<(), AppError> {
+/// 接続先アドレスの検査（private / link-local / メタデータ / CGNAT / loopback の拒否）。
+/// favicon プロキシ（`service::favicon`）も同じ規則で使う。
+pub fn validate_addresses(allow_loopback: bool, addresses: &[SocketAddr]) -> Result<(), AppError> {
     if addresses.is_empty() {
         return Err(AppError::BadRequestDetail(
             "url の接続先がありません".into(),

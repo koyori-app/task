@@ -48,10 +48,12 @@ import {
 } from '@/lib/review-findings-url-state';
 import { pullRequestState } from '@/lib/forge-pull-request';
 import {
+  DEFAULT_PR_STATE_FILTER,
   PR_PAGE_SIZE,
   PR_STATE_FILTERS,
   filterPullRequests,
   hasGithubConnection,
+  initialPrStateFilter,
   isMyPullRequest,
   pageCount,
   pageOfPullRequest,
@@ -122,7 +124,9 @@ const githubNeedsRelink = computed(
 );
 /** 選択中 PR とは別——サイドバーの見える行だけを絞る。 */
 const prQuery = ref('');
-const prStateFilter = ref<PrStateFilter>('all');
+const prStateFilter = ref<PrStateFilter>(DEFAULT_PR_STATE_FILTER);
+// 一覧の初回到着時に既定の「PR の状態」を 1 回だけ確かめるための印。利用者が先に触ったら確かめない
+const prStateDecided = ref(false);
 // PR 一覧は連携一覧を待たずに出す（連携一覧は外部への問い合わせで遅れることがある）。
 // 連携一覧が要るのは「自分の PR」の判定だけで、その間スイッチは使えない
 const railReady = computed(() => prsQuery.isSuccess.value);
@@ -166,7 +170,14 @@ const railNote = computed<{ kind: 'hidden' } | { kind: 'elsewhere'; page: number
  * URL から来た `mine` と `page` は、一覧と連携の状態が揃ってから確かめる
  * （未連携の `mine=1` と範囲外の `page` は、無視・最後のページに寄せて理由を出す）。
  */
-const urlRailCheckReady = computed(() => railReady.value && !connectionsQuery.isPending.value);
+const urlRailCheckReady = computed(
+  () =>
+    railReady.value &&
+    // 既定の「PR の状態」を確かめた後の一覧でページを数える（暫定の Open で数えると、
+    // 「すべて」に倒れる一覧のページを誤って補正する）。空の一覧は確かめる対象が無い
+    (prStateDecided.value || pullRequests.value.length === 0) &&
+    !connectionsQuery.isPending.value,
+);
 let urlRailCheckPending = true;
 function checkUrlRailState() {
   if (!urlRailCheckPending || !urlRailCheckReady.value) return;
@@ -301,13 +312,30 @@ watch(
 
 const summary = computed(() => summaryQuery.data.value ?? null);
 
-/** 初期 PR の指定が無ければ、最後にレビューされた PR を開く。 */
-watch(pullRequests, (list) => {
-  if (selectedPr.value === null && list.length > 0) {
-    selectedPr.value = list[0].pr_number;
-    writeUrl('replace');
-  }
-});
+/**
+ * 一覧が初めて届いたら、既定の「PR の状態」を確かめる（Open が無いか、URL のページが
+ * Open の一覧には無く「すべて」なら在るときは「すべて」）。
+ * 初期 PR の指定が無ければ、その絞り込みで一覧の先頭に出る PR（最後にレビューされた
+ * Open の PR）を開く。絞り込みに合う PR が無ければ全体の先頭を開く。
+ * `mine` は連携一覧の到着を待つため、候補には作成者の絞り込みを掛けない。
+ */
+watch(
+  pullRequests,
+  (list) => {
+    if (list.length === 0) return;
+    if (!prStateDecided.value) {
+      prStateDecided.value = true;
+      prStateFilter.value = initialPrStateFilter(list, prPage.value);
+    }
+    if (selectedPr.value === null) {
+      const first = filterPullRequests(list, '', null, prStateFilter.value)[0] ?? list[0];
+      selectedPr.value = first.pr_number;
+      writeUrl('replace');
+    }
+  },
+  // 同じ QueryClient での再マウントでは一覧がキャッシュで最初から揃っていて、変化として届かない
+  { immediate: true },
+);
 
 /** 絞り込みは画面側で適用する（API は PR 単位で全件返す）。 */
 const allFindings = computed(() => sortFindings(findingsQuery.data.value ?? []));
@@ -427,6 +455,7 @@ function onPrQueryInput() {
 }
 
 function setPrStateFilter(value: unknown) {
+  prStateDecided.value = true;
   prStateFilter.value = value as PrStateFilter;
   onPrQueryInput();
 }
@@ -653,20 +682,30 @@ async function onRoundCreated() {
             class="text-muted-foreground flex flex-col items-start gap-2 text-sm"
             data-testid="no-pr-match"
           >
-            <p v-if="mineApplied && prQuery.trim() === ''">
+            <!-- 状態で絞っているときは、その状態の PR が無いだけで、PR 自体はあるかもしれない -->
+            <p v-if="mineApplied && prQuery.trim() === '' && prStateFilter === 'all'">
               あなた（GitHub @{{ githubLogin }}）が作成した PR
               で、レビューのあるものはまだありません。
             </p>
+            <p v-else-if="mineApplied && prQuery.trim() === ''">
+              あなた（GitHub @{{ githubLogin }}）が作成した、この状態の PR はありません。
+            </p>
             <p v-else-if="prQuery.trim() === ''">この状態の PR はありません。</p>
             <p v-else>
-              「{{ prQuery.trim() }}」に一致する{{ mineApplied ? '、自分が作成した' : '' }} PR
-              はありません。
+              「{{ prQuery.trim() }}」に一致する{{ mineApplied ? '、自分が作成した' : ''
+              }}{{ prStateFilter === 'all' ? '' : '、この状態の' }} PR はありません。
             </p>
             <Button
               v-if="mineApplied"
               variant="tertiary"
               :label="prQuery.trim() === '' ? 'すべての PR を表示' : 'すべての PR から探す'"
               @click="setMineOnly(false)"
+            />
+            <Button
+              v-if="prStateFilter !== 'all'"
+              variant="tertiary"
+              label="すべての状態の PR を表示"
+              @click="setPrStateFilter('all')"
             />
           </div>
 

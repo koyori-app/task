@@ -14,6 +14,7 @@ pub struct Model {
     pub user_id: Uuid,
     pub role: String,
     pub assigned_at: DateTimeWithTimeZone,
+    pub completed_at: Option<DateTimeWithTimeZone>,
     #[sea_orm(
         belongs_to,
         from = "task_id",

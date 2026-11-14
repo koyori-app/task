@@ -12,14 +12,21 @@ import { taskSeqKey } from '@/lib/task-display';
 const SEARCH_DEBOUNCE_MS = 300;
 const SEARCH_LIMIT = 20;
 
-const props = defineProps<{
-  tenantId: string | null | undefined;
-  projectId: string | null | undefined;
-  projectKey: string;
-  /** 候補から除くタスク。深い子孫までは手元に無いので、残りは backend の 409 に任せる */
-  excludeTaskIds: string[];
-  disabled: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    tenantId: string | null | undefined;
+    projectId: string | null | undefined;
+    projectKey: string;
+    /** 候補から除くタスク。深い子孫までは手元に無いので、残りは backend の 409 に任せる */
+    excludeTaskIds: string[];
+    disabled: boolean;
+    /** 入力欄の aria-label。既定は親タスク用 */
+    inputLabel?: string;
+    /** 閉じるボタンの aria-label。既定は親タスク用 */
+    cancelLabel?: string;
+  }>(),
+  { inputLabel: '親にするタスクを検索', cancelLabel: '親タスクの選択をやめる' },
+);
 
 const emit = defineEmits<{
   select: [taskId: string];
@@ -107,7 +114,7 @@ onMounted(async () => {
       <Input
         ref="inputRef"
         class="min-w-0 flex-1"
-        aria-label="親にするタスクを検索"
+        :aria-label="inputLabel"
         placeholder="キーまたはタイトルで検索"
         autocomplete="off"
         :value="query"
@@ -118,7 +125,7 @@ onMounted(async () => {
         type="button"
         variant="ghost"
         class="shrink-0"
-        ariaLabel="親タスクの選択をやめる"
+        :ariaLabel="cancelLabel"
         @click="emit('cancel')"
       >
         <template #icon><X class="size-4" aria-hidden="true" /></template>

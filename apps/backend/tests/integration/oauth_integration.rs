@@ -615,6 +615,7 @@ async fn oauth_callback_requires_2fa_setup_for_every_membership_form() {
                 )),
                 is_personal: Set(false),
                 personal_owner_id: Set(None),
+                inherit_tenant_members: Set(true),
             }
             .insert(&app.state.db)
             .await

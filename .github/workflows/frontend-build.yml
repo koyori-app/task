@@ -66,3 +66,20 @@ jobs:
       - name: Build
         run: pnpm build
         working-directory: apps/frontend
+
+      # build と dev では SSR の依存の扱いが違い、dev だけ壊れても build では気づけない。
+      # dev サーバーで 1 ページ描画できるかを見る（backend は無くても / は描画できる）
+      - name: Dev server smoke
+        run: |
+          pnpm exec vike dev --port 3000 > /tmp/vike-dev.log 2>&1 &
+          code=000
+          for i in $(seq 1 90); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/ || true)
+            [ "$code" != 000 ] && break
+            sleep 1
+          done
+          echo "GET / -> $code"
+          if [ "$code" != 200 ]; then cat /tmp/vike-dev.log; exit 1; fi
+        working-directory: apps/frontend
+        env:
+          APP_URL: http://localhost:3000

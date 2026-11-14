@@ -119,6 +119,7 @@ async fn returns_similar_titles_in_score_order_within_project() {
         )),
         is_personal: Set(false),
         personal_owner_id: Set(None),
+        inherit_tenant_members: Set(true),
     }
     .insert(&app.state.db)
     .await

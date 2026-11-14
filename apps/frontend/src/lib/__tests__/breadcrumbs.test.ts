@@ -17,7 +17,6 @@ describe('パンくずのルート台帳', () => {
     ['/acme/projects/ENG/tasks', ''],
     ['/acme/projects/ENG/settings', 'プロジェクト設定'],
     ['/acme/projects/ENG/reviews', 'レビュー'],
-    ['/acme/projects/ENG/labels', 'ラベル'],
     ['/acme/projects/ENG/tasks/ENG-3', ''],
     ['/acme/projects/ENG/docs', 'ドキュメント'],
     ['/acme/projects/ENG/docs/file-1', ''],
@@ -42,6 +41,13 @@ describe('パンくずのルート台帳', () => {
     '/auth/reset-password',
   ])('%s は段を出さない', (pathname) => {
     expect(breadcrumbRoute(pathname, { tenant: 'acme' })).toBeUndefined();
+  });
+
+  // 表示専用だったラベルページは削除済み（管理はプロジェクト設定のラベル節）
+  it('削除済みのプロジェクト配下 /labels は、プロジェクトが分かっていても段を出さない', () => {
+    expect(
+      breadcrumbRoute('/acme/projects/ENG/labels', { tenant: 'acme', projectKey: 'ENG' }),
+    ).toBeUndefined();
   });
 });
 

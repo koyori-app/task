@@ -56,6 +56,7 @@ import TaskDetailPane, { type TaskRefLink } from '@/components/tasks/TaskDetailP
 import CreateTaskDialog from '@/components/tasks/CreateTaskDialog.vue';
 import TaskListSortMenu from '@/components/tasks/TaskListSortMenu.vue';
 import TaskTitleLink from '@/components/tasks/TaskTitleLink.vue';
+import { usePreference } from '@/composables/useLocalSettings';
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import { fetchClient, taskSearchQueryOptions, useAssignableUsersQuery } from '@/lib/api-vue-query';
@@ -228,6 +229,8 @@ const VIEW_OPTIONS: { value: TaskListView; label: string; icon: Component }[] = 
 ];
 const view = ref<TaskListView>(initialListState.view);
 const isListView = computed(() => view.value === 'list');
+// 環境設定。true なら List 表示の親行を、サブタスクを開いた状態で描く
+const expandSubtasks = usePreference('expandSubtasksInList');
 
 const searchInput = ref(initialListState.q);
 const submittedSearchQuery = ref(initialListState.q);
@@ -1213,6 +1216,7 @@ const columnItems = computed<DropdownItem[]>(() =>
               :comment-pending-task-ids="rowMutations.commentPendingTaskIds.value"
               :create-errors="rowMutations.createErrors.value"
               :sorting="sorting"
+              :expand-subtasks="expandSubtasks"
               @open="openOverlay"
               @more="loadMoreInGroup"
               @update:status="(task, statusId) => rowMutations.setStatus(task, statusId)"

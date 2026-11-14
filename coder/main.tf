@@ -62,10 +62,6 @@ resource "coder_agent" "main" {
     setsid nohup t3 serve --no-browser --lan >/tmp/t3-serve.log 2>&1 < /dev/null &
     cd ~
 
-    # Claude Code / Codex の共通設定とスキル（Mac と同じもの）
-    [ -d ~/ai-skill ] || git clone -q git@github.com:yupix/ai-skill.git ~/ai-skill
-    ~/ai-skill/install.sh
-
     # Paradev はホストの id を /etc/machine-id から作る。コンテナのものは起動ごとに変わる（空）ので、
     # ホームに 1 度だけ作った値を置き直し、id が変わらないようにする
     [ -s ~/.local/share/machine-id ] || tr -d - < /proc/sys/kernel/random/uuid > ~/.local/share/machine-id

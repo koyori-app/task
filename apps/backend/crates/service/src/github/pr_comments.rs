@@ -27,6 +27,13 @@ pub fn summary_marker(project_id: Uuid) -> String {
     format!("<!-- koyori-review-summary:{project_id} -->")
 }
 
+/// 承認の取り消し（`REQUEST_CHANGES`）に付ける印。task が出したレビューと見分け、
+/// 承認し直してよいかの判定に使う。プロジェクトごとなのは [`summary_marker`] と同じ理由。
+#[must_use]
+pub fn revoke_marker(project_id: Uuid) -> String {
+    format!("<!-- koyori-approval-revoked:{project_id} -->")
+}
+
 /// マーカー探索で読むコメントの最大ページ数（100 件 × 5 ページ）。
 /// これを超えて遡らないのは、要約コメントは初回に作られるため実際には
 /// 1 ページ目で見つかるのが普通で、長大な PR で全ページを舐める費用に
@@ -81,19 +88,205 @@ struct PullRequestReview {
     commit_id: Option<String>,
     #[serde(default)]
     state: Option<String>,
+    #[serde(default)]
+    body: Option<String>,
+}
+
+/// 本人の最後の決定（APPROVED / CHANGES_REQUESTED / DISMISSED）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Decision {
+    Approved,
+    Dismissed,
+    /// `by_task` は本文に取り消しの目印がある（task が出した）こと
+    ChangesRequested {
+        by_task: bool,
+    },
 }
 
 impl PullRequestReview {
-    /// `approver_id` の GitHub ユーザーが `commit_sha` に出した承認か。
-    ///
-    /// 人に取り下げられた（DISMISSED）承認も含める。含めないと、取り下げた直後の
-    /// 遷移で同じ commit を承認し直し、人の判断と争う。login ではなく数値の ID で
-    /// 見るのは、改名しても同じ人と分かるようにするため。
-    fn is_approval_by(&self, commit_sha: &str, approver_id: i64) -> bool {
-        self.user.as_ref().and_then(|u| u.id) == Some(approver_id)
-            && self.commit_id.as_deref() == Some(commit_sha)
-            && matches!(self.state.as_deref(), Some("APPROVED" | "DISMISSED"))
+    /// 決定として読む。COMMENTED などは `None`（最後の決定を決めるときに飛ばす）。
+    fn decision(&self, marker: &str) -> Option<Decision> {
+        match self.state.as_deref() {
+            Some("APPROVED") => Some(Decision::Approved),
+            Some("DISMISSED") => Some(Decision::Dismissed),
+            Some("CHANGES_REQUESTED") => Some(Decision::ChangesRequested {
+                by_task: self.body.as_deref().is_some_and(|b| b.contains(marker)),
+            }),
+            _ => None,
+        }
     }
+
+    fn user_id(&self) -> Option<i64> {
+        self.user.as_ref().and_then(|u| u.id)
+    }
+}
+
+/// 本人のレビューの走査結果。
+#[derive(Debug, Default)]
+struct ReviewScan {
+    /// 同じ commit への APPROVED か DISMISSED が 1 件でもある
+    any_approved_or_dismissed: bool,
+    /// 同じ commit への最後の決定。COMMENTED などは無視する
+    last: Option<Decision>,
+    /// commit を問わない最後の決定。GitHub は本人の最後の決定で変更要求の有無を決めるので、
+    /// 前の head で task が出した取り消しが残っているかはこちらで見る
+    last_any_commit: Option<Decision>,
+    /// 上限までに一覧の終わりに届かなかった。`last` はその先にある決定を見落としている
+    truncated: bool,
+}
+
+impl ReviewScan {
+    /// 一覧（古い順）の 1 ページぶんを取り込む。login ではなく数値の ID で本人を見るのは、
+    /// 改名しても同じ人と分かるようにするため。
+    fn absorb(
+        &mut self,
+        reviews: &[PullRequestReview],
+        commit_sha: &str,
+        approver_id: i64,
+        marker: &str,
+    ) {
+        for r in reviews {
+            if r.user_id() != Some(approver_id) {
+                continue;
+            }
+            let Some(decision) = r.decision(marker) else {
+                continue;
+            };
+            self.last_any_commit = Some(decision);
+            if r.commit_id.as_deref() != Some(commit_sha) {
+                continue;
+            }
+            // 人に取り下げられた承認も含める。含めないと、取り下げた直後の遷移で
+            // 同じ commit を承認し直し、人の判断と争う
+            self.any_approved_or_dismissed |=
+                matches!(decision, Decision::Approved | Decision::Dismissed);
+            self.last = Some(decision);
+        }
+    }
+
+    /// 最後の決定（commit を問わない）が task の取り消しのまま残っている。
+    /// 打ち切られたときは最後の決定が分からないので `false`。
+    fn revoked_by_task(&self) -> bool {
+        !self.truncated
+            && self.last_any_commit == Some(Decision::ChangesRequested { by_task: true })
+    }
+}
+
+/// 満杯のページで上限に達した（その先にまだ続きがありうる）。
+fn is_cut_off(page: u32, fetched: usize) -> bool {
+    page == MAX_SEARCH_PAGES && fetched as u32 >= PER_PAGE
+}
+
+/// PR のレビュー一覧を全ページ（上限あり）辿り、1 ページずつ `absorb` に渡す。
+/// 上限で打ち切ったら `true` を返す。
+async fn for_each_review_page(
+    http: &Client,
+    token: &str,
+    reviews_url: &str,
+    mut absorb: impl FnMut(&[PullRequestReview]),
+) -> Result<bool, anyhow::Error> {
+    // 探索の上限はコメントと同じ。500 件を超えるレビューが付く PR は想定しない
+    for page in 1..=MAX_SEARCH_PAGES {
+        let page_url = format!("{reviews_url}?per_page={PER_PAGE}&page={page}");
+        let res = request(http, Method::GET, &page_url, token).send().await?;
+        let status = res.status();
+        if !status.is_success() {
+            let body = res.text().await.unwrap_or_default();
+            return Err(anyhow::anyhow!("list pr reviews failed: {status}: {body}"));
+        }
+        let reviews = res.json::<Vec<PullRequestReview>>().await?;
+        absorb(&reviews);
+        if (reviews.len() as u32) < PER_PAGE {
+            return Ok(false);
+        }
+        if is_cut_off(page, reviews.len()) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// 本人のレビューを全ページ（上限あり）辿って走査する。
+async fn scan_reviews(
+    http: &Client,
+    token: &str,
+    reviews_url: &str,
+    commit_sha: &str,
+    approver_id: i64,
+    marker: &str,
+) -> Result<ReviewScan, anyhow::Error> {
+    let mut scan = ReviewScan::default();
+    scan.truncated = for_each_review_page(http, token, reviews_url, |reviews| {
+        scan.absorb(reviews, commit_sha, approver_id, marker);
+    })
+    .await?;
+    Ok(scan)
+}
+
+/// 最後の決定（commit を問わない）が task の取り消しのまま残っている GitHub アカウント。
+///
+/// GitHub は stale な承認を push で取り下げても、変更要求は取り下げない。前の head で
+/// 取り消した人は、本人が新しい head をレビューして承認で上書きするまでマージを止める。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevokedReviewer {
+    pub github_user_id: i64,
+    pub login: String,
+}
+
+/// 一覧（古い順）を取り込み、人ごとの最後の決定を控える。
+fn absorb_last_decisions(
+    last: &mut std::collections::HashMap<i64, (String, Decision)>,
+    reviews: &[PullRequestReview],
+    marker: &str,
+) {
+    for r in reviews {
+        let (Some(id), Some(decision)) = (r.user_id(), r.decision(marker)) else {
+            continue;
+        };
+        let login = r
+            .user
+            .as_ref()
+            .and_then(|u| u.login.clone())
+            .unwrap_or_default();
+        last.insert(id, (login, decision));
+    }
+}
+
+fn revoked_from(last: std::collections::HashMap<i64, (String, Decision)>) -> Vec<RevokedReviewer> {
+    let mut out: Vec<RevokedReviewer> = last
+        .into_iter()
+        .filter(|(_, (_, d))| *d == Decision::ChangesRequested { by_task: true })
+        .map(|(github_user_id, (login, _))| RevokedReviewer {
+            github_user_id,
+            login,
+        })
+        .collect();
+    // 要約コメントの本文を毎回同じにする
+    out.sort_by(|a, b| {
+        a.login
+            .cmp(&b.login)
+            .then(a.github_user_id.cmp(&b.github_user_id))
+    });
+    out
+}
+
+/// PR のレビュー一覧から [`RevokedReviewer`] を集める。読むだけなので App のトークンでよい。
+/// 上限で打ち切ったら最後の決定が分からないので `None` を返す。
+pub async fn revoked_reviewers(
+    http: &Client,
+    token: &str,
+    owner: &str,
+    repo: &str,
+    number: i32,
+    revoke_marker: &str,
+) -> Result<Option<Vec<RevokedReviewer>>, anyhow::Error> {
+    let url = format!("{}/repos/{owner}/{repo}/pulls/{number}/reviews", api_base());
+    let mut last = std::collections::HashMap::new();
+    let truncated = for_each_review_page(http, token, &url, |reviews| {
+        absorb_last_decisions(&mut last, reviews, revoke_marker);
+    })
+    .await?;
+    Ok((!truncated).then(|| revoked_from(last)))
 }
 
 /// PR のメタ情報のうち、表示用にキャッシュするもの。
@@ -285,6 +478,11 @@ pub struct ApproveTarget<'a> {
     pub commit_sha: &'a str,
     /// 承認する人（トークンの持ち主）の GitHub ユーザー ID
     pub approver_id: i64,
+    /// 取り消しの目印（[`revoke_marker`]）。task が取り消した後なら承認し直す
+    pub revoke_marker: &'a str,
+    /// true なら、最後の決定が task の取り消しのときだけ承認する（承認し直し専用。
+    /// 取り消されていない人を新しく承認しない）。それ以外は `AlreadyApproved` を返す
+    pub only_after_revoke: bool,
 }
 
 /// [`approve_pull_request`] の結果。
@@ -298,7 +496,8 @@ pub enum ApproveOutcome {
 }
 
 /// レビュワー本人のトークン（`token`）で、PR を `commit_sha` に対して Approve する。
-/// 本人の承認（取り下げ済みを含む）が既にあれば何もしない。
+/// 本人の承認（取り下げ済みを含む）が既にあれば何もしない。ただし最後の決定が
+/// task の取り消し（目印付きの `CHANGES_REQUESTED`）なら承認し直す。
 ///
 /// `commit_id` は必ず明示する。省くと GitHub は最新の commit に付けるので、判定と投稿の
 /// 間に push されると、レビューしていない commit を承認してしまう。
@@ -313,29 +512,18 @@ pub async fn approve_pull_request(
         number,
         commit_sha,
         approver_id,
+        revoke_marker,
+        only_after_revoke,
     } = *target;
     let url = format!("{}/repos/{owner}/{repo}/pulls/{number}/reviews", api_base());
 
-    // 探索の上限はコメントと同じ。超えた先に自分の承認があれば二重に承認するが、
-    // 500 件を超えるレビューが付く PR は想定しない
-    for page in 1..=MAX_SEARCH_PAGES {
-        let page_url = format!("{url}?per_page={PER_PAGE}&page={page}");
-        let res = request(http, Method::GET, &page_url, token).send().await?;
-        let status = res.status();
-        if !status.is_success() {
-            let body = res.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!("list pr reviews failed: {status}: {body}"));
-        }
-        let reviews = res.json::<Vec<PullRequestReview>>().await?;
-        if reviews
-            .iter()
-            .any(|r| r.is_approval_by(commit_sha, approver_id))
-        {
-            return Ok(ApproveOutcome::AlreadyApproved);
-        }
-        if (reviews.len() as u32) < PER_PAGE {
-            break;
-        }
+    let scan = scan_reviews(http, token, &url, commit_sha, approver_id, revoke_marker).await?;
+    // 取り消しは前の head で出したものでも照合する。呼び出し側はこの commit をレビューした
+    // 人だけを渡すので、新しい head を見ていない人を承認することにはならない。
+    // 打ち切られたときは最後の決定が分からないので、目印による承認し直しはしない
+    let revoked_by_task = scan.revoked_by_task();
+    if !revoked_by_task && (scan.any_approved_or_dismissed || only_after_revoke) {
+        return Ok(ApproveOutcome::AlreadyApproved);
     }
 
     let payload = serde_json::json!({ "event": "APPROVE", "commit_id": commit_sha });
@@ -356,6 +544,88 @@ pub async fn approve_pull_request(
         ));
     }
     Ok(ApproveOutcome::Approved)
+}
+
+/// 承認の取り消しの対象。
+pub struct RevokeTarget<'a> {
+    pub owner: &'a str,
+    pub repo: &'a str,
+    pub number: i32,
+    /// 取り消す承認の commit。`REQUEST_CHANGES` もこの commit に付ける
+    pub commit_sha: &'a str,
+    /// 承認した人（トークンの持ち主）の GitHub ユーザー ID
+    pub approver_id: i64,
+    /// 本文に入れる目印（[`revoke_marker`]）
+    pub revoke_marker: &'a str,
+    /// 指摘一覧の URL。あれば本文に添える
+    pub findings_url: Option<&'a str>,
+}
+
+/// [`revoke_approval`] の結果。
+#[derive(Debug, PartialEq, Eq)]
+pub enum RevokeOutcome {
+    Revoked,
+    /// 最後の決定が承認ではない（無い・取り下げ済み・人の変更要求・取り消し済み）
+    NotApproved,
+    /// レビューが多く、一覧の終わりまで読めなかった。最後の決定が分からないので何もしない
+    Truncated,
+    /// GitHub が受け付けなかった（422）
+    Unprocessable(String),
+}
+
+/// 本人の最後の決定が APPROVED のときだけ、本人のトークンで `REQUEST_CHANGES` を出して
+/// 承認を上書きする。dismiss は保護ブランチで管理者権限が要り、人の取り下げと
+/// 区別できないので使わない。
+pub async fn revoke_approval(
+    http: &Client,
+    token: &str,
+    target: &RevokeTarget<'_>,
+) -> Result<RevokeOutcome, anyhow::Error> {
+    let RevokeTarget {
+        owner,
+        repo,
+        number,
+        commit_sha,
+        approver_id,
+        revoke_marker,
+        findings_url,
+    } = *target;
+    let url = format!("{}/repos/{owner}/{repo}/pulls/{number}/reviews", api_base());
+
+    let scan = scan_reviews(http, token, &url, commit_sha, approver_id, revoke_marker).await?;
+    if scan.truncated {
+        return Ok(RevokeOutcome::Truncated);
+    }
+    if scan.last != Some(Decision::Approved) {
+        return Ok(RevokeOutcome::NotApproved);
+    }
+
+    let mut body = format!(
+        "{revoke_marker}\ntask に未解決の High / Medium の指摘があるため、先に出した承認を取り下げます。解消してマージ可になれば承認し直します。"
+    );
+    if let Some(u) = findings_url {
+        body.push_str(&format!("\n\n指摘一覧: {u}"));
+    }
+    let payload = serde_json::json!({
+        "event": "REQUEST_CHANGES",
+        "commit_id": commit_sha,
+        "body": body,
+    });
+    let res = request(http, Method::POST, &url, token)
+        .json(&payload)
+        .send()
+        .await?;
+    let status = res.status();
+    if status == StatusCode::UNPROCESSABLE_ENTITY {
+        return Ok(RevokeOutcome::Unprocessable(
+            res.text().await.unwrap_or_default(),
+        ));
+    }
+    if !status.is_success() {
+        let text = res.text().await.unwrap_or_default();
+        return Err(anyhow::anyhow!("revoke approval failed: {status}: {text}"));
+    }
+    Ok(RevokeOutcome::Revoked)
 }
 
 #[cfg(test)]
@@ -427,10 +697,8 @@ mod tests {
         assert!(!unknown.is_written_by("koyori-task[bot]"));
     }
 
-    /// 本人の承認と見なすのは「同じ GitHub ユーザー ID・同じ commit・承認か取り下げ済み」だけ。
-    #[test]
-    fn only_the_approvers_approval_of_the_same_commit_counts() {
-        let review = |id: i64, commit: &str, state: &str| PullRequestReview {
+    fn review(id: i64, commit: &str, state: &str, body: Option<&str>) -> PullRequestReview {
+        PullRequestReview {
             user: Some(CommentUser {
                 id: Some(id),
                 login: Some("someone".into()),
@@ -438,18 +706,133 @@ mod tests {
             }),
             commit_id: Some(commit.into()),
             state: Some(state.into()),
+            body: body.map(Into::into),
+        }
+    }
+
+    fn scan(reviews: &[PullRequestReview]) -> ReviewScan {
+        let mut s = ReviewScan::default();
+        s.absorb(reviews, "abc", 42, "MARK");
+        s
+    }
+
+    /// 対象は「同じ GitHub ユーザー ID・同じ commit」のレビューだけ。
+    #[test]
+    fn only_the_approvers_reviews_of_the_same_commit_count() {
+        let s = scan(&[
+            review(42, "old", "APPROVED", None),
+            review(7, "abc", "APPROVED", None),
+        ]);
+        assert_eq!(s.last, None);
+        assert!(!s.any_approved_or_dismissed);
+
+        let s = scan(&[review(42, "abc", "DISMISSED", None)]);
+        assert_eq!(s.last, Some(Decision::Dismissed));
+        assert!(s.any_approved_or_dismissed);
+    }
+
+    /// 最後の決定は COMMENTED を飛ばして決める。
+    #[test]
+    fn the_last_decision_skips_comments() {
+        let s = scan(&[
+            review(42, "abc", "APPROVED", None),
+            review(42, "abc", "COMMENTED", None),
+        ]);
+        assert_eq!(s.last, Some(Decision::Approved));
+    }
+
+    /// 目印があるときだけ task の取り消しとみなす。
+    #[test]
+    fn changes_requested_is_ours_only_with_the_marker() {
+        let ours = scan(&[
+            review(42, "abc", "APPROVED", None),
+            review(42, "abc", "CHANGES_REQUESTED", Some("MARK\n説明")),
+        ]);
+        assert_eq!(
+            ours.last,
+            Some(Decision::ChangesRequested { by_task: true })
+        );
+        assert!(ours.any_approved_or_dismissed);
+
+        let human = scan(&[review(42, "abc", "CHANGES_REQUESTED", Some("直して"))]);
+        assert_eq!(
+            human.last,
+            Some(Decision::ChangesRequested { by_task: false })
+        );
+    }
+
+    /// 上限のページが満杯のままのときだけ、打ち切られたと見なす。
+    #[test]
+    fn a_scan_is_cut_off_only_when_the_last_allowed_page_is_full() {
+        assert!(is_cut_off(MAX_SEARCH_PAGES, PER_PAGE as usize));
+        assert!(!is_cut_off(MAX_SEARCH_PAGES, PER_PAGE as usize - 1));
+        assert!(!is_cut_off(MAX_SEARCH_PAGES - 1, PER_PAGE as usize));
+    }
+
+    /// 前の head で出した取り消しも、最後の決定なら残っているとみなす（GitHub は push で
+    /// 変更要求を取り下げない）。同じ commit の判定（`last`）には混ぜない。
+    #[test]
+    fn a_revocation_on_an_older_head_is_still_the_last_decision() {
+        let s = scan(&[
+            review(42, "old", "APPROVED", None),
+            review(42, "old", "CHANGES_REQUESTED", Some("MARK")),
+        ]);
+        assert_eq!(s.last, None);
+        assert!(s.revoked_by_task());
+
+        // 本人がその後に人として決定を出していれば、取り消しは残っていない
+        let s = scan(&[
+            review(42, "old", "CHANGES_REQUESTED", Some("MARK")),
+            review(42, "abc", "CHANGES_REQUESTED", Some("直して")),
+        ]);
+        assert!(!s.revoked_by_task());
+
+        let mut cut = scan(&[review(42, "old", "CHANGES_REQUESTED", Some("MARK"))]);
+        cut.truncated = true;
+        assert!(!cut.revoked_by_task(), "打ち切られたら分からない");
+    }
+
+    /// 人ごとの最後の決定が目印付きの変更要求の人だけを、login 順に返す。
+    #[test]
+    fn revoked_reviewers_are_those_whose_last_decision_is_ours() {
+        let named = |id: i64, login: &str, commit: &str, state: &str, body: Option<&str>| {
+            let mut r = review(id, commit, state, body);
+            r.user.as_mut().expect("user").login = Some(login.into());
+            r
         };
-        let me = 42;
+        let mut last = std::collections::HashMap::new();
+        absorb_last_decisions(
+            &mut last,
+            &[
+                named(1, "zed", "h1", "APPROVED", None),
+                named(1, "zed", "h1", "CHANGES_REQUESTED", Some("MARK")),
+                named(2, "amy", "h1", "CHANGES_REQUESTED", Some("MARK")),
+                named(2, "amy", "h2", "COMMENTED", None),
+                // 取り消しの後に承認し直された
+                named(3, "bob", "h1", "CHANGES_REQUESTED", Some("MARK")),
+                named(3, "bob", "h2", "APPROVED", None),
+                // 人の変更要求
+                named(4, "cat", "h1", "CHANGES_REQUESTED", Some("直して")),
+            ],
+            "MARK",
+        );
+        assert_eq!(
+            revoked_from(last),
+            vec![
+                RevokedReviewer {
+                    github_user_id: 2,
+                    login: "amy".into()
+                },
+                RevokedReviewer {
+                    github_user_id: 1,
+                    login: "zed".into()
+                },
+            ]
+        );
+    }
 
-        assert!(review(me, "abc", "APPROVED").is_approval_by("abc", me));
-        // 人が取り下げた承認も済み扱い（承認し直して争わない）
-        assert!(review(me, "abc", "DISMISSED").is_approval_by("abc", me));
-
-        // 別の commit への承認（レビュー後に push された）
-        assert!(!review(me, "old", "APPROVED").is_approval_by("abc", me));
-        // 承認ではないレビュー
-        assert!(!review(me, "abc", "COMMENTED").is_approval_by("abc", me));
-        // 別の人の承認
-        assert!(!review(7, "abc", "APPROVED").is_approval_by("abc", me));
+    #[test]
+    fn revoke_marker_differs_per_project() {
+        assert_ne!(revoke_marker(Uuid::new_v4()), revoke_marker(Uuid::new_v4()));
     }
 }

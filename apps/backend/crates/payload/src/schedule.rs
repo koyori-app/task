@@ -90,6 +90,23 @@ pub struct ScheduleTask {
     pub milestone_id: Option<Uuid>,
 }
 
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ScheduleRelation {
+    #[schema(value_type = String, format = "uuid")]
+    pub from_task_id: Uuid,
+    #[schema(value_type = String, format = "uuid")]
+    pub to_task_id: Uuid,
+    /// 関係の向き。`blocked_by` は端点を反転し、常に `blocks` で返す。
+    pub r#type: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ScheduleRelationsResponse {
+    pub relations: Vec<ScheduleRelation>,
+    /// 上限を超えた関係があり、`relations` を切り詰めたか。
+    pub truncated: bool,
+}
+
 #[derive(Serialize, Deserialize, ToSchema)]
 pub struct ScheduleResponse {
     pub range: ScheduleRange,

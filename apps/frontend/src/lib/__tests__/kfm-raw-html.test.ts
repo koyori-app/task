@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import { renderDescription } from '@/lib/markup-renderer';
 import { remarkKfmRawHtml } from '@/lib/remark-kfm-raw-html';
+import { favicon } from './kfm-favicon-html';
 
 /**
  * markdown 中の生の HTML（行中の tag・HTML の行で始まる段落・HTML のコメント）は、落とさず字として出す。
@@ -112,14 +113,16 @@ describe.each(PROFILES)('生の HTML は字として出る（%s profile）', (pr
       profile,
       mentions: { [id]: { status: 'member', name: 'alice' } },
     });
-    expect(html).toContain('kfm-mention');
+    expect(html).toContain('koyori-mention');
     expect(html).toContain('@alice');
     expect(html).toContain('&lt;b&gt;');
   });
 
   it('自動 link（<https://…>）は生の HTML ではなく、今どおり link になる', async () => {
     const html = await render('<https://example.com/a>');
-    expect(html).toBe('<p><a href="https://example.com/a">https://example.com/a</a></p>');
+    expect(html).toBe(
+      `<p><a href="https://example.com/a">${favicon('example.com')}https://example.com/a</a></p>`,
+    );
   });
 });
 

@@ -1,10 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defineComponent, ref, type Ref } from 'vue';
-import { flushPromises, mount } from '@vue/test-utils';
-import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
+import { QueryClient, VueQueryPlugin, focusManager } from '@tanstack/vue-query';
 import type { paths } from '@/generated/api';
 
-import { useTaskSubtasks, type TaskSubtaskFilters } from '../useTaskSubtasks';
+import {
+  useTaskSubtasks,
+  type TaskSubtaskFilters,
+  type UseTaskSubtasksParams,
+} from '../useTaskSubtasks';
 
 const { control, requestLog, fetchMock, createdChildren } = vi.hoisted(() => {
   const control: {
@@ -110,11 +114,17 @@ vi.mock('@/lib/api-vue-query', async (importOriginal) => {
   };
 });
 
+enableAutoUnmount(afterEach);
+
 describe('useTaskSubtasks', () => {
   let queryClient: QueryClient;
   let subtasks: ReturnType<typeof useTaskSubtasks>;
 
-  function mountHost(filters?: Ref<TaskSubtaskFilters>, parentTaskId = ref<string | null>(null)) {
+  function mountHost(
+    filters?: Ref<TaskSubtaskFilters>,
+    parentTaskId = ref<string | null>(null),
+    extra: Partial<UseTaskSubtasksParams> = {},
+  ) {
     const Host = defineComponent({
       setup() {
         subtasks = useTaskSubtasks({
@@ -124,6 +134,7 @@ describe('useTaskSubtasks', () => {
           taskUuid: 'parent-1',
           parentTaskId,
           filters,
+          ...extra,
         });
         return () => null;
       },
@@ -274,5 +285,76 @@ describe('useTaskSubtasks', () => {
     await flushPromises();
     expect(subtasks.error.value).toBe(false);
     expect(subtasks.subtasks.value).toHaveLength(203);
+  });
+
+  it('テナントが未解決の間は取得結果が無い（pending）として扱い、取れたら外れる', async () => {
+    const tenantId = ref<string | null>(null);
+    mountHost(ref({ is_archived: false }), ref(null), { tenantId });
+    await flushPromises();
+    expect(subtasks.pending.value).toBe(true);
+    expect(subtasks.loading.value).toBe(false);
+    expect(requestLog).toHaveLength(0);
+
+    tenantId.value = 'tenant-1';
+    await flushPromises();
+    expect(subtasks.pending.value).toBe(false);
+    expect(subtasks.subtasks.value).toHaveLength(203);
+  });
+
+  it('取得に失敗しても pending のままにはならず、error で見分けられる', async () => {
+    control.rejectNextPage = true;
+    mountHost(ref({ is_archived: false }));
+    await flushPromises();
+    expect(subtasks.pending.value).toBe(false);
+    expect(subtasks.error.value).toBe(true);
+  });
+
+  describe('queryOptions', () => {
+    async function focusAgain() {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+      await flushPromises();
+    }
+
+    it.each([
+      ['relations', undefined],
+      ['一覧条件つき', ref<TaskSubtaskFilters>({ is_archived: false })],
+    ])('%s: 指定が無ければフォーカス復帰で取り直す', async (_name, filters) => {
+      mountHost(filters);
+      await flushPromises();
+      const before = requestLog.length;
+
+      await focusAgain();
+      expect(requestLog.length).toBeGreaterThan(before);
+    });
+
+    it.each([
+      ['relations', undefined],
+      ['一覧条件つき', ref<TaskSubtaskFilters>({ is_archived: false })],
+    ])(
+      '%s: refetchOnWindowFocus: false ならフォーカス復帰で取り直さない',
+      async (_name, filters) => {
+        mountHost(filters, ref(null), {
+          queryOptions: { staleTime: 30_000, refetchOnWindowFocus: false },
+        });
+        await flushPromises();
+        const before = requestLog.length;
+
+        await focusAgain();
+        expect(requestLog).toHaveLength(before);
+      },
+    );
+
+    it('行の変更による invalidate では staleTime 内でも取り直す', async () => {
+      mountHost(undefined, ref(null), {
+        queryOptions: { staleTime: 30_000, refetchOnWindowFocus: false },
+      });
+      await flushPromises();
+      const before = requestLog.length;
+
+      await queryClient.invalidateQueries({ queryKey: ['get'] });
+      await flushPromises();
+      expect(requestLog.length).toBeGreaterThan(before);
+    });
   });
 });

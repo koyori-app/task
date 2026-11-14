@@ -12,12 +12,10 @@ use axum::{
     http::StatusCode,
 };
 use axum_valid::Valid;
-use chrono::Utc;
 use entity::{
     drive_files, labels, project_statuses, project_task_views, sprints, task_assignees,
     task_attachments, task_labels, tasks,
 };
-use payload::drive_files::content_url;
 use payload::task_extensions::*;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
@@ -574,6 +572,7 @@ pub(crate) fn bulk_error_reason(err: &AppError) -> String {
         AppError::Conflict => "conflict".into(),
         AppError::BadRequest => "bad-request".into(),
         AppError::BadRequestDetail(d) => d.clone(),
+        AppError::ConflictDetail(d) => d.clone(),
         _ => "error".into(),
     }
 }
@@ -586,16 +585,13 @@ async fn apply_bulk_update(
     user_id: Uuid,
     update: &BulkUpdateFields,
 ) -> Result<(), AppError> {
-    let task = tasks::Entity::find_by_id(task_id)
-        .filter(tasks::Column::ProjectId.eq(project_id))
-        .filter(tasks::Column::DeletedAt.is_null())
-        .one(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
     let txn = state.db.begin().await?;
+    // 担当者ごとの完了の判定がずれないよう、タスク行をロックしてから読む
+    let task = service::task_completion::lock_task(&txn, project_id, task_id).await?;
     let snapshot = task.clone();
     let mut active: tasks::ActiveModel = task.into();
+    // ステータスが変わるときの (変更前が完了, 変更後が完了)。担当者ごとの完了の判定に使う
+    let mut status_move: Option<(bool, bool)> = None;
 
     if let Some(status_id) = update.status_id {
         // ステータスが変わらない場合は completed_at もアクティビティも更新しない
@@ -605,6 +601,11 @@ async fn apply_bulk_update(
                 .one(&txn)
                 .await?
                 .ok_or(AppError::NotFound)?;
+            let was_done = project_statuses::Entity::find_by_id(snapshot.status_id)
+                .one(&txn)
+                .await?
+                .is_some_and(|old| old.is_done_state);
+            status_move = Some((was_done, status.is_done_state));
             active.status_id = Set(status_id);
             // 単体更新 API と同じルール: done 状態なら既存 completed_at を保持、なければ now()
             active.completed_at = if status.is_done_state {
@@ -641,7 +642,7 @@ async fn apply_bulk_update(
     }
 
     active.updated_at = Set(chrono::Utc::now().into());
-    active.update(&txn).await?;
+    let updated = active.update(&txn).await?;
 
     if let Some(assignee_id) = update.assignee_id {
         require_project_access(&txn, tenant_id, project_id, assignee_id).await?;
@@ -658,6 +659,7 @@ async fn apply_bulk_update(
                 user_id: Set(assignee_id),
                 role: Set("assignee".into()),
                 assigned_at: Set(chrono::Utc::now().into()),
+                completed_at: Set(None),
             }
             .insert(&txn)
             .await?;
@@ -670,6 +672,17 @@ async fn apply_bulk_update(
             )
             .await?;
         }
+    }
+
+    // 担当者ごとの完了。同じ要求で足した担当者も含めて判定する
+    match status_move {
+        Some((false, true)) => {
+            service::task_completion::ensure_can_enter_done(&txn, &updated).await?;
+        }
+        Some((true, false)) => {
+            service::task_completion::reset_assignee_completions(&txn, task_id).await?;
+        }
+        _ => {}
     }
 
     // ラベル変更の前後スナップショット。実際に集合が変わったときだけ記録する。
@@ -952,29 +965,7 @@ pub async fn list_task_attachments(
         .await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
 
-    let rows = task_attachments::Entity::find()
-        .filter(task_attachments::Column::TaskId.eq(task.id))
-        .order_by_desc(task_attachments::Column::CreatedAt)
-        .find_also_related(drive_files::Entity)
-        .all(&state.db)
-        .await?;
-
-    let attachments = rows
-        .into_iter()
-        .map(|(row, file)| {
-            let file = file.ok_or(AppError::NotFound)?;
-            Ok(TaskAttachmentResponse {
-                id: row.id,
-                drive_file_id: row.drive_file_id,
-                name: file.name,
-                mime_type: file.mime_type,
-                size: file.size,
-                url: content_url(file.id),
-                created_at: row.created_at.with_timezone(&Utc),
-                source: row.source,
-            })
-        })
-        .collect::<Result<Vec<_>, AppError>>()?;
+    let attachments = service::task_attachments::list_for_task(&state.db, task.id).await?;
 
     Ok(Json(TaskAttachmentListResponse { attachments }))
 }
@@ -1083,16 +1074,7 @@ pub async fn attach_task_file(
 
     Ok((
         status,
-        Json(TaskAttachmentResponse {
-            id: model.id,
-            drive_file_id: file.id,
-            name: file.name,
-            mime_type: file.mime_type,
-            size: file.size,
-            url: content_url(file.id),
-            created_at: model.created_at.with_timezone(&Utc),
-            source: model.source,
-        }),
+        Json(TaskAttachmentResponse::from_parts(model, file)),
     ))
 }
 

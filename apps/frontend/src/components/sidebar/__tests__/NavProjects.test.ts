@@ -17,6 +17,7 @@ const sampleProjects: ProjectNavItem[] = [
     description: 'Shared project',
     key: 'ALPHA',
     is_personal: false,
+    inherit_tenant_members: true,
     icon_emoji: null,
     icon_url: null,
     personal_owner_id: null,
@@ -28,6 +29,7 @@ const sampleProjects: ProjectNavItem[] = [
     description: 'Personal project',
     key: 'ME01',
     is_personal: true,
+    inherit_tenant_members: true,
     icon_emoji: '📝',
     icon_url: null,
     personal_owner_id: '00000000-0000-4000-8000-000000000099',
@@ -107,17 +109,17 @@ describe('NavProjects', () => {
     expect(visibleHrefs(wrapper)).toEqual([]);
   });
 
-  it('行クリックで展開し、タスク/ラベル/レビュー/設定の子リンクを出す', async () => {
+  it('行クリックで展開し、タスク/レビュー/設定の子リンクを出す', async () => {
     const wrapper = mountNavProjects({});
     await findRowButton(wrapper, 'Team Alpha')!.trigger('click');
 
     const hrefs = visibleHrefs(wrapper);
     expect(hrefs).toContain('/acme/projects/ALPHA/tasks');
-    expect(hrefs).toContain('/acme/projects/ALPHA/labels');
+    expect(hrefs).not.toContain('/acme/projects/ALPHA/labels');
     expect(hrefs).toContain('/acme/projects/ALPHA/reviews');
     expect(hrefs).toContain('/acme/projects/ALPHA/settings');
     expect(wrapper.text()).toContain('タスク');
-    expect(wrapper.text()).toContain('ラベル');
+    expect(wrapper.text()).not.toContain('ラベル');
     expect(wrapper.text()).toContain('レビュー');
     expect(wrapper.text()).toContain('設定');
   });
@@ -129,7 +131,7 @@ describe('NavProjects', () => {
 
     const hrefs = wrapper.findAll('a').map((a) => a.attributes('href'));
     expect(hrefs).toContain('/acme/projects/ME01/tasks');
-    expect(hrefs).toContain('/acme/projects/ME01/labels');
+    expect(hrefs).not.toContain('/acme/projects/ME01/labels');
     expect(hrefs).not.toContain('/acme/projects/ME01/settings');
     expect(hrefs).not.toContain('/acme/projects/ME01/reviews');
   });

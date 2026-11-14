@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { Sidebar } from '@koyori-app/ui-vue';
-import { usePreference } from '@/composables/useLocalSettings';
+import { useExperimentFlag } from '@/composables/useLocalSettings';
 import { useRouteAlignedTenantId } from '@/composables/useRouteAlignedTenantId';
 import { useTenantStore } from '@/stores/tenant';
-import { useProjectsQuery } from '@/lib/api-vue-query';
+import { useMeQuery, useProjectsQuery } from '@/lib/api-vue-query';
 import { usePageContext } from 'vike-vue/usePageContext';
 import { navigate } from 'vike/client/router';
 import { computed, watch } from 'vue';
 
 import { Calendar, ChartGantt, House, ListTodo } from '@lucide/vue';
 import NavMain from '@/components/sidebar/NavMain.vue';
+import NavAdmin from '@/components/sidebar/NavAdmin.vue';
 import NavProjects from '@/components/sidebar/NavProjects.vue';
 import { shouldCloseSidebarOnNavigate } from '@/components/sidebar/sidebar-navigation';
 
@@ -25,6 +26,7 @@ const emit = defineEmits<{
 }>();
 
 const pageContext = usePageContext();
+const meQuery = useMeQuery();
 const tenantStore = useTenantStore();
 
 const routeTenantSlug = computed(() => {
@@ -37,9 +39,9 @@ const tenantSlug = computed(
   () => routeTenantSlug.value || (tenantStore.selectedTenant?.display_id ?? ''),
 );
 
-// ガントは arc が alpha なので、環境設定の「実験的機能を表示する」を入れた人にだけ出す。
-// 残った値は SSR で読めぬので、mount の後に出る（usePreference が mount の前は既定値＝無効を返す）
-const showExperiments = usePreference('showExperiments');
+// ガントは arc が alpha なので、実験的機能の「ガントチャート」を有効にした人にだけ出す。
+// 残った値は SSR で読めないので、mount の後に出る（useExperimentFlag が mount の前は既定値＝無効を返す）
+const showGantt = useExperimentFlag('koyoriArcIntegration');
 
 const myTasksUrl = computed(() => (tenantSlug.value ? `/${tenantSlug.value}/my-tasks` : '#'));
 
@@ -49,6 +51,7 @@ const routeAlignedTenantId = useRouteAlignedTenantId(
 );
 
 const projectsQuery = useProjectsQuery(routeAlignedTenantId);
+const isAdmin = computed(() => meQuery.data.value?.is_admin === true);
 
 const navProjects = computed(() => projectsQuery.data.value ?? []);
 
@@ -93,7 +96,7 @@ const data = computed(() => ({
       icon: Calendar,
       isActive: pageContext.urlPathname === `/${pageContext.routeParams.tenant}/calendar`,
     },
-    ...(showExperiments.value
+    ...(showGantt.value
       ? [
           {
             title: 'ガント',
@@ -133,9 +136,10 @@ function closeOnNavigate(event: MouseEvent) {
       :current-path="pageContext.urlPathname"
       :loading="navProjectsLoading"
       :error="projectsQuery.isError.value"
-      :show-gantt="showExperiments"
+      :show-gantt="showGantt"
       @retry="retryProjects"
       @create="onCreateProject"
     />
+    <NavAdmin v-if="isAdmin" :current-path="pageContext.urlPathname" />
   </Sidebar>
 </template>

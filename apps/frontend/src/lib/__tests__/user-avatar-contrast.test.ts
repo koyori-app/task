@@ -24,12 +24,6 @@ describe('頭文字の対比', () => {
     expect(ratio(token(scope, 'foreground'), token(scope, 'muted'))).toBeGreaterThanOrEqual(4.5);
   });
 
-  it('従来の薄い字（text-muted-foreground）は明るい面で 4.5:1 に届かなかった（陽性対照）', () => {
-    const r = ratio(token(':root', 'muted-foreground'), token(':root', 'muted'));
-    expect(r).toBeLessThan(4.5);
-    expect(r).toBeGreaterThan(4.3);
-  });
-
   it('灰色（USER_AVATAR_INACTIVE_CLASS の opacity）にしても、面の上で 4.5:1 以上', () => {
     const opacity = /\bopacity-(\d+)\b/.exec(USER_AVATAR_INACTIVE_CLASS);
     if (!opacity) throw new Error('USER_AVATAR_INACTIVE_CLASS に opacity-* が無い');

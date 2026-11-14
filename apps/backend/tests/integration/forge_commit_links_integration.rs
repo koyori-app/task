@@ -152,6 +152,7 @@ pub(crate) async fn insert_project(app: &TestApp, tenant_id: Uuid, key: &str) ->
         key: Set(key.into()),
         is_personal: Set(false),
         personal_owner_id: Set(None),
+        inherit_tenant_members: Set(true),
     }
     .insert(&app.state.db)
     .await
@@ -182,6 +183,7 @@ pub(crate) async fn insert_task(
         soft_deadline: Set(None),
         hard_deadline: Set(None),
         planned_start_on: Set(None),
+        require_all_assignees_done: Set(false),
         estimated_minutes: Set(None),
         is_archived: Set(false),
         created_by: Set(created_by),

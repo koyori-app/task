@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  CheckCheck,
   CircleDashed,
   Copy,
   EllipsisVertical,
@@ -32,8 +33,11 @@ import {
 import { computed, nextTick, ref, watch } from 'vue';
 import type { ComponentPublicInstance } from 'vue';
 import type { components } from '@/generated/api';
-import type { EditableField } from '@/components/tasks/editable-field';
+import type { EditableField, MutatingField } from '@/components/tasks/editable-field';
+import MentionHoverCard from '@/components/tasks/MentionHoverCard.vue';
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
+import TaskChecklistProgress from '@/components/tasks/TaskChecklistProgress.vue';
+import TaskCompletionRule from '@/components/tasks/TaskCompletionRule.vue';
 import TaskPropertyRow from '@/components/tasks/TaskPropertyRow.vue';
 import {
   AvatarGroup,
@@ -46,6 +50,8 @@ import {
 } from '@koyori-app/ui-vue';
 import MarkdownEditor from '@/components/markdown/MarkdownEditor.vue';
 import { lookup, toPlainText } from '@/lib/comment-mention';
+import { countChecklist } from '@/lib/task-checklist';
+import { hasMentionCards } from '@/lib/mention-card';
 import {
   PRIORITY_CONFIG,
   clampProgressPct,
@@ -63,8 +69,8 @@ import '@/lib/remark-gfm/style.css';
 import '@/lib/remark-koyori-alerts/style.css';
 import '@/lib/rehype-starry-night/style.css';
 import '@/lib/rehype-kfm-code/style.css';
+import '@/lib/rehype-kfm-link-favicon/style.css';
 import '@/lib/remark-kfm-mermaid/style.css';
-import '@/lib/remark-kfm-mention/style.css';
 
 type TaskDetail = components['schemas']['TaskDetailResponse'];
 type StatusOption = components['schemas']['ProjectStatusResponse'];
@@ -84,12 +90,19 @@ const props = defineProps<{
   /** 担当者の更新中。ピッカーを止める（止めないと 2 回目が無言で捨てられる） */
   assigneeUpdating?: boolean;
   assigneeError?: string | null;
+  /** 完了条件（担当者ごとの完了）の更新中。切り替えと自分の分の操作を止める */
+  completionUpdating?: boolean;
+  completionError?: string | null;
   /** 候補の取得状態。取得中・失敗を「候補 0 人」と混ぜない */
   membersState?: { loading?: boolean; error?: boolean; onRetry?: () => void };
   /** 担当者のプロフィール画面の URL。渡すと担当者名をリンクで並べる */
   profileHref?: (userId: string) => string;
   /** ログイン中ユーザーの ID。押した人の一覧で「自分」を示す */
   currentUserId?: string | null;
+  /** 説明の札のカードがプロフィール API を引くテナント（UUID）。無ければカードは名前と画像だけ */
+  tenantId?: string | null;
+  /** 説明の札のカードの「プロフィールを見る」の道のテナント（表示用 id） */
+  mentionTenant?: string;
   /** 絵文字リアクションの操作。渡さなければリアクションの UI を出さない */
   reactionController?: ReactionController;
   projectLabels?: LabelOption[];
@@ -100,7 +113,7 @@ const props = defineProps<{
   fieldUpdating?: Partial<Record<EditableField, boolean>>;
   fieldErrors?: Partial<Record<EditableField, string>>;
   /** 直近に保存が確定したフィールド。該当箇所に「保存しました」を出す（失敗表示が優先） */
-  savedField?: EditableField | null;
+  savedField?: MutatingField | null;
   loading?: boolean;
   notFound?: boolean;
   error?: boolean;
@@ -148,6 +161,9 @@ const emit = defineEmits<{
   'save:hard_deadline': [value: string | null];
   'save:label_ids': [value: string[]];
   'toggle:assignee': [userId: string, checked: boolean];
+  'update:require-all': [value: boolean];
+  'complete:mine': [];
+  'reopen:mine': [];
   'delete-request': [];
 }>();
 
@@ -170,7 +186,7 @@ const statusItems = computed<DropdownItem[]>(() =>
     label: status.name,
     kind: 'radio',
     checked: status.id === props.statusId,
-    disabled: props.statusUpdating,
+    disabled: props.statusUpdating || (doneBlocked.value && status.is_done_state),
   })),
 );
 
@@ -182,6 +198,17 @@ const priorityItems = computed<DropdownItem[]>(() =>
     checked: value === props.task?.priority,
     disabled: props.priorityUpdating,
   })),
+);
+
+/**
+ * 担当者全員の完了が必要なタスクで、未完了の担当者が残っている間は完了へ直接移せない
+ * （backend が 409 で止める）。移せないボタンは出さず、メニューの項目は無効にする。
+ */
+const doneBlocked = computed(
+  () =>
+    !!props.task?.require_all_assignees_done &&
+    props.task.assignees.some((assignee) => !assignee.completed_at) &&
+    !resolvedStatus.value?.is_done_state,
 );
 
 /** 「完了にする」の移動先。既定の完了に印が無ければ並び順で最初の完了へ倒す。 */
@@ -201,6 +228,8 @@ const nextStatus = computed(() => {
   return orderedStatuses.value[index + 1] ?? null;
 });
 
+// 達成率は常に保存済みの説明から数える。編集中の下書きは数えない
+const checklist = computed(() => countChecklist(props.task?.description));
 // 古い HTML の遮断: 描画元 (descriptionSource) がクライアントの最新 task.description と
 // 厳密一致しない descriptionHtml は捨て、プレーンテキスト表示へ倒す。v-html の直前で
 // 照合するのは、消費側の渡し忘れ・渡し間違いでも stale HTML が漏れないようにするため。
@@ -220,6 +249,8 @@ const freshDescriptionHtml = computed(() => {
   if (props.descriptionSource !== props.task.description) return null;
   return props.descriptionHtml;
 });
+/** 説明の KFM 表示の容れ物。札のカード（HoverCard）の委譲先。client で mount した後に入る */
+const descriptionHtmlEl = ref<HTMLElement | null>(null);
 const editingField = ref<EditableField | null>(null);
 const draftValue = ref('');
 const editingControlRef = ref<HTMLElement | ComponentPublicInstance | null>(null);
@@ -671,7 +702,7 @@ function clearDescription() {
                         class="inline-flex h-7 items-center rounded-r border-l border-background/60 px-1.5 hover:bg-muted-foreground/10 disabled:opacity-50"
                         :aria-label="`${nextStatus.name} にする`"
                         :title="`次へ: ${nextStatus.name}`"
-                        :disabled="statusUpdating"
+                        :disabled="statusUpdating || (nextStatus.is_done_state && doneBlocked)"
                         @click="emit('update:statusId', nextStatus.id)"
                       >
                         <ChevronRight class="size-3.5 opacity-70" aria-hidden="true" />
@@ -680,7 +711,7 @@ function clearDescription() {
 
                     <!-- ✓ は完了扱いのステータスへ一手で移す -->
                     <Button
-                      v-if="doneStatus && doneStatus.id !== statusId"
+                      v-if="doneStatus && doneStatus.id !== statusId && !doneBlocked"
                       type="button"
                       variant="ghost"
                       :ariaLabel="`${doneStatus.name} にする（完了）`"
@@ -691,6 +722,13 @@ function clearDescription() {
                     </Button>
                   </div>
                   <p v-if="statusError" class="mt-1 text-xs text-destructive">{{ statusError }}</p>
+                  <p
+                    v-else-if="savedField === 'status_id'"
+                    role="status"
+                    class="mt-1 text-xs text-muted-foreground"
+                  >
+                    保存しました
+                  </p>
                 </TaskPropertyRow>
 
                 <!-- 日付は 1 行に 2 つ（参照の Start → Due） -->
@@ -950,6 +988,13 @@ function clearDescription() {
                     <p v-if="labelsError" class="mt-1 text-xs text-destructive">
                       {{ labelsError }}
                     </p>
+                    <p
+                      v-else-if="savedField === 'labels'"
+                      role="status"
+                      class="mt-1 text-xs text-muted-foreground"
+                    >
+                      保存しました
+                    </p>
                   </TaskPropertyRow>
                 </div>
               </div>
@@ -1003,6 +1048,19 @@ function clearDescription() {
                   </p>
                 </TaskPropertyRow>
 
+                <TaskPropertyRow label="完了条件" :icon="CheckCheck">
+                  <TaskCompletionRule
+                    :task="task"
+                    :current-user-id="currentUserId"
+                    :task-done="!!resolvedStatus?.is_done_state"
+                    :updating="completionUpdating"
+                    :error="completionError"
+                    @update:require-all="(value) => emit('update:require-all', value)"
+                    @complete="emit('complete:mine')"
+                    @reopen="emit('reopen:mine')"
+                  />
+                </TaskPropertyRow>
+
                 <TaskPropertyRow label="優先度" :icon="Flag">
                   <!--
                     ステータスと同じピル + メニューで変える（#665 の native select から
@@ -1032,6 +1090,13 @@ function clearDescription() {
                   </Dropdown>
                   <p v-if="priorityError" class="mt-1 text-xs text-destructive">
                     {{ priorityError }}
+                  </p>
+                  <p
+                    v-else-if="savedField === 'priority'"
+                    role="status"
+                    class="mt-1 text-xs text-muted-foreground"
+                  >
+                    保存しました
                   </p>
                 </TaskPropertyRow>
 
@@ -1085,7 +1150,14 @@ function clearDescription() {
             <!-- 説明 -->
             <div class="border-t pt-5">
               <div class="mb-2 flex items-center justify-between gap-2">
-                <h2 class="text-sm font-medium text-muted-foreground">説明</h2>
+                <div class="flex min-w-0 items-center gap-2">
+                  <h2 class="text-sm font-medium text-muted-foreground">説明</h2>
+                  <TaskChecklistProgress
+                    v-if="checklist"
+                    :done="checklist.done"
+                    :total="checklist.total"
+                  />
+                </div>
                 <Button
                   v-if="editingField === 'description' && task.description"
                   type="button"
@@ -1131,6 +1203,7 @@ function clearDescription() {
                 v-else-if="freshDescriptionHtml"
                 :class="KFM_CONTENT_CLASS"
                 class="text-sm leading-relaxed"
+                ref="descriptionHtmlEl"
                 data-task-description-html
                 v-html="freshDescriptionHtml"
               />
@@ -1146,6 +1219,16 @@ function clearDescription() {
                 </p>
                 <p v-else class="text-sm text-muted-foreground">説明を追加</p>
               </button>
+              <MentionHoverCard
+                v-if="
+                  freshDescriptionHtml && descriptionHtmlEl && hasMentionCards(freshDescriptionHtml)
+                "
+                :container="descriptionHtmlEl"
+                :mentions="task.mentions"
+                :current-user-id="currentUserId"
+                :tenant-id="tenantId"
+                :mention-tenant="mentionTenant"
+              />
               <div v-if="editingField === 'description'" class="mt-2 flex justify-end gap-2">
                 <Button
                   type="button"

@@ -184,7 +184,7 @@ pub struct UpdateTaskViewRequest {
     pub view_type: Option<String>,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct TaskAttachmentResponse {
     #[schema(value_type = String, format = "uuid")]
     pub id: Uuid,
@@ -199,6 +199,25 @@ pub struct TaskAttachmentResponse {
     /// 添付の由来。`manual`（手動）または `body`（Drive の Markdown 本文から抽出）
     #[schema(example = "manual")]
     pub source: String,
+}
+
+impl TaskAttachmentResponse {
+    /// 添付の行と、結び付いた Drive ファイルの行から応答を組む。
+    pub fn from_parts(
+        row: entity::task_attachments::Model,
+        file: entity::drive_files::Model,
+    ) -> Self {
+        Self {
+            id: row.id,
+            drive_file_id: row.drive_file_id,
+            url: crate::drive_files::content_url(file.id),
+            name: file.name,
+            mime_type: file.mime_type,
+            size: file.size,
+            created_at: row.created_at.with_timezone(&chrono::Utc),
+            source: row.source,
+        }
+    }
 }
 
 #[derive(Serialize, ToSchema)]
