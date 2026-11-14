@@ -440,6 +440,38 @@ async fn done_filter_narrows_the_list_and_its_total() {
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
 
+/// 期限の絞り込み（timezone を `$1` で束縛する）に完了の条件が重なる。`$N` の振り直しが
+/// ずれると、束縛が入れ替わって 500 になるか、完了済みが混ざる。
+#[tokio::test]
+async fn done_filter_combines_with_the_overdue_filter() {
+    let mut app = TestApp::new().await;
+    let (user, tp) = setup(&mut app).await;
+    let todo = create_status(&app, &tp, "Todo", false).await;
+    let done = create_status(&app, &tp, "Done", true).await;
+    let past = Utc::now().date_naive() - Duration::days(3);
+    let future = Utc::now().date_naive() + Duration::days(3);
+    for title in ["overdue 1", "overdue 2"] {
+        add_task(&app, &user, &tp, todo, title, None, Some(past)).await;
+    }
+    add_task(&app, &user, &tp, done, "done overdue", None, Some(past)).await;
+    // 対照: 期限が先のものは期限超過に入らない
+    add_task(&app, &user, &tp, todo, "not yet", None, Some(future)).await;
+
+    let query = "filter=overdue&timezone=Asia%2FTokyo";
+    let open = list(&app, &tp, &format!("{query}&done=false")).await;
+    assert_eq!(titles_of(&open), vec!["overdue 1", "overdue 2"]);
+    assert_eq!(open["total"], 2);
+
+    // 期限超過は完了済みを含まないので、done=true と掛けると 0 件になる
+    let finished = list(&app, &tp, &format!("{query}&done=true")).await;
+    assert!(titles_of(&finished).is_empty(), "{finished}");
+    assert_eq!(finished["total"], 0);
+
+    // 対照: done を付けなくても結果は同じ（完了済みは元から除かれる）
+    let unfiltered = list(&app, &tp, query).await;
+    assert_eq!(titles_of(&unfiltered), vec!["overdue 1", "overdue 2"]);
+}
+
 /// 未完了だけのページ送り。`total` が絞り込み後の件数でなければ、CLI は続きの有無を誤る。
 #[tokio::test]
 async fn open_tasks_page_past_the_default_limit() {
