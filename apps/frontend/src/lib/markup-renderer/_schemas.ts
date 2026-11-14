@@ -10,6 +10,7 @@
  * 検査していた。ここを単一ソースにすれば、プラグインを足した時点で両方が動く。
  */
 import { kfmCodeSanitizeSchema } from '@/lib/rehype-kfm-code/schema';
+import { kfmLinkFaviconSanitizeSchema } from '@/lib/rehype-kfm-link-favicon/schema';
 import { starryNightSanitizeSchema } from '@/lib/rehype-starry-night/schema';
 import { gfmSanitizeSchema } from '@/lib/remark-gfm';
 import { kfmMermaidSanitizeSchema } from '@/lib/remark-kfm-mermaid';
@@ -27,4 +28,5 @@ export const kfmSanitizeSchemas: readonly SanitizeSchema[] = [
   kfmMermaidSanitizeSchema,
   kfmTaskRefSanitizeSchema,
   kfmMentionSanitizeSchema,
+  kfmLinkFaviconSanitizeSchema,
 ];

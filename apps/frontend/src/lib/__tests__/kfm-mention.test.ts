@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { MentionTable } from '../comment-mention';
 import { renderDescription } from '../markup-renderer';
 import { kfmMentionSanitizeSchema } from '../remark-kfm-mention';
+import { favicon } from './kfm-favicon-html';
 
 const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
@@ -88,7 +89,9 @@ describe('remark-kfm-mention (<@利用者ID> の印を札にする)', () => {
 
   it('リンクの入れ子の文字は札にせず、現在の名前へ戻す', async () => {
     const inline = await render(`[**<@${A}>**](https://example.com)`);
-    expect(inline).toContain('<a href="https://example.com"><strong>@alice</strong></a>');
+    expect(inline).toContain(
+      `<a href="https://example.com">${favicon('example.com')}<strong>@alice</strong></a>`,
+    );
     expect(inline).not.toContain('koyori-mention');
     expect(inline).not.toContain(A);
 

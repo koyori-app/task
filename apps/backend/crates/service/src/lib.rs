@@ -15,6 +15,7 @@ pub mod drive;
 pub mod drive_task_links;
 pub mod email;
 pub mod email_verification;
+pub mod favicon;
 pub mod forge;
 pub mod github;
 pub mod http;
