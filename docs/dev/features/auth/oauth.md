@@ -46,7 +46,7 @@ sidebar:
 
 ### PR 承認用の連携
 
-`github_app` は、レビューが完了した PR をレビュワー本人の名義で Approve するための連携である（[レビュー指摘管理](/dev/features/review-findings)の GitHub 要約コメント）。
+`github_app` は、レビューが完了した PR をレビュワー本人の名義で Approve・変更要求するための連携である（[レビュー指摘管理](/dev/features/review-findings)の GitHub 要約コメント）。
 
 - ログイン中の利用者にだけ結べる。開始・コールバックとも `link_user_id` が無ければ拒み、これで利用者を作ったりログインしたりはしない
 - `list_providers` は `sign_in: false` で返し、サインイン画面（`OAuthButtons.vue`）には出さない

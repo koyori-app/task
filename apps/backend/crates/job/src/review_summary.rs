@@ -11,7 +11,8 @@
 //! 最新ラウンドのレビュワー本人の名義（GitHub App のユーザー認可で得たトークン）で、
 //! レビューした commit を Approve する。これもベストエフォート。
 //! 同じ head でマージ可でなくなったら、その head にラウンドを出した全員の承認を
-//! `REQUEST_CHANGES` で上書きして取り消し、マージ可に戻れば承認し直す。
+//! `REQUEST_CHANGES` で上書きして取り消し、未解決の High / Medium を自分のラウンドに持つ人には
+//! （承認していなくても）変更を求める。マージ可に戻れば承認し直す。
 //!
 //! 同一 (project, pr) の更新要求は 1 本に合流させる（`service::github::review_summary_queue`）。
 //! 遷移のたびに積むと同じコメントへ連続して書き込み、GitHub の
@@ -32,7 +33,7 @@ use uuid::Uuid;
 use common::cache::redis::RedisConnection;
 use common::settings::Settings;
 use entity::github_integrations;
-use service::github::pr_comments::{ApproveOutcome, RevokeOutcome};
+use service::github::pr_comments::{ApproveOutcome, RequestChangesOutcome};
 
 use crate::JobState;
 
@@ -563,14 +564,15 @@ async fn update_summary(
         snapshot.head_is_fresh(),
         snapshot.latest_head_sha.as_deref(),
     ) {
-        // head が違うときは何もしない（push 後の古い承認は branch protection に任せる）。
-        // 再レビュー待ちだけのときも取り消さない（取り消しの本文は未解決の指摘を理由にしている）
-        revoke_approvals(job, state, integration, repo, &snapshot, commit_sha).await;
+        // 未解決の指摘がある間は変更要求を出し、承認があれば取り消す。head が違うときは
+        // 何もしない（push 後の古い承認は branch protection に任せる）。
+        // 再レビュー待ちだけのときも出さない（本文は未解決の指摘を理由にしている）
+        request_changes_as_reviewers(job, state, integration, repo, &snapshot, commit_sha).await;
     }
     Ok(())
 }
 
-/// task が承認を取り消したまま（最後の決定が目印付きの `REQUEST_CHANGES`）で、
+/// task が変更を求めたまま（最後の決定が目印付きの `REQUEST_CHANGES`）で、
 /// `commit_sha` にラウンドを出していない人の GitHub login を返す。
 ///
 /// その人の変更要求は、本人が承認で上書きするまで保護ブランチでマージを止める。
@@ -695,11 +697,12 @@ async fn approve_as_reviewer(
     }
 }
 
-/// マージ可でなくなった PR で、今の head に対するラウンドを出した全レビュワーの承認を取り消す。
+/// マージ可でなくなった PR で、今の head に対するラウンドを出した全レビュワーについて、
+/// 承認の取り消しと、自分のラウンドに未解決の High / Medium がある人の変更要求を出す。
 ///
 /// 承認したのが前のラウンドの人の場合があるので、最新ラウンドの作成者だけにしない。
-/// 判定は [`service::github::pr_comments::revoke_approval`]。失敗はベストエフォート。
-async fn revoke_approvals(
+/// 判定は [`service::github::pr_comments::request_changes`]。失敗はベストエフォート。
+async fn request_changes_as_reviewers(
     job: &ReviewSummaryJob,
     state: &JobState,
     integration: &github_integrations::Model,
@@ -718,10 +721,25 @@ async fn revoke_approvals(
     {
         Ok(ids) => ids,
         Err(e) => {
-            tracing::warn!(error = %e, project_id = %job.project_id, pr = job.pr_number, "load reviewers failed; skipping approval revocation");
+            tracing::warn!(error = %e, project_id = %job.project_id, pr = job.pr_number, "load reviewers failed; skipping change requests");
             return;
         }
     };
+    let blocking_owners: std::collections::HashSet<Uuid> =
+        match service::reviews::reviewer_ids_with_blocking_findings(
+            &state.db,
+            job.project_id,
+            repo,
+            job.pr_number,
+        )
+        .await
+        {
+            Ok(ids) => ids.into_iter().collect(),
+            Err(e) => {
+                tracing::warn!(error = %e, project_id = %job.project_id, pr = job.pr_number, "load reviewers with blocking findings failed; skipping change requests");
+                return;
+            }
+        };
     let marker = service::github::pr_comments::revoke_marker(job.project_id);
 
     for reviewer_id in reviewers {
@@ -735,7 +753,7 @@ async fn revoke_approvals(
         {
             Ok(Some(token)) => token,
             Ok(None) => {
-                tracing::info!(project_id = %job.project_id, pr = job.pr_number, %reviewer_id, "reviewer has not linked GitHub; skipping approval revocation");
+                tracing::info!(project_id = %job.project_id, pr = job.pr_number, %reviewer_id, "reviewer has not linked GitHub; skipping change request");
                 continue;
             }
             Err(e) => {
@@ -744,33 +762,37 @@ async fn revoke_approvals(
             }
         };
 
-        match service::github::pr_comments::revoke_approval(
+        match service::github::pr_comments::request_changes(
             &state.http_client,
             &token.access_token,
-            &service::github::pr_comments::RevokeTarget {
+            &service::github::pr_comments::RequestChangesTarget {
                 owner: &integration.repo_owner,
                 repo: &integration.repo_name,
                 number: job.pr_number,
                 commit_sha,
-                approver_id: token.github_user_id,
+                reviewer_id: token.github_user_id,
+                own_blocking: blocking_owners.contains(&reviewer_id),
                 revoke_marker: &marker,
                 findings_url: snapshot.findings_url.as_deref(),
             },
         )
         .await
         {
-            Ok(RevokeOutcome::Revoked) => {
+            Ok(RequestChangesOutcome::Requested) => {
+                tracing::info!(project_id = %job.project_id, pr = job.pr_number, commit_sha, %reviewer_id, "changes requested by reviewer");
+            }
+            Ok(RequestChangesOutcome::Revoked) => {
                 tracing::info!(project_id = %job.project_id, pr = job.pr_number, commit_sha, %reviewer_id, "approval revoked");
             }
-            Ok(RevokeOutcome::NotApproved) => {}
-            Ok(RevokeOutcome::Truncated) => {
-                tracing::warn!(project_id = %job.project_id, pr = job.pr_number, %reviewer_id, "too many reviews to find the last decision; skipping approval revocation");
+            Ok(RequestChangesOutcome::NotNeeded) => {}
+            Ok(RequestChangesOutcome::Truncated) => {
+                tracing::warn!(project_id = %job.project_id, pr = job.pr_number, %reviewer_id, "too many reviews to find the last decision; skipping change request");
             }
-            Ok(RevokeOutcome::Unprocessable(body)) => {
-                tracing::info!(project_id = %job.project_id, pr = job.pr_number, %reviewer_id, body, "GitHub declined the revocation");
+            Ok(RequestChangesOutcome::Unprocessable(body)) => {
+                tracing::info!(project_id = %job.project_id, pr = job.pr_number, %reviewer_id, body, "GitHub declined the change request");
             }
             Err(e) => {
-                tracing::warn!(error = %e, project_id = %job.project_id, pr = job.pr_number, %reviewer_id, "revoke approval failed");
+                tracing::warn!(error = %e, project_id = %job.project_id, pr = job.pr_number, %reviewer_id, "request changes failed");
             }
         }
     }
