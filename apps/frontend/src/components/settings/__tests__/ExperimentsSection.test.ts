@@ -29,13 +29,13 @@ describe('ExperimentsSection（実験的機能の画面）: 表示が有効', ()
     );
   });
 
-  it('表のフラグごとに、名前・説明・切り替えを並べる（最初は koyori-arc の統合、既定は無効）', async () => {
+  it('表のフラグごとに、名前・説明・切り替えを並べる（最初はガントチャート、既定は無効）', async () => {
     const { wrapper } = await mountSection();
 
     const rows = wrapper.findAll('[data-setting]');
     expect(rows.map((r) => r.attributes('data-setting'))).toEqual(Object.keys(EXPERIMENT_TABLE));
     const row = wrapper.get('[data-setting="koyoriArcIntegration"]');
-    expect(row.text()).toContain('koyori-arc の統合');
+    expect(row.text()).toContain('ガントチャート');
     expect(row.text()).toContain(EXPERIMENT_TABLE.koyoriArcIntegration.description);
     expect(row.get('[role="switch"]').attributes('aria-checked')).toBe('false');
   });

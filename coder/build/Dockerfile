@@ -56,6 +56,20 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin INSTALLER_NO_MODIFY_PATH=1 sh
 
+# Playwright の Chromium（Storybook のテスト・スクリーンショット）が要る OS のライブラリとフォント。
+# `pnpm exec playwright install-deps chromium` が入れるものと同じ。/home/coder の外なので、
+# 実行中に sudo で入れてもワークスペースを作り直すと消える。Playwright を上げて足りなくなったら
+# `pnpm exec playwright install-deps --dry-run chromium` の一覧に合わせる
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libatspi2.0-0t64 libcairo2 libcups2t64 \
+        libdbus-1-3 libdrm2 libgbm1 libglib2.0-0t64 libnspr4 libnss3 libpango-1.0-0 libx11-6 libxcb1 \
+        libxcomposite1 libxdamage1 libxext6 libxfixes3 libxkbcommon0 libxrandr2 xvfb \
+        fonts-noto-color-emoji fonts-unifont libfontconfig1 libfreetype6 xfonts-cyrillic \
+        xfonts-scalable fonts-liberation fonts-ipafont-gothic fonts-wqy-zenhei fonts-tlwg-loma-otf \
+        fonts-freefont-ttf \
+    && rm -rf /var/lib/apt/lists/*
+
 USER coder
 WORKDIR /home/coder
 

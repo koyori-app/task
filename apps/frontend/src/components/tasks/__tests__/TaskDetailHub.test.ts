@@ -33,6 +33,7 @@ const task: TaskDetail = {
   created_at: '2026-07-16T00:00:00Z',
   custom_field_values: [],
   reactions: [],
+  attachments: [],
   id: 'task-id',
   is_archived: false,
   labels: [],
@@ -951,6 +952,91 @@ describe('TaskDetailHub ステータスの操作', () => {
     await wrapper.get('button[aria-label="Done にする（完了）"]').trigger('click');
 
     expect(wrapper.emitted('update:statusId')).toEqual([['status-done']]);
+  });
+});
+
+// 担当者全員の完了が必要なタスクは、未完了の担当者が残る間は完了へ直接移せない（backend が 409 で止める）
+describe('TaskDetailHub の完了条件', () => {
+  const alpha = { id: 'user-alpha', username: 'alpha', avatar_url: null };
+  const beta = { id: 'user-beta', username: 'beta', avatar_url: null };
+
+  function mountRule(
+    taskPatch: Partial<TaskDetail>,
+    extra: Record<string, unknown> = {},
+    statusId = 'status-id',
+  ) {
+    return mount(TaskDetailHub, {
+      props: {
+        task: { ...task, ...taskPatch },
+        projectKey: 'TEST',
+        statuses,
+        statusId,
+        currentUserId: 'user-alpha',
+        ...extra,
+      },
+    });
+  }
+
+  const pending = {
+    require_all_assignees_done: true,
+    assignees: [
+      { role: 'assignee', user: alpha, completed_at: null },
+      { role: 'assignee', user: beta, completed_at: '2026-07-16T01:00:00Z' },
+    ],
+  };
+
+  function doneItem(wrapper: ReturnType<typeof mountRule>) {
+    return wrapper
+      .get('[role="menu"][aria-label="ステータス"]')
+      .findAll('[role="menuitemradio"]')
+      .find((item) => item.text().includes('Done'))!;
+  }
+
+  it('未完了の担当者が残るなら、✓ ボタンを出さず、メニューの完了を無効にする', () => {
+    const wrapper = mountRule(pending);
+
+    expect(wrapper.find('button[aria-label="Done にする（完了）"]').exists()).toBe(false);
+    expect(doneItem(wrapper).attributes('aria-disabled')).toBe('true');
+    // 完了でない項目は選べる
+    const todo = wrapper
+      .get('[role="menu"][aria-label="ステータス"]')
+      .findAll('[role="menuitemradio"]')
+      .find((item) => item.text().includes('In Progress'))!;
+    expect(todo.attributes('aria-disabled')).not.toBe('true');
+  });
+
+  it('「次へ」が完了ステータスなら無効にする', () => {
+    const wrapper = mountRule(pending, {}, 'status-progress');
+
+    expect(wrapper.get('button[aria-label="Done にする"]').attributes('disabled')).toBeDefined();
+  });
+
+  it('設定が off なら従来どおり ✓ ボタンも完了の項目も使える', async () => {
+    const wrapper = mountRule({ ...pending, require_all_assignees_done: false });
+
+    expect(doneItem(wrapper).attributes('aria-disabled')).not.toBe('true');
+    await wrapper.get('button[aria-label="Done にする（完了）"]').trigger('click');
+    expect(wrapper.emitted('update:statusId')).toEqual([['status-done']]);
+  });
+
+  it('全員が完了にしていれば（未完了が残らなければ）✓ ボタンを出す', () => {
+    const wrapper = mountRule({
+      require_all_assignees_done: true,
+      assignees: [{ role: 'assignee', user: beta, completed_at: '2026-07-16T01:00:00Z' }],
+    });
+
+    expect(wrapper.find('button[aria-label="Done にする（完了）"]').exists()).toBe(true);
+  });
+
+  it('完了条件の操作を emit する', async () => {
+    const wrapper = mountRule(pending);
+
+    await wrapper.get('input[name="require-all-assignees-done"]').setValue(false);
+    expect(wrapper.emitted('update:require-all')).toEqual([[false]]);
+
+    const complete = wrapper.findAll('button').find((b) => b.text() === '自分の分を完了にする')!;
+    await complete.trigger('click');
+    expect(wrapper.emitted('complete:mine')).toHaveLength(1);
   });
 });
 

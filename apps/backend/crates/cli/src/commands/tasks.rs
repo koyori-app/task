@@ -191,6 +191,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
                 hard_deadline: resolved.hard_deadline,
                 planned_start_on: resolved.planned_start_on,
                 estimated_minutes: resolved.estimated_minutes,
+                require_all_assignees_done: false,
                 assignees: resolved.assignees.take().unwrap_or_default(),
                 label_ids: resolved.set_label_ids.take().unwrap_or_default(),
                 custom_field_values: vec![],
@@ -548,6 +549,7 @@ fn update_request(fields: UpdateFields) -> UpdateTaskRequest {
         clear_hard_deadline: clears.clear_hard_deadline,
         planned_start_on: resolved.planned_start_on,
         clear_planned_start_on: clears.clear_planned_start,
+        require_all_assignees_done: None,
         estimated_minutes: resolved.estimated_minutes,
         clear_estimated_minutes: clears.clear_estimate,
         is_archived: fields.is_archived,
@@ -756,6 +758,7 @@ async fn resolve_bulk_item(
         hard_deadline: resolved.hard_deadline,
         planned_start_on: resolved.planned_start_on,
         estimated_minutes: resolved.estimated_minutes,
+        require_all_assignees_done: false,
         assignees: resolved.assignees.take().unwrap_or_default(),
         label_ids: resolved.set_label_ids.take().unwrap_or_default(),
         custom_field_values: vec![],
@@ -1649,6 +1652,34 @@ mod tests {
             "mentions": mentions,
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn task_show_prints_attachments() {
+        // `attachments` が無い応答（古いサーバー）も読める
+        let without = task_detail_with("説明", json!({}));
+        assert!(without.attachments.is_empty());
+
+        let file_id = Uuid::new_v4();
+        let mut value = serde_json::to_value(&without).unwrap();
+        value["attachments"] = json!([{
+            "id": Uuid::new_v4(),
+            "drive_file_id": file_id,
+            "name": "spec.pdf",
+            "mime_type": "application/pdf",
+            "size": 1024,
+            "url": format!("/v1/drive/files/{file_id}/content"),
+            "created_at": "2026-01-02T00:00:00Z",
+            "source": "manual",
+        }]);
+        let detail: payload::tasks::TaskDetailResponse = serde_json::from_value(value).unwrap();
+        let shown = task_for_show(detail, false);
+
+        for json_mode in [false, true] {
+            let out = crate::output::render(&shown, OutputOptions::new(json_mode));
+            assert!(out.contains("spec.pdf"), "{out}");
+            assert!(out.contains("/v1/drive/files/"), "{out}");
+        }
     }
 
     #[test]

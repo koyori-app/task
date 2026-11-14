@@ -1,5 +1,5 @@
 // テストケースの一覧（docs/dev/features/account-settings.md から移した）
-// - 他人のプロフィール: 返す項目が 7 つだけでメールを含まないこと、オーナー・ゲスト・自分を対象に開けること
+// - 他人のプロフィール: 返す項目が決まった集合だけでメールを含まず、membership がオーナー・メンバー・ゲストで変わること、オーナー・ゲスト・自分を対象に開けること
 // - テナントに関わらない人と存在しない UUID が同じ 404 になること、テナント外の人とゲストの閲覧が 403 になること
 // - PAT の `read:tenant` と `read:task` の対照、未ログイン拒否
 
@@ -115,6 +115,7 @@ async fn tenant_members_can_view_profiles_of_people_in_the_tenant() {
             "bio",
             "department",
             "id",
+            "membership",
             "position",
             "team",
             "username"
@@ -127,6 +128,7 @@ async fn tenant_members_can_view_profiles_of_people_in_the_tenant() {
     assert_eq!(body["department"], "開発部");
     assert_eq!(body["position"], "開発部の課長");
     assert_eq!(body["team"], "開発部の基盤チーム");
+    assert_eq!(body["membership"], "Member");
 
     // 別テナントから見ると、そのテナントでの所属が返る
     let res = app
@@ -139,10 +141,10 @@ async fn tenant_members_can_view_profiles_of_people_in_the_tenant() {
     assert_eq!(body["team"], "営業部の基盤チーム");
 
     // オーナーは tenant_members に行を持たないが、閲覧の対象になる
-    for (target, label) in [
-        (owner.id, "オーナー"),
-        (guest.id, "客分"),
-        (viewer.id, "自分自身"),
+    for (target, label, membership) in [
+        (owner.id, "オーナー", "Owner"),
+        (guest.id, "客分", "Guest"),
+        (viewer.id, "自分自身", "Member"),
     ] {
         let res = app
             .get_with_session(&profile_path(tp.tenant_id, target))
@@ -150,6 +152,7 @@ async fn tenant_members_can_view_profiles_of_people_in_the_tenant() {
         assert_eq!(res.status(), StatusCode::OK, "{label}のプロフィール");
         let body: Value = res.json().await.expect("profile json");
         assert!(body.get("email").is_none(), "{label}でもメールを返さない");
+        assert_eq!(body["membership"], membership, "{label}の membership");
         // オーナー（所属行なし）・客分は所属を持たない。自分自身は所属行があるが未設定
         for key in ["department", "position", "team"] {
             assert!(body[key].is_null(), "{label}の{key}は null");

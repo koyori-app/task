@@ -66,6 +66,8 @@ const props = defineProps<{
   /** タスクの作成。同上 */
   onCreate: (input: CreateTaskInput) => Promise<boolean>;
   sorting: TaskListSortingState;
+  /** 環境設定「タスク一覧でサブタスクを最初から展開する」。true なら上書きの無い親行を展開して描く */
+  expandSubtasks?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -240,7 +242,14 @@ watch(
 // 折りたたみは画面内の一時状態。URL には載せない（共有したい情報ではない）
 const collapsed = ref<Record<string, boolean>>({});
 const selectedTaskId = ref<string | null>(null);
+/** 利用者が矢印で変えた行だけを持つ上書き。無い行は expandSubtasks に従う */
 const expandedTaskIds = ref<Record<string, boolean>>({});
+/**
+ * 枝が「取得が成功して子が 0 件」と報告した枝（true だけを持つ。暗黙の枝の矢印を閉じた見た目にする）。
+ * キーは枝の実体ごとの `グループ:行`。行が別グループへ移ると、新しい枝の mount と古い枝の unmount の
+ * 順序に依らず、古い枝の通知が新しい枝の記録を消さないようにする
+ */
+const emptyBranchIds = ref<Record<string, boolean>>({});
 
 function toggle(statusId: string) {
   collapsed.value = { ...collapsed.value, [statusId]: !collapsed.value[statusId] };
@@ -250,13 +259,54 @@ function selectTask(taskId: string) {
   selectedTaskId.value = taskId;
 }
 
-function toggleSubtasks(task: TaskResponse) {
-  selectedTaskId.value = task.id;
-  expandedTaskIds.value = {
-    ...expandedTaskIds.value,
-    [task.id]: !expandedTaskIds.value[task.id],
-  };
+/** 枝を描くか（枝の v-if に使う） */
+function isBranchOpen(task: TaskResponse): boolean {
+  return expandedTaskIds.value[task.id] ?? !!props.expandSubtasks;
 }
+
+/** オプションで開いた枝か（利用者が明示的に開いた枝ではない） */
+function isImplicitBranch(task: TaskResponse): boolean {
+  return expandedTaskIds.value[task.id] === undefined && !!props.expandSubtasks;
+}
+
+function branchKey(statusId: string, task: TaskResponse): string {
+  return `${statusId}:${task.id}`;
+}
+
+/** 行の矢印に渡す見た目の展開。暗黙の枝で子が 0 件なら閉じて見せる */
+function isRowExpanded(statusId: string, task: TaskResponse): boolean {
+  return (
+    isBranchOpen(task) &&
+    !(isImplicitBranch(task) && emptyBranchIds.value[branchKey(statusId, task)])
+  );
+}
+
+function toggleSubtasks(statusId: string, task: TaskResponse) {
+  selectedTaskId.value = task.id;
+  // 見た目で開いていれば閉じ、閉じていれば明示的に開く（空の暗黙の枝も 1 回で作成欄まで開く）
+  expandedTaskIds.value = { ...expandedTaskIds.value, [task.id]: !isRowExpanded(statusId, task) };
+}
+
+function setBranchEmpty(statusId: string, task: TaskResponse, empty: boolean) {
+  const key = branchKey(statusId, task);
+  if (!empty) {
+    if (!emptyBranchIds.value[key]) return;
+    const { [key]: _removed, ...rest } = emptyBranchIds.value;
+    emptyBranchIds.value = rest;
+    return;
+  }
+  emptyBranchIds.value = { ...emptyBranchIds.value, [key]: true };
+}
+
+// 設定を切り替えたら、利用者が個別に変えた行も含めて全行を設定に従わせる。
+// 子の有無（emptyBranchIds）は枝が再マウントされず通知し直さないので残す。
+// 枝が消えるとき（閉じる・行の移動）は枝が false を返して自分のキーの記録だけを消す
+watch(
+  () => props.expandSubtasks,
+  () => {
+    expandedTaskIds.value = {};
+  },
+);
 
 // ---- グループ末尾からの追加 ----
 // タイトルだけで作る。他の項目は作った行からそのまま触れる
@@ -478,9 +528,9 @@ async function commitAdding(statusId: string) {
                   :error="errors[task.id]"
                   :comment-pending="!!commentPendingTaskIds?.[task.id]"
                   :selected="selectedTaskId === task.id"
-                  :expanded="!!expandedTaskIds[task.id]"
+                  :expanded="isRowExpanded(group.status.id, task)"
                   @select="selectTask(task.id)"
-                  @toggle:subtasks="toggleSubtasks(task)"
+                  @toggle:subtasks="toggleSubtasks(group.status.id, task)"
                   @open="emit('open', task)"
                   @update:status="(statusId) => emit('update:status', task, statusId)"
                   @update:priority="(priority) => emit('update:priority', task, priority)"
@@ -493,7 +543,7 @@ async function commitAdding(statusId: string) {
                   :on-comment="(body: string) => onComment(task, body)"
                 />
                 <TaskSubtaskBranch
-                  v-if="expandedTaskIds[task.id]"
+                  v-if="isBranchOpen(task)"
                   :project-key="projectKey"
                   :parent-task="task"
                   :filters="{
@@ -511,6 +561,8 @@ async function commitAdding(statusId: string) {
                   :errors="errors"
                   :comment-pending-task-ids="commentPendingTaskIds"
                   :on-comment="onComment"
+                  :implicit="isImplicitBranch(task)"
+                  @empty="(empty) => setBranchEmpty(group.status.id, task, empty)"
                   @collapse="expandedTaskIds = { ...expandedTaskIds, [task.id]: false }"
                   @open="emit('open', $event)"
                   @update:status="(child, statusId) => emit('update:status', child, statusId)"

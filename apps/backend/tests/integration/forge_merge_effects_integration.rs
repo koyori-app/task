@@ -803,3 +803,70 @@ async fn merge_completion_pushes_back_to_the_source_issue() {
     forget_github_mock();
     app.cleanup_user(fx.owner_id).await;
 }
+
+/// 担当者全員の完了が必要なタスクは、未完了の担当者が残るかぎり PR のマージで完了にならない
+/// （対照として、同じ PR が閉じる通常のタスクは完了する）。全員が完了にした後なら完了になる。
+#[tokio::test]
+async fn merged_pull_request_leaves_tasks_with_pending_assignees_open() {
+    let _mock_server = github_mock().await;
+    let app = TestApp::new_with_github().await;
+    let fx = setup(&app).await;
+    let key = &fx.key;
+    let (done, _) = insert_done_statuses(&app, fx.tp.project_id).await;
+    let blocked = insert_task(&app, fx.tp.project_id, fx.status_id, fx.owner_id, 1).await;
+    let plain = insert_task(&app, fx.tp.project_id, fx.status_id, fx.owner_id, 2).await;
+    let finished = insert_task(&app, fx.tp.project_id, fx.status_id, fx.owner_id, 3).await;
+    for (task, completed) in [(blocked, false), (finished, true)] {
+        let mut active: tasks::ActiveModel = task_row(&app, task).await.into();
+        active.require_all_assignees_done = Set(true);
+        active.update(&app.state.db).await.expect("set rule");
+        entity::task_assignees::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            task_id: Set(task),
+            user_id: Set(fx.owner_id),
+            role: Set("assignee".into()),
+            assigned_at: Set(chrono::Utc::now().into()),
+            completed_at: Set(completed.then(|| chrono::Utc::now().into())),
+        }
+        .insert(&app.state.db)
+        .await
+        .expect("insert assignee");
+    }
+
+    let body = format!("Closes {key}-1\nCloses {key}-2\nCloses {key}-3");
+    let opened = pr_payload(
+        fx.installation_id,
+        "opened",
+        90,
+        "feat",
+        Some(&body),
+        "2026-10-01T00:00:00Z",
+    );
+    deliver(&app, &fx, &opened).await.expect("opened");
+    let closed = merged(
+        pr_payload(
+            fx.installation_id,
+            "closed",
+            90,
+            "feat",
+            Some(&body),
+            "2026-10-01T00:10:00Z",
+        ),
+        "2026-10-01T00:10:00Z",
+    );
+    deliver(&app, &fx, &closed).await.expect("closed merged");
+
+    assert_eq!(task_row(&app, plain).await.status_id, done);
+    assert_eq!(
+        task_row(&app, finished).await.status_id,
+        done,
+        "全員が完了にしていれば完了になる"
+    );
+    let row = task_row(&app, blocked).await;
+    assert_eq!(
+        row.status_id, fx.status_id,
+        "未完了の担当者が残るタスクは開いたまま"
+    );
+    assert!(row.completed_at.is_none());
+    assert!(activities(&app, blocked, "status_changed").await.is_empty());
+}

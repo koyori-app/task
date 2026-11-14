@@ -39,6 +39,10 @@ pub struct TaskResponse {
     /// 開始予定日（`YYYY-MM-DD`）。計画用の値で、締切との前後関係は検証しない
     #[schema(value_type = Option<String>, format = "date", nullable)]
     pub planned_start_on: Option<NaiveDate>,
+    /// true のとき、担当者全員が自分の分を完了にして初めてタスクが完了になる。
+    /// 古いサーバーの応答には無いので、無ければ false
+    #[serde(default)]
+    pub require_all_assignees_done: bool,
     #[schema(nullable)]
     pub estimated_minutes: Option<i32>,
     pub is_archived: bool,
@@ -61,6 +65,10 @@ pub struct TaskResponse {
 pub struct TaskAssigneeSummary {
     pub role: String,
     pub user: UserSummary,
+    /// 担当者が自分の分を完了にした時刻。未完了なら null。古いサーバーの応答には無い
+    #[serde(default)]
+    #[schema(value_type = Option<String>, format = "date-time", nullable)]
+    pub completed_at: Option<DateTime<Utc>>,
 }
 
 impl TaskResponse {
@@ -85,6 +93,7 @@ impl TaskResponse {
             soft_deadline: model.soft_deadline.map(|dt| dt.with_timezone(&Utc)),
             hard_deadline: model.hard_deadline.map(|dt| dt.with_timezone(&Utc)),
             planned_start_on: model.planned_start_on,
+            require_all_assignees_done: model.require_all_assignees_done,
             estimated_minutes: model.estimated_minutes,
             is_archived: model.is_archived,
             created_by,
@@ -108,6 +117,13 @@ pub struct AssigneeInput {
 /// SSR の Markdown 描画（同期）が長大な本文で塞がらないようにする。
 /// frontend のタスク詳細 `+data.ts` の `MAX_DESCRIPTION_LENGTH` を同じ値に手で合わせる。
 pub const MAX_DESCRIPTION_LEN: u64 = 100_000;
+
+/// 担当者全員の完了が必要なタスクで、未完了の担当者が残るまま完了へ移そうとしたときの 409 の message
+pub const ASSIGNEES_NOT_DONE: &str = "assignees-not-done";
+/// `require_all_assignees_done` が off のタスクで担当者の完了を操作したときの 409 の message
+pub const COMPLETION_NOT_REQUIRED: &str = "completion-not-required";
+/// 完了済みのタスクで担当者の完了を取り消そうとしたときの 409 の message
+pub const TASK_ALREADY_DONE: &str = "task-already-done";
 
 #[derive(Validate, Deserialize, ToSchema, serde::Serialize)]
 pub struct CreateTaskRequest {
@@ -137,6 +153,9 @@ pub struct CreateTaskRequest {
     pub planned_start_on: Option<NaiveDate>,
     #[validate(range(min = 1))]
     pub estimated_minutes: Option<i32>,
+    /// 担当者全員の完了を必須にする。true で完了ステータスを指定すると 409
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub require_all_assignees_done: bool,
     #[serde(default)]
     pub assignees: Vec<AssigneeInput>,
     #[serde(default)]
@@ -184,6 +203,9 @@ pub struct UpdateTaskRequest {
     pub planned_start_on: Option<NaiveDate>,
     #[serde(default)]
     pub clear_planned_start_on: bool,
+    /// 担当者全員の完了を必須にするかどうか。off にすると全員の完了を消す
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub require_all_assignees_done: Option<bool>,
     #[validate(range(min = 1))]
     pub estimated_minutes: Option<i32>,
     #[serde(default)]
@@ -281,6 +303,11 @@ pub struct TaskDetailResponse {
     #[serde(default)]
     #[schema(required)]
     pub reactions: Vec<crate::reactions::ReactionSummary>,
+    /// 添付ファイル（`GET /tasks/{id}/attachments` と同じ要素。新しい順）。
+    /// タスク一覧（`GET /tasks`）には載せない。
+    #[serde(default)]
+    #[schema(required)]
+    pub attachments: Vec<crate::task_extensions::TaskAttachmentResponse>,
 }
 
 /// 一括作成の 1 リクエストあたりの上限件数（handler の `BULK_MAX_TASKS` と同じ値）。
@@ -324,6 +351,9 @@ pub struct TaskAssigneeResponse {
     pub role: String,
     #[schema(value_type = String, format = "date-time")]
     pub assigned_at: DateTime<Utc>,
+    #[serde(default)]
+    #[schema(value_type = Option<String>, format = "date-time", nullable)]
+    pub completed_at: Option<DateTime<Utc>>,
 }
 
 impl From<task_assignees::Model> for TaskAssigneeResponse {
@@ -334,6 +364,7 @@ impl From<task_assignees::Model> for TaskAssigneeResponse {
             user_id: model.user_id,
             role: model.role,
             assigned_at: model.assigned_at.with_timezone(&Utc),
+            completed_at: model.completed_at.map(|dt| dt.with_timezone(&Utc)),
         }
     }
 }
@@ -382,4 +413,66 @@ pub struct AddRelationRequest {
     #[serde(rename = "type")]
     pub relation_type: String,
     pub target_task_id: Uuid,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const UUID: &str = "11111111-1111-1111-1111-111111111111";
+
+    /// 担当者ごとの完了を知らない古いサーバーの応答も、CLI が読める。
+    #[test]
+    fn reads_responses_without_the_completion_fields() {
+        let assignee: TaskAssigneeSummary = serde_json::from_value(serde_json::json!({
+            "role": "assignee",
+            "user": { "id": UUID, "username": "alice", "avatar_url": null },
+        }))
+        .expect("assignee without completed_at");
+        assert!(assignee.completed_at.is_none());
+
+        let task: TaskResponse = serde_json::from_value(serde_json::json!({
+            "id": UUID,
+            "project_id": UUID,
+            "seq_id": 1,
+            "title": "t",
+            "description": null,
+            "status_id": UUID,
+            "priority": "medium",
+            "progress_pct": 0,
+            "parent_task_id": null,
+            "milestone_id": null,
+            "sprint_id": null,
+            "soft_deadline": null,
+            "hard_deadline": null,
+            "planned_start_on": null,
+            "estimated_minutes": null,
+            "is_archived": false,
+            "created_by": null,
+            "assignees": [],
+            "labels": [],
+            "created_at": "2026-11-01T00:00:00Z",
+            "updated_at": "2026-11-01T00:00:00Z",
+            "completed_at": null,
+            "deleted_at": null,
+        }))
+        .expect("task without require_all_assignees_done");
+        assert!(!task.require_all_assignees_done);
+    }
+
+    /// 追加した設定は、使わないかぎり送らない（古いサーバーへの要求を変えない）。
+    #[test]
+    fn omits_the_unused_rule_when_sending() {
+        let create = serde_json::json!({ "title": "t", "status_id": UUID });
+        let create: CreateTaskRequest = serde_json::from_value(create).expect("create");
+        assert!(!create.require_all_assignees_done);
+        let sent = serde_json::to_value(&create).expect("serialize create");
+        assert!(sent.get("require_all_assignees_done").is_none());
+
+        let update: UpdateTaskRequest =
+            serde_json::from_value(serde_json::json!({})).expect("update");
+        assert!(update.require_all_assignees_done.is_none());
+        let sent = serde_json::to_value(&update).expect("serialize update");
+        assert!(sent.get("require_all_assignees_done").is_none());
+    }
 }

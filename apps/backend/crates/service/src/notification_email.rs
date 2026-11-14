@@ -303,6 +303,7 @@ mod tests {
             soft_deadline: None,
             hard_deadline: None,
             planned_start_on: None,
+            require_all_assignees_done: false,
             estimated_minutes: None,
             is_archived: false,
             created_by: Uuid::new_v4(),

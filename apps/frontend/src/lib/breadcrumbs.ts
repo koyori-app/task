@@ -56,6 +56,11 @@ export function breadcrumbRoute(pathname: string, params: Record<string, string 
     ['/settings/profile', { kind: 'static', name: 'プロフィール' }],
     ['/settings/security', { kind: 'static', name: 'セキュリティ' }],
     ['/settings/tokens', { kind: 'static', name: 'API トークン' }],
+    ['/admin/users', { kind: 'static', name: '管理: ユーザー' }],
+    ['/admin/settings', { kind: 'static', name: '管理: システム設定' }],
+    ...(user
+      ? ([[`/admin/users/${user}`, { kind: 'static', name: 'ユーザー詳細' }]] as const)
+      : []),
     ...(tenant
       ? ([
           [tenantBase, { kind: 'home', name: 'ホーム' }],
@@ -74,7 +79,6 @@ export function breadcrumbRoute(pathname: string, params: Record<string, string 
           [`${projectBase}/tasks`, { kind: 'project', name: '' }],
           [`${projectBase}/settings`, { kind: 'project', name: 'プロジェクト設定' }],
           [`${projectBase}/reviews`, { kind: 'project', name: 'レビュー' }],
-          [`${projectBase}/labels`, { kind: 'project', name: 'ラベル' }],
           [`${projectBase}/docs`, { kind: 'project', name: 'ドキュメント' }],
           ...(file
             ? ([[`${projectBase}/docs/${file}`, { kind: 'document', name: '' }]] as const)

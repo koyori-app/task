@@ -6,7 +6,7 @@
 
 use crate::common::TestApp;
 use axum::http::StatusCode;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, QueryFilter};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -405,4 +405,319 @@ async fn task_extensions_acl_cases() {
         )
         .await;
     assert_eq!(patch.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+#[serial_test::file_serial(drive)]
+async fn task_detail_embeds_attachments_and_list_does_not() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(true, false).await;
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    let tp = app.insert_tenant_project(owner.id).await;
+
+    let status_resp = app
+        .post_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{}/statuses",
+                tp.tenant_id, tp.project_id
+            ),
+            serde_json::json!({
+                "name": "Backlog",
+                "color": "#336699",
+                "position": 0,
+                "is_default": true
+            }),
+        )
+        .await;
+    assert_eq!(status_resp.status(), StatusCode::CREATED);
+    let status_body: Value = status_resp.json().await.expect("status json");
+    let status_id = status_body["id"].as_str().expect("status id").to_string();
+
+    let tasks_path = format!(
+        "/v1/tenants/{}/projects/{}/tasks",
+        tp.tenant_id, tp.project_id
+    );
+    let created = app
+        .post_json_with_session(
+            &tasks_path,
+            serde_json::json!({ "title": "attachment task", "status_id": status_id }),
+        )
+        .await;
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let created_body: Value = created.json().await.expect("task json");
+    let task_id = created_body["id"].as_str().expect("task id").to_string();
+    assert_eq!(
+        created_body["attachments"],
+        serde_json::json!([]),
+        "作成直後の応答も attachments を持つ"
+    );
+
+    let task_path = format!("{tasks_path}/{task_id}");
+    let attachments_path = format!("{task_path}/attachments");
+
+    // 添付が無いときは空配列（キーごと省かない）
+    let empty = app.get_with_session(&task_path).await;
+    assert_eq!(empty.status(), StatusCode::OK);
+    let empty_body: Value = empty.json().await.expect("detail json");
+    assert_eq!(empty_body["attachments"], serde_json::json!([]));
+
+    // 2 件添付する（2 件目のほうが新しい）
+    let mut attachment_ids = Vec::new();
+    for _ in 0..2 {
+        let file_id = insert_drive_file(&app, tp.tenant_id, owner.id).await;
+        let attach = app
+            .post_json_with_session(
+                &attachments_path,
+                serde_json::json!({ "drive_file_id": file_id }),
+            )
+            .await;
+        assert_eq!(attach.status(), StatusCode::CREATED);
+        let body: Value = attach.json().await.expect("attach json");
+        attachment_ids.push(body["id"].as_str().expect("attachment id").to_string());
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+
+    let list = app.get_with_session(&attachments_path).await;
+    assert_eq!(list.status(), StatusCode::OK);
+    let list_body: Value = list.json().await.expect("attachments json");
+
+    let detail = app.get_with_session(&task_path).await;
+    assert_eq!(detail.status(), StatusCode::OK);
+    let detail_body: Value = detail.json().await.expect("detail json");
+    let embedded = detail_body["attachments"].as_array().expect("attachments");
+    assert_eq!(embedded.len(), 2);
+    assert_eq!(
+        detail_body["attachments"], list_body["attachments"],
+        "詳細の attachments は添付一覧 API と同じ要素・同じ並び"
+    );
+    for item in embedded {
+        for key in [
+            "id",
+            "drive_file_id",
+            "name",
+            "mime_type",
+            "size",
+            "url",
+            "created_at",
+            "source",
+        ] {
+            assert!(item.get(key).is_some(), "attachments[].{key} がある");
+        }
+        assert_eq!(item["source"], "manual");
+        assert_eq!(item["name"], "spec.pdf");
+    }
+
+    // 一覧には載せない
+    let tasks_list = app.get_with_session(&tasks_path).await;
+    assert_eq!(tasks_list.status(), StatusCode::OK);
+    let tasks_list_body: Value = tasks_list.json().await.expect("tasks list json");
+    let listed = tasks_list_body["tasks"].as_array().expect("tasks array");
+    assert!(!listed.is_empty());
+    for task in listed {
+        assert!(
+            task.get("attachments").is_none(),
+            "一覧に attachments は無い"
+        );
+    }
+
+    // 更新の応答も詳細と同じ形
+    let updated = app
+        .put_json_with_session(&task_path, serde_json::json!({ "title": "renamed" }))
+        .await;
+    assert_eq!(updated.status(), StatusCode::OK);
+    let updated_body: Value = updated.json().await.expect("update json");
+    assert_eq!(
+        updated_body["attachments"].as_array().map(Vec::len),
+        Some(2)
+    );
+
+    // 解除すると詳細からも消える
+    let removed = app
+        .delete_with_session(&format!("{attachments_path}/{}", attachment_ids[0]))
+        .await;
+    assert_eq!(removed.status(), StatusCode::NO_CONTENT);
+    let after: Value = app
+        .get_with_session(&task_path)
+        .await
+        .json()
+        .await
+        .expect("detail json");
+    assert_eq!(after["attachments"].as_array().map(Vec::len), Some(1));
+
+    // 認可: メンバーは読める（過剰拒否でない）、非メンバーは 403（添付一覧と同じ）
+    let member = app.insert_user(false, false).await;
+    add_project_member(&app, tp.project_id, member.id).await;
+    let outsider = app.insert_user(false, false).await;
+
+    app.login_session_no_content(&member.email, &member.password)
+        .await;
+    let member_detail = app.get_with_session(&task_path).await;
+    assert_eq!(member_detail.status(), StatusCode::OK);
+    let member_body: Value = member_detail.json().await.expect("member detail json");
+    assert_eq!(member_body["attachments"].as_array().map(Vec::len), Some(1));
+
+    app.login_session_no_content(&outsider.email, &outsider.password)
+        .await;
+    assert_eq!(
+        app.get_with_session(&task_path).await.status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        app.get_with_session(&attachments_path).await.status(),
+        StatusCode::FORBIDDEN
+    );
+}
+
+/// 担当者全員の完了が必要なタスクは、未完了の担当者が残るかぎり一括更新でも完了へ移せない。
+/// 同じ要求の通常タスクは更新される。
+#[tokio::test]
+async fn bulk_update_rejects_done_while_assignees_are_pending() {
+    let mut app = TestApp::new().await;
+    let fx = setup_task(&mut app).await;
+    let member = app.insert_user(false, false).await;
+    crate::common::ensure_tenant_member_for_project(&app.state.db, fx.project_id, member.id).await;
+
+    let tasks_path = format!(
+        "/v1/tenants/{}/projects/{}/tasks",
+        fx.tenant_id, fx.project_id
+    );
+    let backlog_id = entity::tasks::Entity::find_by_id(Uuid::parse_str(&fx.task_id).expect("uuid"))
+        .one(&app.state.db)
+        .await
+        .expect("query")
+        .expect("row")
+        .status_id
+        .to_string();
+    let blocked = app
+        .post_json_with_session(
+            &tasks_path,
+            serde_json::json!({
+                "title": "needs everyone",
+                "status_id": backlog_id,
+                "require_all_assignees_done": true,
+                "assignees": [{ "user_id": member.id, "role": "assignee" }],
+            }),
+        )
+        .await;
+    assert_eq!(blocked.status(), StatusCode::CREATED);
+    let blocked_id = Uuid::parse_str(
+        blocked.json::<Value>().await.expect("task json")["id"]
+            .as_str()
+            .expect("id"),
+    )
+    .expect("uuid");
+    let plain_id = Uuid::parse_str(&fx.task_id).expect("task uuid");
+
+    let bulk = app
+        .post_json_with_session(
+            &format!("{tasks_path}/bulk"),
+            serde_json::json!({
+                "task_ids": [blocked_id, plain_id],
+                "update": { "status_id": fx.status_done_id }
+            }),
+        )
+        .await;
+    assert_eq!(bulk.status(), StatusCode::OK);
+    let body: Value = bulk.json().await.expect("bulk json");
+    assert_eq!(body["updated"], 1);
+    let failed = body["failed"].as_array().expect("failed");
+    assert_eq!(failed.len(), 1);
+    assert_eq!(failed[0]["task_id"], blocked_id.to_string());
+    assert_eq!(failed[0]["reason"], "assignees-not-done");
+
+    let blocked_row = entity::tasks::Entity::find_by_id(blocked_id)
+        .one(&app.state.db)
+        .await
+        .expect("query")
+        .expect("row");
+    assert_eq!(blocked_row.status_id.to_string(), backlog_id);
+    let plain_row = entity::tasks::Entity::find_by_id(plain_id)
+        .one(&app.state.db)
+        .await
+        .expect("query")
+        .expect("row");
+    assert_eq!(plain_row.status_id.to_string(), fx.status_done_id);
+}
+
+/// 一括更新でタスクを完了から未完了へ戻すと、担当者ごとの完了は全員分消える。
+/// 対照: ステータスが変わらない更新では消えない。
+#[tokio::test]
+async fn bulk_update_out_of_done_clears_assignee_completions() {
+    let mut app = TestApp::new().await;
+    let fx = setup_task(&mut app).await;
+    let member = app.insert_user(false, false).await;
+    crate::common::ensure_tenant_member_for_project(&app.state.db, fx.project_id, member.id).await;
+    let tasks_path = format!(
+        "/v1/tenants/{}/projects/{}/tasks",
+        fx.tenant_id, fx.project_id
+    );
+    let task_id = Uuid::parse_str(&fx.task_id).expect("task uuid");
+    let backlog_id = entity::tasks::Entity::find_by_id(task_id)
+        .one(&app.state.db)
+        .await
+        .expect("query")
+        .expect("row")
+        .status_id;
+    let done_id = Uuid::parse_str(&fx.status_done_id).expect("done uuid");
+
+    // 担当者が完了済みで、タスクは完了
+    for user_id in [member.id] {
+        entity::task_assignees::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            task_id: Set(task_id),
+            user_id: Set(user_id),
+            role: Set("assignee".into()),
+            assigned_at: Set(chrono::Utc::now().into()),
+            completed_at: Set(Some(chrono::Utc::now().into())),
+        }
+        .insert(&app.state.db)
+        .await
+        .expect("insert assignee");
+    }
+    let mut active: entity::tasks::ActiveModel = entity::tasks::Entity::find_by_id(task_id)
+        .one(&app.state.db)
+        .await
+        .expect("query")
+        .expect("row")
+        .into();
+    active.require_all_assignees_done = Set(true);
+    active.status_id = Set(done_id);
+    active.completed_at = Set(Some(chrono::Utc::now().into()));
+    active.update(&app.state.db).await.expect("mark done");
+    let completed = || async {
+        entity::task_assignees::Entity::find()
+            .filter(sea_orm::ColumnTrait::eq(
+                &entity::task_assignees::Column::TaskId,
+                task_id,
+            ))
+            .filter(sea_orm::ColumnTrait::is_not_null(
+                &entity::task_assignees::Column::CompletedAt,
+            ))
+            .all(&app.state.db)
+            .await
+            .expect("query assignees")
+            .len()
+    };
+
+    // 対照: 同じ完了ステータスへの更新は何も変えない
+    let same = app
+        .post_json_with_session(
+            &format!("{tasks_path}/bulk"),
+            serde_json::json!({ "task_ids": [task_id], "update": { "status_id": done_id } }),
+        )
+        .await;
+    assert_eq!(same.status(), StatusCode::OK);
+    assert_eq!(completed().await, 1, "ステータスが変わらなければ消さない");
+
+    let back = app
+        .post_json_with_session(
+            &format!("{tasks_path}/bulk"),
+            serde_json::json!({ "task_ids": [task_id], "update": { "status_id": backlog_id } }),
+        )
+        .await;
+    assert_eq!(back.status(), StatusCode::OK);
+    let body: Value = back.json().await.expect("bulk json");
+    assert_eq!(body["updated"], 1);
+    assert_eq!(completed().await, 0, "完了から戻すと全員分消す");
 }

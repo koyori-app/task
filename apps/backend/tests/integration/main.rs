@@ -3,6 +3,7 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+mod admin_auth_methods_integration;
 mod admin_tenants_integration;
 mod admin_users_integration;
 mod apalis_supervise_integration;
@@ -38,6 +39,7 @@ mod pat_revoke_all_integration;
 mod pat_scope_integration;
 mod pat_tenant_membership_integration;
 mod personal_token_identity_integration;
+mod personal_token_last_used_integration;
 mod personal_tokens_create_auth_integration;
 mod personal_tokens_list_integration;
 mod profile_update_integration;
@@ -62,6 +64,7 @@ mod task_atomic_update_integration;
 mod task_bulk_create_integration;
 mod task_comment_mentions_integration;
 mod task_comments_integration;
+mod task_completion_integration;
 mod task_description_limit_integration;
 mod task_description_mentions_integration;
 mod task_extensions_integration;

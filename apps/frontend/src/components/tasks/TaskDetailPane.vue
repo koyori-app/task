@@ -8,10 +8,12 @@ import TaskComments from '@/components/tasks/TaskComments.vue';
 import TaskDetailHub from '@/components/tasks/TaskDetailHub.vue';
 import TaskForgeSection from '@/components/tasks/TaskForgeSection.vue';
 import SimilarTasksList from '@/components/tasks/SimilarTasksList.vue';
+import TaskBlockingPanel from '@/components/tasks/TaskBlockingPanel.vue';
 import TaskSubtaskPanel from '@/components/tasks/TaskSubtaskPanel.vue';
 import { Button } from '@koyori-app/ui-vue';
 import type { ActivityFilter, ActivityLookups } from '@/lib/activity-timeline';
 import { useAssignableUsersQuery } from '@/lib/api-vue-query';
+import { useTaskCompletion } from '@/composables/useTaskCompletion';
 import { useTaskRowMutations } from '@/composables/useTaskRowMutations';
 import { useTaskActivities } from '@/composables/useTaskActivities';
 import { useReactions } from '@/composables/useReactions';
@@ -209,6 +211,35 @@ const assigneeError = computed(() => {
   return id ? (rowMutations.errors.value[id] ?? null) : null;
 });
 
+// 完了条件（担当者ごとの完了）。切り替えと自分の分の完了・取り消し
+const completion = useTaskCompletion({ tenantId, projectId });
+const completionUpdating = computed(() => {
+  const id = displayTask.value?.id;
+  return !!id && !!completion.pending.value[id];
+});
+const completionError = computed(() => {
+  const id = displayTask.value?.id;
+  return id ? (completion.errors.value[id] ?? null) : null;
+});
+
+function onUpdateRequireAll(value: boolean) {
+  const task = displayTask.value;
+  if (!task) return;
+  void completion.setRequireAll(task, value);
+}
+
+function onCompleteMine() {
+  const task = displayTask.value;
+  if (!task || !currentUserId.value) return;
+  void completion.completeMine(task, currentUserId.value);
+}
+
+function onReopenMine() {
+  const task = displayTask.value;
+  if (!task || !currentUserId.value) return;
+  void completion.reopenMine(task, currentUserId.value);
+}
+
 const meQuery = useMeQuery();
 const currentUserId = computed(() => meQuery.data.value?.id ?? null);
 const reactionController = useReactions({
@@ -275,6 +306,8 @@ function onDeleteDialogCancel(event: Event) {
         :current-user-id="currentUserId"
         :layout="layout"
         :profile-href="profileHref"
+        :tenant-id="tenantId"
+        :mention-tenant="tenantDisplayId"
         :task="displayTask"
         :project-key="projectKey"
         :statuses="statuses"
@@ -310,6 +343,11 @@ function onDeleteDialogCancel(event: Event) {
         :assignee-error="assigneeError"
         :members-state="membersState"
         @toggle:assignee="onToggleAssignee"
+        :completion-updating="completionUpdating"
+        :completion-error="completionError"
+        @update:require-all="onUpdateRequireAll"
+        @complete:mine="onCompleteMine"
+        @reopen:mine="onReopenMine"
         :delete-disabled="deletePending"
         @delete-request="openDeleteDialog"
       >
@@ -330,6 +368,15 @@ function onDeleteDialogCancel(event: Event) {
             :project-key="projectKey"
             @open="emit('open-task', $event)"
             @change-parent="onChangeParent"
+          />
+          <TaskBlockingPanel
+            :tenant-id="tenantId"
+            :project-id="projectId"
+            :task-id="taskId"
+            :task-uuid="displayTask.id"
+            :statuses="statuses"
+            :project-key="projectKey"
+            @open="emit('open-task', $event)"
           />
           <SimilarTasksList
             class="border-t pt-5"

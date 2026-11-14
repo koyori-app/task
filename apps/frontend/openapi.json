@@ -1042,6 +1042,18 @@
         "tags": ["Admin Users"],
         "summary": "ユーザー強制削除",
         "operationId": "delete_user",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "対象ユーザーの ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "204": {
             "description": "削除完了"
@@ -1124,6 +1136,18 @@
         "tags": ["Admin Users"],
         "summary": "ユーザー更新（is_admin / is_suspended）",
         "operationId": "update_user",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "対象ユーザーの ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -1220,11 +1244,135 @@
         }
       }
     },
+    "/v1/admin/users/{id}/auth-methods": {
+      "get": {
+        "tags": ["Admin Users"],
+        "summary": "対象ユーザーの認証方法（パスキー・OAuth 連携）",
+        "operationId": "get_auth_methods",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "対象ユーザーの ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "秘密値を含まない認証方法の一覧",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAuthMethodsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/users/{id}/oauth/{provider}": {
       "delete": {
         "tags": ["Admin Users"],
         "summary": "OAuth 連携強制解除",
         "operationId": "delete_oauth",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "対象ユーザーの ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "provider",
+            "in": "path",
+            "description": "OAuth プロバイダー名",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "204": {
             "description": "解除完了"
@@ -1309,6 +1457,28 @@
         "tags": ["Admin Users"],
         "summary": "パスキー強制削除",
         "operationId": "delete_admin_user_passkey",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "対象ユーザーの ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "passkey_id",
+            "in": "path",
+            "description": "パスキーの ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "204": {
             "description": "削除完了"
@@ -1393,6 +1563,18 @@
         "tags": ["Admin Users"],
         "summary": "パスワードリセットリンク生成・送信",
         "operationId": "password_reset",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "対象ユーザーの ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -1494,6 +1676,18 @@
         "tags": ["Admin Users"],
         "summary": "2FA 強制リセット",
         "operationId": "reset_2fa",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "対象ユーザーの ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "204": {
             "description": "2FA リセット完了"
@@ -19069,6 +19263,272 @@
         }
       }
     },
+    "/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/assignees/{user_id}/complete": {
+      "post": {
+        "tags": ["Tasks"],
+        "summary": "自分の担当分を完了にする",
+        "description": "`require_all_assignees_done` が on のタスクで、本人だけが自分の分を完了にできる。最後の 1 人が完了にすると、タスクを既定の完了ステータスへ移す。off のタスクは 409 `completion-not-required`",
+        "operationId": "complete_assignee",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "プロジェクトID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "タスクID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "path",
+            "description": "ユーザーID（本人のみ）",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "更新後のタスク",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskDetailResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/assignees/{user_id}/reopen": {
+      "post": {
+        "tags": ["Tasks"],
+        "summary": "自分の担当分の完了を取り消す",
+        "description": "本人だけが取り消せる。タスクが完了済みの間は 409 `task-already-done`（先にステータスを戻す）",
+        "operationId": "reopen_assignee",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "プロジェクトID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "タスクID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "path",
+            "description": "ユーザーID（本人のみ）",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "更新後のタスク",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskDetailResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/attachments": {
       "get": {
         "tags": ["Tasks"],
@@ -24123,6 +24583,202 @@
         }
       }
     },
+    "/v1/tenants/{tenant_id}/schedule/relations": {
+      "get": {
+        "tags": ["Schedule"],
+        "summary": "期間内のタスク同士のブロッキング関係",
+        "operationId": "get_schedule_relations",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "期間の開始日（含む）",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "期間の終了日（含む）。`to - from` は 92 日まで",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "timezone",
+            "in": "query",
+            "description": "締切を日付に落とす IANA タイムゾーン名。既定 `UTC`",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "プロジェクトで絞る（繰り返し指定可）。見えないプロジェクトは無視する",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "explode": true
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "description": "担当者で絞る（繰り返し指定可）",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "explode": true
+          },
+          {
+            "name": "include_done",
+            "in": "query",
+            "description": "完了ステータスのタスクを含めるか。既定 true",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "include_overdue",
+            "in": "query",
+            "description": "締切超過のタスク（Soft 締切・開始予定日・見積があり、期間より前に終わっている未完了のもの）も\n含めるか。既定 false。\n山積みで締切超過の残工数を今日に積むために、期間に今日を含むときに使う",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "前ページの `next_cursor`",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "タスクの件数。既定 200、上限 500",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "スケジュールの関係",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleRelationsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tenants/{tenant_id}/users/me/dashboard": {
       "get": {
         "tags": ["My Tasks"],
@@ -25425,6 +26081,24 @@
           }
         }
       },
+      "AdminAuthMethodsResponse": {
+        "type": "object",
+        "required": ["passkeys", "oauth"],
+        "properties": {
+          "oauth": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminOAuthItem"
+            }
+          },
+          "passkeys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminPasskeyItem"
+            }
+          }
+        }
+      },
       "AdminCreateUserRequest": {
         "type": "object",
         "required": ["username", "email", "password"],
@@ -25442,6 +26116,48 @@
             "type": "string"
           },
           "username": {
+            "type": "string"
+          }
+        }
+      },
+      "AdminOAuthItem": {
+        "type": "object",
+        "description": "管理者に見せる OAuth 連携の情報。トークン・provider_user_id は含めない。",
+        "required": ["provider", "created_at"],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "instance_url": {
+            "type": ["string", "null"]
+          },
+          "provider": {
+            "type": "string"
+          },
+          "provider_email": {
+            "type": ["string", "null"]
+          },
+          "provider_login": {
+            "type": ["string", "null"]
+          }
+        }
+      },
+      "AdminPasskeyItem": {
+        "type": "object",
+        "description": "管理者に見せるパスキーの情報。公開鍵・credential_id・sign_count は含めない。",
+        "required": ["id", "name", "created_at"],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "last_used_at": {
+            "type": ["string", "null"]
+          },
+          "name": {
             "type": "string"
           }
         }
@@ -25662,7 +26378,17 @@
             "type": "boolean"
           },
           "role": {
-            "$ref": "#/components/schemas/TenantRole"
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TenantRole"
+                  }
+                ],
+                "x-or-unknown": true
+              }
+            ],
+            "description": "知らない値（新しいサーバーが足した役）でも、ほかの欄は読めるように包む"
           },
           "tenant_id": {
             "type": "string",
@@ -26346,6 +27072,10 @@
           "progress_pct": {
             "type": ["integer", "null"],
             "format": "int32"
+          },
+          "require_all_assignees_done": {
+            "type": "boolean",
+            "description": "担当者全員の完了を必須にする。true で完了ステータスを指定すると 409"
           },
           "soft_deadline": {
             "type": ["string", "null"],
@@ -28692,6 +29422,40 @@
           }
         }
       },
+      "ScheduleRelation": {
+        "type": "object",
+        "required": ["from_task_id", "to_task_id", "type"],
+        "properties": {
+          "from_task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "to_task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "description": "関係の向き。`blocked_by` は端点を反転し、常に `blocks` で返す。"
+          }
+        }
+      },
+      "ScheduleRelationsResponse": {
+        "type": "object",
+        "required": ["relations", "truncated"],
+        "properties": {
+          "relations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScheduleRelation"
+            }
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "上限を超えた関係があり、`relations` を切り詰めたか。"
+          }
+        }
+      },
       "ScheduleResponse": {
         "type": "object",
         "required": ["range", "tasks", "sprints", "milestones", "members"],
@@ -29101,6 +29865,10 @@
             "type": "string",
             "format": "date-time"
           },
+          "completed_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -29122,6 +29890,11 @@
         "type": "object",
         "required": ["role", "user"],
         "properties": {
+          "completed_at": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "担当者が自分の分を完了にした時刻。未完了なら null。古いサーバーの応答には無い"
+          },
           "role": {
             "type": "string"
           },
@@ -29271,8 +30044,15 @@
           },
           {
             "type": "object",
-            "required": ["custom_field_values", "reactions"],
+            "required": ["custom_field_values", "reactions", "attachments"],
             "properties": {
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TaskAttachmentResponse"
+                },
+                "description": "添付ファイル（`GET /tasks/{id}/attachments` と同じ要素。新しい順）。\nタスク一覧（`GET /tasks`）には載せない。"
+              },
               "custom_field_values": {
                 "type": "array",
                 "items": {
@@ -29783,6 +30563,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "require_all_assignees_done": {
+            "type": "boolean",
+            "description": "true のとき、担当者全員が自分の分を完了にして初めてタスクが完了になる。\n古いサーバーの応答には無いので、無ければ false"
+          },
           "seq_id": {
             "type": "integer",
             "format": "int32"
@@ -29962,7 +30746,7 @@
       },
       "TenantMembershipKind": {
         "type": "string",
-        "description": "テナント一覧における、この利用者から見た関わり方の印。\n`TenantRole` と同じ流儀（PascalCase の文字列）で返す。",
+        "description": "テナントとの関わり方（オーナー・メンバー・ゲスト）。テナント一覧では閲覧者の、プロフィールでは対象の利用者の関わり方を表す。\n`TenantRole` と同じ流儀（PascalCase の文字列）で返す。",
         "enum": ["Owner", "Member", "Guest"]
       },
       "TenantResponse": {
@@ -30472,6 +31256,10 @@
               "format": "uuid"
             }
           },
+          "require_all_assignees_done": {
+            "type": ["boolean", "null"],
+            "description": "担当者全員の完了を必須にするかどうか。off にすると全員の完了を消す"
+          },
           "soft_deadline": {
             "type": ["string", "null"],
             "format": "date-time"
@@ -30595,7 +31383,7 @@
       "UserProfileResponse": {
         "type": "object",
         "description": "他の利用者に見せるプロフィール。`UserResponse` からメール等の本人向け項目を落としたもの",
-        "required": ["id", "username"],
+        "required": ["id", "username", "membership"],
         "properties": {
           "account_kind": {
             "type": "string"
@@ -30613,6 +31401,19 @@
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "membership": {
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TenantMembershipKind"
+                  }
+                ],
+                "x-or-unknown": true
+              }
+            ],
+            "description": "このテナントとの関わり方。オーナー・メンバー・客分（Guest）"
           },
           "position": {
             "type": ["string", "null"],

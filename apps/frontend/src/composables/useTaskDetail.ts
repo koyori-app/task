@@ -303,7 +303,13 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     pendingFieldRevisions.value = nextPending;
 
     if (field === 'status_id') {
-      statusError.value = 'ステータスの更新に失敗しました';
+      // 409 には別の理由もありうるので、本文の message で担当者の未完了だけを判定する
+      const notDone =
+        error instanceof OpenApiVueQueryError &&
+        (error.error as { message?: unknown } | null)?.message === 'assignees-not-done';
+      statusError.value = notDone
+        ? '担当者全員が完了にするまで完了へ移せません'
+        : 'ステータスの更新に失敗しました';
       const currentStatusId = taskQuery.data.value?.status_id;
       if (currentStatusId) selectedStatusId.value = currentStatusId;
       return;
@@ -337,14 +343,19 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     if (revision > (appliedFieldRevisions.get(appliedKey) ?? 0)) {
       appliedFieldRevisions.set(appliedKey, revision);
       // 状態を変えると backend が completed_at も書き換える（完了へ移れば入り、出れば空になる）。
-      // 期限の遅れはこれで数えるので、状態と一緒に応答から取る
+      // 期限の遅れはこれで数えるので、状態と一緒に応答から取る。
+      // 完了から戻すと backend が担当者ごとの完了も全員分消すので、assignees も応答から取る
+      // （古いままだと「全員完了」と表示され、完了へ戻す操作が 409 になる）
       queryClient.setQueryData<TaskDetail | null>(queryKey, (current) =>
         current
           ? {
               ...current,
               [field]: data[field],
               updated_at: laterIso(current.updated_at, data.updated_at),
-              ...(field === 'status_id' && { completed_at: data.completed_at }),
+              ...(field === 'status_id' && {
+                completed_at: data.completed_at,
+                assignees: data.assignees,
+              }),
             }
           : data,
       );

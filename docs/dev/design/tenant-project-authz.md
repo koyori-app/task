@@ -220,7 +220,7 @@ Drive にはファイル ID だけで引ける経路がある（`GET /v1/drive/f
 | My Tasks（`GET /v1/tenants/{id}/users/me/tasks`） | 所属者には全体を返す。ゲストには自分の project の分に絞る |
 | テナントの更新・削除 | オーナーのみ |
 | メンバー一覧の閲覧 | テナントに入れる人全員（ゲストは含まない） |
-| 利用者のプロフィール（`GET /v1/tenants/{id}/users/{user_id}`） | テナントに入れる人全員（ゲストは含まない）。対象はそのテナントのオーナー・メンバー・ゲストのいずれかで、それ以外は 404。返すのは id / username / bio / avatar_url と、このテナントでの department / position / team（未設定・ゲストでは null）だけ。PAT は `read:tenant` |
+| 利用者のプロフィール（`GET /v1/tenants/{id}/users/{user_id}`） | テナントに入れる人全員（ゲストは含まない）。対象はそのテナントのオーナー・メンバー・ゲストのいずれかで、それ以外は 404。返すのは id / username / account_kind / bio / avatar_url と、このテナントでの department / position / team（未設定・ゲストでは null）、このテナントとの関わり方の `membership`（`Owner` / `Member` / `Guest`）だけ。閲覧者はテナントに入れる人に限られるので、`membership` で誰がゲストかを見られるのはテナントのオーナー・メンバーだけである。PAT は `read:tenant` |
 | メンバーの追加・ロールと所属（部署・役職・チーム）の変更・削除 | オーナー + テナント `Admin` |
 | 所属行の無いオーナーの所属の変更 | オーナー本人のみ。ロールの変更と削除はオーナー本人でもできない |
 | 招待の発行・一覧・再送・取り消し（`/v1/tenants/{id}/invitations`） | オーナー + テナント `Admin`。PAT は一覧に `read:tenant`、それ以外に `write:tenant` |

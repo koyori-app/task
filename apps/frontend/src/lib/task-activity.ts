@@ -75,10 +75,29 @@ export function activityText(item: ActivityItem): string {
       return '担当者を追加しました';
     case 'assignee_removed':
       return '担当者を外しました';
+    case 'assignee_completed':
+      return '自分の担当分を完了にしました';
+    case 'assignee_reopened':
+      return '自分の担当分の完了を取り消しました';
+    case 'completion_rule_changed':
+      return payload.require_all_assignees_done === true
+        ? '担当者全員の完了を必須にしました'
+        : '担当者全員の完了の必須を解除しました';
     case 'relation_added':
-      return '関連タスクを追加しました';
-    case 'relation_removed':
+      // backend は blocked_by で追加しても type を "blocks" に正規化して記録する。
+      // type から向きは分からないので、相手だけを示す
+      return typeof payload.target_seq_id === 'number'
+        ? `タスク #${payload.target_seq_id} との依存関係を追加しました`
+        : '関連タスクを追加しました';
+    case 'relation_removed': {
+      // 解除は実際の向きを記録する
+      const type = str('type');
+      const target =
+        typeof payload.target_seq_id === 'number' ? `タスク #${payload.target_seq_id} ` : '';
+      if (type === 'blocks') return `${target}をブロックする関係を解除しました`;
+      if (type === 'blocked_by') return `${target}にブロックされる関係を解除しました`;
       return '関連タスクを外しました';
+    }
     case 'comment_added':
       return 'コメントしました';
     case 'comment_edited':

@@ -24,7 +24,15 @@ const { control, requestLog, fetchMock } = vi.hoisted(() => {
     rejectPost: boolean;
     /** この利用者を担当者に足す POST だけ失敗させる */
     rejectAssigneeId: string | null;
-  } = { holdPost: false, held: [], rejectPost: false, rejectAssigneeId: null };
+    /** 書き込みを 409 でこの message で拒む */
+    conflictMessage: string | null;
+  } = {
+    holdPost: false,
+    held: [],
+    rejectPost: false,
+    rejectAssigneeId: null,
+    conflictMessage: null,
+  };
 
   const requestLog: { method: string; url: string; body?: unknown }[] = [];
 
@@ -47,6 +55,7 @@ const { control, requestLog, fetchMock } = vi.hoisted(() => {
       });
     }
     if (control.rejectPost) return jsonResponse({ message: 'boom' }, 500);
+    if (control.conflictMessage) return jsonResponse({ message: control.conflictMessage }, 409);
     if ((entry.body as { user_id?: string } | undefined)?.user_id === control.rejectAssigneeId) {
       return jsonResponse({ message: 'boom' }, 409);
     }
@@ -114,6 +123,7 @@ describe('useTaskRowMutations', () => {
     control.held = [];
     control.rejectPost = false;
     control.rejectAssigneeId = null;
+    control.conflictMessage = null;
     requestLog.length = 0;
   });
 
@@ -123,6 +133,25 @@ describe('useTaskRowMutations', () => {
 
     await expect(mutations.addComment('task-1', 'だめなコメント')).resolves.toBe(false);
     expect(mutations.errors.value['task-1']).toBe('コメントを追加できませんでした');
+  });
+
+  // 担当者全員の完了が必要なタスクを、未完了の担当者が残るまま完了へ移すと backend が 409 で止める
+  it('完了へのドラッグ・変更が assignees-not-done で拒まれたら専用の文言を出す', async () => {
+    mountHost();
+    control.conflictMessage = 'assignees-not-done';
+
+    await mutations.setStatus({ id: 'task-1', status_id: 'todo' } as never, 'done');
+
+    expect(mutations.errors.value['task-1']).toBe('担当者全員が完了にするまで完了へ移せません');
+  });
+
+  it('他の 409 は従来の文言のまま', async () => {
+    mountHost();
+    control.conflictMessage = 'conflict';
+
+    await mutations.setStatus({ id: 'task-1', status_id: 'todo' } as never, 'done');
+
+    expect(mutations.errors.value['task-1']).toBe('更新に失敗しました');
   });
 
   // 飛行中の抑止を 1 件しか持たないと、行 A の送信中に行 B から送ったぶんが
