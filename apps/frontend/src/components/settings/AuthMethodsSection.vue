@@ -381,7 +381,7 @@ async function onPasswordSet() {
               {{
                 item.signIn
                   ? `${item.label} でサインインできなくなります。`
-                  : 'レビューが完了した PR を、あなたの名義で Approve しなくなります。'
+                  : 'レビューした PR を、あなたの名義で Approve・変更要求しなくなります。'
               }}
             </p>
             <Button

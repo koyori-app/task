@@ -4,6 +4,7 @@
 // - 要約コメント: 連携なしプロジェクトでは投稿だけスキップして起票は成功する
 // - Approve: マージ可の PR は、レビュワー本人のトークンで、レビューした commit を指定して 1 回だけ承認される（対照: High / Medium の未解決・レビュー後の push・閉じた PR では承認しない）。レビュワーが連携していなければ承認しない（bot でも承認しない）。トークンの期限が切れていれば更新してから承認し、回転したトークンを保存し直す。同じ commit への本人の承認が既にあれば、2 ページ目にあっても承認し直さない。承認が通らなくても（422 / 403）要約コメントは出て、ジョブは成功する
 // - 承認の取り消し: 承認済みの PR に同じ head で High のラウンドが出ると、承認者のトークンで REQUEST_CHANGES が 1 回だけ出る（commit_id と目印付き）。承認者が前のラウンドの作成者で、High を出したのが別の人でも取り消す。取り消し済みなら重ねて出さない。head が違う・閉じた PR・承認していない・取り下げ済み・連携なしでは取り消さない。403 / 422 でも要約コメントは出てジョブは成功する
+// - 変更要求: High / Medium の未解決があり head が新しい PR では、今の head にラウンドを出した人のうち自分のラウンドに未解決の High / Medium がある人の名義で、承認していなくても REQUEST_CHANGES が 1 回だけ出る（commit_id と目印付き）。承認済みなら取り消しの文面で出す。前の head の承認だけが残っていても出す。同じ commit に変更要求（目印の有無を問わない）か取り下げがあれば出さない。前の head の変更要求が残っていれば重ねない。連携なし・head が違う・閉じた PR では出さない。レビュー一覧の 2 ページ目にある変更要求も見落とさない
 // - 承認し直し: 目印付きの取り消しが最後の決定なら、マージ可に戻ったとき承認し直す。人が取り下げた承認・人の変更要求の後は承認し直さない
 // - マーカーの先取り: 第三者が同じマーカーを含むコメントを先に投稿していても、それを要約コメントと誤認せず、自分のコメントを新規に作成する
 // - 要約コメントの合流: 連続した状態遷移でも更新ジョブは 1 本に合流し、コメントは 1 本のまま最新の件数・マージ可否になる
@@ -1529,7 +1530,13 @@ async fn a_pull_request_with_blocking_findings_is_not_approved() {
     )
     .await;
 
-    assert!(approvals(&mock_server).await.is_empty());
+    assert!(
+        approvals(&mock_server)
+            .await
+            .iter()
+            .all(|(body, _)| body["event"] != "APPROVE"),
+        "承認は出さない（変更要求は出る）"
+    );
 }
 
 /// レビュー後にコミットが積まれた PR と、閉じた PR は承認しない。
@@ -1738,26 +1745,33 @@ async fn the_earlier_approver_is_revoked_when_someone_else_adds_a_blocking_round
     )
     .await;
 
+    // 承認者には取り消し、High を出した別の人には変更要求が出る
     let posted = approvals(&mock_server).await;
-    assert_eq!(posted.len(), 1, "承認していない別の人には出さない");
-    assert_eq!(posted[0].1, format!("Bearer {REVIEWER_TOKEN}"));
-    assert_eq!(posted[0].0["event"], "REQUEST_CHANGES");
-    assert_ne!(posted[0].1, format!("Bearer {OTHER_TOKEN}"));
+    assert_eq!(posted.len(), 2);
+    for (body, _) in &posted {
+        assert_eq!(body["event"], "REQUEST_CHANGES");
+    }
+    let text_for = |token: &str| {
+        posted
+            .iter()
+            .find(|(_, t)| t == &format!("Bearer {token}"))
+            .and_then(|(b, _)| b["body"].as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let revoked = text_for(REVIEWER_TOKEN);
+    assert!(revoked.contains("取り下げ"), "{revoked}");
+    let requested = text_for(OTHER_TOKEN);
+    assert!(requested.contains("変更を求めます"), "{requested}");
+    assert!(!requested.contains("取り下げ"), "{requested}");
 }
 
-/// 取り消さない場合: 承認していない・取り下げ済み・人の変更要求・連携なし・head が違う・閉じた PR。
+/// 取り消さない場合: 取り下げ済み・人の変更要求・連携なし・head が違う・閉じた PR。
 #[serial_test::serial]
 #[tokio::test]
 async fn nothing_is_revoked_without_a_live_approval_or_a_fresh_open_pr() {
     let human_cr = || review_json(REVIEWER_GITHUB_ID, "CHANGES_REQUESTED", Some("直して"));
     for (case, reviews, link, head, state) in [
-        (
-            "承認していない",
-            serde_json::json!([]),
-            LINKED,
-            REVIEWED_HEAD,
-            "open",
-        ),
         (
             "人が取り下げた",
             serde_json::json!([
@@ -1829,7 +1843,213 @@ async fn nothing_is_revoked_without_a_live_approval_or_a_fresh_open_pr() {
     }
 }
 
-/// 取り消しが 403 / 422 でも要約コメントは出て、ジョブは成功する。
+/// 承認していなくても、High / Medium の未解決を含むラウンドを今の head に出した本人の名義で
+/// 変更要求（REQUEST_CHANGES）を 1 回だけ出す。目印と commit_id を付ける。
+#[serial_test::serial]
+#[tokio::test]
+async fn a_blocking_round_requests_changes_as_the_reviewer() {
+    let mock_server = MockServer::start().await;
+    review_once_and_run_summary(&mock_server, high(), LINKED).await;
+
+    let posted = approvals(&mock_server).await;
+    assert_eq!(posted.len(), 1);
+    let (body, auth) = &posted[0];
+    assert_eq!(auth, &format!("Bearer {REVIEWER_TOKEN}"));
+    assert_eq!(body["event"], "REQUEST_CHANGES");
+    assert_eq!(body["commit_id"], REVIEWED_HEAD);
+    let text = body["body"].as_str().expect("body");
+    assert!(text.contains("<!-- koyori-approval-revoked:"), "{text}");
+    assert!(text.contains("変更を求めます"), "{text}");
+    assert!(!text.contains("取り下げ"), "{text}");
+}
+
+/// 前の head への承認だけが残っていても、今の head の High には変更要求を出す
+/// （承認は commit ごとなので、今の head の最後の決定は無い）。
+#[serial_test::serial]
+#[tokio::test]
+async fn a_stale_approval_on_an_older_head_is_overridden_by_a_change_request() {
+    let mock_server = MockServer::start().await;
+    scenario(
+        &mock_server,
+        high(),
+        LINKED,
+        Scenario {
+            reviews: Some(Box::new(|_, _| {
+                serde_json::json!([review_on(REVIEWER_GITHUB_ID, OLD_HEAD, "APPROVED", None)])
+            })),
+            ..Default::default()
+        },
+    )
+    .await;
+
+    let posted = approvals(&mock_server).await;
+    assert_eq!(posted.len(), 1);
+    assert_eq!(posted[0].0["event"], "REQUEST_CHANGES");
+    assert_eq!(posted[0].0["commit_id"], REVIEWED_HEAD);
+}
+
+/// 変更要求は、自分のラウンドに未解決の High / Medium がある人だけが出す。
+/// 指摘なしのラウンドを出した人（先に出した 1 本目）には出さない。
+#[serial_test::serial]
+#[tokio::test]
+async fn only_reviewers_with_their_own_blocking_findings_request_changes() {
+    let mock_server = MockServer::start().await;
+    scenario(
+        &mock_server,
+        serde_json::json!([]),
+        LINKED,
+        Scenario {
+            second_round: Some((high(), true)),
+            ..Default::default()
+        },
+    )
+    .await;
+
+    let posted = approvals(&mock_server).await;
+    assert_eq!(posted.len(), 1, "指摘を出していない人には出さない");
+    assert_eq!(posted[0].1, format!("Bearer {OTHER_TOKEN}"));
+    assert_eq!(posted[0].0["event"], "REQUEST_CHANGES");
+    assert_eq!(posted[0].0["commit_id"], REVIEWED_HEAD);
+}
+
+/// 変更要求を出さない場合（上の対照）: 同じ commit に変更要求済み（目印の有無を問わない）・
+/// 取り下げ済み・前の head の task の変更要求が残っている・連携なし・head が違う・閉じた PR。
+#[serial_test::serial]
+#[tokio::test]
+async fn changes_are_not_requested_twice_or_against_a_human_decision() {
+    let fresh = REVIEWED_HEAD;
+    let stale = "0000000000000000000000000000000000000000";
+    for (case, reviews, link, head, state) in [
+        (
+            "同じ commit に task の変更要求がある",
+            serde_json::json!([review_json(
+                REVIEWER_GITHUB_ID,
+                "CHANGES_REQUESTED",
+                Some("<!-- koyori-approval-revoked:PROJECT -->")
+            )]),
+            LINKED,
+            fresh,
+            "open",
+        ),
+        (
+            "同じ commit に人の変更要求がある",
+            serde_json::json!([review_json(
+                REVIEWER_GITHUB_ID,
+                "CHANGES_REQUESTED",
+                Some("直して")
+            )]),
+            LINKED,
+            fresh,
+            "open",
+        ),
+        (
+            "同じ commit で変更要求を人が取り下げた",
+            serde_json::json!([
+                review_json(
+                    REVIEWER_GITHUB_ID,
+                    "CHANGES_REQUESTED",
+                    Some("<!-- koyori-approval-revoked:PROJECT -->")
+                ),
+                review_json(REVIEWER_GITHUB_ID, "DISMISSED", None)
+            ]),
+            LINKED,
+            fresh,
+            "open",
+        ),
+        (
+            "前の head の task の変更要求が残っている",
+            serde_json::json!([review_on(
+                REVIEWER_GITHUB_ID,
+                OLD_HEAD,
+                "CHANGES_REQUESTED",
+                Some("<!-- koyori-approval-revoked:PROJECT -->")
+            )]),
+            LINKED,
+            fresh,
+            "open",
+        ),
+        ("連携なし", serde_json::json!([]), None, fresh, "open"),
+        ("head が違う", serde_json::json!([]), LINKED, stale, "open"),
+        ("閉じた PR", serde_json::json!([]), LINKED, fresh, "closed"),
+    ] {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/repos/{REPO_OWNER}/{REPO_NAME}/pulls/{PR_NUMBER}"
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "title": "feat: レビュー指摘管理",
+                "user": { "login": "yupix" },
+                "head": { "sha": head },
+                "state": state
+            })))
+            .with_priority(1)
+            .mount(&mock_server)
+            .await;
+        scenario(
+            &mock_server,
+            high(),
+            link,
+            Scenario {
+                reviews: Some(Box::new(move |marker, _| {
+                    // PROJECT は呼び出し側が書いた仮の目印。実際のプロジェクトの目印に置き換える
+                    let text = serde_json::to_string(&reviews)
+                        .expect("json")
+                        .replace("<!-- koyori-approval-revoked:PROJECT -->", marker);
+                    serde_json::from_str(&text).expect("json")
+                })),
+                ..Default::default()
+            },
+        )
+        .await;
+        assert!(approvals(&mock_server).await.is_empty(), "{case}");
+    }
+}
+
+/// 同じ commit への本人の変更要求が 2 ページ目にあっても、重ねて出さない。
+/// 1 ページ目は既定のページサイズ（100 件）ちょうどで埋めて、ページ送りを確かめる。
+#[serial_test::serial]
+#[tokio::test]
+async fn an_existing_change_request_on_a_later_page_is_not_repeated() {
+    let mock_server = MockServer::start().await;
+    let others: Vec<serde_json::Value> = (0..100)
+        .map(|i| {
+            serde_json::json!({
+                "user": { "id": 100 + i, "login": format!("reviewer-{i}"), "type": "User" },
+                "commit_id": REVIEWED_HEAD,
+                "state": "COMMENTED"
+            })
+        })
+        .collect();
+    Mock::given(method("GET"))
+        .and(path(reviews_api_path()))
+        .and(query_param("page", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(others))
+        .with_priority(1)
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(reviews_api_path()))
+        .and(query_param("page", "2"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                "user": { "id": REVIEWER_GITHUB_ID, "login": "reviewer", "type": "User" },
+                "commit_id": REVIEWED_HEAD,
+                "state": "CHANGES_REQUESTED"
+            }])),
+        )
+        .with_priority(1)
+        .mount(&mock_server)
+        .await;
+    review_once_and_run_summary(&mock_server, high(), LINKED).await;
+
+    assert!(
+        approvals(&mock_server).await.is_empty(),
+        "変更要求済みの commit に重ねて出さない"
+    );
+}
+
+/// 取り消しと変更要求が 403 / 422 でも要約コメントは出て、ジョブは成功する。
 #[serial_test::serial]
 #[tokio::test]
 async fn a_rejected_revocation_still_posts_the_summary_comment() {
@@ -1868,6 +2088,34 @@ async fn a_rejected_revocation_still_posts_the_summary_comment() {
             .count();
         assert_eq!(comments, 1, "{status} でも要約コメントは出ている");
     }
+
+    // 承認していない人への新しい変更要求が拒まれたときも同じ
+    for status in [422, 403] {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(reviews_api_path()))
+            .respond_with(
+                ResponseTemplate::new(status).set_body_json(serde_json::json!({
+                    "message": "nope"
+                })),
+            )
+            .with_priority(1)
+            .mount(&mock_server)
+            .await;
+        review_once_and_run_summary(&mock_server, high(), LINKED).await;
+
+        assert_eq!(
+            approvals(&mock_server).await.len(),
+            1,
+            "変更要求は試みている"
+        );
+        let comments = bodies_of(&mock_server, wiremock::http::Method::POST)
+            .await
+            .into_iter()
+            .filter(|b| b.get("body").is_some() && b.get("event").is_none())
+            .count();
+        assert_eq!(comments, 1, "{status} でも要約コメントは出ている");
+    }
 }
 
 /// 取り消した後にマージ可へ戻ったら承認し直す。人が取り下げた承認・人の変更要求の後は承認し直さない。
@@ -1887,6 +2135,15 @@ async fn approval_is_restored_only_after_our_own_revocation() {
                     Some("<!-- koyori-approval-revoked:PROJECT -->"),
                 ),
             ],
+        ),
+        (
+            "承認せずに task が変更を求めた後",
+            true,
+            vec![review_json(
+                REVIEWER_GITHUB_ID,
+                "CHANGES_REQUESTED",
+                Some("<!-- koyori-approval-revoked:PROJECT -->"),
+            )],
         ),
         (
             "人が取り下げた",

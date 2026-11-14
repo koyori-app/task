@@ -1,9 +1,10 @@
-//! PR への要約コメント（GitHub Issue Comments API）と Approve（Pull Request Reviews API）。
+//! PR への要約コメント（GitHub Issue Comments API）と、Approve・変更要求（Pull Request Reviews API）。
 //!
 //! レビュー指摘の一覧・状態は task 側が権威で、GitHub には**マーカー付きの
 //! コメント 1 本**だけを置く。2 回目以降は同じコメントを編集して更新する。
 //! マージ可になったら、レビュワー本人のトークンで、レビューした commit を本文なしで
-//! Approve する（インライン投稿はしない。仕様 `docs/dev/features/review-findings/github-comment.md`）。
+//! Approve する。未解決の High / Medium があるときは、指摘を出した本人の名義で変更要求を出す
+//! （インライン投稿はしない。仕様 `docs/dev/features/review-findings/github-comment.md`）。
 
 // 受け入れ条件（docs/dev/features/review-findings/github-comment.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
 // - 要約コメントの持ち主: それぞれのコメントを自分のマーカーで見分ける（プロジェクトごとにマーカーが違う）
@@ -27,8 +28,8 @@ pub fn summary_marker(project_id: Uuid) -> String {
     format!("<!-- koyori-review-summary:{project_id} -->")
 }
 
-/// 承認の取り消し（`REQUEST_CHANGES`）に付ける印。task が出したレビューと見分け、
-/// 承認し直してよいかの判定に使う。プロジェクトごとなのは [`summary_marker`] と同じ理由。
+/// task が出した変更要求（`REQUEST_CHANGES`。承認の取り消しも含む）に付ける印。人の変更要求と見分け、
+/// 承認し直してよいかの判定に使う。関数名と文字列は、GitHub に既にあるレビューと照合するため変えない。プロジェクトごとなのは [`summary_marker`] と同じ理由。
 #[must_use]
 pub fn revoke_marker(project_id: Uuid) -> String {
     format!("<!-- koyori-approval-revoked:{project_id} -->")
@@ -97,7 +98,7 @@ struct PullRequestReview {
 enum Decision {
     Approved,
     Dismissed,
-    /// `by_task` は本文に取り消しの目印がある（task が出した）こと
+    /// `by_task` は本文に目印がある（task が出した変更要求・取り消し）こと
     ChangesRequested {
         by_task: bool,
     },
@@ -164,12 +165,38 @@ impl ReviewScan {
         }
     }
 
-    /// 最後の決定（commit を問わない）が task の取り消しのまま残っている。
+    /// 最後の決定（commit を問わない）が task の変更要求・取り消しのまま残っている。
     /// 打ち切られたときは最後の決定が分からないので `false`。
     fn revoked_by_task(&self) -> bool {
         !self.truncated
             && self.last_any_commit == Some(Decision::ChangesRequested { by_task: true })
     }
+
+    /// 出すべき変更要求。`own_blocking` は本人に未解決の High / Medium の指摘があること。
+    fn change_request(&self, own_blocking: bool) -> Option<ChangeRequest> {
+        if self.truncated {
+            return None;
+        }
+        // 同じ commit の承認は、指摘の有無に関係なく取り消す（今の head にラウンドを出した人だけが対象）
+        if self.last == Some(Decision::Approved) {
+            return Some(ChangeRequest::Revoke);
+        }
+        // 前の head の変更要求が残っていれば GitHub 上は既に Changes requested なので重ねない
+        let standing = matches!(
+            self.last_any_commit,
+            Some(Decision::ChangesRequested { .. })
+        );
+        (own_blocking && self.last.is_none() && !standing).then_some(ChangeRequest::New)
+    }
+}
+
+/// [`ReviewScan::change_request`] が決める変更要求の種類。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChangeRequest {
+    /// 同じ commit への承認を上書きして取り消す
+    Revoke,
+    /// 承認していない人が新しく変更を求める
+    New,
 }
 
 /// 満杯のページで上限に達した（その先にまだ続きがありうる）。
@@ -546,63 +573,78 @@ pub async fn approve_pull_request(
     Ok(ApproveOutcome::Approved)
 }
 
-/// 承認の取り消しの対象。
-pub struct RevokeTarget<'a> {
+/// 変更要求の対象。
+pub struct RequestChangesTarget<'a> {
     pub owner: &'a str,
     pub repo: &'a str,
     pub number: i32,
-    /// 取り消す承認の commit。`REQUEST_CHANGES` もこの commit に付ける
+    /// 変更を求める commit。`REQUEST_CHANGES` もこの commit に付ける
     pub commit_sha: &'a str,
-    /// 承認した人（トークンの持ち主）の GitHub ユーザー ID
-    pub approver_id: i64,
+    /// 変更を求める人（トークンの持ち主）の GitHub ユーザー ID
+    pub reviewer_id: i64,
+    /// 本人に未解決の High / Medium の指摘があるか。無ければ新しく変更を求めない
+    /// （同じ commit の承認の取り消しは、これに関係なく行う）
+    pub own_blocking: bool,
     /// 本文に入れる目印（[`revoke_marker`]）
     pub revoke_marker: &'a str,
     /// 指摘一覧の URL。あれば本文に添える
     pub findings_url: Option<&'a str>,
 }
 
-/// [`revoke_approval`] の結果。
+/// [`request_changes`] の結果。
 #[derive(Debug, PartialEq, Eq)]
-pub enum RevokeOutcome {
+pub enum RequestChangesOutcome {
+    /// 承認していない人に、新しく変更要求を出した
+    Requested,
+    /// 同じ commit への承認を変更要求で上書きした
     Revoked,
-    /// 最後の決定が承認ではない（無い・取り下げ済み・人の変更要求・取り消し済み）
-    NotApproved,
+    /// 出す必要がない（決定が既にある・本人に未解決の指摘が無い）
+    NotNeeded,
     /// レビューが多く、一覧の終わりまで読めなかった。最後の決定が分からないので何もしない
     Truncated,
     /// GitHub が受け付けなかった（422）
     Unprocessable(String),
 }
 
-/// 本人の最後の決定が APPROVED のときだけ、本人のトークンで `REQUEST_CHANGES` を出して
-/// 承認を上書きする。dismiss は保護ブランチで管理者権限が要り、人の取り下げと
-/// 区別できないので使わない。
-pub async fn revoke_approval(
+/// 本人のトークンで `REQUEST_CHANGES` を出す。
+///
+/// 同じ commit への最後の決定が APPROVED なら、その承認を上書きして取り消す。決定が無く、
+/// 本人に未解決の High / Medium の指摘があり、前の head の変更要求も残っていなければ、
+/// 新しく変更を求める。それ以外（変更要求済み・人の取り下げなど）は人の判断と争わず何もしない。
+/// dismiss は保護ブランチで管理者権限が要り、人の取り下げと区別できないので使わない。
+pub async fn request_changes(
     http: &Client,
     token: &str,
-    target: &RevokeTarget<'_>,
-) -> Result<RevokeOutcome, anyhow::Error> {
-    let RevokeTarget {
+    target: &RequestChangesTarget<'_>,
+) -> Result<RequestChangesOutcome, anyhow::Error> {
+    let RequestChangesTarget {
         owner,
         repo,
         number,
         commit_sha,
-        approver_id,
+        reviewer_id,
+        own_blocking,
         revoke_marker,
         findings_url,
     } = *target;
     let url = format!("{}/repos/{owner}/{repo}/pulls/{number}/reviews", api_base());
 
-    let scan = scan_reviews(http, token, &url, commit_sha, approver_id, revoke_marker).await?;
+    let scan = scan_reviews(http, token, &url, commit_sha, reviewer_id, revoke_marker).await?;
     if scan.truncated {
-        return Ok(RevokeOutcome::Truncated);
+        return Ok(RequestChangesOutcome::Truncated);
     }
-    if scan.last != Some(Decision::Approved) {
-        return Ok(RevokeOutcome::NotApproved);
-    }
+    let Some(kind) = scan.change_request(own_blocking) else {
+        return Ok(RequestChangesOutcome::NotNeeded);
+    };
 
-    let mut body = format!(
-        "{revoke_marker}\ntask に未解決の High / Medium の指摘があるため、先に出した承認を取り下げます。解消してマージ可になれば承認し直します。"
-    );
+    let mut body = match kind {
+        ChangeRequest::Revoke => format!(
+            "{revoke_marker}\ntask に未解決の High / Medium の指摘があるため、先に出した承認を取り下げます。解消してマージ可になれば承認し直します。"
+        ),
+        ChangeRequest::New => format!(
+            "{revoke_marker}\ntask に未解決の High / Medium の指摘があるため、変更を求めます。解消してマージ可になれば承認します。"
+        ),
+    };
     if let Some(u) = findings_url {
         body.push_str(&format!("\n\n指摘一覧: {u}"));
     }
@@ -617,15 +659,18 @@ pub async fn revoke_approval(
         .await?;
     let status = res.status();
     if status == StatusCode::UNPROCESSABLE_ENTITY {
-        return Ok(RevokeOutcome::Unprocessable(
+        return Ok(RequestChangesOutcome::Unprocessable(
             res.text().await.unwrap_or_default(),
         ));
     }
     if !status.is_success() {
         let text = res.text().await.unwrap_or_default();
-        return Err(anyhow::anyhow!("revoke approval failed: {status}: {text}"));
+        return Err(anyhow::anyhow!("request changes failed: {status}: {text}"));
     }
-    Ok(RevokeOutcome::Revoked)
+    Ok(match kind {
+        ChangeRequest::Revoke => RequestChangesOutcome::Revoked,
+        ChangeRequest::New => RequestChangesOutcome::Requested,
+    })
 }
 
 #[cfg(test)]
@@ -759,6 +804,49 @@ mod tests {
             human.last,
             Some(Decision::ChangesRequested { by_task: false })
         );
+    }
+
+    /// 出すべき変更要求は、本人の決定の履歴と未解決の指摘の有無から決まる。
+    #[test]
+    fn a_change_request_is_decided_from_the_scan() {
+        // 決定なし: 本人に未解決の指摘があるときだけ新しく出す
+        let none = scan(&[review(42, "abc", "COMMENTED", None)]);
+        assert_eq!(none.change_request(true), Some(ChangeRequest::New));
+        assert_eq!(none.change_request(false), None);
+
+        // 同じ commit の承認は、指摘の有無に関係なく取り消す
+        let approved = scan(&[review(42, "abc", "APPROVED", None)]);
+        assert_eq!(approved.change_request(true), Some(ChangeRequest::Revoke));
+        assert_eq!(approved.change_request(false), Some(ChangeRequest::Revoke));
+
+        // 同じ commit で変更要求済み（目印の有無を問わない）・取り下げ済みなら出さない
+        for decisions in [
+            vec![review(42, "abc", "CHANGES_REQUESTED", Some("MARK"))],
+            vec![review(42, "abc", "CHANGES_REQUESTED", Some("直して"))],
+            vec![review(42, "abc", "DISMISSED", None)],
+            vec![
+                review(42, "abc", "APPROVED", None),
+                review(42, "abc", "DISMISSED", None),
+            ],
+        ] {
+            assert_eq!(scan(&decisions).change_request(true), None, "{decisions:?}");
+        }
+
+        // 前の commit の承認だけなら新しく出す。前の commit の変更要求が残っていれば重ねない
+        let older_approval = scan(&[review(42, "old", "APPROVED", None)]);
+        assert_eq!(
+            older_approval.change_request(true),
+            Some(ChangeRequest::New)
+        );
+        for body in [Some("MARK"), Some("直して")] {
+            let older_cr = scan(&[review(42, "old", "CHANGES_REQUESTED", body)]);
+            assert_eq!(older_cr.change_request(true), None, "{body:?}");
+        }
+
+        // 打ち切られたら最後の決定が分からないので何もしない
+        let mut cut = scan(&[review(42, "abc", "APPROVED", None)]);
+        cut.truncated = true;
+        assert_eq!(cut.change_request(true), None);
     }
 
     /// 上限のページが満杯のままのときだけ、打ち切られたと見なす。
