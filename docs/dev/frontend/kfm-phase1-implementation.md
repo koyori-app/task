@@ -41,7 +41,7 @@ apps/frontend/src/lib/
   rehype-starry-night/         コードブロック着色 (rehype-starry-night の薄いラッパ)
     index.ts                   createRehypeStarryNight（starry-night 実体の共有と失敗回収）
     schema.ts                  pl-* class の sanitize スキーマ
-    style.css                  サイドカー CSS（light シート固定と .dark ブリッジ）
+    style.css                  サイドカー CSS（light シート固定とダークブリッジ）
   rehype-kfm-code/             コードブロックの枠（帯・行番号・コピーボタン）
     index.ts                   <kfm-code> で包み、data-lang / data-title と行分割を出力する
     element.ts                 コピーボタンを足す custom element
@@ -227,7 +227,7 @@ href のスキームの拒否は要素の種類で分ける。`<a>`（遷移の 
 
 ### テーマ
 
-テーマは描画時のスナップショットである。`.dark` の祖先を描画時に一度だけ見る。
+テーマは描画時のスナップショットである。`html` の `data-theme` を描画時に一度だけ見る（`light` なら明るい配色、それ以外は暗い配色）。
 
 ## サニタイズ（_sanitize.ts）
 
@@ -364,7 +364,7 @@ import '@/lib/remark-kfm-mermaid/style.css';
 - GFM CSS は import とラッパーのクラスの二点が要る。GFM の出力は素の ul/ol/blockquote/a/del で掴む class が無く、bare 要素へ当てるとアプリ全体へ漏れるので、全ルールが `.kfm-content` の子孫に限定されている。クラスを付け忘れると一行も当たらない
 - alerts CSS は、レンダラ自身が出力する名前空間クラス（`.kfm-alert` など）を直接指す
 - メンションのチップは koyori の固定 class で描き、GFM CSS の `a` の規則は `:not(.koyori-mention)` でチップを外す
-- 着色 CSS は starry-night が出力する `pl-*` の名前空間クラスを直接指す。実体は upstream の light シート固定と `.dark` ブリッジで、アプリの class 戦略のダークに追従する
+- 着色 CSS は starry-night が出力する `pl-*` の名前空間クラスを直接指す。実体は upstream の light シート固定とダークブリッジで、`html` の `data-theme` が `light` でないときのダークに追従する
 - kfm-code CSS は `kfm-code` 要素と `.pl-line` を直接指し、着色 CSS と同じ場所で import する
 - link favicon CSS は `img.kfm-link-favicon` だけを指し、字の大きさ（`1em`）に合わせた正方形にする
 - mermaid CSS は JS 無効時または描画失敗時の light DOM のソースを、`white-space: pre` と横スクロールで読める状態に保つ
@@ -421,7 +421,7 @@ KFM の Storybook story (`stories/kfm/*`) は、本番と同じ「サーバー�
 | 2026-08-20 | SVG をサーバーで生成する方式を採らず、Mermaid を client で描画する | mermaid はレイアウト計測に DOM を要するブラウザ描画である |
 | 2026-08-20 | shadow DOM を失敗時に張らない | 張ると light DOM のソーステキスト（JS 無効時と失敗時のフォールバック表示）まで隠れる |
 | 2026-08-20 | SVG の挿入前の検査に XML パーサを使わない | mermaid の正常出力（click 付き flowchart の `<a xlink:href>` は `xmlns:xlink` 宣言なし）を偽陽性で落とし、逆に HTML 再パースで構造が変わる mXSS を素通しする |
-| 2026-08-20 | 着色 CSS に OS 設定に連動する both.css を使わない | 発火条件を `.dark` の一系統にまとめ、OS がダークでアプリがライトのときにコードだけ暗転する状態を防ぐ |
+| 2026-08-20 | 着色 CSS に OS 設定に連動する both.css を使わない | 発火条件を `html` の `data-theme` の一系統にまとめ、OS がダークでアプリがライトのときにコードだけ暗転する状態を防ぐ |
 | 2026-08-20 | scope をランダムにしない | 同じ入力から同じ HTML を得る性質（L1 キャッシュ、SSR と CSR の一致）を保つ |
 | 2026-08-21 | 本文のリンクに `rel` を付けない | `target="_blank"` を出力しないので reverse tabnabbing の経路が無く、同じタブの遷移では `noopener` は不要である |
 | 2026-08-22 | `data:` を一律に拒否せず、`<image>` / `<img>` の `data:image/` を許す | C4 図が Person アイコンを `<image xlink:href="data:image/png;base64,…">` で埋める（mermaid@11.16.1 で実測）ので、一律に拒否すると C4 図全体が error になる |
