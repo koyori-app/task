@@ -152,6 +152,90 @@ async fn the_env_url_and_token_connect_even_when_the_config_is_broken() {
     list_projects_with_the_env_pair(home.path(), None).await;
 }
 
+const OTHER_TENANT: &str = "88888888-8888-4888-8888-888888888888";
+
+/// 複数のテナントで使えるトークンの `/me` の応答。旧 CLI 向けの `tenant_id` は付かない。
+fn multi_tenant_identity() -> ResponseTemplate {
+    let mut body = token_identity_json();
+    body.as_object_mut().unwrap().remove("tenant_id");
+    body["tenant_ids"] = json!([TENANT, OTHER_TENANT]);
+    ResponseTemplate::new(200).set_body_json(body)
+}
+
+async fn mount_identity(harness: &Harness, response: ResponseTemplate) {
+    Mock::given(method("GET"))
+        .and(path(ME))
+        .respond_with(response)
+        .mount(&harness.server)
+        .await;
+}
+
+/// 黙って 1 つを選ぶと、別のテナントへ書き込みかねない。明示を求めて止まり、要求は送らない。
+#[tokio::test]
+async fn a_token_bound_to_several_tenants_requires_an_explicit_tenant() {
+    let harness = harness_with(None, &[]).await;
+    mount_identity(&harness, multi_tenant_identity()).await;
+    mount_projects(&harness, project_list()).await;
+    let before = harness.store().load().unwrap();
+
+    let err = harness
+        .run(&["task", "projects", "list"])
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.exit_code, 2);
+    assert!(err.message.contains(TENANT), "{}", err.message);
+    assert!(err.message.contains(OTHER_TENANT), "{}", err.message);
+    assert!(err.message.contains("TASK_TENANT"), "{}", err.message);
+    assert_eq!(harness.calls_to(ME).await, 1);
+    assert_eq!(harness.calls_to(&projects_path()).await, 0);
+    assert_eq!(harness.store().load().unwrap(), before);
+}
+
+/// 対照: 同じトークンでも、テナントを明示すれば 1 つに決まり、`/me` は要らない。
+#[tokio::test]
+async fn an_explicit_tenant_selects_one_of_several_without_the_token_endpoint() {
+    let harness = harness_with(None, &[("TASK_TENANT", TENANT)]).await;
+    mount_identity(&harness, multi_tenant_identity()).await;
+    mount_projects(&harness, project_list()).await;
+
+    assert_eq!(harness.run(&["task", "projects", "list"]).await.unwrap(), 0);
+    assert_eq!(harness.calls_to(ME).await, 0);
+    assert_eq!(harness.calls_to(&projects_path()).await, 1);
+}
+
+/// 旧サーバーは `tenant_ids` を返さない。`tenant_id` だけの応答も 1 件として読める。
+#[tokio::test]
+async fn resolves_the_tenant_from_a_server_that_only_reports_tenant_id() {
+    let harness = harness_with(None, &[]).await;
+    let mut body = token_identity_json();
+    body.as_object_mut().unwrap().remove("tenant_ids");
+    mount_identity(&harness, ResponseTemplate::new(200).set_body_json(body)).await;
+    mount_projects(&harness, project_list()).await;
+
+    assert_eq!(harness.run(&["task", "projects", "list"]).await.unwrap(), 0);
+    assert_eq!(harness.calls_to(&projects_path()).await, 1);
+}
+
+/// 束縛が空のトークンは、行き先が無いことを伝えて止まる。
+#[tokio::test]
+async fn a_token_without_any_tenant_stops_with_an_explanation() {
+    let harness = harness_with(None, &[]).await;
+    let mut body = token_identity_json();
+    let object = body.as_object_mut().unwrap();
+    object.remove("tenant_id");
+    object.insert("tenant_ids".into(), json!([]));
+    mount_identity(&harness, ResponseTemplate::new(200).set_body_json(body)).await;
+
+    let err = harness
+        .run(&["task", "projects", "list"])
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.message, "The token is not bound to any tenant");
+    assert_eq!(harness.calls_to(&projects_path()).await, 0);
+}
+
 #[tokio::test]
 async fn whoami_calls_the_token_endpoint_once_without_a_tenant() {
     let harness = harness_with(None, &[]).await;
@@ -242,12 +326,12 @@ async fn a_forbidden_response_names_the_explicit_tenant_to_remove() {
     let cases: [(Harness, &str); 2] = [
         (
             harness_with(Some(TENANT), &[]).await,
-            "tenant_id is set in config; if the token belongs to another tenant, run `task config unset tenant_id`",
+            "tenant_id is set in config; if the token cannot be used in that tenant, run `task config unset tenant_id`",
         ),
         // env は config に勝つので、両方あれば env の解除を案内する
         (
             harness_with(Some(TENANT), &[("TASK_TENANT", TENANT)]).await,
-            "tenant_id is set by TASK_TENANT; if the token belongs to another tenant, unset it",
+            "tenant_id is set by TASK_TENANT; if the token cannot be used in that tenant, unset it",
         ),
     ];
     for (harness, hint) in cases {

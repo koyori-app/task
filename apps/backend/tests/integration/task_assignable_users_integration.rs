@@ -19,7 +19,7 @@ async fn issue_token(app: &TestApp, tenant_id: Uuid, name: &str, scopes: &[&str]
     let res = app
         .post_json_with_session(
             "/v1/personal_tokens",
-            serde_json::json!({ "name": name, "tenant_id": tenant_id, "scopes": scopes }),
+            serde_json::json!({ "name": name, "tenant_ids": [tenant_id], "scopes": scopes }),
         )
         .await;
     assert_eq!(res.status(), StatusCode::CREATED, "トークン発行は成功する");
@@ -575,7 +575,7 @@ async fn assignable_users_hide_org_from_principals_who_cannot_read_profiles() {
             "/v1/personal_tokens",
             serde_json::json!({
                 "name": "bound",
-                "tenant_id": tp.tenant_id,
+                "tenant_ids": [tp.tenant_id],
                 "scopes": ["write:task", "read:tenant"],
                 "project_ids": [tp.project_id],
             }),

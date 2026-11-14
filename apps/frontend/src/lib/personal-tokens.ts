@@ -56,6 +56,12 @@ export function maskedToken(lastFour: string): string {
   return `pat_••••••${lastFour}`;
 }
 
+/** トークンが結び付いたテナントの名前を行に収める。2 件までは全部、3 件以上は先頭 2 件と残りの数。 */
+export function formatTenantNames(names: string[]): string {
+  if (names.length <= 2) return names.join('、');
+  return `${names.slice(0, 2).join('、')} ほか ${names.length - 2} 件`;
+}
+
 export function formatExpiry(iso: string | null | undefined, now: Date = new Date()): string {
   if (!iso) return '無期限';
   const d = new Date(iso);

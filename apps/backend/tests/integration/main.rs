@@ -42,6 +42,7 @@ mod personal_token_identity_integration;
 mod personal_token_last_used_integration;
 mod personal_tokens_create_auth_integration;
 mod personal_tokens_list_integration;
+mod personal_tokens_multi_tenant_integration;
 mod profile_update_integration;
 mod project_events_integration;
 mod project_guest_access_integration;

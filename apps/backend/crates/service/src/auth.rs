@@ -23,10 +23,16 @@ use tracing::{error, warn};
 use chrono::{DateTime, Utc};
 use sea_orm::prelude::DateTimeWithTimeZone;
 use sea_orm::sea_query::Expr;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::sea_query::{Query, SelectStatement};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
+};
+use std::collections::HashMap;
+use uuid::Uuid;
 
 use crate::error::{ServerError, internal_server_error};
 use entity::device_tokens;
+use entity::personal_token_tenants;
 use entity::personal_tokens::{self, Entity as PersonalTokenEntity};
 use sea_orm::DatabaseConnection;
 
@@ -447,6 +453,107 @@ pub async fn authenticate_personal_token(
     }
 
     Ok(token)
+}
+
+/// PAT が結び付けられたテナント（`tenant_id` 昇順）。
+pub async fn personal_token_tenant_ids<C: ConnectionTrait>(
+    conn: &C,
+    token_id: Uuid,
+) -> Result<Vec<Uuid>, DbErr> {
+    personal_token_tenants::Entity::find()
+        .select_only()
+        .column(personal_token_tenants::Column::TenantId)
+        .filter(personal_token_tenants::Column::TokenId.eq(token_id))
+        .order_by_asc(personal_token_tenants::Column::TenantId)
+        .into_tuple::<Uuid>()
+        .all(conn)
+        .await
+}
+
+/// 複数の PAT の束縛を 1 クエリで引く。各値は昇順。束縛の無い PAT はキーが無い。
+pub async fn personal_token_tenant_ids_by_token<C: ConnectionTrait>(
+    conn: &C,
+    token_ids: &[Uuid],
+) -> Result<HashMap<Uuid, Vec<Uuid>>, DbErr> {
+    let mut out: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+    if token_ids.is_empty() {
+        return Ok(out);
+    }
+    let rows = personal_token_tenants::Entity::find()
+        .filter(personal_token_tenants::Column::TokenId.is_in(token_ids.iter().copied()))
+        .order_by_asc(personal_token_tenants::Column::TenantId)
+        .all(conn)
+        .await?;
+    for row in rows {
+        out.entry(row.token_id).or_default().push(row.tenant_id);
+    }
+    Ok(out)
+}
+
+/// PAT をテナントに結び付ける。`tenant_ids` は重複を含まないこと（主キー違反になる）。
+pub async fn bind_personal_token_tenants<C: ConnectionTrait>(
+    conn: &C,
+    token_id: Uuid,
+    tenant_ids: &[Uuid],
+) -> Result<(), DbErr> {
+    if tenant_ids.is_empty() {
+        return Ok(());
+    }
+    personal_token_tenants::Entity::insert_many(tenant_ids.iter().map(|tenant_id| {
+        personal_token_tenants::ActiveModel {
+            token_id: sea_orm::ActiveValue::Set(token_id),
+            tenant_id: sea_orm::ActiveValue::Set(*tenant_id),
+        }
+    }))
+    .exec_without_returning(conn)
+    .await?;
+    Ok(())
+}
+
+/// そのテナントに結び付いた PAT の id を返す副問い合わせ（`Column::Id.in_subquery(..)` に渡す）。
+pub fn token_ids_bound_to(tenant_id: Uuid) -> SelectStatement {
+    Query::select()
+        .column(personal_token_tenants::Column::TokenId)
+        .from(personal_token_tenants::Entity)
+        .and_where(personal_token_tenants::Column::TenantId.eq(tenant_id))
+        .to_owned()
+}
+
+/// そのテナントへの束縛をすべての PAT から外し、束縛が 1 つも残らなくなった PAT を取り消す。
+/// ほかのテナントにも結び付いた PAT は生かす。取り消した PAT（取り消し前の行）を返す。
+///
+/// 一括失効とテナントの削除で同じ処理を使う。テナントの削除は束縛を `ON DELETE CASCADE` で
+/// 消すので、行だけ `revoked = false` で残らないよう、テナントを消す前に同じトランザクションで呼ぶ。
+pub async fn unbind_tenant_from_tokens<C: ConnectionTrait>(
+    conn: &C,
+    tenant_id: Uuid,
+) -> Result<Vec<personal_tokens::Model>, DbErr> {
+    let tokens = PersonalTokenEntity::find()
+        .filter(personal_tokens::Column::Id.in_subquery(token_ids_bound_to(tenant_id)))
+        .filter(personal_tokens::Column::Revoked.eq(false))
+        .all(conn)
+        .await?;
+    personal_token_tenants::Entity::delete_many()
+        .filter(personal_token_tenants::Column::TenantId.eq(tenant_id))
+        .exec(conn)
+        .await?;
+    let still_bound: std::collections::HashSet<Uuid> = personal_token_tenants::Entity::find()
+        .filter(personal_token_tenants::Column::TokenId.is_in(tokens.iter().map(|token| token.id)))
+        .all(conn)
+        .await?
+        .into_iter()
+        .map(|binding| binding.token_id)
+        .collect();
+    let orphaned: Vec<personal_tokens::Model> = tokens
+        .into_iter()
+        .filter(|token| !still_bound.contains(&token.id))
+        .collect();
+    PersonalTokenEntity::update_many()
+        .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
+        .filter(personal_tokens::Column::Id.is_in(orphaned.iter().map(|token| token.id)))
+        .exec(conn)
+        .await?;
+    Ok(orphaned)
 }
 
 /// PAT の `last_used_at` を書き直す間隔。CLI や BOT は短い間隔で連続して叩くので、毎回は書かない。

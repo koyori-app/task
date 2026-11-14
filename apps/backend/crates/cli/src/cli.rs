@@ -76,7 +76,7 @@ pub enum Command {
 
 #[derive(Debug, Subcommand)]
 pub enum AuthCommand {
-    /// Show the personal access token in use and its holder (tenant_id is optional)
+    /// Show the personal access token in use and its holder (tenant_ids lists the tenants it can be used in)
     Whoami,
     /// Save personal access token to config
     Token {

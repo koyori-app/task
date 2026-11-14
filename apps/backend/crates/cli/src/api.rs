@@ -50,6 +50,9 @@ impl ApiClient {
 
     /// tenant が明示されていなければ、トークンの束縛先を `/me` から引いて埋める。
     ///
+    /// 束縛が 1 つならそれを使う。複数なら、黙って 1 つを選ぶと別のテナントへ書き込みかねないので、
+    /// 明示を求めて止まる（要求は送らない）。
+    ///
     /// config には書かない。トークンを替えたときに古いテナントが残るため
     pub(crate) async fn resolve_tenant(mut self) -> Result<Self> {
         if self.tenant_source.is_some() {
@@ -57,7 +60,21 @@ impl ApiClient {
         }
         let identity: PersonalTokenIdentityResponse =
             self.get(&["v1", "personal_tokens", "me"], &[]).await?;
-        self.tenant_id = identity.tenant_id.to_string();
+        self.tenant_id = match identity.bound_tenant_ids().as_slice() {
+            [only] => only.to_string(),
+            [] => return Err(CliError::new("The token is not bound to any tenant")),
+            many => {
+                let ids = many
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(CliError::validation(format!(
+                    "This token can be used in {} tenants: {ids}. Choose one with TASK_TENANT=<tenant_id>, or run `task config set tenant_id <tenant_id>` when api_url and token also come from the config.",
+                    many.len()
+                )));
+            }
+        };
         self.token_identity = Some(identity);
         Ok(self)
     }

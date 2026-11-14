@@ -811,6 +811,74 @@ async fn project_file_content_rejects_pat_bound_to_other_tenant() {
     app.cleanup_user(owner.id).await;
 }
 
+/// 複数のテナントに結んだ PAT は、結んだテナントのプロジェクトファイル本体をどれも読め、
+/// 結んでいないテナントのものは読めない（URL にテナントを持たない経路の束縛判定）。
+#[tokio::test]
+#[serial_test::file_serial(drive)]
+async fn project_file_content_follows_every_tenant_a_pat_is_bound_to() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let tenant_a = app.insert_tenant_project(owner.id).await;
+    let tenant_b = app.insert_tenant_project(owner.id).await;
+    let tenant_c = app.insert_tenant_project(owner.id).await;
+    app.reset_session_client();
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    let mut files = Vec::new();
+    for (tp, body) in [
+        (&tenant_a, "tenant a"),
+        (&tenant_b, "tenant b"),
+        (&tenant_c, "tenant c"),
+    ] {
+        let folder = insert_project_folder(&app, tp.tenant_id, tp.project_id, owner.id).await;
+        let file = file_id_of(
+            &upload_file(
+                &app,
+                tp.tenant_id,
+                Some(folder),
+                "f.txt",
+                "text/plain",
+                body.as_bytes(),
+            )
+            .await,
+        );
+        files.push(file);
+    }
+
+    app.reset_session_client();
+    let pat = app
+        .insert_pat_in_tenants(
+            owner.id,
+            &[tenant_a.tenant_id, tenant_b.tenant_id],
+            vec![Scope::ReadDrive],
+            None,
+        )
+        .await;
+
+    for (file, body) in [(files[0], "tenant a"), (files[1], "tenant b")] {
+        let allowed = app
+            .get_with_bearer(&format!("/v1/drive/files/{file}/content"), &pat)
+            .await;
+        assert_eq!(
+            allowed.status(),
+            StatusCode::OK,
+            "結んだテナントのファイル本体は読める"
+        );
+        assert_eq!(allowed.text().await.expect("content body"), body);
+    }
+    let rejected = app
+        .get_with_bearer(&format!("/v1/drive/files/{}/content", files[2]), &pat)
+        .await;
+    assert_eq!(
+        rejected.status(),
+        StatusCode::FORBIDDEN,
+        "結んでいないテナントのファイル本体は読めない"
+    );
+
+    app.cleanup_user(owner.id).await;
+}
+
 /// プロジェクト限定の PAT は、同じテナントでも `allowed_project_ids` 外のプロジェクトの
 /// ファイル本体を読めない。
 #[tokio::test]
