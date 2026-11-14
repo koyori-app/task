@@ -11,13 +11,15 @@
 // - 繰り延べ: deferred で通常タスクが同プロジェクトに起票されリンクされる。deferred → open で自動起票タスクがクローズされる
 // - 繰り延べの重大度制約: High / Medium を deferred にしようとすると拒否され、マージ可否が「可」に変わらない（対照: Low / Nit は成功し、通常タスクが起票される）
 // - 繰り延べの往復: deferred → open → deferred で同じ `deferred_task_id` が再オープンされる。対照: リンク先のタスクを削除してから再繰り延べするとリンクが差し替わり、削除済みタスクが復活しない
+// - 繰り延べ先の担当者ごとの完了: 設定 on で未完了の担当者が残るタスクは、指摘を閉じても完了にならない（対照: 全員完了なら完了する）。完了から開き直すと担当者の完了は全員分消える
 // - 戻り遷移: fixed → open の差し戻しはレビュー側のみ（レビュー側でない利用者は 403、対照: レビュワーは成功）。verified からの遷移はすべて拒否（終端）
 
 use crate::common::TestApp;
 use axum::http::StatusCode;
 use entity::scopes::Scope;
 use entity::{
-    github_integrations, project_statuses, review_findings, reviews, tasks, tenant_members,
+    github_integrations, project_statuses, review_findings, reviews, task_assignees, tasks,
+    tenant_members,
 };
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, prelude::Uuid,
@@ -1275,6 +1277,171 @@ async fn deferring_again_reuses_the_task_unless_it_was_deleted() {
     assert!(
         deleted.deleted_at.is_some(),
         "消したタスクは消えたまま（黙って復活しない）"
+    );
+
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+/// 繰り延べ先タスクを「担当者全員の完了が必要」にして、担当者を入れる。
+/// `completed` の担当者は完了済みで入れる。
+async fn require_all_assignees(fx: &Fixture, task_id: Uuid, assignees: &[(Uuid, bool)]) {
+    let db = &fx.app.state.db;
+    let mut active: tasks::ActiveModel = tasks::Entity::find_by_id(task_id)
+        .one(db)
+        .await
+        .expect("query task")
+        .expect("task row")
+        .into();
+    active.require_all_assignees_done = Set(true);
+    active.update(db).await.expect("set rule");
+    for (user_id, completed) in assignees {
+        task_assignees::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            task_id: Set(task_id),
+            user_id: Set(*user_id),
+            role: Set("assignee".into()),
+            assigned_at: Set(chrono::Utc::now().into()),
+            completed_at: Set(completed.then(|| chrono::Utc::now().into())),
+        }
+        .insert(db)
+        .await
+        .expect("insert assignee");
+    }
+}
+
+async fn task_row(fx: &Fixture, task_id: Uuid) -> tasks::Model {
+    tasks::Entity::find_by_id(task_id)
+        .one(&fx.app.state.db)
+        .await
+        .expect("query task")
+        .expect("task row")
+}
+
+async fn completed_assignees(fx: &Fixture, task_id: Uuid) -> usize {
+    task_assignees::Entity::find()
+        .filter(task_assignees::Column::TaskId.eq(task_id))
+        .filter(task_assignees::Column::CompletedAt.is_not_null())
+        .all(&fx.app.state.db)
+        .await
+        .expect("query assignees")
+        .len()
+}
+
+/// 繰り延べ先タスクが「担当者全員の完了が必要」で未完了の担当者が残るとき、
+/// 指摘を閉じても完了にしない（PR マージの自動完了と同じ扱い）。
+/// 対照: 全員が完了していれば完了する。
+#[tokio::test]
+async fn closing_a_deferred_task_respects_pending_assignees() {
+    let mut fx = setup().await;
+    fx.login(&fx.reviewer.clone()).await;
+    let (reviewer_id, developer_id) = (fx.reviewer.id, fx.developer.id);
+
+    let (_, pending_finding) = submit_round(&fx, 720, "low", "未完了の担当者が残る").await;
+    let pending_task: Uuid =
+        json(transition(&fx, &pending_finding, "deferred").await).await["deferred_task_id"]
+            .as_str()
+            .expect("繰り延べ先タスク")
+            .parse()
+            .expect("uuid");
+    require_all_assignees(
+        &fx,
+        pending_task,
+        &[(reviewer_id, true), (developer_id, false)],
+    )
+    .await;
+    let before = task_row(&fx, pending_task).await;
+
+    let res = transition(&fx, &pending_finding, "open").await;
+    assert_eq!(res.status(), StatusCode::OK, "指摘の遷移そのものは通る");
+    let after = task_row(&fx, pending_task).await;
+    assert_eq!(after.status_id, before.status_id, "完了へ移さない");
+    assert!(after.completed_at.is_none(), "未完了のまま残る");
+    assert_eq!(completed_assignees(&fx, pending_task).await, 1);
+
+    // 対照: 全員完了なら、設定 on でも完了にする
+    let (_, done_finding) = submit_round(&fx, 721, "low", "全員完了").await;
+    let done_task: Uuid =
+        json(transition(&fx, &done_finding, "deferred").await).await["deferred_task_id"]
+            .as_str()
+            .expect("繰り延べ先タスク")
+            .parse()
+            .expect("uuid");
+    require_all_assignees(&fx, done_task, &[(reviewer_id, true), (developer_id, true)]).await;
+    let res = transition(&fx, &done_finding, "open").await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(
+        task_row(&fx, done_task).await.completed_at.is_some(),
+        "全員完了なら完了する"
+    );
+
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+/// 完了済みの繰り延べ先タスクを開き直すと、担当者の完了は全員分消える。
+/// 対照: 未完了のまま開き直すときは、担当者の完了を消さない。
+#[tokio::test]
+async fn reopening_a_deferred_task_clears_assignee_completions() {
+    let mut fx = setup().await;
+    fx.login(&fx.reviewer.clone()).await;
+    let (reviewer_id, developer_id) = (fx.reviewer.id, fx.developer.id);
+
+    let (_, finding_id) = submit_round(&fx, 722, "low", "開き直し").await;
+    let task_id: Uuid =
+        json(transition(&fx, &finding_id, "deferred").await).await["deferred_task_id"]
+            .as_str()
+            .expect("繰り延べ先タスク")
+            .parse()
+            .expect("uuid");
+    require_all_assignees(&fx, task_id, &[(reviewer_id, true), (developer_id, true)]).await;
+
+    // 指摘を閉じて（全員完了なので完了する）、もう一度繰り延べる
+    assert_eq!(
+        transition(&fx, &finding_id, "open").await.status(),
+        StatusCode::OK
+    );
+    assert!(task_row(&fx, task_id).await.completed_at.is_some());
+    assert_eq!(completed_assignees(&fx, task_id).await, 2);
+
+    let again = json(transition(&fx, &finding_id, "deferred").await).await;
+    assert_eq!(again["deferred_task_id"], task_id.to_string());
+    let reopened = task_row(&fx, task_id).await;
+    assert!(reopened.completed_at.is_none(), "未完了に戻る");
+    assert_eq!(
+        completed_assignees(&fx, task_id).await,
+        0,
+        "担当者の完了は全員分消える"
+    );
+
+    // 対照: 完了していないタスクの繰り延べ（open → deferred の往復で畳まれない場合）では消さない。
+    // 担当者が 1 人完了済みのまま、完了前のタスクを開き直す
+    let (_, other) = submit_round(&fx, 723, "low", "未完了で開き直し").await;
+    let other_task: Uuid =
+        json(transition(&fx, &other, "deferred").await).await["deferred_task_id"]
+            .as_str()
+            .expect("繰り延べ先タスク")
+            .parse()
+            .expect("uuid");
+    require_all_assignees(
+        &fx,
+        other_task,
+        &[(reviewer_id, true), (developer_id, false)],
+    )
+    .await;
+    // 閉じても完了しない（未完了の担当者が残る）ので、そのまま開き直す
+    assert_eq!(
+        transition(&fx, &other, "open").await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        transition(&fx, &other, "deferred").await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        completed_assignees(&fx, other_task).await,
+        1,
+        "未完了のタスクを開き直しても、担当者の完了は消さない"
     );
 
     fx.app.cleanup_user(fx.reviewer.id).await;

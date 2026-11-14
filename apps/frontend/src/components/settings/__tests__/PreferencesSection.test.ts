@@ -47,6 +47,16 @@ describe('PreferencesSection（環境設定の画面）', () => {
     expect(toggle.attributes('disabled')).toBeUndefined();
   });
 
+  it('「タスク一覧でサブタスクを最初から展開する」の切り替えが在り、既定は無効', async () => {
+    const { wrapper } = await mountSection();
+
+    const toggle = wrapper.get('[data-setting="expandSubtasksInList"] [role="switch"]');
+    expect(wrapper.get('[data-setting="expandSubtasksInList"]').text()).toContain(
+      'タスク一覧でサブタスクを最初から展開する',
+    );
+    expect(toggle.attributes('aria-checked')).toBe('false');
+  });
+
   it('切り替えると store と localStorage に残る', async () => {
     const { wrapper, pinia } = await mountSection();
 
@@ -213,7 +223,11 @@ describe('PreferencesSection（環境設定の画面）', () => {
     seedSettings({ preferences: { emojiFont: 'fluent', showExperiments: true } });
     const { wrapper, pinia } = await mountSection();
 
-    expect(usePreferencesStore(pinia).values).toEqual({ showExperiments: true, emojiFont: 'os' });
+    expect(usePreferencesStore(pinia).values).toEqual({
+      showExperiments: true,
+      emojiFont: 'os',
+      expandSubtasksInList: false,
+    });
     expect(wrapper.get<HTMLSelectElement>('[data-setting="emojiFont"] select').element.value).toBe(
       'os',
     );

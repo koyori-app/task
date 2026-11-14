@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/vue3-vite';
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test';
 import { provide, ref } from 'vue';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
+import { createPinia, setActivePinia } from 'pinia';
 import TaskDetailPage from '@/pages/@tenant/projects/@projectKey/tasks/@taskId/+Page.vue';
 import { KFM_STORY_INPUTS } from '@/lib/kfm-story-fixtures/inputs';
 import kfmChecklistHtml from '@/lib/kfm-story-fixtures/rendered/gfm-task-list.html?raw';
@@ -125,10 +126,15 @@ const sampleTaskDetail = {
   created_at: '2026-06-01T00:00:00Z',
   updated_at: '2026-06-15T00:00:00Z',
   created_by: mockUsers.alpha,
+  require_all_assignees_done: false as boolean,
   assignees: [
     { role: 'assignee', user: mockUsers.alpha },
     { role: 'assignee', user: mockUsers.beta },
-  ],
+  ] as {
+    role: string;
+    user: (typeof mockUsers)[keyof typeof mockUsers];
+    completed_at?: string | null;
+  }[],
   labels: [
     {
       id: 'label-bug',
@@ -255,6 +261,12 @@ function applyPutBody(
   if (typeof body.progress_pct === 'number') next.progress_pct = body.progress_pct;
   if (typeof body.title === 'string') next.title = body.title;
   if (typeof body.status_id === 'string') next.status_id = body.status_id;
+  if (typeof body.require_all_assignees_done === 'boolean') {
+    next.require_all_assignees_done = body.require_all_assignees_done;
+    if (!body.require_all_assignees_done) {
+      next.assignees = next.assignees.map((a) => ({ ...a, completed_at: null }));
+    }
+  }
 
   if (Array.isArray(body.label_ids)) {
     next.labels = sampleLabels.filter((label) => (body.label_ids as string[]).includes(label.id));
@@ -455,6 +467,25 @@ function createMockFetch(overrides: MockOptions = {}) {
         return jsonResponse({ message: 'not-found' }, 404);
       }
     }
+    // 担当者ごとの完了。全員がそろったら backend と同じく既定の完了ステータスへ移す
+    const assigneeCompletion = new URL(url, 'http://localhost').pathname.match(
+      /\/assignees\/([^/]+)\/(complete|reopen)$/,
+    );
+    if (method === 'POST' && assigneeCompletion) {
+      const [, userId, action] = assigneeCompletion;
+      mutableTaskDetail = {
+        ...mutableTaskDetail,
+        assignees: mutableTaskDetail.assignees.map((a) =>
+          a.user.id === userId
+            ? { ...a, completed_at: action === 'complete' ? '2026-06-16T00:00:00Z' : null }
+            : a,
+        ),
+      };
+      if (action === 'complete' && mutableTaskDetail.assignees.every((a) => a.completed_at)) {
+        mutableTaskDetail = { ...mutableTaskDetail, status_id: 's-done' };
+      }
+      return jsonResponse(mutableTaskDetail);
+    }
     if (method === 'PUT' && url.includes('/tasks/')) {
       if (overrides.rejectPut) {
         return jsonResponse({ message: 'update failed' }, overrides.rejectPut);
@@ -503,6 +534,8 @@ function storyDecorator(
 ) {
   return () => ({
     setup() {
+      // 札のプロフィールのカードが、閲覧者の関わり方をテナントのストア（Pinia）から引く
+      setActivePinia(createPinia());
       const queryClient = new QueryClient({
         defaultOptions: {
           queries: { retry: false, gcTime: 0, staleTime: 0 },
@@ -874,6 +907,82 @@ export const StatusChange: Story = {
     await user.click(trigger);
     await user.click(await screen.findByRole('menuitemradio', { name: /Done/ }));
     await expect(trigger).toHaveTextContent('Done');
+  },
+};
+
+/** 担当者全員の完了が必要なタスクで、beta だけが完了にしている。alpha（ログイン中）が最後の 1 人 */
+const requireAllPendingTask = {
+  ...sampleTaskDetail,
+  require_all_assignees_done: true,
+  assignees: [
+    { role: 'assignee', user: mockUsers.alpha, completed_at: null },
+    { role: 'assignee', user: mockUsers.beta, completed_at: '2026-06-15T00:00:00Z' },
+  ],
+};
+
+/**
+ * 担当者の完了で状態が変わる story 用。`createMockFetch({ task })` の `task` は GET で固定の値を
+ * 返し続けるので、書き換えを GET に反映させるには `mutableTaskDetail` へ据え直す。
+ */
+function withTask(task: typeof sampleTaskDetail) {
+  const restore = createMockFetch();
+  mutableTaskDetail = { ...task };
+  return restore;
+}
+
+export const RequireAllPending: Story = {
+  name: '完了条件（自分が最後の 1 人）',
+  beforeEach: () => withTask(requireAllPendingTask),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await expect(
+      canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
+    ).resolves.toBeInTheDocument();
+
+    await expect(canvas.findByText('1 / 2 人が完了')).resolves.toBeInTheDocument();
+    // 未完了の担当者が残る間は、✓ ボタンも完了への直接移動も使えない
+    await expect(
+      canvas.queryByRole('button', { name: 'Done にする（完了）' }),
+    ).not.toBeInTheDocument();
+
+    await user.click(await canvas.findByRole('button', { name: '自分の分を完了にする' }));
+
+    // 最後の 1 人が完了にすると、タスクが Done へ移る。完了済みの間は取り消しを出さない
+    const trigger = await canvas.findByRole('button', { name: 'ステータス' });
+    await waitFor(() => expect(trigger).toHaveTextContent('Done'));
+    await expect(canvas.findByText('2 / 2 人が完了')).resolves.toBeInTheDocument();
+    await expect(
+      canvas.queryByRole('button', { name: '自分の完了を取り消す' }),
+    ).not.toBeInTheDocument();
+  },
+};
+
+export const RequireAllBlocked: Story = {
+  name: '完了条件（誰も完了にしていない）',
+  beforeEach: () =>
+    withTask({
+      ...requireAllPendingTask,
+      assignees: requireAllPendingTask.assignees.map((a) => ({ ...a, completed_at: null })),
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await expect(
+      canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
+    ).resolves.toBeInTheDocument();
+
+    await expect(canvas.findByText('0 / 2 人が完了')).resolves.toBeInTheDocument();
+    await expect(
+      canvas.queryByRole('button', { name: 'Done にする（完了）' }),
+    ).not.toBeInTheDocument();
+
+    // ステータスのメニューでも Done は選べない
+    await user.click(await canvas.findByRole('button', { name: 'ステータス' }));
+    await expect(await screen.findByRole('menuitemradio', { name: /Done/ })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
   },
 };
 
@@ -1477,6 +1586,29 @@ export const ReactionInDialogIdle: Story = {
 };
 
 /**
+ * Dialog の中では本文とアクティビティの列だけがスクロールし、Dialog 自体はスクロールしない。
+ * CodeMirror がメンション候補の器を Dialog 直下に置くので、器が高さを持つと Dialog が
+ * 2 倍の高さにスクロールして下に空白が出る（TASK-505）。
+ */
+export const DialogScrollsOnlyInsideColumns: Story = {
+  name: 'Dialog 自体はスクロールしない',
+  beforeEach: () => createMockFetch({ comments: sampleComments }),
+  render: reactionDialogRender,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
+    ).resolves.toBeInTheDocument();
+    // コメント欄（CodeMirror）が起動し、候補の器が dialog に載ってから測る
+    await expect(
+      canvas.findByRole('textbox', { name: 'コメントを入力' }),
+    ).resolves.toBeInTheDocument();
+    const dialog = canvasElement.querySelector('dialog')!;
+    await waitFor(() => expect(dialog.scrollHeight).toBe(dialog.clientHeight));
+  },
+};
+
+/**
  * ピッカーと一覧はタスク詳細の Dialog（`<dialog showModal>`）の中でも、自分だけを閉じる。
  * play の keydown は合成イベントで Chromium の cancel を起こさないので、Dialog を止めている
  * 根拠の `defaultPrevented` を確かめ、札の無い場所の Esc が止まらないことを対照に置く。
@@ -1627,18 +1759,20 @@ export const CommentsKfmRendered: Story = {
     );
     // コメントの見出しは説明文（h1 は 2em）より詰める: 14px の器の 1.25em で 20px を超えぬ
     await expect(parseFloat(getComputedStyle(heading).fontSize)).toBeLessThanOrEqual(20);
-    await expect(body.querySelector('.kfm-mention-self')).not.toBeNull();
+    await expect(body.querySelector('.koyori-mention-self')).not.toBeNull();
     // 全画面でも、いま入れる者の札はプロフィールへの link になる（分割ビューと同じ）。
     // 外の者と退会済みの札は link にしない。
-    await expect(body.querySelector('.kfm-mention-self')?.tagName).toBe('A');
-    await expect(body.querySelector('.kfm-mention-self')).toHaveAttribute(
+    await expect(body.querySelector('.koyori-mention-self')?.tagName).toBe('A');
+    await expect(body.querySelector('.koyori-mention-self')).toHaveAttribute(
       'href',
       `/tenant-123/users/${mockUsers.alpha.id}`,
     );
-    await expect(body.querySelector('.kfm-mention-outside')?.tagName).toBe('SPAN');
-    await expect(body.querySelector('.kfm-mention-gone')?.tagName).toBe('SPAN');
-    await expect(body.querySelector('.kfm-mention-outside')?.textContent).toBe('@プロジェクト外');
-    await expect(body.querySelector('.kfm-mention-gone')?.textContent).toBe('@退会済み');
+    await expect(body.querySelector('.koyori-mention-outside')?.tagName).toBe('SPAN');
+    await expect(body.querySelector('.koyori-mention-gone')?.tagName).toBe('SPAN');
+    await expect(body.querySelector('.koyori-mention-outside')?.textContent).toBe(
+      '@プロジェクト外',
+    );
+    await expect(body.querySelector('.koyori-mention-gone')?.textContent).toBe('@退会済み');
     // 生の HTML は要素にならず、字として見える
     await expect(body.querySelector('script')).toBeNull();
     await expect(body.textContent).toContain('<script>alert(1)</script>');

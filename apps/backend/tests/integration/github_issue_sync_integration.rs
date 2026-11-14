@@ -3,7 +3,10 @@ use axum::http::StatusCode;
 use backend::utils::github::sync::{
     apply_issue_event, import_project, mark_pending_push, push_task,
 };
-use entity::{github_integrations, github_issue_links, project_statuses, task_activities, tasks};
+use entity::{
+    github_integrations, github_issue_links, project_statuses, task_activities, task_assignees,
+    tasks,
+};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait,
     QueryFilter, QueryOrder, Statement,
@@ -533,6 +536,174 @@ async fn github_issue_sync_suite() {
         )
         .await;
 
+        app.cleanup_user(owner.id).await;
+    }
+
+    // 4b. 担当者ごとの完了 — Issue の close では担当者の完了を残し、reopen（完了から未完了）で全員分消す
+    {
+        let owner = app.insert_user(false, false).await;
+        let tp = app.insert_tenant_project(owner.id).await;
+        let (_, done_id) = seed_statuses(&app, tp.project_id).await;
+        insert_integration(&app, tp.project_id, owner.id).await;
+        import_project(
+            &app.state.db,
+            &app.state.http_client,
+            &github,
+            tp.project_id,
+        )
+        .await
+        .expect("import");
+        let task = project_tasks(&app, tp.project_id).await.remove(0);
+        let mut active: tasks::ActiveModel = task.clone().into();
+        active.require_all_assignees_done = Set(true);
+        active.update(&app.state.db).await.expect("set rule");
+        let other = app.insert_user(false, false).await;
+        for user_id in [owner.id, other.id] {
+            task_assignees::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                task_id: Set(task.id),
+                user_id: Set(user_id),
+                role: Set("assignee".into()),
+                assigned_at: Set(chrono::Utc::now().into()),
+                completed_at: Set(Some(chrono::Utc::now().into())),
+            }
+            .insert(&app.state.db)
+            .await
+            .expect("insert assignee");
+        }
+        let completed = || async {
+            task_assignees::Entity::find()
+                .filter(task_assignees::Column::TaskId.eq(task.id))
+                .filter(task_assignees::Column::CompletedAt.is_not_null())
+                .all(&app.state.db)
+                .await
+                .expect("query assignees")
+                .len()
+        };
+
+        apply_issue_event(
+            &app.state.db,
+            tp.project_id,
+            &serde_json::json!({
+                "action": "closed",
+                "issue": issue_json(1, "ログインできない", Some("再現手順"), "closed", T_EVENT),
+            }),
+        )
+        .await
+        .expect("apply closed event");
+        assert_eq!(
+            project_tasks(&app, tp.project_id).await[0].status_id,
+            done_id
+        );
+        assert_eq!(completed().await, 2, "close では担当者の完了を消さない");
+
+        apply_issue_event(
+            &app.state.db,
+            tp.project_id,
+            &serde_json::json!({
+                "action": "reopened",
+                "issue": issue_json(1, "ログインできない", Some("再現手順"), "open", T_ECHO),
+            }),
+        )
+        .await
+        .expect("apply reopened event");
+        assert_ne!(
+            project_tasks(&app, tp.project_id).await[0].status_id,
+            done_id
+        );
+        assert_eq!(completed().await, 0, "reopen で担当者の完了を全員分消す");
+
+        app.cleanup_user(other.id).await;
+        app.cleanup_user(owner.id).await;
+    }
+
+    // 4c. Issue の reopen による担当者の完了の巻き戻しは、担当者の削除（タスク行 → 担当者行の順）と
+    // 重なってもデッドロックしない。削除側に見立てたトランザクションでタスク行を握ったまま
+    // reopen を始め、同じトランザクションで担当者行を消す。reopen が先に担当者行を更新する順序だと、
+    // 互いに相手の行を待ってデッドロックになる
+    {
+        use sea_orm::{ConnectionTrait, TransactionTrait};
+        let owner = app.insert_user(false, false).await;
+        let tp = app.insert_tenant_project(owner.id).await;
+        let (_, done_id) = seed_statuses(&app, tp.project_id).await;
+        insert_integration(&app, tp.project_id, owner.id).await;
+        import_project(
+            &app.state.db,
+            &app.state.http_client,
+            &github,
+            tp.project_id,
+        )
+        .await
+        .expect("import");
+        let task = project_tasks(&app, tp.project_id).await.remove(0);
+        let mut active: tasks::ActiveModel = task.clone().into();
+        active.require_all_assignees_done = Set(true);
+        active.update(&app.state.db).await.expect("set rule");
+        let other = app.insert_user(false, false).await;
+        for user_id in [owner.id, other.id] {
+            task_assignees::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                task_id: Set(task.id),
+                user_id: Set(user_id),
+                role: Set("assignee".into()),
+                assigned_at: Set(chrono::Utc::now().into()),
+                completed_at: Set(Some(chrono::Utc::now().into())),
+            }
+            .insert(&app.state.db)
+            .await
+            .expect("insert assignee");
+        }
+        apply_issue_event(
+            &app.state.db,
+            tp.project_id,
+            &serde_json::json!({
+                "action": "closed",
+                "issue": issue_json(1, "ログインできない", Some("再現手順"), "closed", T_EVENT),
+            }),
+        )
+        .await
+        .expect("apply closed event");
+        assert_eq!(
+            project_tasks(&app, tp.project_id).await[0].status_id,
+            done_id
+        );
+
+        let txn = app.state.db.begin().await.expect("begin");
+        txn.execute_unprepared(&format!(
+            "SELECT id FROM tasks WHERE id = '{}' FOR NO KEY UPDATE",
+            task.id
+        ))
+        .await
+        .expect("lock task row");
+        let reopened_event = serde_json::json!({
+            "action": "reopened",
+            "issue": issue_json(1, "ログインできない", Some("再現手順"), "open", T_ECHO),
+        });
+        let reopen = apply_issue_event(&app.state.db, tp.project_id, &reopened_event);
+        tokio::pin!(reopen);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(500), &mut reopen)
+                .await
+                .is_err(),
+            "タスク行のロックが解けるまで reopen は進まない"
+        );
+        txn.execute_unprepared(&format!(
+            "DELETE FROM task_assignees WHERE task_id = '{}' AND user_id = '{}'",
+            task.id, other.id
+        ))
+        .await
+        .expect("担当者の削除がデッドロックで失敗した");
+        txn.commit().await.expect("commit");
+        reopen.await.expect("reopen はデッドロックせず終わる");
+        let rows = task_assignees::Entity::find()
+            .filter(task_assignees::Column::TaskId.eq(task.id))
+            .all(&app.state.db)
+            .await
+            .expect("query assignees");
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].completed_at.is_none(), "reopen で完了を消す");
+
+        app.cleanup_user(other.id).await;
         app.cleanup_user(owner.id).await;
     }
 

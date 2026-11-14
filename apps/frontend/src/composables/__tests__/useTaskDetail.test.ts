@@ -62,7 +62,7 @@ const {
   // PUT を保留して任意のタイミングで完了（成功/失敗）させるための deferred
   const putControl: {
     resolve?: (task: Record<string, unknown>) => void;
-    fail?: (status?: number) => void;
+    fail?: (status?: number, message?: string) => void;
     body?: Promise<unknown>;
   } = {};
 
@@ -98,7 +98,8 @@ const {
       putControl.body = input.clone().json();
       return new Promise<Response>((resolve) => {
         putControl.resolve = (task) => resolve(jsonResponse(task));
-        putControl.fail = (status = 400) => resolve(jsonResponse({ message: 'invalid' }, status));
+        putControl.fail = (status = 400, message = 'invalid') =>
+          resolve(jsonResponse({ message }, status));
       });
     }
     if (method === 'DELETE' && url.endsWith(`/tasks/${TASK_SEQ_KEY}`)) {
@@ -938,6 +939,65 @@ describe('useTaskDetail のキャッシュ同期', () => {
       taskId.value = OTHER_TASK_SEQ_KEY;
       await flushPromises();
       expect(detail.parentError.value).toBeNull();
+    });
+  });
+
+  // 担当者全員の完了が必要なタスクを、未完了の担当者が残るまま完了へ移すと backend が 409 で止める
+  it.each([
+    [409, 'assignees-not-done', '担当者全員が完了にするまで完了へ移せません'],
+    // 409 でも理由が違えば担当者の文言にしない
+    [409, 'other-conflict', 'ステータスの更新に失敗しました'],
+    [500, 'invalid', 'ステータスの更新に失敗しました'],
+  ])(
+    'ステータス変更が %i（%s）で拒まれたら巻き戻し、理由に合う文言を出す',
+    async (status, reason, message) => {
+      mountHost();
+      await flushPromises();
+
+      detail.onStatusChange('status-done');
+      await flushPromises();
+      putControl.fail!(status, reason);
+      await flushPromises();
+
+      expect(detail.statusError.value).toBe(message);
+      expect(detail.selectedStatusId.value).toBe(baseTask.status_id);
+    },
+  );
+
+  // 完了から戻すと backend が担当者ごとの完了を全員分消す。詳細のキャッシュに写さないと
+  // 「全員完了」が残り、完了へ戻す操作が 409 になる
+  it('完了から戻したら、応答の担当者の完了状態をキャッシュへ写す', async () => {
+    const done = (userId: string) => ({
+      user_id: userId,
+      role: 'assignee',
+      completed_at: '2026-07-01T00:00:00Z',
+    });
+    const pending = (userId: string) => ({ user_id: userId, role: 'assignee', completed_at: null });
+    mountHost();
+    await flushPromises();
+    queryClient.setQueryData(taskQueryKey, {
+      ...baseTask,
+      status_id: 'status-done',
+      completed_at: '2026-07-01T00:00:00Z',
+      require_all_assignees_done: true,
+      assignees: [done('user-a'), done('user-b')],
+    });
+
+    detail.onStatusChange('status-1');
+    await flushPromises();
+    putControl.resolve!({
+      ...baseTask,
+      status_id: 'status-1',
+      completed_at: null,
+      require_all_assignees_done: true,
+      assignees: [pending('user-a'), pending('user-b')],
+    });
+    await flushPromises();
+
+    expect(queryClient.getQueryData(taskQueryKey)).toMatchObject({
+      status_id: 'status-1',
+      completed_at: null,
+      assignees: [pending('user-a'), pending('user-b')],
     });
   });
 

@@ -15,7 +15,8 @@ use crate::common::{
 use axum::http::StatusCode;
 use chrono::{DateTime, NaiveDate, Utc};
 use entity::{
-    milestones, project_statuses, scopes::Scope, sprints, task_assignees, tasks, time_logs,
+    milestones, project_statuses, scopes::Scope, sprints, task_assignees, task_relations, tasks,
+    time_logs,
 };
 use sea_orm::{ActiveModelTrait, ActiveValue::Set};
 use serde_json::Value;
@@ -34,10 +35,26 @@ fn at(day: u32) -> DateTime<Utc> {
 fn url(tenant: Uuid, query: &str) -> String {
     format!("/v1/tenants/{tenant}/schedule?{query}")
 }
+
+fn relations_url(tenant: Uuid, query: &str) -> String {
+    format!("/v1/tenants/{tenant}/schedule/relations?{query}")
+}
 async fn get(app: &TestApp, tenant: Uuid, query: &str) -> Value {
     let res = app.get_with_session(&url(tenant, query)).await;
     if res.status() != StatusCode::OK {
         panic!("schedule: {} {}", res.status(), res.text().await.unwrap());
+    }
+    res.json().await.unwrap()
+}
+
+async fn get_relations(app: &TestApp, tenant: Uuid, query: &str) -> Value {
+    let res = app.get_with_session(&relations_url(tenant, query)).await;
+    if res.status() != StatusCode::OK {
+        panic!(
+            "schedule relations: {} {}",
+            res.status(),
+            res.text().await.unwrap()
+        );
     }
     res.json().await.unwrap()
 }
@@ -102,6 +119,7 @@ async fn task(
         soft_deadline: Set(soft.map(Into::into)),
         hard_deadline: Set(hard.map(Into::into)),
         planned_start_on: Set(planned),
+        require_all_assignees_done: Set(false),
         estimated_minutes: Set(None),
         is_archived: Set(false),
         created_by: Set(creator),
@@ -116,6 +134,18 @@ async fn task(
     .unwrap();
     id
 }
+
+async fn relation(app: &TestApp, blocker: Uuid, blocked: Uuid) {
+    task_relations::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        blocker_task_id: Set(blocker),
+        blocked_task_id: Set(blocked),
+        created_at: Set(Utc::now().into()),
+    }
+    .insert(&app.state.db)
+    .await
+    .unwrap();
+}
 async fn assign(app: &TestApp, task: Uuid, user: Uuid, role: &str) {
     task_assignees::ActiveModel {
         id: Set(Uuid::new_v4()),
@@ -123,6 +153,7 @@ async fn assign(app: &TestApp, task: Uuid, user: Uuid, role: &str) {
         user_id: Set(user),
         role: Set(role.into()),
         assigned_at: Set(Utc::now().into()),
+        completed_at: Set(None),
     }
     .insert(&app.state.db)
     .await
@@ -600,6 +631,7 @@ async fn follows_project_visibility_guest_scope_and_tokens() {
         None,
     )
     .await;
+    relation(&app, public_task, restricted_task).await;
     // 期間に重なるスプリント・マイルストーンも同じ可視範囲に従う
     for project in [tp.project_id, restricted] {
         sprints::ActiveModel {
@@ -635,6 +667,8 @@ async fn follows_project_visibility_guest_scope_and_tokens() {
         by_viewer["sprints"][0]["project_id"],
         tp.project_id.to_string()
     );
+    let viewer_relations = get_relations(&app, t, RANGE).await;
+    assert_eq!(viewer_relations["relations"], serde_json::json!([]));
     // 見えないプロジェクトを指名しても返らない
     let named = get(&app, t, &format!("{RANGE}&project_id={restricted}")).await;
     assert!(ids(&named).is_empty());
@@ -785,4 +819,99 @@ async fn cursor_pages_without_gaps_and_repeats_sprints_and_milestones() {
     let exact = get(&app, t, &format!("{RANGE}&limit=3")).await;
     assert_eq!(ids(&exact).len(), 3);
     assert!(exact["next_cursor"].is_null());
+}
+
+#[tokio::test]
+async fn relations_are_canonical_and_only_include_endpoints_in_the_response() {
+    let mut app = TestApp::new().await;
+    let (owner, tp, open, _) = setup(&mut app).await;
+    let other_project = insert_extra_project(&app, tp.tenant_id).await;
+
+    let from = task(
+        &app,
+        tp.project_id,
+        open,
+        owner.id,
+        Some(d(14)),
+        Some(at(15)),
+        None,
+    )
+    .await;
+    let to = task(
+        &app,
+        tp.project_id,
+        open,
+        owner.id,
+        Some(d(16)),
+        Some(at(17)),
+        None,
+    )
+    .await;
+    let range_hidden = task(
+        &app,
+        tp.project_id,
+        open,
+        owner.id,
+        Some(d(1)),
+        Some(at(2)),
+        None,
+    )
+    .await;
+    let filter_hidden = task(
+        &app,
+        other_project,
+        open,
+        owner.id,
+        Some(d(14)),
+        Some(at(15)),
+        None,
+    )
+    .await;
+
+    relation(&app, from, to).await;
+    relation(&app, from, range_hidden).await;
+    relation(&app, from, filter_hidden).await;
+
+    let page1 = get(
+        &app,
+        tp.tenant_id,
+        &format!("{RANGE}&project_id={}&limit=1", tp.project_id),
+    )
+    .await;
+    let cursor = page1["next_cursor"].as_str().expect("next cursor");
+    let page2 = get(
+        &app,
+        tp.tenant_id,
+        &format!(
+            "{RANGE}&project_id={}&limit=1&cursor={cursor}",
+            tp.project_id
+        ),
+    )
+    .await;
+    assert_ne!(ids(&page1), ids(&page2));
+
+    let body = get_relations(
+        &app,
+        tp.tenant_id,
+        &format!("{RANGE}&project_id={}&limit=1", tp.project_id),
+    )
+    .await;
+    assert_eq!(
+        body["relations"],
+        serde_json::json!([{
+            "from_task_id": from,
+            "to_task_id": to,
+            "type": "blocks"
+        }])
+    );
+    assert_eq!(body["truncated"], false);
+
+    let empty = get_relations(
+        &app,
+        tp.tenant_id,
+        &format!("{RANGE}&project_id={other_project}"),
+    )
+    .await;
+    assert_eq!(empty["relations"], serde_json::json!([]));
+    assert_eq!(empty["truncated"], false);
 }

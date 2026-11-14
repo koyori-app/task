@@ -84,6 +84,7 @@ async fn task(
         soft_deadline: Set(soft.map(Into::into)),
         hard_deadline: Set(hard.map(Into::into)),
         planned_start_on: Set(None),
+        require_all_assignees_done: Set(false),
         estimated_minutes: Set(None),
         is_archived: Set(false),
         created_by: Set(fx.owner.id),
@@ -105,6 +106,7 @@ async fn assign(fx: &Fixture, task_id: Uuid, user_id: Uuid) {
         user_id: Set(user_id),
         role: Set("primary".into()),
         assigned_at: Set(Utc::now().into()),
+        completed_at: Set(None),
     }
     .insert(&fx.app.state.db)
     .await

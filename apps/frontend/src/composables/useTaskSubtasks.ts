@@ -30,6 +30,16 @@ export type UseTaskSubtasksParams = {
   enabled?: MaybeRefOrGetter<boolean>;
   /** 一覧の展開では親行と同じ条件を使う。詳細画面では未指定。 */
   filters?: MaybeRefOrGetter<TaskSubtaskFilters>;
+  /**
+   * 取得の再実行条件。省略すると TanStack の既定（staleTime 0、フォーカス復帰で再取得）に従う。
+   * 親行ごとに枝が並ぶ一覧では、フォーカスのたびに全行が取り直されるのを抑えるために使う。
+   */
+  queryOptions?: MaybeRefOrGetter<TaskSubtaskQueryOptions | undefined>;
+};
+
+export type TaskSubtaskQueryOptions = {
+  staleTime?: number;
+  refetchOnWindowFocus?: boolean;
 };
 
 /**
@@ -66,24 +76,39 @@ export function useTaskSubtasks(params: UseTaskSubtasksParams) {
       ] as const,
   );
 
-  const relationsQuery = useQuery({
-    queryKey,
-    queryFn: async ({ signal }) => {
-      const { data, error } = await fetchClient.GET(TASK_RELATIONS_PATH, {
-        params: { path: queryKey.value[2].params.path },
-        signal,
-      });
-      if (error) throw error;
-      return data;
-    },
-    enabled: computed(() => canFetch.value && !filters.value),
+  // 指定のある項目だけ渡す（undefined で上書きすると既定値が消える）
+  const extraOptions = computed(() => {
+    const options = toValue(params.queryOptions);
+    return {
+      ...(options?.staleTime !== undefined && { staleTime: options.staleTime }),
+      ...(options?.refetchOnWindowFocus !== undefined && {
+        refetchOnWindowFocus: options.refetchOnWindowFocus,
+      }),
+    };
   });
+
+  const relationsQuery = useQuery(
+    computed(() => ({
+      ...extraOptions.value,
+      queryKey: queryKey.value,
+      queryFn: async ({ signal }: { signal: AbortSignal }) => {
+        const { data, error } = await fetchClient.GET(TASK_RELATIONS_PATH, {
+          params: { path: queryKey.value[2].params.path },
+          signal,
+        });
+        if (error) throw error;
+        return data;
+      },
+      enabled: canFetch.value && !filters.value,
+    })),
+  );
 
   const filteredQuery = useQuery(
     computed(() => {
       const path = { tenant_id: tenantId.value, project_id: projectId.value };
       const query = { ...filters.value, parent_task_id: taskUuid.value, limit: 200 };
       return {
+        ...extraOptions.value,
         queryKey: ['get', LIST_TASKS_PATH, { params: { path, query } }, 'subtasks'],
         enabled: canFetch.value && !!filters.value,
         queryFn: async ({ signal }: { signal: AbortSignal }) => {
@@ -163,6 +188,8 @@ export function useTaskSubtasks(params: UseTaskSubtasksParams) {
     ),
     parentTask: computed(() => relationsQuery.data.value?.parent ?? null),
     loading: computed(() => activeQuery.value.isLoading.value),
+    /** 取得結果がまだ無い（未開始・取得中・失敗）。0 件の成功とは区別する */
+    pending: computed(() => activeQuery.value.isPending.value),
     error: computed(() => activeQuery.value.isError.value),
     refetch: () => void activeQuery.value.refetch(),
     createPending,
