@@ -1,7 +1,7 @@
 ---
 title: テナントとプロジェクトの認可
 description: 誰がどのテナント・プロジェクトに入れるかの判定と、継承・明示 ACE・招待の規則
-updated: 2026-11-04
+updated: 2026-11-14
 sidebar:
   order: 1
 ---
@@ -14,7 +14,7 @@ sidebar:
 
 判定は「テナントに入れるか（継承）」、「プロジェクトに入れるか」の順に進む。明示 ACE を見るのは、継承で入れない場合に限る。
 
-PAT のテナントバインドは「どのテナントを触れるか」の制限であって所属の証明ではない。セッションと PAT はどちらも同じ所属判定を通る。
+PAT に結び付けたテナント（複数あり得る）は「どのテナントを触れるか」の制限であって所属の証明ではない。セッションと PAT はどちらも同じ所属判定を通る。
 
 関連するコードは `crates/service/src/access.rs`、`crates/handler/src/extractors.rs`、`crates/handler/src/auth_helpers.rs`、`crates/handler/src/handlers/tenant_members.rs`、`crates/handler/src/handlers/projects.rs`、`crates/handler/src/handlers/project_members.rs`、`crates/entity/src/tenant_members.rs` である。
 
@@ -209,7 +209,7 @@ Drive にはファイル ID だけで引ける経路がある（`GET /v1/drive/f
 
 | 操作 | 許可 |
 |---|---|
-| テナント一覧（`GET /v1/tenants`） | 所属しているテナント＋ゲストとして関わるテナントを `membership` を付けて返す。PAT もバインド先に同じ判定を適用する |
+| テナント一覧（`GET /v1/tenants`） | 所属しているテナント＋ゲストとして関わるテナントを `membership` を付けて返す。PAT は、バインド先のテナントのうち同じ判定を通るものだけを返す |
 | テナントの取得（`GET /v1/tenants/{id}`） | テナントに入れる人全員（ゲストは含まない） |
 | プロジェクト一覧（`GET /v1/tenants/{id}/projects`） | owner は全件。member は公開規則どおり。ゲストは明示 member の分だけ |
 | My Tasks（`GET /v1/tenants/{id}/users/me/tasks`） | 所属者には全体を返す。ゲストには自分の project の分に絞る |

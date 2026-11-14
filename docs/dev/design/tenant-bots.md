@@ -1,7 +1,7 @@
 ---
 title: テナント BOT の認証と管理
 description: BOT の認証の拒否、メールの停止、管理 API、役割の上限について、判断の理由を残すページ
-updated: 2026-11-05
+updated: 2026-11-14
 sidebar:
   order: 8
 ---
@@ -63,7 +63,7 @@ BOT のメールは UUID から作る `@bots.task.invalid` のアドレスとす
 | `tenant_invitations::accept_invitation` | `POST /invitations/accept` | 人のセッションを必須にする |
 | `auth::{me,update_me}`、管理用の extractor | `GET/PATCH /auth/me` ほか | 保存済みセッションから利用者を読むたびに BOT を拒否 |
 
-PAT の照合では `is_suspended` と所有テナントを確認する。
+PAT の照合では `is_suspended` と、束縛が BOT の所属テナント 1 件だけであることを確認する。
 BOT に対する Device Token とブラウザーのセッションは、保存済みの値が残っていても利用者の取得時に拒否する。
 
 ## テナントの 2FA 強制
