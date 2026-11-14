@@ -151,6 +151,9 @@ pub enum TasksCommand {
         /// Filter by assignee username (or UUID)
         #[arg(long)]
         assignee: Option<String>,
+        /// Only tasks nobody is assigned to
+        #[arg(long, conflicts_with = "assignee")]
+        unassigned: bool,
         /// Filter by milestone name (or UUID)
         #[arg(long)]
         milestone: Option<String>,
@@ -711,6 +714,16 @@ mod tests {
             Cli::try_parse_from(["task", "tasks", "update", "APP-1", "--assignee", "alice"])
                 .is_ok()
         );
+    }
+
+    /// `--unassigned` は `--assignee` と同時に指定できない。
+    #[test]
+    fn rejects_unassigned_with_an_assignee_filter() {
+        let base = ["task", "tasks", "list", "--project", "APP"];
+        let with = |extra: &[&str]| Cli::try_parse_from(base.iter().chain(extra.iter()).copied());
+        assert!(with(&["--assignee", "alice", "--unassigned"]).is_err());
+        assert!(with(&["--unassigned"]).is_ok());
+        assert!(with(&["--assignee", "alice"]).is_ok());
     }
 
     /// 開始予定日は日付だけを受け、解除と同時には指定できない。

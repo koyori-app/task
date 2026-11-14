@@ -17254,6 +17254,15 @@
             }
           },
           {
+            "name": "unassigned",
+            "in": "query",
+            "description": "`true` で担当者が 1 人もいないタスクだけを返す。役割は問わない。\n\n`assignee_id` と同時には指定できない（400）",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "created_by",
             "in": "query",
             "description": "作成者のユーザー ID。指定するとその人が作ったタスクだけを返す",
