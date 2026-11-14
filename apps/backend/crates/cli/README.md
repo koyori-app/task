@@ -215,7 +215,7 @@ task tasks pr unlink TASK-181 87
 ```bash
 task config set api_url https://task.example.com
 task auth token < token.txt        # 引数を省くと標準入力から読む
-task auth whoami                   # 使用中の鍵と持ち主・scope・有効期限が出る
+task auth whoami                   # 使用中の鍵と持ち主・scope・有効期限・使えるテナント（tenant_ids）が出る
 ```
 
 ### 設定の優先順位
@@ -246,8 +246,10 @@ task config set api_url https://task.example.com
 task auth token < token.txt
 ```
 
-`tenant_id` は任意。未設定ならトークンの属するテナントを `GET /v1/personal_tokens/me` から引く
-（config には書かない）。設定していればそちらを使うので、別テナントのトークンに替えたら
+`tenant_id` は、トークンが使えるテナントが 1 つなら任意。未設定ならそのテナントを
+`GET /v1/personal_tokens/me` から引く（config には書かない）。複数のテナントで使えるトークンは
+自動では選ばず、`TASK_TENANT` か `tenant_id` の指定を求めて終了コード 2 で止まる。
+設定していればそちらを使うので、使えないテナントのトークンに替えたら
 `task config unset tenant_id`（環境変数なら `TASK_TENANT` の解除）で外す。外さないと 403 になる。
 
 トークンは Web のアカウント設定（アクセストークン）で発行する。CLI のすべての操作を使うなら

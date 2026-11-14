@@ -7,12 +7,17 @@ use validator::Validate;
 use crate::or_unknown::OrUnknown;
 use entity::{personal_tokens, scopes::Scope, scopes::ScopeList};
 
+/// 1 本の PAT を結び付けられるテナント数の上限。作成時にテナントごとの権限判定が走る。
+pub const MAX_TOKEN_TENANTS: usize = 20;
+
 #[derive(Validate, Debug, Deserialize, ToSchema)]
 pub struct CreatePersonalTokenRequest {
     #[validate(length(min = 1, max = 100))]
     pub name: String,
-    #[schema(value_type = String, format = "uuid")]
-    pub tenant_id: Uuid,
+    /// トークンを使えるテナント。選んだすべてで、所属・2FA・Admin を確かめる
+    #[validate(length(min = 1, max = 20))]
+    #[schema(value_type = Vec<String>, format = "uuid", min_items = 1, max_items = 20)]
+    pub tenant_ids: Vec<Uuid>,
     #[schema(value_type = Vec<String>, format = "uuid", nullable)]
     pub project_ids: Option<Vec<Uuid>>,
     #[validate(length(min = 1))]
@@ -35,8 +40,9 @@ pub struct PersonalTokenResponse {
     pub id: Uuid,
     pub name: String,
     pub token_last_four: String,
-    #[schema(value_type = String, format = "uuid")]
-    pub tenant_id: Uuid,
+    /// トークンが結び付けられたテナント（昇順）
+    #[schema(value_type = Vec<String>, format = "uuid")]
+    pub tenant_ids: Vec<Uuid>,
     #[schema(value_type = Vec<String>, format = "uuid", nullable)]
     pub project_ids: Option<Vec<Uuid>>,
     pub scopes: ScopeList,
@@ -61,10 +67,17 @@ pub struct PersonalTokenIdentityResponse {
     #[serde(default = "crate::users::default_account_kind")]
     #[schema(required = false)]
     pub account_kind: String,
-    /// この PAT がバインドされたテナント。鍵だけ渡された自動化クライアントが
-    /// 行き先（/v1/tenants/{id}/... の {id}）を自力で知るための欄
-    #[schema(value_type = String, format = "uuid")]
-    pub tenant_id: Uuid,
+    /// この PAT が結び付けられたテナント（昇順）。鍵だけ渡された自動化クライアントが
+    /// 行き先（/v1/tenants/{id}/... の {id}）を自力で知るための欄。旧サーバーの応答には
+    /// 無いので、読む側は `bound_tenant_ids()` を使う
+    #[serde(default)]
+    #[schema(value_type = Vec<String>, format = "uuid", required = false)]
+    pub tenant_ids: Vec<Uuid>,
+    /// 束縛がちょうど 1 件のときだけ入る、旧 CLI 向けの欄。複数のときに入れると、旧 CLI が
+    /// その 1 つへ黙って書き込む。入れなければ旧 CLI は応答を読めず「CLI を更新する」案内で止まる
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = String, format = "uuid", required = false)]
+    pub tenant_id: Option<Uuid>,
     #[schema(inline)]
     pub scopes: Vec<OrUnknown<Scope>>,
     #[schema(value_type = Vec<String>, format = "uuid", nullable)]
@@ -73,10 +86,23 @@ pub struct PersonalTokenIdentityResponse {
     pub expires_at: Option<DateTime<Utc>>,
 }
 
-impl TryFrom<personal_tokens::Model> for PersonalTokenResponse {
-    type Error = serde_json::Error;
+impl PersonalTokenIdentityResponse {
+    /// 結び付けられたテナント。旧サーバーの応答（`tenant_id` だけ）も 1 件として読む。
+    pub fn bound_tenant_ids(&self) -> Vec<Uuid> {
+        if self.tenant_ids.is_empty() {
+            self.tenant_id.into_iter().collect()
+        } else {
+            self.tenant_ids.clone()
+        }
+    }
+}
 
-    fn try_from(model: personal_tokens::Model) -> Result<Self, Self::Error> {
+impl PersonalTokenResponse {
+    /// `tenant_ids` は `personal_token_tenants` から引いた束縛（昇順）。
+    pub fn from_parts(
+        model: personal_tokens::Model,
+        tenant_ids: Vec<Uuid>,
+    ) -> Result<Self, serde_json::Error> {
         let project_ids = match model.allowed_project_ids.as_ref() {
             None => None,
             Some(v) => personal_tokens::parse_allowed_project_ids(v)?,
@@ -86,7 +112,7 @@ impl TryFrom<personal_tokens::Model> for PersonalTokenResponse {
             id: model.id,
             name: model.name,
             token_last_four: model.token_last_four,
-            tenant_id: model.tenant_id,
+            tenant_ids,
             project_ids,
             expires_at: model.expires_at.map(|dt| dt.with_timezone(&Utc)),
             last_used_at: model.last_used_at.map(|dt| dt.with_timezone(&Utc)),
@@ -105,8 +131,9 @@ pub struct CreatePersonalTokenResponse {
     pub id: Uuid,
     pub name: String,
     pub token_last_four: String,
-    #[schema(value_type = String, format = "uuid")]
-    pub tenant_id: Uuid,
+    /// トークンが結び付けられたテナント（昇順）
+    #[schema(value_type = Vec<String>, format = "uuid")]
+    pub tenant_ids: Vec<Uuid>,
     #[schema(value_type = Vec<String>, format = "uuid", nullable)]
     pub project_ids: Option<Vec<Uuid>>,
     pub scopes: ScopeList,
@@ -120,14 +147,18 @@ pub struct CreatePersonalTokenResponse {
 }
 
 impl CreatePersonalTokenResponse {
-    pub fn new(token: String, model: personal_tokens::Model) -> Result<Self, serde_json::Error> {
-        let metadata = PersonalTokenResponse::try_from(model)?;
+    pub fn new(
+        token: String,
+        model: personal_tokens::Model,
+        tenant_ids: Vec<Uuid>,
+    ) -> Result<Self, serde_json::Error> {
+        let metadata = PersonalTokenResponse::from_parts(model, tenant_ids)?;
         Ok(Self {
             token,
             id: metadata.id,
             name: metadata.name,
             token_last_four: metadata.token_last_four,
-            tenant_id: metadata.tenant_id,
+            tenant_ids: metadata.tenant_ids,
             project_ids: metadata.project_ids,
             expires_at: metadata.expires_at,
             last_used_at: metadata.last_used_at,
@@ -148,5 +179,29 @@ mod legacy_identity_tests {
             "allowed_project_ids": null, "expires_at": null
         })).expect("legacy PAT identity");
         assert_eq!(identity.account_kind, "human");
+        // 旧サーバーは tenant_id だけを返す。1 件として読める
+        assert_eq!(
+            identity.bound_tenant_ids(),
+            vec![identity.tenant_id.expect("legacy tenant_id")]
+        );
+    }
+
+    #[test]
+    fn identity_prefers_tenant_ids_and_omits_tenant_id_for_several() {
+        let (a, b) = (
+            sea_orm::prelude::Uuid::new_v4(),
+            sea_orm::prelude::Uuid::new_v4(),
+        );
+        let identity: super::PersonalTokenIdentityResponse = serde_json::from_value(serde_json::json!({
+            "id": sea_orm::prelude::Uuid::new_v4(), "name": "n", "user_id": sea_orm::prelude::Uuid::new_v4(),
+            "username": "u", "tenant_ids": [a, b], "scopes": ["read:task"],
+            "allowed_project_ids": null, "expires_at": null
+        })).expect("multi-tenant PAT identity");
+        assert_eq!(identity.bound_tenant_ids(), vec![a, b]);
+        let json = serde_json::to_value(&identity).expect("serialize");
+        assert!(
+            json.get("tenant_id").is_none(),
+            "tenant_id must be absent for several tenants"
+        );
     }
 }

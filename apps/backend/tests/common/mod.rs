@@ -355,7 +355,8 @@ DROP INDEX IF EXISTS "idx-projects-projects_key_tenant_unique";
                  ALTER TABLE users ADD COLUMN IF NOT EXISTS is_suspended BOOLEAN NOT NULL DEFAULT false;
                  ALTER TABLE users ADD COLUMN IF NOT EXISTS sessions_revoked_at TIMESTAMPTZ;
                  ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
-                 ALTER TABLE personal_tokens DROP COLUMN IF EXISTS token;",
+                 ALTER TABLE personal_tokens DROP COLUMN IF EXISTS token;
+                 ALTER TABLE personal_tokens DROP COLUMN IF EXISTS tenant_id;",
             )
             .await
             .expect("prepare user columns for integration tests");
@@ -944,10 +945,22 @@ impl TestApp {
         scopes: Vec<Scope>,
         allowed_project_ids: Option<Vec<Uuid>>,
     ) -> String {
+        self.insert_pat_in_tenants(user_id, &[tenant_id], scopes, allowed_project_ids)
+            .await
+    }
+
+    /// 複数のテナントに結び付いた PAT を DB へ直に挿し、平文トークンを返す。
+    pub async fn insert_pat_in_tenants(
+        &self,
+        user_id: Uuid,
+        tenant_ids: &[Uuid],
+        scopes: Vec<Scope>,
+        allowed_project_ids: Option<Vec<Uuid>>,
+    ) -> String {
         insert_personal_token_for_test(
             &self.state.db,
             user_id,
-            tenant_id,
+            tenant_ids,
             &self.state.settings.personal_token_secret,
             scopes,
             allowed_project_ids,
@@ -1409,16 +1422,17 @@ pub fn current_totp_code(secret: &str, issuer: &str, email: &str) -> String {
 pub async fn insert_personal_token_for_test(
     db: &DatabaseConnection,
     user_id: Uuid,
-    tenant_id: Uuid,
+    tenant_ids: &[Uuid],
     secret: &str,
     scopes: Vec<Scope>,
     allowed_project_ids: Option<Vec<Uuid>>,
 ) -> String {
-    use backend::utils::auth::generate_personal_token;
+    use backend::utils::auth::{bind_personal_token_tenants, generate_personal_token};
 
     let (token, token_hash) = generate_personal_token(secret).expect("generate pat");
+    let token_id = Uuid::new_v4();
     personal_tokens::ActiveModel {
-        id: Set(Uuid::new_v4()),
+        id: Set(token_id),
         name: Set("integration-test".into()),
         token_hash: Set(token_hash),
         token_last_four: Set(token[token.len().saturating_sub(4)..].to_string()),
@@ -1426,13 +1440,15 @@ pub async fn insert_personal_token_for_test(
         last_used_at: Set(None),
         revoked: Set(false),
         user_id: Set(user_id),
-        tenant_id: Set(tenant_id),
         scopes: Set(ScopeList(scopes)),
         allowed_project_ids: Set(allowed_project_ids.map(|ids| serde_json::json!(ids))),
     }
     .insert(db)
     .await
     .expect("insert pat");
+    bind_personal_token_tenants(db, token_id, tenant_ids)
+        .await
+        .expect("bind pat tenants");
     token
 }
 

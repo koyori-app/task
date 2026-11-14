@@ -19,6 +19,7 @@ pub mod notification_settings;
 pub mod notifications;
 pub mod oauth_connections;
 pub mod passkeys;
+pub mod personal_token_tenants;
 pub mod personal_tokens;
 pub mod project_custom_fields;
 pub mod project_members;

@@ -1,8 +1,11 @@
 //! テナント BOT の所属と鍵の管理。
+use crate::auth::{bind_personal_token_tenants, token_ids_bound_to};
 use chrono::{DateTime, Duration, Utc};
 use common::error::AppError;
 use entity::scopes::ScopeList;
-use entity::{audit_logs, personal_tokens, projects, tenant_members, tenants, users};
+use entity::{
+    audit_logs, personal_token_tenants, personal_tokens, projects, tenant_members, tenants, users,
+};
 use payload::{
     bots::*,
     personal_tokens::{CreatePersonalTokenResponse, PersonalTokenResponse},
@@ -236,7 +239,7 @@ pub async fn list_bot_tokens(
     bot(&txn, tenant_id, bot_id).await?;
     let tokens = personal_tokens::Entity::find()
         .filter(personal_tokens::Column::UserId.eq(bot_id))
-        .filter(personal_tokens::Column::TenantId.eq(tenant_id))
+        .filter(personal_tokens::Column::Id.in_subquery(token_ids_bound_to(tenant_id)))
         .filter(personal_tokens::Column::Revoked.eq(false))
         .order_by_asc(personal_tokens::Column::Name)
         .order_by_asc(personal_tokens::Column::Id)
@@ -244,7 +247,7 @@ pub async fn list_bot_tokens(
         .await?;
     let result = tokens
         .into_iter()
-        .map(PersonalTokenResponse::try_from)
+        .map(|token| PersonalTokenResponse::from_parts(token, vec![tenant_id]))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| AppError::Internal(e.into()))?;
     txn.commit().await?;
@@ -288,7 +291,6 @@ pub async fn create_bot_token(
     let token = personal_tokens::ActiveModel {
         id: Set(token_id),
         user_id: Set(bot_id),
-        tenant_id: Set(tenant_id),
         name: Set(payload.name),
         token_last_four: Set(secret[secret.len() - 4..].into()),
         token_hash: Set(hash),
@@ -300,6 +302,7 @@ pub async fn create_bot_token(
     }
     .insert(&txn)
     .await?;
+    bind_personal_token_tenants(&txn, token_id, &[tenant_id]).await?;
     audit(
         &txn,
         actor_id,
@@ -310,7 +313,8 @@ pub async fn create_bot_token(
     )
     .await?;
     txn.commit().await?;
-    CreatePersonalTokenResponse::new(secret, token).map_err(|e| AppError::Internal(e.into()))
+    CreatePersonalTokenResponse::new(secret, token, vec![tenant_id])
+        .map_err(|e| AppError::Internal(e.into()))
 }
 
 pub async fn revoke_bot_token(
@@ -325,7 +329,7 @@ pub async fn revoke_bot_token(
     bot(&txn, tenant_id, bot_id).await?;
     let token = personal_tokens::Entity::find_by_id(token_id)
         .filter(personal_tokens::Column::UserId.eq(bot_id))
-        .filter(personal_tokens::Column::TenantId.eq(tenant_id))
+        .filter(personal_tokens::Column::Id.in_subquery(token_ids_bound_to(tenant_id)))
         .one(&txn)
         .await?
         .ok_or(AppError::NotFound)?;
@@ -368,18 +372,34 @@ pub async fn revoke_all_tenant_tokens(
         .all(&txn)
         .await?;
     let bot_ids: std::collections::HashSet<Uuid> = bots.into_iter().map(|user| user.id).collect();
+    // このテナントの束縛を外す。オーナーの権限は自分のテナントまでなので、ほかのテナントにも
+    // 結び付いたトークンは残し、束縛が 1 つも無くなったトークンだけを取り消す。
     let tokens = personal_tokens::Entity::find()
-        .filter(personal_tokens::Column::TenantId.eq(tenant_id))
+        .filter(personal_tokens::Column::Id.in_subquery(token_ids_bound_to(tenant_id)))
         .filter(personal_tokens::Column::Revoked.eq(false))
         .all(&txn)
         .await?;
-    personal_tokens::Entity::update_many()
-        .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
-        .filter(personal_tokens::Column::TenantId.eq(tenant_id))
-        .filter(personal_tokens::Column::Revoked.eq(false))
+    personal_token_tenants::Entity::delete_many()
+        .filter(personal_token_tenants::Column::TenantId.eq(tenant_id))
         .exec(&txn)
         .await?;
-    for token in tokens {
+    let still_bound: std::collections::HashSet<Uuid> = personal_token_tenants::Entity::find()
+        .filter(personal_token_tenants::Column::TokenId.is_in(tokens.iter().map(|token| token.id)))
+        .all(&txn)
+        .await?
+        .into_iter()
+        .map(|binding| binding.token_id)
+        .collect();
+    let orphaned: Vec<personal_tokens::Model> = tokens
+        .into_iter()
+        .filter(|token| !still_bound.contains(&token.id))
+        .collect();
+    personal_tokens::Entity::update_many()
+        .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
+        .filter(personal_tokens::Column::Id.is_in(orphaned.iter().map(|token| token.id)))
+        .exec(&txn)
+        .await?;
+    for token in orphaned {
         if bot_ids.contains(&token.user_id) {
             audit(
                 &txn,

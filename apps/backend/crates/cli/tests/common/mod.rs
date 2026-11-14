@@ -98,6 +98,7 @@ impl Harness {
 }
 
 /// `GET /v1/personal_tokens/me` の応答。tenant を自動で引くときの元になる。
+/// 束縛が 1 件のトークンの形（新しいサーバーは `tenant_id` と `tenant_ids` の両方を返す）。
 pub fn token_identity_json() -> serde_json::Value {
     serde_json::json!({
         "id": "77777777-7777-4777-8777-777777777777",
@@ -105,6 +106,7 @@ pub fn token_identity_json() -> serde_json::Value {
         "user_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         "username": "yupix",
         "tenant_id": TENANT,
+        "tenant_ids": [TENANT],
         "scopes": ["read:task"],
         "allowed_project_ids": null,
         "expires_at": null,

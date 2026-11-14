@@ -32,8 +32,6 @@ pub struct Model {
     #[sea_orm(has_many)]
     pub drive_folders: HasMany<super::drive_folders::Entity>,
     #[sea_orm(has_many)]
-    pub personal_tokens: HasMany<super::personal_tokens::Entity>,
-    #[sea_orm(has_many)]
     pub projects: HasMany<super::projects::Entity>,
     #[sea_orm(
         belongs_to,
@@ -43,6 +41,8 @@ pub struct Model {
         on_delete = "NoAction"
     )]
     pub users: HasOne<super::users::Entity>,
+    #[sea_orm(has_many, via = "personal_token_tenants")]
+    pub personal_tokens: HasMany<super::personal_tokens::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
