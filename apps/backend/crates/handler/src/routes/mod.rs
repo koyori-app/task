@@ -38,6 +38,10 @@ pub fn create_routes() -> OpenApiRouter<AppState> {
                 .nest(
                     "/avatars",
                     OpenApiRouter::new().routes(routes!(crate::handlers::avatars::get_avatar)),
+                )
+                .nest(
+                    "/favicons",
+                    OpenApiRouter::new().routes(routes!(crate::handlers::favicons::get_favicon)),
                 ),
         )
         // レイヤーは登録済みのルートにのみ適用されるため、nest の後に付ける。

@@ -31,6 +31,8 @@
  *   `@/lib/rehype-kfm-code/style.css` を starry-night の style.css と同じ場所で
  *   明示 import する (二枚組)。コピーボタンは client 専用 entry の custom element 登録
  *   (_client-registry) が担う。
+ * - 外部リンクの favicon の見た目も同方式: 消費側で `@/lib/rehype-kfm-link-favicon/style.css`
+ *   を明示 import する (画像は backend の `/api/v1/favicons/{host}` が配信する)。
  *
  * renderDescription はモジュールトップレベル singleton = プロセス全体 (SSR では全
  * リクエスト・全 tenant) で共有される。L1 キャッシュが full-text キーであることが
@@ -42,6 +44,7 @@
 import remarkBreaks from 'remark-breaks';
 
 import { rehypeKfmCode } from '@/lib/rehype-kfm-code';
+import { rehypeKfmLinkFavicon } from '@/lib/rehype-kfm-link-favicon';
 import { remarkGfm } from '@/lib/remark-gfm';
 import { remarkKfmMermaid } from '@/lib/remark-kfm-mermaid';
 import { remarkKfmRawHtml } from '@/lib/remark-kfm-raw-html';
@@ -119,7 +122,8 @@ export const renderDescription = createRenderer({
       // GitHub 同様のコードブロック着色。rehype 層 (remark-rehype の後段) に挿す。
       // rehypeKfmCode は着色済みの子を行分割して <kfm-code> で包むため、必ず
       // starry-night の後ろ (行分割は着色より後でしか成立しない)。
-      rehypePlugins: [rehypeStarryNight, rehypeKfmCode],
+      // rehypeKfmLinkFavicon は `a` しか触らず他と干渉しない。最終 HTML に近い rehype 層の最後に置く。
+      rehypePlugins: [rehypeStarryNight, rehypeKfmCode, rehypeKfmLinkFavicon],
     },
     // comment profile = github ＋ remarkBreaks。GitHub の comment 欄の流儀
     // (空行を挟まぬ単一改行を <br> として出す)。レビュー指摘の本文の消費側が使う。
@@ -134,7 +138,7 @@ export const renderDescription = createRenderer({
         remarkKfmMention,
         remarkBreaks,
       ],
-      rehypePlugins: [rehypeStarryNight, rehypeKfmCode],
+      rehypePlugins: [rehypeStarryNight, rehypeKfmCode, rehypeKfmLinkFavicon],
     },
     // Phase 2 seam: kfm profile はここへ remark / rehype 層を足す (コアは不変)。
   },
