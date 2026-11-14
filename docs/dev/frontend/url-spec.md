@@ -46,7 +46,7 @@ sidebar:
 | URL | 説明 |
 |-----|------|
 | `/settings/profile` | プロフィール編集（[アカウント設定](/dev/features/account-settings)） |
-| `/settings/security` | 認証方法と Koyori Desktop の端末（[アカウント設定](/dev/features/account-settings)） |
+| `/settings/security` | 認証方法、2 段階認証、Koyori Desktop の端末（[アカウント設定](/dev/features/account-settings)） |
 | `/settings/tokens` | パーソナルアクセストークンの発行と取り消し（[アカウント設定](/dev/features/account-settings)） |
 | `/settings/preferences` | 環境設定 |
 | `/settings/experiments` | 実験的機能の設定 |

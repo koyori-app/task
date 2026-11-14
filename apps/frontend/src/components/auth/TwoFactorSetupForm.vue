@@ -9,6 +9,8 @@ const props = defineProps<{
   pending: boolean;
   error: string | null;
   locked: boolean;
+  /** 設定画面に埋め込むとき true。見出しと説明を出さない */
+  embedded?: boolean;
 }>();
 const emit = defineEmits<{ submit: [code: string] }>();
 
@@ -32,7 +34,7 @@ function onSubmit() {
 <template>
   <HydrationSafeForm v-slot="{ isHydrated }" @submit="onSubmit">
     <div class="flex flex-col gap-6">
-      <div class="flex flex-col items-center gap-2 text-center">
+      <div v-if="!embedded" class="flex flex-col items-center gap-2 text-center">
         <h1 class="text-2xl font-bold">2 段階認証の設定</h1>
         <p class="text-muted-foreground text-sm text-balance">
           このアカウントでは 2 段階認証が必須です。認証アプリで QR コードを読み取り、表示された 6
