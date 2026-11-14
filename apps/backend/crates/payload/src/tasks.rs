@@ -234,6 +234,11 @@ pub struct ListTasksQuery {
     /// `High` のような綴りや未知の値は 400 になる
     pub priority: Option<String>,
     pub assignee_id: Option<Uuid>,
+    /// `true` で担当者が 1 人もいないタスクだけを返す。役割は問わない。
+    ///
+    /// `assignee_id` と同時には指定できない（400）
+    #[serde(default)]
+    pub unassigned: bool,
     /// 作成者のユーザー ID。指定するとその人が作ったタスクだけを返す
     pub created_by: Option<Uuid>,
     pub label_id: Option<Uuid>,

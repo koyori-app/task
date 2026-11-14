@@ -118,6 +118,7 @@ cargo build --release -p task-cli   # apps/backend/target/release/task
 task tasks list --project TASK --page 2 --limit 100
 task tasks list --project TASK --status Todo --label bug --sort deadline_asc
 task tasks list --project TASK --archived
+task tasks list --project TASK --unassigned  # 担当者がいないタスクだけ
 task tasks search --project TASK ページング
 task tasks search --project TASK @alice      # alice を印でメンションした説明文にも当たる
 task tasks show TASK-181                     # 説明文のメンションは @今の名 で出る
@@ -133,6 +134,7 @@ task tasks show TASK-181 --raw               # 保存されたまま（<@利用�
 候補 ID を含むエラーを返すので、UUID で指定する。
 綴りを外すと、そのプロジェクトで使える名前が並ぶ。担当者の候補一覧には `write:task`
 が要るので、読み取りだけのトークンでは名前解決はできても候補は並ばない。
+`--unassigned` は担当者が 1 人もいないタスクだけを返す。`--assignee` とは同時に使えない。
 
 作成と更新は同じ綴りの項目を受ける。
 更新は本体・ラベル差分・担当者置換を一度の API 呼び出しで反映し、途中失敗時はすべて取り消す。
