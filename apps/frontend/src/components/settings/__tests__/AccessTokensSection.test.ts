@@ -5,12 +5,14 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
+import { Picker } from '@koyori-app/ui-vue';
 import AccessTokensSection from '../AccessTokensSection.vue';
 import type { components } from '@/generated/api';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
 const OTHER_USER_ID = '00000000-0000-0000-0000-000000000002';
 const TENANT_ID = '11111111-1111-1111-1111-111111111111';
+const SECOND_TENANT_ID = '44444444-4444-4444-4444-444444444444';
 
 const user: components['schemas']['UserResponse'] = {
   id: USER_ID,
@@ -28,11 +30,13 @@ const user: components['schemas']['UserResponse'] = {
 function tenant(
   ownerId: string,
   memberRole: components['schemas']['TenantRole'] | null = null,
+  id = TENANT_ID,
+  name = 'Acme Inc',
 ): components['schemas']['TenantListItemResponse'] {
   return {
-    id: TENANT_ID,
-    display_id: 'acme',
-    name: 'Acme Inc',
+    id,
+    display_id: id === TENANT_ID ? 'acme' : 'beta',
+    name,
     description: '',
     icon_url: '',
     owner_id: ownerId,
@@ -51,7 +55,7 @@ function token(
     id: '22222222-2222-2222-2222-222222222222',
     name: 'CLI on MacBook',
     token_last_four: '7f3a',
-    tenant_id: TENANT_ID,
+    tenant_ids: [TENANT_ID],
     project_ids: null,
     scopes: ['read:task', 'write:task', 'read:project'],
     expires_at: null,
@@ -66,6 +70,8 @@ type MockState = {
   tokens: components['schemas']['PersonalTokenResponse'][];
   tenantOwnerId?: string;
   tenantMemberRole?: components['schemas']['TenantRole'] | null;
+  /** true なら、オーナーのテナントを 2 つ（Acme Inc・Beta LLC）返す */
+  twoTenants?: boolean;
   createStatus?: number;
   deleteStatus?: number;
 };
@@ -83,7 +89,12 @@ function stubFetch(state: MockState) {
     const pathname = new URL(req.url, 'http://localhost').pathname;
 
     if (req.method === 'GET' && pathname.endsWith('/v1/tenants')) {
-      return jsonResponse([tenant(state.tenantOwnerId ?? USER_ID, state.tenantMemberRole ?? null)]);
+      const ownerId = state.tenantOwnerId ?? USER_ID;
+      const memberRole = state.tenantMemberRole ?? null;
+      return jsonResponse([
+        tenant(ownerId, memberRole),
+        ...(state.twoTenants ? [tenant(ownerId, memberRole, SECOND_TENANT_ID, 'Beta LLC')] : []),
+      ]);
     }
     if (req.method === 'GET' && pathname.endsWith('/v1/personal_tokens')) {
       return jsonResponse(state.tokens);
@@ -92,7 +103,11 @@ function stubFetch(state: MockState) {
       const body = (await req.clone().json()) as Record<string, unknown>;
       createBodies.push(body);
       if (state.createStatus) return jsonResponse({ message: 'error' }, state.createStatus);
-      const created = token({ name: String(body.name), token_last_four: 'b21c' });
+      const created = token({
+        name: String(body.name),
+        token_last_four: 'b21c',
+        tenant_ids: body.tenant_ids as string[],
+      });
       state.tokens = [...state.tokens, created];
       return jsonResponse({ ...created, token: 'pat_plain-token-value' }, 201);
     }
@@ -185,7 +200,7 @@ describe('AccessTokensSection', () => {
     expect(wrapper.text()).toContain('トークンはまだありません。');
   });
 
-  it('発行フォームから name / tenant_id / scopes / expires_at(90日) を送る', async () => {
+  it('発行フォームから name / tenant_ids / scopes / expires_at(90日) を送る', async () => {
     const { createBodies } = stubFetch({ tokens: [] });
     const wrapper = mountSection();
     await flushPromises();
@@ -207,12 +222,13 @@ describe('AccessTokensSection', () => {
     expect(createBodies).toHaveLength(1);
     const body = createBodies[0] as {
       name: string;
-      tenant_id: string;
+      tenant_ids: string[];
       scopes: string[];
       expires_at: string;
     };
     expect(body.name).toBe('CI deploy');
-    expect(body.tenant_id).toBe(TENANT_ID);
+    // 候補が 1 つなら選択済み
+    expect(body.tenant_ids).toEqual([TENANT_ID]);
     expect(body.scopes).toEqual(['read:task', 'write:task']);
     // 既定の有効期限は 90 日
     const days = (new Date(body.expires_at).getTime() - new Date().getTime()) / 86400000;
@@ -410,6 +426,66 @@ describe('AccessTokensSection', () => {
 
     expect(wrapper.find('#token-tenant').exists()).toBe(true);
     expect(wrapper.text()).toContain('Acme Inc');
+  });
+
+  it('候補が 2 つ以上なら未選択で始まり、選ばずに送るとエラーを出して送らない', async () => {
+    const { createBodies } = stubFetch({ tokens: [], twoTenants: true });
+    const wrapper = mountSection();
+    await flushPromises();
+
+    clickBodyButton('トークンを発行');
+    await flushPromises();
+
+    expect(wrapper.findComponent(Picker).props('selectedValues')).toEqual([]);
+
+    await wrapper.find('#token-name').setValue('CI deploy');
+    clickScopeCheckbox('read:task');
+    await flushPromises();
+    await wrapper.find('form').trigger('submit');
+    await flushPromises();
+
+    expect(createBodies).toHaveLength(0);
+    expect(wrapper.text()).toContain('テナントを 1 つ以上選択してください。');
+  });
+
+  it('テナントを 2 つ選ぶと tenant_ids に両方入り、一覧の行に両方の名前が出る', async () => {
+    const { createBodies } = stubFetch({ tokens: [], twoTenants: true });
+    const wrapper = mountSection();
+    await flushPromises();
+
+    clickBodyButton('トークンを発行');
+    await flushPromises();
+
+    await wrapper.find('#token-name').setValue('CI deploy');
+    clickScopeCheckbox('read:task');
+    const picker = wrapper.findComponent(Picker);
+    (picker.props('onSelectionChange') as (values: string[]) => void)([
+      TENANT_ID,
+      SECOND_TENANT_ID,
+    ]);
+    await flushPromises();
+    await wrapper.find('form').trigger('submit');
+    await flushPromises();
+
+    expect(createBodies).toHaveLength(1);
+    expect((createBodies[0] as { tenant_ids: string[] }).tenant_ids).toEqual([
+      TENANT_ID,
+      SECOND_TENANT_ID,
+    ]);
+    expect(wrapper.find('[data-testid="token-list"]').text()).toContain('Acme Inc、Beta LLC');
+  });
+
+  it('2 テナントのトークンは、取り消しダイアログにも両方の名前を出す', async () => {
+    stubFetch({ tokens: [token({ tenant_ids: [TENANT_ID, SECOND_TENANT_ID] })], twoTenants: true });
+    mountSection();
+    await flushPromises();
+
+    clickBodyButton('取り消し');
+    await flushPromises();
+
+    expect(document.body.textContent).toContain(
+      'テナント「Acme Inc、Beta LLC」の「CLI on MacBook」',
+    );
   });
 
   it('role が Admin の member なら発行ボタンが有効になる', async () => {

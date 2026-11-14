@@ -8,8 +8,10 @@ import AccessTokensSection from '@/components/settings/AccessTokensSection.vue';
 const USER_ID = '00000000-0000-4000-8000-000000000001';
 const OTHER_USER_ID = '00000000-0000-4000-8000-000000000002';
 const TENANT_ID = '11111111-1111-1111-1111-111111111111';
+const SECOND_TENANT_ID = '44444444-4444-4444-4444-444444444444';
 const TOKEN_A_ID = '00000000-0000-4000-8000-000000000021';
 const TOKEN_B_ID = '00000000-0000-4000-8000-000000000022';
+const TOKEN_C_ID = '00000000-0000-4000-8000-000000000023';
 
 /** 自分から見たテナントの関わり方。発行候補の絞りは membership と member_role で決まる。 */
 type TenantView = {
@@ -17,10 +19,10 @@ type TenantView = {
   member_role?: 'Admin' | 'Member' | 'Viewer' | null;
 };
 
-const tenant = (view: TenantView) => ({
-  id: TENANT_ID,
-  display_id: 'acme',
-  name: 'Acme Inc',
+const tenant = (view: TenantView, id = TENANT_ID, name = 'Acme Inc') => ({
+  id,
+  display_id: id === TENANT_ID ? 'acme' : 'beta',
+  name,
   description: '',
   icon_url: '',
   owner_id: view.membership === 'Owner' ? USER_ID : OTHER_USER_ID,
@@ -35,7 +37,7 @@ const sampleTokens = [
     id: TOKEN_A_ID,
     name: 'CLI on MacBook',
     token_last_four: '7f3a',
-    tenant_id: TENANT_ID,
+    tenant_ids: [TENANT_ID],
     project_ids: null,
     scopes: ['read:task', 'write:task', 'read:project'],
     expires_at: '2099-11-14T00:00:00Z',
@@ -47,9 +49,21 @@ const sampleTokens = [
     id: TOKEN_B_ID,
     name: 'CI deploy',
     token_last_four: 'b21c',
-    tenant_id: TENANT_ID,
+    tenant_ids: [TENANT_ID],
     project_ids: null,
     scopes: ['read:task'],
+    expires_at: null,
+    last_used_at: null,
+    revoked: false,
+    user_id: USER_ID,
+  },
+  {
+    id: TOKEN_C_ID,
+    name: 'Cross-tenant sync',
+    token_last_four: 'c0de',
+    tenant_ids: [TENANT_ID, SECOND_TENANT_ID],
+    project_ids: null,
+    scopes: ['read_api'],
     expires_at: null,
     last_used_at: null,
     revoked: false,
@@ -66,7 +80,9 @@ const jsonResponse = (data: unknown, status = 200) =>
 let fetchSpy: ReturnType<typeof fn> | null = null;
 
 /** トークン系 API をインメモリの配列で応答する fetch モック */
-function mockFetch(overrides: { empty?: boolean; tenantView?: TenantView } = {}) {
+function mockFetch(
+  overrides: { empty?: boolean; tenantView?: TenantView; singleTenant?: boolean } = {},
+) {
   return () => {
     const original = globalThis.fetch;
     let tokens = overrides.empty ? [] : sampleTokens.map((token) => ({ ...token }));
@@ -77,18 +93,22 @@ function mockFetch(overrides: { empty?: boolean; tenantView?: TenantView } = {})
       const itemMatch = pathname.match(/\/v1\/personal_tokens\/([^/]+)$/);
 
       if (method === 'GET' && pathname.endsWith('/v1/tenants')) {
-        return jsonResponse([tenant(overrides.tenantView ?? { membership: 'Owner' })]);
+        const view = overrides.tenantView ?? { membership: 'Owner' };
+        return jsonResponse([
+          tenant(view),
+          ...(overrides.singleTenant ? [] : [tenant(view, SECOND_TENANT_ID, 'Beta LLC')]),
+        ]);
       }
       if (method === 'GET' && pathname.endsWith('/v1/personal_tokens')) {
         return jsonResponse(tokens);
       }
       if (method === 'POST' && pathname.endsWith('/v1/personal_tokens')) {
-        const body = await (req as Request).json();
+        const body = await (req as Request).clone().json();
         const created = {
           id: `00000000-0000-4000-8000-0000000000${30 + tokens.length}`,
           name: body.name,
           token_last_four: '9d4e',
-          tenant_id: body.tenant_id,
+          tenant_ids: body.tenant_ids,
           project_ids: body.project_ids ?? null,
           scopes: body.scopes,
           expires_at: body.expires_at ?? null,
@@ -165,8 +185,12 @@ export const Default: Story = {
     await expect(canvas.getByText('pat_••••••7f3a')).toBeInTheDocument();
     await expect(canvas.getByText('3 スコープ')).toBeInTheDocument();
     await expect(canvas.findByText('CI deploy')).resolves.toBeInTheDocument();
-    await expect(canvas.getByText('無期限')).toBeInTheDocument();
-    await expect(canvas.getByText('未使用')).toBeInTheDocument();
+    await expect(canvas.getAllByText('無期限').length).toBeGreaterThan(0);
+    await expect(canvas.getAllByText('未使用').length).toBeGreaterThan(0);
+    // 1 テナントのトークンと 2 テナントのトークンが並ぶ
+    await expect(canvas.findByText('Cross-tenant sync')).resolves.toBeInTheDocument();
+    // テナント名は一覧の取得より遅れて解決されるので、現れるまで待つ
+    await expect(canvas.findByText('Acme Inc、Beta LLC')).resolves.toBeInTheDocument();
   },
 };
 
@@ -180,11 +204,12 @@ export const Empty: Story = {
 };
 
 export const GenerateFlow: Story = {
-  name: '発行（Admin の候補が在れば作れる。フォーム → POST → 平文トークンを 1 度だけ表示）',
+  name: '発行（候補 1 件は選択済み。フォーム → POST → 平文トークンを 1 度だけ表示）',
   // 主ではなく role=Admin の member として発行する——Admin 境界の口が
   // member_role で開くことをこの story が表す
   beforeEach: mockFetch({
     empty: true,
+    singleTenant: true,
     tenantView: { membership: 'Member', member_role: 'Admin' },
   }),
   play: async ({ canvasElement }) => {
@@ -205,6 +230,45 @@ export const GenerateFlow: Story = {
     const [post] = requestsOf('POST');
     await expect(post).toBeTruthy();
     await expect(post.url).toContain('/v1/personal_tokens');
+    await expect((await post.clone().json()).tenant_ids).toEqual([TENANT_ID]);
+  },
+};
+
+export const GenerateForMultipleTenants: Story = {
+  name: '発行（候補 2 件は未選択 → 選ばず送ってエラー → 2 件選んで発行）',
+  beforeEach: mockFetch({ empty: true }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const page = within(canvasElement.ownerDocument.body);
+    const user = userEvent.setup();
+    await canvas.findByText('トークンはまだありません。');
+
+    await user.click(canvas.getByRole('button', { name: 'トークンを発行' }));
+    await user.type(await canvas.findByLabelText('トークン名'), 'Cross-tenant sync');
+    await user.click(canvas.getByRole('checkbox', { name: /read:task/ }));
+
+    // テナントを選ばずに送ると、送信せずエラーを出す
+    await user.click(canvas.getByRole('button', { name: 'トークンを発行' }));
+    await expect(
+      canvas.findByText('テナントを 1 つ以上選択してください。'),
+    ).resolves.toBeInTheDocument();
+    await expect(requestsOf('POST')).toHaveLength(0);
+
+    // 開いたまま続けて 2 件選ぶ
+    await user.click(canvas.getByRole('button', { name: /^テナント/ }));
+    const listbox = await page.findByRole('listbox');
+    await user.click(within(listbox).getByRole('option', { name: 'Acme Inc' }));
+    await user.click(within(listbox).getByRole('option', { name: 'Beta LLC' }));
+    await user.keyboard('{Escape}');
+
+    await user.click(canvas.getByRole('button', { name: 'トークンを発行' }));
+    await expect(canvas.findByTestId('created-token')).resolves.toHaveTextContent(
+      'pat_plain-token-value-9d4e',
+    );
+    const [post] = requestsOf('POST');
+    const body = await post.clone().json();
+    await expect(new Set(body.tenant_ids)).toEqual(new Set([TENANT_ID, SECOND_TENANT_ID]));
+    await expect(canvas.findByText('Acme Inc、Beta LLC')).resolves.toBeInTheDocument();
   },
 };
 

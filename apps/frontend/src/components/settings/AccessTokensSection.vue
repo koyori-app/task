@@ -28,6 +28,7 @@ import {
   expiresAtFromPreset,
   formatExpiry,
   formatLastUsed,
+  formatTenantNames,
   maskedToken,
   type ExpirationKey,
   type PersonalToken,
@@ -69,7 +70,9 @@ function tenantName(tenantId: string) {
 const isFormOpen = ref(false);
 const tokenName = ref('');
 const nameError = ref<string | null>(null);
-const selectedTenantId = ref<string | null>(null);
+/** null = 未操作。候補が 1 つのときだけ、未操作でもそのテナントが選択済みになる。 */
+const selectedTenantIds = ref<string[] | null>(null);
+const tenantsError = ref<string | null>(null);
 const expiration = ref<ExpirationKey>('90d');
 const selectedScopes = ref<TokenScope[]>([]);
 const scopesError = ref<string | null>(null);
@@ -80,7 +83,15 @@ const createdToken = ref<string | null>(null);
 const copied = ref(false);
 const copyError = ref<string | null>(null);
 
-const formTenantId = computed(() => selectedTenantId.value ?? issuableTenants.value[0]?.id ?? null);
+/**
+ * 候補が 1 つなら選択済み、2 つ以上なら未選択から始める。複数選択で 1 つ目を黙って選ぶと、
+ * 意図しないテナントに結び付いたトークンを発行しやすい。
+ */
+const formTenantIds = computed(
+  () =>
+    selectedTenantIds.value ??
+    (issuableTenants.value.length === 1 ? [issuableTenants.value[0]!.id] : []),
+);
 
 function openForm() {
   isFormOpen.value = true;
@@ -93,7 +104,8 @@ function resetForm() {
   isFormOpen.value = false;
   tokenName.value = '';
   nameError.value = null;
-  selectedTenantId.value = null;
+  selectedTenantIds.value = null;
+  tenantsError.value = null;
   expiration.value = '90d';
   selectedScopes.value = [];
   scopesError.value = null;
@@ -127,14 +139,17 @@ async function onSubmit() {
   if (selectedScopes.value.length === 0) {
     scopesError.value = 'スコープを 1 つ以上選択してください。';
   }
-  const tenantId = formTenantId.value;
-  if (!nameOk || selectedScopes.value.length === 0 || !tenantId) return;
+  const tenantIds = formTenantIds.value;
+  if (tenantIds.length === 0) {
+    tenantsError.value = 'テナントを 1 つ以上選択してください。';
+  }
+  if (!nameOk || selectedScopes.value.length === 0 || tenantIds.length === 0) return;
 
   try {
     const created = await createToken.mutateAsync({
       body: {
         name: tokenName.value.trim(),
-        tenant_id: tenantId,
+        tenant_ids: tenantIds,
         // null = テナント内の全プロジェクトで有効。プロジェクト単位の絞り込み UI は未対応。
         project_ids: null,
         scopes: selectedScopes.value,
@@ -179,7 +194,7 @@ function openRevokeDialog(token: PersonalToken) {
 
 const revokeDescription = computed(() =>
   revokeTarget.value
-    ? `テナント「${tenantName(revokeTarget.value.tenant_id)}」の「${revokeTarget.value.name}」を取り消します。このトークンを使っている API・CLI は即座に認証できなくなります。この操作は元に戻せません。`
+    ? `テナント「${revokeTarget.value.tenant_ids.map(tenantName).join('、')}」の「${revokeTarget.value.name}」を取り消します。このトークンを使っている API・CLI は即座に認証できなくなります。この操作は元に戻せません。`
     : '',
 );
 
@@ -285,14 +300,21 @@ function scopeItems(scopes: string[]): DropdownItem[] {
             v-if="issuableTenants.length > 0"
             id="token-tenant"
             label="テナント"
-            description="トークンはこのテナントの中でだけ使えます。"
+            description="トークンは選んだテナントの中でだけ使えます。複数選べます。"
+            :error="tenantsError ?? ''"
           >
             <Picker
               label="テナント"
+              selection-mode="multiple"
               :searchable="tenantItems.length > 8"
               :items="tenantItems"
-              :selected-values="formTenantId ? [formTenantId] : []"
-              :on-selection-change="(values: string[]) => (selectedTenantId = values[0] ?? null)"
+              :selected-values="formTenantIds"
+              :on-selection-change="
+                (values: string[]) => {
+                  selectedTenantIds = values;
+                  tenantsError = null;
+                }
+              "
             />
           </Field>
 
@@ -389,7 +411,7 @@ function scopeItems(scopes: string[]): DropdownItem[] {
             <p class="text-muted-foreground flex flex-wrap items-center gap-x-2 text-xs">
               <code class="font-mono">{{ maskedToken(token.token_last_four) }}</code>
               <span>·</span>
-              <span>{{ tenantName(token.tenant_id) }}</span>
+              <span>{{ formatTenantNames(token.tenant_ids.map(tenantName)) }}</span>
               <span>·</span>
               <span>{{ token.scopes.length }} スコープ</span>
               <span>·</span>
