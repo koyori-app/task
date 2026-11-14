@@ -184,6 +184,18 @@ const DUE_NOT_DONE: &str = "EXISTS (
       AND project_statuses.is_done_state = false
 )";
 
+/// ステータスが完了状態かどうかで絞る（`done` クエリ）。
+fn done_state_filter(done: bool) -> sea_orm::sea_query::SimpleExpr {
+    sea_orm::sea_query::Expr::cust_with_values(
+        "EXISTS (
+            SELECT 1 FROM project_statuses
+            WHERE project_statuses.id = tasks.status_id
+              AND project_statuses.is_done_state = $1
+        )",
+        vec![sea_orm::Value::from(done)],
+    )
+}
+
 /// 期限の判定はホーム（dashboard）と同じ `service::deadline_filter` を使う。
 /// 今日・今週・期限超過は完了済みを除く。
 fn apply_my_tasks_filter(
@@ -340,6 +352,9 @@ pub async fn list_my_tasks(
         return Err(AppError::BadRequest);
     }
     query = apply_my_tasks_filter(query, &q.filter, timezone)?;
+    if let Some(done) = q.done {
+        query = query.filter(done_state_filter(done));
+    }
 
     let limit = std::cmp::min(q.limit, 200);
     let total = query.clone().count(&state.db).await?;

@@ -123,6 +123,8 @@ task tasks search --project TASK ページング
 task tasks search --project TASK @alice      # alice を印でメンションした説明文にも当たる
 task tasks show TASK-181                     # 説明文のメンションは @今の名 で出る
 task tasks show TASK-181 --raw               # 保存されたまま（<@利用者ID> の印）で出す
+task my list --open                          # 自分の担当のうち未完了だけ
+task my list --open --page 2 --limit 100     # ページングは tasks list と同じ
 ```
 
 `tasks show` は説明文のメンションの印を `@今の名` に戻して出す。それを `tasks update --description` へ
