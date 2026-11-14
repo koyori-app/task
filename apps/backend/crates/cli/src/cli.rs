@@ -367,7 +367,7 @@ pub struct TaskFieldArgs {
     /// Progress percentage (0-100)
     #[arg(long)]
     pub progress: Option<i16>,
-    /// Parent task (KEY-N or UUID)
+    /// Parent task (KEY-N or UUID). A new task takes the parent's deadlines and planned start unless set here
     #[arg(long)]
     pub parent: Option<String>,
     /// Milestone name (or UUID)
