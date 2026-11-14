@@ -36,6 +36,7 @@ import type { components } from '@/generated/api';
 import type { EditableField, MutatingField } from '@/components/tasks/editable-field';
 import MentionHoverCard from '@/components/tasks/MentionHoverCard.vue';
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
+import TaskChecklistProgress from '@/components/tasks/TaskChecklistProgress.vue';
 import TaskCompletionRule from '@/components/tasks/TaskCompletionRule.vue';
 import TaskPropertyRow from '@/components/tasks/TaskPropertyRow.vue';
 import {
@@ -49,6 +50,7 @@ import {
 } from '@koyori-app/ui-vue';
 import MarkdownEditor from '@/components/markdown/MarkdownEditor.vue';
 import { lookup, toPlainText } from '@/lib/comment-mention';
+import { countChecklist } from '@/lib/task-checklist';
 import { hasMentionCards } from '@/lib/mention-card';
 import {
   PRIORITY_CONFIG,
@@ -225,6 +227,8 @@ const nextStatus = computed(() => {
   return orderedStatuses.value[index + 1] ?? null;
 });
 
+// 達成率は常に保存済みの説明から数える。編集中の下書きは数えない
+const checklist = computed(() => countChecklist(props.task?.description));
 // 古い HTML の遮断: 描画元 (descriptionSource) がクライアントの最新 task.description と
 // 厳密一致しない descriptionHtml は捨て、プレーンテキスト表示へ倒す。v-html の直前で
 // 照合するのは、消費側の渡し忘れ・渡し間違いでも stale HTML が漏れないようにするため。
@@ -1145,7 +1149,14 @@ function clearDescription() {
             <!-- 説明 -->
             <div class="border-t pt-5">
               <div class="mb-2 flex items-center justify-between gap-2">
-                <h2 class="text-sm font-medium text-muted-foreground">説明</h2>
+                <div class="flex min-w-0 items-center gap-2">
+                  <h2 class="text-sm font-medium text-muted-foreground">説明</h2>
+                  <TaskChecklistProgress
+                    v-if="checklist"
+                    :done="checklist.done"
+                    :total="checklist.total"
+                  />
+                </div>
                 <Button
                   v-if="editingField === 'description' && task.description"
                   type="button"

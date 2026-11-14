@@ -21,8 +21,10 @@ import type { components } from '@/generated/api';
 import type { TaskRowField } from '@/composables/useTaskRowMutations';
 import { TASK_ROW_GRID } from '@/components/tasks/task-grouped-columns';
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
+import TaskChecklistProgress from '@/components/tasks/TaskChecklistProgress.vue';
 import TaskIdCopyButton from '@/components/tasks/TaskIdCopyButton.vue';
 import UserAvatar from '@/components/UserAvatar.vue';
+import { countChecklist } from '@/lib/task-checklist';
 
 type TaskResponse = components['schemas']['TaskResponse'];
 type LabelResponse = components['schemas']['LabelResponse'];
@@ -88,6 +90,7 @@ const deadline = computed(() =>
 );
 const assignees = computed(() => props.task.assignees.map((entry) => entry.user));
 const seqKey = computed(() => taskSeqKey(props.projectKey, props.task.seq_id));
+const checklist = computed(() => countChecklist(props.task.description));
 // 狭い幅の 2 段目はラベルを先頭の 1 つと「+N」に畳む。全件は詳細で見る
 const firstLabel = computed(() => props.task.labels[0] ?? null);
 const hiddenLabelCount = computed(() => Math.max(0, props.task.labels.length - 1));
@@ -296,6 +299,13 @@ function selectFromKeyboard(event: KeyboardEvent) {
           <!-- 広い幅の 2 段目。担当・期限・優先度は右の列にある -->
           <div class="mt-1 hidden flex-wrap items-center gap-1 @3xl:flex" data-row-labels>
             <TaskIdCopyButton class="mr-1" :project-key="projectKey" :seq-id="task.seq_id" />
+            <!-- 数字は隣のタスク ID と同じ等幅にする。書体が違うと字面の高さがずれて見える -->
+            <TaskChecklistProgress
+              v-if="checklist"
+              class="mr-1 font-mono"
+              :done="checklist.done"
+              :total="checklist.total"
+            />
             <span
               v-for="label in task.labels"
               :key="label.id"
@@ -343,6 +353,12 @@ function selectFromKeyboard(event: KeyboardEvent) {
                 class="max-[769px]:hidden"
                 :project-key="projectKey"
                 :seq-id="task.seq_id"
+              />
+              <TaskChecklistProgress
+                v-if="checklist"
+                class="font-mono"
+                :done="checklist.done"
+                :total="checklist.total"
               />
               <template v-if="firstLabel">
                 <span aria-hidden="true">·</span>
