@@ -12,6 +12,7 @@ import { KFM_CONTENT_CLASS } from '@/lib/remark-gfm/content-class';
 import '@/lib/remark-gfm/style.css';
 import '@/lib/rehype-starry-night/style.css';
 import '@/lib/rehype-kfm-code/style.css';
+import { htmlTheme } from '../html-theme';
 
 /*
  * KFM コードブロック着色 (starry-night) の story 群。fixture+v-html 方式:
@@ -31,6 +32,8 @@ const meta = {
   title: 'KFM/CodeHighlight',
   tags: ['autodocs'],
   render: kfmRender,
+  // KFM のストーリーは明るい配色を既定にし、暗い配色のものだけ上書きする
+  beforeEach: htmlTheme('light'),
 } satisfies Meta<KfmStoryArgs>;
 
 export default meta;
@@ -173,35 +176,28 @@ export const LongLine: Story = {
 };
 
 export const DarkTheme: Story = {
-  name: 'ダークテーマ（ライトと並置）',
+  name: 'ダークテーマ',
   args: { html: typescriptHtml },
-  // 同一 fixture をライト地とダーク地 (.dark ancestor = アプリ本体と同方式) で並置。
-  // style.css の .dark ブリッジ (starry-night dark パレット) が効いていることが絵で見える。
-  render: (args: KfmStoryArgs) => ({
-    setup: () => ({ args }),
-    template:
-      '<div class="grid gap-4">' +
-      `<div class="p-4"><div class="${KFM_CONTENT_CLASS} kfm-story-light" v-html="args.html" /></div>` +
-      `<div class="dark bg-background text-foreground p-4"><div class="${KFM_CONTENT_CLASS} kfm-story-dark" v-html="args.html" /></div>` +
-      '</div>',
-  }),
+  // html の data-theme = dark（アプリ本体と同方式）。
+  // style.css のダークブリッジ (starry-night dark パレット) が効いていることが絵で見える。
+  beforeEach: htmlTheme('dark'),
   parameters: {
     docs: {
       description: {
         story:
-          '壊れたら: 上下の箱でコードの配色が同じになったら .dark ブリッジ (style.css) の喪失——alerts の「CSS ライト固定」と同型の再発をこの絵で検知する。',
+          '壊れたら: ライトとダークでコードの配色が同じになったらダークブリッジ (style.css) の喪失——alerts の「CSS ライト固定」と同型の再発をこの絵で検知する。',
       },
     },
   },
   play: async ({ canvasElement }) => {
-    // 同じトークン (キーワード) の computed color がライト箱とダーク箱で異なることを
+    // 同じトークン (キーワード) の computed color がダークとライトで異なることを
     // 機械で固定する (パレット実値はハードコードせず相対比較 = upstream 更新に強い)
-    const lightKeyword = canvasElement.querySelector('.kfm-story-light .pl-k');
-    const darkKeyword = canvasElement.querySelector('.kfm-story-dark .pl-k');
-    await expect(lightKeyword).not.toBeNull();
-    await expect(darkKeyword).not.toBeNull();
-    const lightColor = getComputedStyle(lightKeyword as Element).color;
-    const darkColor = getComputedStyle(darkKeyword as Element).color;
+    const keyword = canvasElement.querySelector('.pl-k');
+    await expect(keyword).not.toBeNull();
+    const darkColor = getComputedStyle(keyword as Element).color;
+    document.documentElement.dataset.theme = 'light';
+    const lightColor = getComputedStyle(keyword as Element).color;
+    document.documentElement.dataset.theme = 'dark';
     await expect(lightColor).not.toBe('');
     await expect(darkColor).not.toBe('');
     await expect(lightColor).not.toBe(darkColor);

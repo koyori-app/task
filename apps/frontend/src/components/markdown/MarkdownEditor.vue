@@ -94,7 +94,7 @@ let destroying = false;
 
 /**
  * markdown の見出し・強調・リンク等の着色。
- * 色はアプリのテーマ変数から取り、`.dark` の切り替えに CSS 側で追従させる
+ * 色はアプリのテーマ変数から取り、`html` の `data-theme` の切り替えに CSS 側で追従させる
  * (KFM サイドカーがコードブロックの配色で採っているのと同じ方針)。
  */
 const highlightStyle = HighlightStyle.define([
@@ -161,7 +161,7 @@ function editorTheme(plain: boolean) {
 
 /** 枠・影・リングを付ける（`outlined` のときだけ）。完成した文字列で書き、Tailwind に拾わせる */
 const OUTLINED_CLASS =
-  'border-input focus-within:border-ring focus-within:ring-ring/50 dark:bg-input/30 overflow-hidden rounded-md border shadow-xs transition-[color,box-shadow] focus-within:ring-[3px]';
+  'border-input focus-within:border-ring focus-within:ring-ring/50 overflow-hidden rounded-md border shadow-xs transition-[color,box-shadow] focus-within:ring-[3px]';
 
 /**
  * 字下げが意味を持つ文脈 (リスト項目・コードブロック・引用) にカーソルがあるか。

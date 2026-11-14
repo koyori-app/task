@@ -3,19 +3,19 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { ratio, token } from './design-token';
+import { ratio, token, type ThemeName } from './design-token';
 
 /**
  * リンク文字（text-link）と面の対比（WCAG 2.x の相対輝度）。ボタンの地に使う accent（--primary）とは
  * 分けた --link が、明るい面でも暗い面でも 4.5:1 以上であることを縛る。
  */
 describe('リンク文字の対比', () => {
-  it.each([
-    [':root', '明るい面'],
-    ['.dark', '暗い面'],
-  ])('%s（%s）の text-link は bg-background / bg-card 上で 4.5:1 以上', (scope) => {
+  it.each<[ThemeName, string]>([
+    ['light', '明るい面'],
+    ['dark', '暗い面'],
+  ])('%s（%s）の text-link は bg-background / bg-card 上で 4.5:1 以上', (theme) => {
     for (const ground of ['background', 'card']) {
-      expect(ratio(token(scope, 'link'), token(scope, ground))).toBeGreaterThanOrEqual(4.5);
+      expect(ratio(token(theme, 'link'), token(theme, ground))).toBeGreaterThanOrEqual(4.5);
     }
   });
 

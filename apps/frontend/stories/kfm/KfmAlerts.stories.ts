@@ -11,6 +11,7 @@ import '@/lib/remark-gfm/style.css';
 // 器は本番と同じ .kfm-content (alerts CSS は .kfm-alert を直接指すため器 scope 不要だが、
 // story の器 = 本番の器 という形を崩さない。単一ソース = content-class.ts)
 import { KFM_CONTENT_CLASS } from '@/lib/remark-gfm/content-class';
+import { htmlTheme } from '../html-theme';
 
 /*
  * KFM GitHub alerts の story 群。
@@ -32,7 +33,7 @@ const ALERT_ACCENTS: Record<(typeof ALERT_TYPES)[number], string> = {
   caution: 'rgb(207, 34, 46)', // #cf222e
 };
 
-// .dark 上書き (GitHub ダークパレット) の期待値
+// ダーク（html の data-theme が light 以外）の上書き (GitHub ダークパレット) の期待値
 const ALERT_ACCENTS_DARK: Record<(typeof ALERT_TYPES)[number], string> = {
   note: 'rgb(68, 147, 248)', // #4493f8
   tip: 'rgb(63, 185, 80)', // #3fb950
@@ -69,17 +70,12 @@ const kfmRender = (args: KfmStoryArgs) => ({
   template: `<div class="${KFM_CONTENT_CLASS}" v-html="args.html" />`,
 });
 
-// アプリ本体と同じ .dark ancestor class 方式 (tailwind.css の @custom-variant dark)。
-// 背景/文字色もアプリのテーマトークンで塗って実際のダーク画面と同じ地の上で撮る。
-const kfmDarkRender = (args: KfmStoryArgs) => ({
-  setup: () => ({ args }),
-  template: `<div class="dark bg-background text-foreground p-4"><div class="${KFM_CONTENT_CLASS}" v-html="args.html" /></div>`,
-});
-
 const meta = {
   title: 'KFM/Alerts',
   tags: ['autodocs'],
   render: kfmRender,
+  // KFM のストーリーは明るい配色を既定にし、暗い配色のものだけ上書きする
+  beforeEach: htmlTheme('light'),
 } satisfies Meta<KfmStoryArgs>;
 
 export default meta;
@@ -106,21 +102,21 @@ export const AllFive: Story = {
 
 export const AllFiveDark: Story = {
   name: '5 種すべて（ダークテーマ）',
-  render: kfmDarkRender,
+  beforeEach: htmlTheme('dark'),
   args: { html: allFiveHtml },
   parameters: {
     docs: {
       description: {
         story:
-          '壊れたら: .dark 上書き (style.css の GitHub ダークパレット) が失われるとライト用の濃色がダーク地に沈み、絵が変わる——種別アクセント色がライト実色のまま固定される退行の再発をこの絵で検知する。',
+          '壊れたら: ダークの上書き (style.css の GitHub ダークパレット) が失われるとライト用の濃色がダーク地に沈み、絵が変わる——種別アクセント色がライト実色のまま固定される退行の再発をこの絵で検知する。',
       },
     },
   },
   play: async ({ canvasElement }) => {
     await expect(canvasElement.querySelectorAll('.kfm-alert')).toHaveLength(5);
-    // ダーク切替の実体 (.dark ancestor) が絵の前提として存在していること
-    await expect(canvasElement.querySelector('.dark .kfm-alert')).not.toBeNull();
-    // .dark 上書きの実効。種別アクセント色がライト実色のままダーク地に沈む退行を
+    // ダーク切替の実体 (html の data-theme) が絵の前提として存在していること
+    await expect(document.documentElement.dataset.theme).toBe('dark');
+    // ダーク上書きの実効。種別アクセント色がライト実色のままダーク地に沈む退行を
     // ダークパレット実色の computed で固定する
     await expectAlertAccents(canvasElement, ALERT_ACCENTS_DARK);
   },

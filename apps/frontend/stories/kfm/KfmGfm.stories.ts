@@ -16,6 +16,7 @@ import taskListHtml from '@/lib/kfm-story-fixtures/rendered/gfm-task-list.html?r
 import { KFM_CONTENT_CLASS } from '@/lib/remark-gfm/content-class';
 import '@/lib/remark-gfm/style.css';
 import '@/lib/rehype-kfm-link-favicon/style.css';
+import { htmlTheme } from '../html-theme';
 
 /*
  * KFM (md レンダリング) の GFM story 群。
@@ -46,18 +47,12 @@ const kfmRender = (args: KfmStoryArgs) => ({
   template: `<div class="${KFM_CONTENT_CLASS}" v-html="args.html" />`,
 });
 
-// アプリ本体と同じ .dark ancestor class 方式 (tailwind.css の @custom-variant dark)。
-// 背景/文字色もアプリのテーマトークンで塗って実際のダーク画面と同じ地の上で撮る
-// (KfmAlerts.stories.ts の kfmDarkRender と同じ形)。
-const kfmDarkRender = (args: KfmStoryArgs) => ({
-  setup: () => ({ args }),
-  template: `<div class="dark bg-background text-foreground p-4"><div class="${KFM_CONTENT_CLASS}" v-html="args.html" /></div>`,
-});
-
 const meta = {
   title: 'KFM/GFM',
   tags: ['autodocs'],
   render: kfmRender,
+  // KFM のストーリーは明るい配色を既定にし、暗い配色のものだけ上書きする
+  beforeEach: htmlTheme('light'),
 } satisfies Meta<KfmStoryArgs>;
 
 export default meta;
@@ -250,19 +245,19 @@ export const LongInlineText: Story = {
 
 export const StrikeAutolinkDark: Story = {
   name: '打ち消し線・自動リンク（ダークテーマ）',
-  render: kfmDarkRender,
+  beforeEach: htmlTheme('dark'),
   args: { html: strikeAutolinkHtml },
   parameters: {
     docs: {
       description: {
         story:
-          '壊れたら: .dark 上書き (style.css の .dark .kfm-content a = #4493f8) が失われるとライト用の濃い青リンクがダーク地に沈み、絵が変わる。GFM サイドカーのダーク専用ルールはこの 1 本のみで、監視はこの story が担う。',
+          '壊れたら: ダークの上書き (style.css の ダークの .kfm-content a = #4493f8) が失われるとライト用の濃い青リンクがダーク地に沈み、絵が変わる。GFM サイドカーのダーク専用ルールはこの 1 本のみで、監視はこの story が担う。',
       },
     },
   },
   play: async ({ canvasElement }) => {
-    // ダーク切替の実体 (.dark ancestor) が絵の前提として存在していること
-    await expect(canvasElement.querySelector(`.dark .${KFM_CONTENT_CLASS}`)).not.toBeNull();
+    // ダーク切替の実体 (html の data-theme) が絵の前提として存在していること
+    await expect(document.documentElement.dataset.theme).toBe('dark');
     const del = canvasElement.querySelector('del');
     await expect(del).not.toBeNull();
     await expect(del ? getComputedStyle(del).textDecorationLine : '').toContain('line-through');
@@ -270,7 +265,7 @@ export const StrikeAutolinkDark: Story = {
     await expect(link).not.toBeNull();
     const style = link ? getComputedStyle(link) : null;
     await expect(style?.textDecoration).toContain('underline');
-    // ダークリンク色の実効 (#4493f8)。ライト色 rgb(9, 105, 218) のままなら .dark 上書きの喪失
+    // ダークリンク色の実効 (#4493f8)。ライト色 rgb(9, 105, 218) のままならダーク上書きの喪失
     await expect(style?.color).toBe('rgb(68, 147, 248)');
     await expectFaviconLoaded(canvasElement);
   },
@@ -359,7 +354,7 @@ export const Headings: Story = {
 
 export const HeadingsDark: Story = {
   name: '見出しと段落・区切り線（ダークテーマ）',
-  render: kfmDarkRender,
+  beforeEach: htmlTheme('dark'),
   args: { html: headingsHtml },
   parameters: {
     docs: {

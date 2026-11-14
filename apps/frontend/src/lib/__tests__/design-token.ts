@@ -3,8 +3,9 @@ import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 
 /**
- * 対比テスト用に task の design token（tailwind.css の `:root` と `.dark`）の色を読む。
- * `:root` の値は `var(--koyori-*)` なので、@koyori-app/ui-vue の `:root` トークンまでたどる。
+ * 対比テスト用に task の design token（tailwind.css の `:root`）の色を読む。
+ * `:root` の値は `var(--koyori-*)` なので、@koyori-app/ui-vue の配色（`:root` が暗い配色、
+ * `[data-theme=light]` が明るい配色）までたどる。
  */
 const CSS = readFileSync(resolve(__dirname, '../../assets/css/tailwind.css'), 'utf8');
 const KOYORI_CSS = readFileSync(
@@ -12,27 +13,38 @@ const KOYORI_CSS = readFileSync(
   'utf8',
 );
 
-function block(selector: string): string {
-  const start = CSS.indexOf(`${selector} {`);
-  if (start < 0) throw new Error(`${selector} が見つからぬ`);
-  return CSS.slice(start, CSS.indexOf('\n}', start));
+export type ThemeName = 'light' | 'dark';
+
+/** `selector{` で始まる規則のうち、koyori の色のトークンを持つものの中身。 */
+function koyoriBlock(selector: string): string {
+  const escaped = selector.replace(/[[\]]/g, '\\$&');
+  for (const match of KOYORI_CSS.matchAll(new RegExp(`(?:^|})${escaped}\\{([^}]*)\\}`, 'g'))) {
+    if (match[1].includes('--koyori-color-surface:')) return match[1];
+  }
+  throw new Error(`koyori の ${selector} の配色が見つからぬ`);
 }
 
-/** `--name` の値。無ければ koyori の `:root` を見て、`var(--…)` は値までたどる。 */
-function raw(scope: string, name: string): string {
+const TASK_ROOT = CSS.slice(CSS.indexOf(':root {'), CSS.indexOf('\n}', CSS.indexOf(':root {')));
+const KOYORI: Record<ThemeName, string> = {
+  dark: koyoriBlock(':root'),
+  light: koyoriBlock('[data-theme=light]'),
+};
+
+/** `--name` の値。task の `:root`、その配色の koyori、暗い配色の順に見て、`var(--…)` は値までたどる。 */
+function raw(theme: ThemeName, name: string): string {
   const find = (css: string) => new RegExp(`--${name}:\\s*([^;}]+)`).exec(css)?.[1].trim();
-  const value = find(block(scope)) ?? find(KOYORI_CSS);
-  if (value === undefined) throw new Error(`${scope} の --${name} が見つからぬ`);
+  const value = find(TASK_ROOT) ?? find(KOYORI[theme]) ?? find(KOYORI.dark);
+  if (value === undefined) throw new Error(`${theme} の --${name} が見つからぬ`);
   const ref = /^var\(--([\w-]+)\)$/.exec(value);
-  return ref ? raw(scope, ref[1]) : value;
+  return ref ? raw(theme, ref[1]) : value;
 }
 
 /** `--name` の色（`#rrggbb` か `oklch(L C H)`）を線形 sRGB へ。 */
-export function token(scope: string, name: string): [number, number, number] {
-  const value = raw(scope, name);
-  if (/^#[\da-f]{6}$/i.test(value)) return hex(value);
+export function token(theme: ThemeName, name: string): [number, number, number] {
+  const value = raw(theme, name);
+  if (/^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(value)) return hex(value);
   const m = /^oklch\(([\d.]+) ([\d.]+)(?: ([\d.]+))?\)$/.exec(value);
-  if (!m) throw new Error(`${scope} の --${name} が色で読めぬ: ${value}`);
+  if (!m) throw new Error(`${theme} の --${name} が色で読めぬ: ${value}`);
   const [L, C, h] = [Number(m[1]), Number(m[2]), (Number(m[3] ?? 0) * Math.PI) / 180];
   const a = C * Math.cos(h);
   const b = C * Math.sin(h);
@@ -55,7 +67,8 @@ export function ratio(a: number[], b: number[]): number {
 
 export function hex(value: string): [number, number, number] {
   const lin = (v: number) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
-  const n = value.replace('#', '');
+  const short = value.replace('#', '');
+  const n = short.length === 3 ? [...short].map((c) => c + c).join('') : short;
   return [0, 2, 4].map((i) => lin(parseInt(n.slice(i, i + 2), 16) / 255)) as [
     number,
     number,
