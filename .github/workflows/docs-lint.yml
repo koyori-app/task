@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 26
       - name: docs/STYLE.md の規則を検査する
         run: node docs/scripts/lint-style.mjs
       - name: 検査スクリプト自体のテスト
