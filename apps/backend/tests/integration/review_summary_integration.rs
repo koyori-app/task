@@ -5,6 +5,7 @@
 // - Approve: マージ可の PR は、レビュワー本人のトークンで、レビューした commit を指定して 1 回だけ承認される（対照: High / Medium の未解決・レビュー後の push・閉じた PR では承認しない）。レビュワーが連携していなければ承認しない（bot でも承認しない）。トークンの期限が切れていれば更新してから承認し、回転したトークンを保存し直す。同じ commit への本人の承認が既にあれば、2 ページ目にあっても承認し直さない。承認が通らなくても（422 / 403）要約コメントは出て、ジョブは成功する
 // - 承認の取り消し: 承認済みの PR に同じ head で High のラウンドが出ると、承認者のトークンで REQUEST_CHANGES が 1 回だけ出る（commit_id と目印付き）。承認者が前のラウンドの作成者で、High を出したのが別の人でも取り消す。取り消し済みなら重ねて出さない。head が違う・閉じた PR・承認していない・取り下げ済み・連携なしでは取り消さない。403 / 422 でも要約コメントは出てジョブは成功する
 // - 変更要求: High / Medium の未解決があり head が新しい PR では、今の head にラウンドを出した人のうち自分のラウンドに未解決の High / Medium がある人の名義で、承認していなくても REQUEST_CHANGES が 1 回だけ出る（commit_id と目印付き）。承認済みなら取り消しの文面で出す。前の head の承認だけが残っていても出す。同じ commit に変更要求（目印の有無を問わない）か取り下げがあれば出さない。前の head の変更要求が残っていれば重ねない。連携なし・head が違う・閉じた PR では出さない。レビュー一覧の 2 ページ目にある変更要求も見落とさない
+// - 作者が本人: PR の作者がレビュワー本人のとき、GitHub が 422 で拒むので Approve・変更要求・承認の取り消しを試みない（作者が別人なら出す）。他のレビュワーには出す。1 人の投稿が 403 / 422 で失敗しても、残りのレビュワーへ進む
 // - 承認し直し: 目印付きの取り消しが最後の決定なら、マージ可に戻ったとき承認し直す。人が取り下げた承認・人の変更要求の後は承認し直さない
 // - マーカーの先取り: 第三者が同じマーカーを含むコメントを先に投稿していても、それを要約コメントと誤認せず、自分のコメントを新規に作成する
 // - 要約コメントの合流: 連続した状態遷移でも更新ジョブは 1 本に合流し、コメントは 1 本のまま最新の件数・マージ可否になる
@@ -1774,10 +1775,8 @@ async fn nothing_is_revoked_without_a_live_approval_or_a_fresh_open_pr() {
     for (case, reviews, link, head, state) in [
         (
             "人が取り下げた",
-            serde_json::json!([
-                review_json(REVIEWER_GITHUB_ID, "APPROVED", None),
-                review_json(REVIEWER_GITHUB_ID, "DISMISSED", None)
-            ]),
+            // 実 API の dismiss は、元のレビュー自体の state を DISMISSED に変える
+            serde_json::json!([review_json(REVIEWER_GITHUB_ID, "DISMISSED", None)]),
             LINKED,
             REVIEWED_HEAD,
             "open",
@@ -1944,14 +1943,12 @@ async fn changes_are_not_requested_twice_or_against_a_human_decision() {
         ),
         (
             "同じ commit で変更要求を人が取り下げた",
-            serde_json::json!([
-                review_json(
-                    REVIEWER_GITHUB_ID,
-                    "CHANGES_REQUESTED",
-                    Some("<!-- koyori-approval-revoked:PROJECT -->")
-                ),
-                review_json(REVIEWER_GITHUB_ID, "DISMISSED", None)
-            ]),
+            // 実 API の dismiss は元のレビューの state を DISMISSED に変える（本文の目印は残る）
+            serde_json::json!([review_json(
+                REVIEWER_GITHUB_ID,
+                "DISMISSED",
+                Some("<!-- koyori-approval-revoked:PROJECT -->")
+            )]),
             LINKED,
             fresh,
             "open",
@@ -2118,6 +2115,166 @@ async fn a_rejected_revocation_still_posts_the_summary_comment() {
     }
 }
 
+/// 1 人の投稿が拒まれても（422 / 403）、残りのレビュワーへ進む。
+/// どちらが先に処理されても確かめられるよう、失敗させる人を入れ替えて 2 回ずつ回す。
+#[serial_test::serial]
+#[tokio::test]
+async fn a_rejected_reviewer_does_not_stop_the_other_reviewer() {
+    for (failing, succeeding) in [(REVIEWER_TOKEN, OTHER_TOKEN), (OTHER_TOKEN, REVIEWER_TOKEN)] {
+        for status in [422, 403] {
+            let mock_server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path(reviews_api_path()))
+                .and(wiremock::matchers::header(
+                    "authorization",
+                    format!("Bearer {failing}").as_str(),
+                ))
+                .respond_with(
+                    ResponseTemplate::new(status).set_body_json(serde_json::json!({
+                        "message": "nope"
+                    })),
+                )
+                .with_priority(1)
+                .mount(&mock_server)
+                .await;
+            scenario(
+                &mock_server,
+                high(),
+                LINKED,
+                Scenario {
+                    second_round: Some((high(), true)),
+                    ..Default::default()
+                },
+            )
+            .await;
+
+            let tokens: Vec<String> = approvals(&mock_server)
+                .await
+                .into_iter()
+                .map(|(_, token)| token)
+                .collect();
+            assert_eq!(tokens.len(), 2, "{failing} が {status} でも両方に試みる");
+            assert!(
+                tokens.contains(&format!("Bearer {succeeding}")),
+                "{failing} が {status} でも {succeeding} には出す"
+            );
+        }
+    }
+}
+
+/// PR の作者がレビュワー本人のとき、GitHub は自分の PR への Approve / 変更要求を 422 で拒む
+/// ので、投稿を試みない（Approve・変更要求・承認の取り消しの全部）。作者が別人なら出す。
+/// 作者の ID が分からないとき（応答に id が無い）は従来どおり試みる（他のテスト）。
+#[serial_test::serial]
+#[tokio::test]
+async fn nothing_is_posted_when_the_reviewer_authored_the_pull_request() {
+    let someone_else: i64 = 7777;
+    for (case, author, findings, opts, expected) in [
+        (
+            "Approve（作者が本人）",
+            REVIEWER_GITHUB_ID,
+            serde_json::json!([]),
+            Scenario::default(),
+            vec![],
+        ),
+        (
+            "Approve（作者が別人）",
+            someone_else,
+            serde_json::json!([]),
+            Scenario::default(),
+            vec![("APPROVE", REVIEWER_TOKEN)],
+        ),
+        (
+            "変更要求（作者が本人）",
+            REVIEWER_GITHUB_ID,
+            high(),
+            Scenario::default(),
+            vec![],
+        ),
+        (
+            "変更要求（作者が別人）",
+            someone_else,
+            high(),
+            Scenario::default(),
+            vec![("REQUEST_CHANGES", REVIEWER_TOKEN)],
+        ),
+        (
+            "承認の取り消し（作者が本人）",
+            REVIEWER_GITHUB_ID,
+            serde_json::json!([]),
+            Scenario {
+                second_round: Some((high(), false)),
+                ..approved_only()
+            },
+            vec![],
+        ),
+        (
+            "承認の取り消し（作者が別人）",
+            someone_else,
+            serde_json::json!([]),
+            Scenario {
+                second_round: Some((high(), false)),
+                ..approved_only()
+            },
+            vec![("REQUEST_CHANGES", REVIEWER_TOKEN)],
+        ),
+        (
+            "本人だけ飛ばし、別のレビュワーには出す",
+            REVIEWER_GITHUB_ID,
+            high(),
+            Scenario {
+                second_round: Some((high(), true)),
+                ..Default::default()
+            },
+            vec![("REQUEST_CHANGES", OTHER_TOKEN)],
+        ),
+    ] {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/repos/{REPO_OWNER}/{REPO_NAME}/pulls/{PR_NUMBER}"
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "title": "feat: レビュー指摘管理",
+                "user": { "login": "author", "id": author },
+                "head": { "sha": REVIEWED_HEAD },
+                "state": "open"
+            })))
+            .with_priority(1)
+            .mount(&mock_server)
+            .await;
+        scenario(&mock_server, findings, LINKED, opts).await;
+
+        let posted: Vec<(String, String)> = approvals(&mock_server)
+            .await
+            .into_iter()
+            .map(|(body, token)| (body["event"].as_str().unwrap_or_default().into(), token))
+            .collect();
+        let expected: Vec<(String, String)> = expected
+            .into_iter()
+            .map(|(event, token)| (event.to_string(), format!("Bearer {token}")))
+            .collect();
+        assert_eq!(posted, expected, "{case}");
+
+        // 作者が本人のときは、レビュー一覧の取得（取り消し済みの判定）も試みない
+        let listed = mock_server
+            .received_requests()
+            .await
+            .expect("received requests")
+            .iter()
+            .filter(|r| {
+                r.method == wiremock::http::Method::GET
+                    && r.url.path() == reviews_api_path()
+                    && r.headers.get("authorization").and_then(|v| v.to_str().ok())
+                        == Some(format!("Bearer {REVIEWER_TOKEN}").as_str())
+            })
+            .count();
+        if author == REVIEWER_GITHUB_ID {
+            assert_eq!(listed, 0, "{case}: 本人の分はレビュー一覧も取らない");
+        }
+    }
+}
+
 /// 取り消した後にマージ可へ戻ったら承認し直す。人が取り下げた承認・人の変更要求の後は承認し直さない。
 #[serial_test::serial]
 #[tokio::test]
@@ -2148,10 +2305,7 @@ async fn approval_is_restored_only_after_our_own_revocation() {
         (
             "人が取り下げた",
             false,
-            vec![
-                review_json(REVIEWER_GITHUB_ID, "APPROVED", None),
-                review_json(REVIEWER_GITHUB_ID, "DISMISSED", None),
-            ],
+            vec![review_json(REVIEWER_GITHUB_ID, "DISMISSED", None)],
         ),
         (
             "人の変更要求",

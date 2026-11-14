@@ -390,54 +390,59 @@ async fn update_summary(
     // 表示用の PR メタは取れたときだけ更新する。取れなくても要約は出す
     // （PR 番号だけで用は足りるので、ここで止めると本題を落とす）。
     // 同じ応答に現在の head が入っているので、鮮度の照合にも使う（仕様 §7）
-    let (current_head_sha, pr_is_open) = match service::github::pr_comments::fetch_pull_request(
-        &state.http_client,
-        &token,
-        &integration.repo_owner,
-        &integration.repo_name,
-        job.pr_number,
-    )
-    .await
-    {
-        Ok(meta) => {
-            let head = meta.head.as_ref().map(|h| h.sha.clone());
-            let txn = state.db.begin().await?;
-            // 起票時の next_round と同じ行を先にロックし、対象取得と更新の間の
-            // ラウンド追加を防ぐ（作者だけ埋まり、通知されないラウンドを作らない）。
-            entity::projects::Entity::find_by_id(job.project_id)
-                .lock(sea_orm::sea_query::LockType::Update)
-                .one(&txn)
+    let (current_head_sha, pr_is_open, pr_author_github_id) =
+        match service::github::pr_comments::fetch_pull_request(
+            &state.http_client,
+            &token,
+            &integration.repo_owner,
+            &integration.repo_name,
+            job.pr_number,
+        )
+        .await
+        {
+            Ok(meta) => {
+                let head = meta.head.as_ref().map(|h| h.sha.clone());
+                let txn = state.db.begin().await?;
+                // 起票時の next_round と同じ行を先にロックし、対象取得と更新の間の
+                // ラウンド追加を防ぐ（作者だけ埋まり、通知されないラウンドを作らない）。
+                entity::projects::Entity::find_by_id(job.project_id)
+                    .lock(sea_orm::sea_query::LockType::Update)
+                    .one(&txn)
+                    .await?;
+                // 作者を控えるのと通知を 1 つの txn にまとめる。控えた後に落ちると、
+                // 次の実行では「作者が NULL のラウンド」が無くなって通知だけ抜ける
+                let unnotified = service::reviews::rounds_without_pr_author(
+                    &txn,
+                    job.project_id,
+                    repo,
+                    job.pr_number,
+                )
                 .await?;
-            // 作者を控えるのと通知を 1 つの txn にまとめる。控えた後に落ちると、
-            // 次の実行では「作者が NULL のラウンド」が無くなって通知だけ抜ける
-            let unnotified = service::reviews::rounds_without_pr_author(
-                &txn,
-                job.project_id,
-                repo,
-                job.pr_number,
-            )
-            .await?;
-            service::reviews::cache_pr_meta(
-                &txn,
-                job.project_id,
-                repo,
-                job.pr_number,
-                &meta.title,
-                meta.user.as_ref().map(|u| u.login.as_str()),
-                head.as_deref(),
-            )
-            .await?;
-            notify_pr_author(&txn, &meta, unnotified).await?;
-            txn.commit().await?;
-            (head, meta.state.as_deref() == Some("open"))
-        }
-        Err(e) => {
-            // 取れなければ鮮度を確かめられない。本文は「鮮度不明」になり、
-            // マージ可は出さない（仕様 §7）
-            tracing::warn!(error = %e, pr = job.pr_number, "fetch pull request meta failed");
-            (None, false)
-        }
-    };
+                service::reviews::cache_pr_meta(
+                    &txn,
+                    job.project_id,
+                    repo,
+                    job.pr_number,
+                    &meta.title,
+                    meta.user.as_ref().map(|u| u.login.as_str()),
+                    head.as_deref(),
+                )
+                .await?;
+                notify_pr_author(&txn, &meta, unnotified).await?;
+                txn.commit().await?;
+                (
+                    head,
+                    meta.state.as_deref() == Some("open"),
+                    meta.user.as_ref().and_then(|u| u.id),
+                )
+            }
+            Err(e) => {
+                // 取れなければ鮮度を確かめられない。本文は「鮮度不明」になり、
+                // マージ可は出さない（仕様 §7）
+                tracing::warn!(error = %e, pr = job.pr_number, "fetch pull request meta failed");
+                (None, false, None)
+            }
+        };
 
     // 指摘一覧への導線。アプリの公開 URL は既存の
     // `email_verification_app_url`（メール本文のリンクに使うもの）を流用する。
@@ -537,7 +542,18 @@ async fn update_summary(
         snapshot.latest_head_sha.as_deref(),
         snapshot.latest_reviewer_id,
     ) {
-        approve_as_reviewer(job, state, integration, commit_sha, reviewer_id, false).await;
+        approve_as_reviewer(
+            job,
+            state,
+            integration,
+            &ApproveRequest {
+                commit_sha,
+                reviewer_id,
+                only_after_revoke: false,
+                pr_author_github_id,
+            },
+        )
+        .await;
         // 前に取り消した他のレビュワーの承認も戻す。残すと、その人の変更要求が
         // 保護ブランチでマージを止め続ける。取り消されていない人は承認しない
         match service::reviews::reviewer_ids_at_head(
@@ -551,7 +567,18 @@ async fn update_summary(
         {
             Ok(ids) => {
                 for other in ids.into_iter().filter(|id| *id != reviewer_id) {
-                    approve_as_reviewer(job, state, integration, commit_sha, other, true).await;
+                    approve_as_reviewer(
+                        job,
+                        state,
+                        integration,
+                        &ApproveRequest {
+                            commit_sha,
+                            reviewer_id: other,
+                            only_after_revoke: true,
+                            pr_author_github_id,
+                        },
+                    )
+                    .await;
                 }
             }
             Err(e) => {
@@ -567,7 +594,16 @@ async fn update_summary(
         // 未解決の指摘がある間は変更要求を出し、承認があれば取り消す。head が違うときは
         // 何もしない（push 後の古い承認は branch protection に任せる）。
         // 再レビュー待ちだけのときも出さない（本文は未解決の指摘を理由にしている）
-        request_changes_as_reviewers(job, state, integration, repo, &snapshot, commit_sha).await;
+        request_changes_as_reviewers(
+            job,
+            state,
+            integration,
+            repo,
+            &snapshot,
+            commit_sha,
+            pr_author_github_id,
+        )
+        .await;
     }
     Ok(())
 }
@@ -630,6 +666,23 @@ async fn awaiting_rereview(
         .collect())
 }
 
+/// [`approve_as_reviewer`] の宛先と条件。
+#[derive(Clone, Copy)]
+struct ApproveRequest<'a> {
+    commit_sha: &'a str,
+    reviewer_id: Uuid,
+    only_after_revoke: bool,
+    /// PR 作者の GitHub ユーザー ID。取れなければ `None`
+    pr_author_github_id: Option<i64>,
+}
+
+/// 本人が PR の作者か。GitHub は自分の PR への Approve / Request changes を 422 で拒み、
+/// 何も残らないので、同じ試みを遷移のたびに繰り返さないよう投稿の前に飛ばす。
+/// 作者が分からないときは `false`（従来どおり試みる）。
+fn is_pr_author(pr_author_github_id: Option<i64>, reviewer_github_id: i64) -> bool {
+    pr_author_github_id == Some(reviewer_github_id)
+}
+
 /// レビュワー本人の名義で、PR を `commit_sha` に対して Approve する。
 /// `only_after_revoke` は、task が取り消した承認の承認し直し専用。
 ///
@@ -644,10 +697,14 @@ async fn approve_as_reviewer(
     job: &ReviewSummaryJob,
     state: &JobState,
     integration: &github_integrations::Model,
-    commit_sha: &str,
-    reviewer_id: Uuid,
-    only_after_revoke: bool,
+    request: &ApproveRequest<'_>,
 ) {
+    let ApproveRequest {
+        commit_sha,
+        reviewer_id,
+        only_after_revoke,
+        pr_author_github_id,
+    } = *request;
     let token = match service::oauth::github_app::github_app_user_token(
         &state.db,
         &state.http_client,
@@ -666,6 +723,11 @@ async fn approve_as_reviewer(
             return;
         }
     };
+
+    if is_pr_author(pr_author_github_id, token.github_user_id) {
+        tracing::debug!(project_id = %job.project_id, pr = job.pr_number, %reviewer_id, "reviewer is the pull request author; skipping approval");
+        return;
+    }
 
     match service::github::pr_comments::approve_pull_request(
         &state.http_client,
@@ -709,6 +771,7 @@ async fn request_changes_as_reviewers(
     repo: &service::reviews::RepoRef,
     snapshot: &service::reviews::SummarySnapshot,
     commit_sha: &str,
+    pr_author_github_id: Option<i64>,
 ) {
     let reviewers = match service::reviews::reviewer_ids_at_head(
         &state.db,
@@ -761,6 +824,11 @@ async fn request_changes_as_reviewers(
                 continue;
             }
         };
+
+        if is_pr_author(pr_author_github_id, token.github_user_id) {
+            tracing::debug!(project_id = %job.project_id, pr = job.pr_number, %reviewer_id, "reviewer is the pull request author; skipping change request");
+            continue;
+        }
 
         match service::github::pr_comments::request_changes(
             &state.http_client,
