@@ -1,5 +1,9 @@
 use sea_orm_migration::prelude::*;
 
+/// 中間テーブルとそのインデックスを作る SQL。新しいバックエンドをマイグレーションより先に起動すると
+/// SeaORM の `sync()` が空のテーブルを作るので、`IF NOT EXISTS` で受ける。統合テストと共有する。
+const CREATE_SQL: &str = include_str!("../../sql/create_personal_token_tenants.sql");
+
 /// 既存トークンの束縛を中間テーブルへ移す SQL。統合テストと共有するため
 /// `apps/backend/sql/` に置く（`m20261004000000_pat_scopes_api` と同じ置き方）。
 const BACKFILL_SQL: &str = include_str!("../../sql/backfill_personal_token_tenants.sql");
@@ -10,22 +14,11 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     /// PAT を複数のテナントに結び付けられるよう、束縛を `personal_tokens.tenant_id` 列から
-    /// 中間テーブルへ移し、列を消す。既存トークンは 1 行ずつ移るので、移行後も同じ 1 テナントで
-    /// だけ通る。一意性は複合主キーで持ち、UNIQUE インデックスは足さない。
+    /// 中間テーブルへ移し、列を消す。`sync()` が先にテーブルを作っていても通る。
+    /// 既存トークンは 1 行ずつ移るので、移行後も同じ 1 テナントでだけ通る。一意性は複合主キーで持ち、UNIQUE インデックスは足さない。
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let conn = manager.get_connection();
-        conn.execute_unprepared(
-            "CREATE TABLE personal_token_tenants (
-                token_id  UUID NOT NULL REFERENCES personal_tokens(id) ON DELETE CASCADE,
-                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-                PRIMARY KEY (token_id, tenant_id)
-            )",
-        )
-        .await?;
-        conn.execute_unprepared(
-            "CREATE INDEX idx_personal_token_tenants_tenant ON personal_token_tenants(tenant_id)",
-        )
-        .await?;
+        conn.execute_unprepared(CREATE_SQL).await?;
         conn.execute_unprepared(BACKFILL_SQL).await?;
         conn.execute_unprepared("ALTER TABLE personal_tokens DROP COLUMN tenant_id")
             .await?;

@@ -519,6 +519,43 @@ pub fn token_ids_bound_to(tenant_id: Uuid) -> SelectStatement {
         .to_owned()
 }
 
+/// そのテナントへの束縛をすべての PAT から外し、束縛が 1 つも残らなくなった PAT を取り消す。
+/// ほかのテナントにも結び付いた PAT は生かす。取り消した PAT（取り消し前の行）を返す。
+///
+/// 一括失効とテナントの削除で同じ処理を使う。テナントの削除は束縛を `ON DELETE CASCADE` で
+/// 消すので、行だけ `revoked = false` で残らないよう、テナントを消す前に同じトランザクションで呼ぶ。
+pub async fn unbind_tenant_from_tokens<C: ConnectionTrait>(
+    conn: &C,
+    tenant_id: Uuid,
+) -> Result<Vec<personal_tokens::Model>, DbErr> {
+    let tokens = PersonalTokenEntity::find()
+        .filter(personal_tokens::Column::Id.in_subquery(token_ids_bound_to(tenant_id)))
+        .filter(personal_tokens::Column::Revoked.eq(false))
+        .all(conn)
+        .await?;
+    personal_token_tenants::Entity::delete_many()
+        .filter(personal_token_tenants::Column::TenantId.eq(tenant_id))
+        .exec(conn)
+        .await?;
+    let still_bound: std::collections::HashSet<Uuid> = personal_token_tenants::Entity::find()
+        .filter(personal_token_tenants::Column::TokenId.is_in(tokens.iter().map(|token| token.id)))
+        .all(conn)
+        .await?
+        .into_iter()
+        .map(|binding| binding.token_id)
+        .collect();
+    let orphaned: Vec<personal_tokens::Model> = tokens
+        .into_iter()
+        .filter(|token| !still_bound.contains(&token.id))
+        .collect();
+    PersonalTokenEntity::update_many()
+        .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
+        .filter(personal_tokens::Column::Id.is_in(orphaned.iter().map(|token| token.id)))
+        .exec(conn)
+        .await?;
+    Ok(orphaned)
+}
+
 /// PAT の `last_used_at` を書き直す間隔。CLI や BOT は短い間隔で連続して叩くので、毎回は書かない。
 const PERSONAL_TOKEN_LAST_USED_WRITE_INTERVAL_SECS: i64 = 300;
 

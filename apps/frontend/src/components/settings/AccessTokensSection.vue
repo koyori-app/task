@@ -160,13 +160,17 @@ async function onSubmit() {
     resetForm();
     createdToken.value = created.token;
   } catch (e) {
-    const status = (e as { response?: { status?: number } }).response?.status;
+    const err = e as { response?: { status?: number }; error?: { message?: unknown } };
+    const status = err.response?.status;
+    // 候補は Owner / Admin に絞ってあるので、403 の主な原因は 2FA の強制。API はどのテナントかを返さない
     submitError.value =
-      status === 403
-        ? 'トークンを発行できるのは、選択したテナントのオーナーと Admin だけです。'
-        : status === 400
-          ? '入力内容を確認してください。'
-          : 'トークンを発行できませんでした。時間をおいて再度お試しください。';
+      status === 403 && err.error?.message === '2fa-setup-required'
+        ? '選択したテナントのどれかが 2 段階認証を必須にしています。2 段階認証を設定してから、もう一度発行してください。'
+        : status === 403
+          ? 'トークンを発行できるのは、選択したテナントのオーナーと Admin だけです。'
+          : status === 400
+            ? '入力内容を確認してください。'
+            : 'トークンを発行できませんでした。時間をおいて再度お試しください。';
   }
 }
 

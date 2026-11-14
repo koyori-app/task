@@ -381,6 +381,10 @@ pub async fn get_personal_token(
     auth.require_session()?;
     let token = get_owned_token(&state, id, auth.user_id).await?;
     let tenant_ids = auth::personal_token_tenant_ids(&state.db, token.id).await?;
+    // 束縛が尽きたトークンは一覧にも出さず認証でも通らないので、単体取得も 404 にそろえる
+    if tenant_ids.is_empty() {
+        return Err(AppError::NotFound);
+    }
     let resp = PersonalTokenResponse::from_parts(token, tenant_ids)
         .map_err(|e| AppError::Internal(e.into()))?;
     Ok(Json(resp))

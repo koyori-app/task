@@ -7,7 +7,7 @@ use axum_valid::Valid;
 use sea_orm::prelude::Uuid;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, EntityTrait, QueryFilter,
-    QuerySelect,
+    QuerySelect, TransactionTrait,
 };
 
 use crate::AppState;
@@ -20,6 +20,7 @@ use crate::extractors::AuthUser;
 use crate::openapi::{CrudErrors, TenantCreateErrors};
 use entity::{scopes::Scope, tenant_members, tenant_members::TenantRole, tenants};
 use payload::tenants::*;
+use service::auth;
 
 #[axum::debug_handler]
 #[utoipa::path(
@@ -235,6 +236,11 @@ pub async fn delete_tenant(
     auth.require_session()?;
     auth.require_scope(Scope::WriteTenant)?;
     auth.ensure_tenant_owner(&state, id).await?;
-    tenants::Entity::delete_by_id(id).exec(&state.db).await?;
+    // 束縛が尽きた PAT を、テナントの削除（束縛の Cascade）より先に同じトランザクションで取り消す。
+    // しないと、行が `revoked = false` で残って単体取得だけが空の束縛で返る
+    let txn = state.db.begin().await?;
+    auth::unbind_tenant_from_tokens(&txn, id).await?;
+    tenants::Entity::delete_by_id(id).exec(&txn).await?;
+    txn.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }

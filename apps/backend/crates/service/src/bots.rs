@@ -1,11 +1,9 @@
 //! テナント BOT の所属と鍵の管理。
-use crate::auth::{bind_personal_token_tenants, token_ids_bound_to};
+use crate::auth::{bind_personal_token_tenants, token_ids_bound_to, unbind_tenant_from_tokens};
 use chrono::{DateTime, Duration, Utc};
 use common::error::AppError;
 use entity::scopes::ScopeList;
-use entity::{
-    audit_logs, personal_token_tenants, personal_tokens, projects, tenant_members, tenants, users,
-};
+use entity::{audit_logs, personal_tokens, projects, tenant_members, tenants, users};
 use payload::{
     bots::*,
     personal_tokens::{CreatePersonalTokenResponse, PersonalTokenResponse},
@@ -374,31 +372,7 @@ pub async fn revoke_all_tenant_tokens(
     let bot_ids: std::collections::HashSet<Uuid> = bots.into_iter().map(|user| user.id).collect();
     // このテナントの束縛を外す。オーナーの権限は自分のテナントまでなので、ほかのテナントにも
     // 結び付いたトークンは残し、束縛が 1 つも無くなったトークンだけを取り消す。
-    let tokens = personal_tokens::Entity::find()
-        .filter(personal_tokens::Column::Id.in_subquery(token_ids_bound_to(tenant_id)))
-        .filter(personal_tokens::Column::Revoked.eq(false))
-        .all(&txn)
-        .await?;
-    personal_token_tenants::Entity::delete_many()
-        .filter(personal_token_tenants::Column::TenantId.eq(tenant_id))
-        .exec(&txn)
-        .await?;
-    let still_bound: std::collections::HashSet<Uuid> = personal_token_tenants::Entity::find()
-        .filter(personal_token_tenants::Column::TokenId.is_in(tokens.iter().map(|token| token.id)))
-        .all(&txn)
-        .await?
-        .into_iter()
-        .map(|binding| binding.token_id)
-        .collect();
-    let orphaned: Vec<personal_tokens::Model> = tokens
-        .into_iter()
-        .filter(|token| !still_bound.contains(&token.id))
-        .collect();
-    personal_tokens::Entity::update_many()
-        .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
-        .filter(personal_tokens::Column::Id.is_in(orphaned.iter().map(|token| token.id)))
-        .exec(&txn)
-        .await?;
+    let orphaned = unbind_tenant_from_tokens(&txn, tenant_id).await?;
     for token in orphaned {
         if bot_ids.contains(&token.user_id) {
             audit(

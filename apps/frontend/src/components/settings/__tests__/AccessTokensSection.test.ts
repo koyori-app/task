@@ -1,6 +1,6 @@
 // テストケースの一覧（docs/dev/features/account-settings.md から移した）
 // - 一覧表示（伏せ字・スコープ数・期限・最終使用）、発行リクエストの内容（90 日既定・無期限）
-// - 名前とスコープの入力チェック、403 の表示、取り消しの確認ダイアログと失敗時の表示、オーナーのテナントが無い場合の無効化
+// - 名前とスコープの入力チェック、403 の表示（オーナーと Admin の限定・2FA 強制の案内）、取り消しの確認ダイアログと失敗時の表示、オーナーのテナントが無い場合の無効化
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils';
@@ -73,6 +73,8 @@ type MockState = {
   /** true なら、オーナーのテナントを 2 つ（Acme Inc・Beta LLC）返す */
   twoTenants?: boolean;
   createStatus?: number;
+  /** 発行の失敗時に返す message（既定は 'error'） */
+  createMessage?: string;
   deleteStatus?: number;
 };
 
@@ -102,7 +104,9 @@ function stubFetch(state: MockState) {
     if (req.method === 'POST' && pathname.endsWith('/v1/personal_tokens')) {
       const body = (await req.clone().json()) as Record<string, unknown>;
       createBodies.push(body);
-      if (state.createStatus) return jsonResponse({ message: 'error' }, state.createStatus);
+      if (state.createStatus) {
+        return jsonResponse({ message: state.createMessage ?? 'error' }, state.createStatus);
+      }
       const created = token({
         name: String(body.name),
         token_last_four: 'b21c',
@@ -357,6 +361,24 @@ describe('AccessTokensSection', () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain('オーナーと Admin だけです。');
+  });
+
+  it('403 が 2fa-setup-required のときは 2 段階認証の設定を促す', async () => {
+    stubFetch({ tokens: [], createStatus: 403, createMessage: '2fa-setup-required' });
+    const wrapper = mountSection();
+    await flushPromises();
+
+    clickBodyButton('トークンを発行');
+    await flushPromises();
+
+    await wrapper.find('#token-name').setValue('CI deploy');
+    clickScopeCheckbox('read:task');
+    await flushPromises();
+    await wrapper.find('form').trigger('submit');
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('2 段階認証を必須にしています');
+    expect(wrapper.text()).not.toContain('オーナーと Admin だけです。');
   });
 
   it('取り消しは確認ダイアログを経て DELETE を送り、一覧から消す', async () => {

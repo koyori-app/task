@@ -14,6 +14,7 @@ use sea_orm::{
 use serde_json::{Value, json};
 use uuid::Uuid;
 
+const CREATE_SQL: &str = include_str!("../../sql/create_personal_token_tenants.sql");
 const BACKFILL_SQL: &str = include_str!("../../sql/backfill_personal_token_tenants.sql");
 
 async fn add_member(app: &TestApp, tenant_id: Uuid, user_id: Uuid, role: TenantRole) {
@@ -366,6 +367,144 @@ async fn deleting_a_tenant_keeps_the_token_for_the_others_and_kills_it_when_none
     app.cleanup_user(admin.id).await;
 }
 
+/// セッションの一覧から、束縛が `tenant_ids` に一致するトークンの id を引く。
+async fn token_id_bound_to(app: &TestApp, tenant_ids: &[Uuid]) -> Uuid {
+    let listed = json_body(app.get_with_session("/v1/personal_tokens").await).await;
+    let want: Vec<String> = tenant_ids.iter().map(ToString::to_string).collect();
+    let found = listed
+        .as_array()
+        .expect("tokens")
+        .iter()
+        .find(|token| {
+            let mut got: Vec<String> = token["tenant_ids"]
+                .as_array()
+                .expect("tenant_ids")
+                .iter()
+                .map(|id| id.as_str().expect("id").to_string())
+                .collect();
+            got.sort();
+            let mut want = want.clone();
+            want.sort();
+            got == want
+        })
+        .expect("token bound to the tenants");
+    found["id"].as_str().expect("id").parse().expect("uuid")
+}
+
+async fn is_revoked(app: &TestApp, token_id: Uuid) -> bool {
+    entity::personal_tokens::Entity::find_by_id(token_id)
+        .one(&app.state.db)
+        .await
+        .expect("find token")
+        .expect("token row")
+        .revoked
+}
+
+/// オーナーによるテナント削除でも、束縛が尽きたトークンは取り消され、単体取得も 404 になる
+/// （一覧・認証と食い違わない）。ほかのテナントにも結んだトークンは生きている。
+#[tokio::test]
+async fn owner_deleting_a_tenant_revokes_exhausted_tokens_and_keeps_shared_ones() {
+    let mut app = TestApp::new().await;
+    let user = app.insert_user_default().await;
+    let a = insert_tenant(&app.state.db, user.id).await;
+    let b = insert_tenant(&app.state.db, user.id).await;
+    app.insert_pat_in_tenants(user.id, &[a, b], vec![Scope::Api], None)
+        .await;
+    app.insert_pat_in_tenants(user.id, &[a], vec![Scope::Api], None)
+        .await;
+
+    login(&mut app, &user).await;
+    let both_id = token_id_bound_to(&app, &[a, b]).await;
+    let only_a_id = token_id_bound_to(&app, &[a]).await;
+
+    let res = app.delete_with_session(&format!("/v1/tenants/{a}")).await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    assert!(is_revoked(&app, only_a_id).await, "束縛が尽きたら取り消す");
+    assert_eq!(
+        app.get_with_session(&format!("/v1/personal_tokens/{only_a_id}"))
+            .await
+            .status(),
+        StatusCode::NOT_FOUND,
+        "束縛の無いトークンは単体取得でも出さない"
+    );
+
+    assert!(
+        !is_revoked(&app, both_id).await,
+        "ほかのテナントに結んだトークンは生きている"
+    );
+    let res = app
+        .get_with_session(&format!("/v1/personal_tokens/{both_id}"))
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(json_body(res).await["tenant_ids"], json!([b.to_string()]));
+
+    app.cleanup_user(user.id).await;
+}
+
+/// 管理者の強制削除も同じ（`delete_tenant` が 2 経路ある）。
+#[tokio::test]
+async fn admin_deleting_a_tenant_revokes_exhausted_tokens() {
+    let mut app = TestApp::new().await;
+    let user = app.insert_user_default().await;
+    let admin = app.insert_user(true, false).await;
+    let a = insert_tenant(&app.state.db, user.id).await;
+    let b = insert_tenant(&app.state.db, user.id).await;
+    app.insert_pat_in_tenants(user.id, &[a], vec![Scope::Api], None)
+        .await;
+    app.insert_pat_in_tenants(user.id, &[a, b], vec![Scope::Api], None)
+        .await;
+    login(&mut app, &user).await;
+    let only_a_id = token_id_bound_to(&app, &[a]).await;
+    let both_id = token_id_bound_to(&app, &[a, b]).await;
+
+    login(&mut app, &admin).await;
+    let res = app
+        .delete_with_session(&format!("/v1/admin/tenants/{a}"))
+        .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    assert!(is_revoked(&app, only_a_id).await);
+    assert!(!is_revoked(&app, both_id).await);
+
+    app.cleanup_user(user.id).await;
+    app.cleanup_user(admin.id).await;
+}
+
+/// 束縛の無い行が（過去の削除などで）残っていても、単体取得は一覧と同じく出さない。
+#[tokio::test]
+async fn single_get_hides_a_token_without_bindings() {
+    let mut app = TestApp::new().await;
+    let user = app.insert_user_default().await;
+    let a = insert_tenant(&app.state.db, user.id).await;
+    app.insert_pat_in_tenants(user.id, &[a], vec![Scope::Api], None)
+        .await;
+    login(&mut app, &user).await;
+    let token_id = token_id_bound_to(&app, &[a]).await;
+    entity::personal_token_tenants::Entity::delete_many()
+        .filter(entity::personal_token_tenants::Column::TokenId.eq(token_id))
+        .exec(&app.state.db)
+        .await
+        .expect("unbind");
+
+    let listed = json_body(app.get_with_session("/v1/personal_tokens").await).await;
+    assert!(
+        !listed
+            .as_array()
+            .expect("tokens")
+            .iter()
+            .any(|token| token["id"] == token_id.to_string())
+    );
+    assert_eq!(
+        app.get_with_session(&format!("/v1/personal_tokens/{token_id}"))
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+
+    app.cleanup_user(user.id).await;
+}
+
 async fn insert_notification(app: &TestApp, user_id: Uuid, project_id: Uuid) {
     entity::notifications::ActiveModel {
         id: Set(Uuid::new_v4()),
@@ -422,7 +561,8 @@ async fn notifications_cover_every_bound_tenant_only() {
     app.cleanup_user(user.id).await;
 }
 
-/// 既存トークンは、移行後も元の 1 テナントにだけ結び付く。移行の SQL は 2 回流しても増えない。
+/// 既存トークンは、移行後も元の 1 テナントにだけ結び付く。移行の SQL は 2 回流しても増えず、
+/// sync() が先にテーブルを作っていても通る。
 /// マイグレーションの前の形（`tenant_id` 列）をトランザクション内で作り、巻き戻す。
 #[tokio::test]
 async fn backfill_binds_existing_tokens_to_their_single_tenant() {
@@ -465,6 +605,10 @@ async fn backfill_binds_existing_tokens_to_their_single_tenant() {
         .await
         .expect("clear bindings");
 
+    // 起動時の sync() が先にテーブルを作った DB（ここでは作成済み）に up を流しても通る
+    txn.execute_unprepared(CREATE_SQL)
+        .await
+        .expect("create is a no-op when sync() already made the table");
     txn.execute_unprepared(BACKFILL_SQL)
         .await
         .expect("backfill");
