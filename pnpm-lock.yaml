@@ -265,8 +265,8 @@ importers:
         specifier: 0.7.6
         version: 0.7.6(@voidzero-dev/vite-plus-core@1.5.0)(crossws@0.4.12(srvx@1.0.5))(srvx@1.0.5)
       '@vitejs/plugin-vue':
-        specifier: 6.0.9
-        version: 6.0.9(@voidzero-dev/vite-plus-core@1.5.0)(vue@3.5.44(typescript@6.0.3))
+        specifier: 6.0.11
+        version: 6.0.11(@voidzero-dev/vite-plus-core@1.5.0)(vue@3.5.44(typescript@6.0.3))
       '@vitest/browser-playwright':
         specifier: 5.1.0
         version: 5.1.0(@voidzero-dev/vite-plus-core@1.5.0)(playwright@1.63.0)(vitest@5.1.0)
@@ -3572,12 +3572,12 @@ packages:
       '@vitejs/devtools-vitest':
         optional: true
 
-  '@vitejs/plugin-vue@6.0.9':
-    resolution: {integrity: sha512-rD/MORlhaZMlXWW0rEn4FB4wMinWC0z/D7Ye160S5+Rs1mC8ZDAdcDp4SjKfUhG5t8q1ktcPVw4xuTkPRlzrSA==}
+  '@vitejs/plugin-vue@6.0.11':
+    resolution: {integrity: sha512-m48lskIUJGlB6qUiYhDMI8nd2ngeidz2U4nKTjqI13cFMu5rH8JeEILPkDtK9Fk/TjBA2pkj8AlbenqDaKu+ww==}
     engines: {node: ^20.19.0 || >=22.12.0}
     peerDependencies:
       vite: ^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0
-      vue: ^3.2.25
+      vue: ^3.2.25 || ^3.6.0-rc.15
 
   '@vitest/browser-playwright@5.1.0':
     resolution: {integrity: sha512-3PbVvX/KNeUEzUeTTXw5bQDyfJS+WqU/UJ8RNWIojHb0mE6d/IBjuLmt+i7OpJ00tjNWv0O6XBm5ler/tEf3eg==}
@@ -10743,7 +10743,7 @@ snapshots:
       - ocache
       - srvx
 
-  '@vitejs/plugin-vue@6.0.9(@voidzero-dev/vite-plus-core@1.5.0)(vue@3.5.44(typescript@6.0.3))':
+  '@vitejs/plugin-vue@6.0.11(@voidzero-dev/vite-plus-core@1.5.0)(vue@3.5.44(typescript@6.0.3))':
     dependencies:
       '@rolldown/pluginutils': 1.0.1
       vite: '@voidzero-dev/vite-plus-core@1.5.0(@types/node@24.19.2)(@vitejs/devtools@0.7.6)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.11)(esbuild@0.28.2)(jiti@2.7.0)(typescript@6.0.3)(vue-tsc@3.3.11(typescript@6.0.3))(yaml@2.9.1)'
