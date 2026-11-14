@@ -58,7 +58,7 @@
     "emojibase-data": "18.0.0",
     "isomorphic-dompurify": "4.4.0",
     "lru-cache": "11.5.3",
-    "mermaid": "11.16.1",
+    "mermaid": "12.3.0",
     "openapi-fetch": "0.17.0",
     "pinia": "4.0.3",
     "pinia-plugin-persistedstate": "4.7.1",
