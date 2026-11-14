@@ -5,6 +5,7 @@ import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
 import { createPinia, setActivePinia } from 'pinia';
 import TaskDetailPage from '@/pages/@tenant/projects/@projectKey/tasks/@taskId/+Page.vue';
 import { KFM_STORY_INPUTS } from '@/lib/kfm-story-fixtures/inputs';
+import kfmChecklistHtml from '@/lib/kfm-story-fixtures/rendered/gfm-task-list.html?raw';
 import kfmDescriptionHtml from '@/lib/kfm-story-fixtures/rendered/task-detail-description.html?raw';
 import TaskDetailOverlay from '@/components/tasks/TaskDetailOverlay.vue';
 import type { MentionTable } from '@/lib/comment-mention';
@@ -832,6 +833,29 @@ export const DescriptionKfmRendered: Story = {
     expect(strong.tagName).toBe('STRONG');
     // プレーン枝 (生テキストのマーカー記法そのまま) が出ていない
     expect(canvas.queryByText(KFM_DESCRIPTION)).toBeNull();
+  },
+};
+
+const CHECKLIST_DESCRIPTION = KFM_STORY_INPUTS['gfm-task-list'];
+
+export const DescriptionChecklistProgress: Story = {
+  name: '説明のチェックリスト達成率',
+  decorators: [
+    storyDecorator(mockContext, {
+      descriptionHtml: kfmChecklistHtml,
+      descriptionSource: CHECKLIST_DESCRIPTION,
+    }),
+  ],
+  beforeEach: () =>
+    createMockFetch({ task: { ...sampleTaskDetail, description: CHECKLIST_DESCRIPTION } }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const badge = await canvas.findByText('2 / 5');
+    await expect(badge.closest('[data-checklist-progress]')).not.toBeNull();
+    const description = canvasElement.querySelector('[data-task-description-html]');
+    await expect(description?.querySelectorAll('input[type="checkbox"]')).toHaveLength(5);
+    // 「進捗」行（progress_pct）は別の値のまま
+    await expect(canvas.findByText('30%')).resolves.toBeInTheDocument();
   },
 };
 
