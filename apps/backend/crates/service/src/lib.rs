@@ -36,6 +36,7 @@ pub mod smtp;
 pub mod storage;
 pub mod task_activities;
 pub mod task_attachments;
+pub mod task_completion;
 pub mod task_responses;
 pub mod tasks;
 pub mod tenant_invitations;

@@ -101,6 +101,18 @@ async fn record_task_field_activities<C: ConnectionTrait>(
         .await?;
         notify_status_changed(db, project_id, task_id, Some(user_id), &from, &to).await?;
     }
+    if let Some(new_rule) = payload.require_all_assignees_done
+        && new_rule != before.require_all_assignees_done
+    {
+        record_activity(
+            db,
+            task_id,
+            Some(user_id),
+            "completion_rule_changed",
+            serde_json::json!({ "require_all_assignees_done": new_rule }),
+        )
+        .await?;
+    }
     if let Some(new_priority) = payload.priority
         && new_priority != before.priority
     {
@@ -863,7 +875,7 @@ pub async fn bulk_create_tasks(
             .filter(entity::sprints::Column::ProjectId.eq(project_id))
             .filter(entity::sprints::Column::Id.is_in(sprint_ids))
             .order_by_asc(entity::sprints::Column::Id)
-            .lock(sea_orm::sea_query::LockType::Update)
+            .lock(LockType::Update)
             .all(&txn)
             .await?;
     }
@@ -993,6 +1005,8 @@ pub async fn update_task(
     }
 
     let mut active: tasks::ActiveModel = task.into();
+    // ステータスが変わるときの (変更前が完了, 変更後が完了)。担当者ごとの完了の判定に使う
+    let mut status_move: Option<(bool, bool)> = None;
     if let Some(ref v) = payload.title {
         active.title = Set(v.clone());
     }
@@ -1007,6 +1021,13 @@ pub async fn update_task(
             .one(&txn)
             .await?
             .ok_or(AppError::NotFound)?;
+        if v != task_snapshot.status_id {
+            let was_done = project_statuses::Entity::find_by_id(task_snapshot.status_id)
+                .one(&txn)
+                .await?
+                .is_some_and(|old| old.is_done_state);
+            status_move = Some((was_done, status.is_done_state));
+        }
         if status.is_done_state {
             ensure_required_custom_fields(
                 &txn,
@@ -1026,6 +1047,9 @@ pub async fn update_task(
             Set(None)
         };
         active.status_id = Set(v);
+    }
+    if let Some(v) = payload.require_all_assignees_done {
+        active.require_all_assignees_done = Set(v);
     }
     if let Some(v) = payload.priority {
         active.priority = Set(v);
@@ -1186,6 +1210,7 @@ pub async fn update_task(
                 user_id: Set(assignee.user_id),
                 role: Set(assignee.role.clone()),
                 assigned_at: Set(chrono::Utc::now().into()),
+                completed_at: Set(None),
             }
             .insert(&txn)
             .await?;
@@ -1222,6 +1247,16 @@ pub async fn update_task(
                 .await?;
             }
         }
+    }
+
+    // 担当者ごとの完了。担当者の置き換えと同じ要求で完了へ移す場合に、置き換え後の担当者で判定する
+    if status_move == Some((false, true)) {
+        service::task_completion::ensure_can_enter_done(&txn, &updated).await?;
+    }
+    if status_move == Some((true, false))
+        || (task_snapshot.require_all_assignees_done && !updated.require_all_assignees_done)
+    {
+        service::task_completion::reset_assignee_completions(&txn, task_id).await?;
     }
 
     // 説明文のメンション。編集では、編集前に無く新しく増えた印の者だけに通知する
@@ -1446,22 +1481,25 @@ pub async fn add_assignee(
         .await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
     require_project_access(&state.db, tenant_id, project_id, payload.user_id).await?;
+    let role = payload.role.clone();
+    let txn = state.db.begin().await?;
+    // 「自分の分の完了」と重なっても判定がずれないよう、先にタスク行をロックする
+    service::task_completion::lock_task(&txn, project_id, task.id).await?;
     let duplicate = task_assignees::Entity::find()
         .filter(task_assignees::Column::TaskId.eq(task.id))
         .filter(task_assignees::Column::UserId.eq(payload.user_id))
-        .one(&state.db)
+        .one(&txn)
         .await?;
     if duplicate.is_some() {
         return Err(AppError::Conflict);
     }
-    let role = payload.role.clone();
-    let txn = state.db.begin().await?;
     let assignee = task_assignees::ActiveModel {
         id: Set(Uuid::new_v4()),
         task_id: Set(task.id),
         user_id: Set(payload.user_id),
         role: Set(role.clone()),
         assigned_at: Set(chrono::Utc::now().into()),
+        completed_at: Set(None),
     }
     .insert(&txn)
     .await?;
@@ -1517,15 +1555,19 @@ pub async fn update_assignee(
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
+    let txn = state.db.begin().await?;
+    service::task_completion::lock_task(&txn, project_id, task.id).await?;
     let assignee = task_assignees::Entity::find()
         .filter(task_assignees::Column::TaskId.eq(task.id))
         .filter(task_assignees::Column::UserId.eq(user_id))
-        .one(&state.db)
+        .one(&txn)
         .await?
         .ok_or(AppError::NotFound)?;
     let mut active: task_assignees::ActiveModel = assignee.into();
     active.role = Set(payload.role);
-    Ok(Json(active.update(&state.db).await?.into()))
+    let updated = active.update(&txn).await?;
+    txn.commit().await?;
+    Ok(Json(updated.into()))
 }
 
 #[axum::debug_handler]
@@ -1554,13 +1596,16 @@ pub async fn remove_assignee(
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
+    let txn = state.db.begin().await?;
+    // 完了処理と同じ順（タスク行 → 担当者行）でロックする
+    service::task_completion::lock_task(&txn, project_id, task.id).await?;
     let assignee = task_assignees::Entity::find()
         .filter(task_assignees::Column::TaskId.eq(task.id))
         .filter(task_assignees::Column::UserId.eq(user_id))
-        .one(&state.db)
+        .lock(LockType::Update)
+        .one(&txn)
         .await?
         .ok_or(AppError::NotFound)?;
-    let txn = state.db.begin().await?;
     task_assignees::Entity::delete_by_id(assignee.id)
         .exec(&txn)
         .await?;
@@ -1574,6 +1619,88 @@ pub async fn remove_assignee(
     .await?;
     txn.commit().await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
+    post,
+    path = "/{id}/assignees/{user_id}/complete",
+    tag = "Tasks",
+    summary = "自分の担当分を完了にする",
+    description = "`require_all_assignees_done` が on のタスクで、本人だけが自分の分を完了にできる。\
+        最後の 1 人が完了にすると、タスクを既定の完了ステータスへ移す。off のタスクは 409 `completion-not-required`",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("project_id" = Uuid, Path, description = "プロジェクトID"),
+        ("id" = String, Path, description = "タスクID"),
+        ("user_id" = Uuid, Path, description = "ユーザーID（本人のみ）"),
+    ),
+    responses(
+        (status = 200, description = "更新後のタスク", body = TaskDetailResponse),
+        CrudErrors,
+    )
+)]
+pub async fn complete_assignee(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, project_id, id, user_id)): Path<(Uuid, Uuid, String, Uuid)>,
+) -> Result<Json<TaskDetailResponse>, AppError> {
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
+    let task = resolve_task(&state, tenant_id, project_id, &id).await?;
+    if user_id != auth.user_id {
+        return Err(AppError::Forbidden);
+    }
+    let txn = state.db.begin().await?;
+    let outcome =
+        service::task_completion::complete_assignee(&txn, project_id, task.id, user_id).await?;
+    txn.commit().await?;
+    if outcome.pending_push {
+        crate::handlers::github::enqueue_issue_push(&state, task.id).await;
+    }
+    Ok(Json(
+        build_task_detail_response(&state, project_id, outcome.task, auth.user_id).await?,
+    ))
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
+    post,
+    path = "/{id}/assignees/{user_id}/reopen",
+    tag = "Tasks",
+    summary = "自分の担当分の完了を取り消す",
+    description = "本人だけが取り消せる。タスクが完了済みの間は 409 `task-already-done`（先にステータスを戻す）",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("project_id" = Uuid, Path, description = "プロジェクトID"),
+        ("id" = String, Path, description = "タスクID"),
+        ("user_id" = Uuid, Path, description = "ユーザーID（本人のみ）"),
+    ),
+    responses(
+        (status = 200, description = "更新後のタスク", body = TaskDetailResponse),
+        CrudErrors,
+    )
+)]
+pub async fn reopen_assignee(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, project_id, id, user_id)): Path<(Uuid, Uuid, String, Uuid)>,
+) -> Result<Json<TaskDetailResponse>, AppError> {
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
+    let task = resolve_task(&state, tenant_id, project_id, &id).await?;
+    if user_id != auth.user_id {
+        return Err(AppError::Forbidden);
+    }
+    let txn = state.db.begin().await?;
+    let task =
+        service::task_completion::reopen_assignee(&txn, project_id, task.id, user_id).await?;
+    txn.commit().await?;
+    Ok(Json(
+        build_task_detail_response(&state, project_id, task, auth.user_id).await?,
+    ))
 }
 
 // ─── Relations ───────────────────────────────────────────────────────────

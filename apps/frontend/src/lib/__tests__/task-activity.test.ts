@@ -52,6 +52,23 @@ describe('activityText', () => {
   });
 
   it.each([
+    ['assignee_completed', { user_id: 'u1' }, '自分の担当分を完了にしました'],
+    ['assignee_reopened', { user_id: 'u1' }, '自分の担当分の完了を取り消しました'],
+    [
+      'completion_rule_changed',
+      { require_all_assignees_done: true },
+      '担当者全員の完了を必須にしました',
+    ],
+    [
+      'completion_rule_changed',
+      { require_all_assignees_done: false },
+      '担当者全員の完了の必須を解除しました',
+    ],
+  ])('担当者ごとの完了 %s %j を表示する', (event_type, payload, expected) => {
+    expect(text(event_type, payload)).toBe(expected);
+  });
+
+  it.each([
     ['label_added', { label_id: 'label-1', name: 'バグ' }, 'ラベル「バグ」を追加しました'],
     ['label_removed', { label_id: 'label-1', name: 'バグ' }, 'ラベル「バグ」を外しました'],
     ['label_added', {}, 'ラベルを追加しました'],

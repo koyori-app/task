@@ -168,6 +168,7 @@ pub async fn create_task_in_txn<C: ConnectionTrait>(
         soft_deadline: Set(soft_deadline),
         hard_deadline: Set(hard_deadline),
         planned_start_on: Set(planned_start_on),
+        require_all_assignees_done: Set(payload.require_all_assignees_done),
         estimated_minutes: Set(payload.estimated_minutes),
         is_archived: Set(false),
         created_by: Set(ctx.actor_id),
@@ -187,6 +188,7 @@ pub async fn create_task_in_txn<C: ConnectionTrait>(
             user_id: Set(a.user_id),
             role: Set(a.role.clone()),
             assigned_at: Set(chrono::Utc::now().into()),
+            completed_at: Set(None),
         }
         .insert(txn)
         .await?;
@@ -199,6 +201,10 @@ pub async fn create_task_in_txn<C: ConnectionTrait>(
             &a.role,
         )
         .await?;
+    }
+    // 作成直後の担当者はみな未完了なので、全員の完了が必要なら完了ステータスでは作れない
+    if status.is_done_state {
+        crate::task_completion::ensure_can_enter_done(txn, &model).await?;
     }
     let unique_label_ids: Vec<Uuid> = {
         let mut v = payload.label_ids.clone();
@@ -348,6 +354,7 @@ mod tests {
             soft_deadline: soft.map(dt),
             hard_deadline: hard.map(dt),
             planned_start_on: start.map(d),
+            require_all_assignees_done: false,
             estimated_minutes: None,
             is_archived: false,
             created_by: Uuid::nil(),

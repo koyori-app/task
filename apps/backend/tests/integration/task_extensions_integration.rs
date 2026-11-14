@@ -6,7 +6,7 @@
 
 use crate::common::TestApp;
 use axum::http::StatusCode;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, QueryFilter};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -567,4 +567,157 @@ async fn task_detail_embeds_attachments_and_list_does_not() {
         app.get_with_session(&attachments_path).await.status(),
         StatusCode::FORBIDDEN
     );
+}
+
+/// 担当者全員の完了が必要なタスクは、未完了の担当者が残るかぎり一括更新でも完了へ移せない。
+/// 同じ要求の通常タスクは更新される。
+#[tokio::test]
+async fn bulk_update_rejects_done_while_assignees_are_pending() {
+    let mut app = TestApp::new().await;
+    let fx = setup_task(&mut app).await;
+    let member = app.insert_user(false, false).await;
+    crate::common::ensure_tenant_member_for_project(&app.state.db, fx.project_id, member.id).await;
+
+    let tasks_path = format!(
+        "/v1/tenants/{}/projects/{}/tasks",
+        fx.tenant_id, fx.project_id
+    );
+    let backlog_id = entity::tasks::Entity::find_by_id(Uuid::parse_str(&fx.task_id).expect("uuid"))
+        .one(&app.state.db)
+        .await
+        .expect("query")
+        .expect("row")
+        .status_id
+        .to_string();
+    let blocked = app
+        .post_json_with_session(
+            &tasks_path,
+            serde_json::json!({
+                "title": "needs everyone",
+                "status_id": backlog_id,
+                "require_all_assignees_done": true,
+                "assignees": [{ "user_id": member.id, "role": "assignee" }],
+            }),
+        )
+        .await;
+    assert_eq!(blocked.status(), StatusCode::CREATED);
+    let blocked_id = Uuid::parse_str(
+        blocked.json::<Value>().await.expect("task json")["id"]
+            .as_str()
+            .expect("id"),
+    )
+    .expect("uuid");
+    let plain_id = Uuid::parse_str(&fx.task_id).expect("task uuid");
+
+    let bulk = app
+        .post_json_with_session(
+            &format!("{tasks_path}/bulk"),
+            serde_json::json!({
+                "task_ids": [blocked_id, plain_id],
+                "update": { "status_id": fx.status_done_id }
+            }),
+        )
+        .await;
+    assert_eq!(bulk.status(), StatusCode::OK);
+    let body: Value = bulk.json().await.expect("bulk json");
+    assert_eq!(body["updated"], 1);
+    let failed = body["failed"].as_array().expect("failed");
+    assert_eq!(failed.len(), 1);
+    assert_eq!(failed[0]["task_id"], blocked_id.to_string());
+    assert_eq!(failed[0]["reason"], "assignees-not-done");
+
+    let blocked_row = entity::tasks::Entity::find_by_id(blocked_id)
+        .one(&app.state.db)
+        .await
+        .expect("query")
+        .expect("row");
+    assert_eq!(blocked_row.status_id.to_string(), backlog_id);
+    let plain_row = entity::tasks::Entity::find_by_id(plain_id)
+        .one(&app.state.db)
+        .await
+        .expect("query")
+        .expect("row");
+    assert_eq!(plain_row.status_id.to_string(), fx.status_done_id);
+}
+
+/// 一括更新でタスクを完了から未完了へ戻すと、担当者ごとの完了は全員分消える。
+/// 対照: ステータスが変わらない更新では消えない。
+#[tokio::test]
+async fn bulk_update_out_of_done_clears_assignee_completions() {
+    let mut app = TestApp::new().await;
+    let fx = setup_task(&mut app).await;
+    let member = app.insert_user(false, false).await;
+    crate::common::ensure_tenant_member_for_project(&app.state.db, fx.project_id, member.id).await;
+    let tasks_path = format!(
+        "/v1/tenants/{}/projects/{}/tasks",
+        fx.tenant_id, fx.project_id
+    );
+    let task_id = Uuid::parse_str(&fx.task_id).expect("task uuid");
+    let backlog_id = entity::tasks::Entity::find_by_id(task_id)
+        .one(&app.state.db)
+        .await
+        .expect("query")
+        .expect("row")
+        .status_id;
+    let done_id = Uuid::parse_str(&fx.status_done_id).expect("done uuid");
+
+    // 担当者が完了済みで、タスクは完了
+    for user_id in [member.id] {
+        entity::task_assignees::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            task_id: Set(task_id),
+            user_id: Set(user_id),
+            role: Set("assignee".into()),
+            assigned_at: Set(chrono::Utc::now().into()),
+            completed_at: Set(Some(chrono::Utc::now().into())),
+        }
+        .insert(&app.state.db)
+        .await
+        .expect("insert assignee");
+    }
+    let mut active: entity::tasks::ActiveModel = entity::tasks::Entity::find_by_id(task_id)
+        .one(&app.state.db)
+        .await
+        .expect("query")
+        .expect("row")
+        .into();
+    active.require_all_assignees_done = Set(true);
+    active.status_id = Set(done_id);
+    active.completed_at = Set(Some(chrono::Utc::now().into()));
+    active.update(&app.state.db).await.expect("mark done");
+    let completed = || async {
+        entity::task_assignees::Entity::find()
+            .filter(sea_orm::ColumnTrait::eq(
+                &entity::task_assignees::Column::TaskId,
+                task_id,
+            ))
+            .filter(sea_orm::ColumnTrait::is_not_null(
+                &entity::task_assignees::Column::CompletedAt,
+            ))
+            .all(&app.state.db)
+            .await
+            .expect("query assignees")
+            .len()
+    };
+
+    // 対照: 同じ完了ステータスへの更新は何も変えない
+    let same = app
+        .post_json_with_session(
+            &format!("{tasks_path}/bulk"),
+            serde_json::json!({ "task_ids": [task_id], "update": { "status_id": done_id } }),
+        )
+        .await;
+    assert_eq!(same.status(), StatusCode::OK);
+    assert_eq!(completed().await, 1, "ステータスが変わらなければ消さない");
+
+    let back = app
+        .post_json_with_session(
+            &format!("{tasks_path}/bulk"),
+            serde_json::json!({ "task_ids": [task_id], "update": { "status_id": backlog_id } }),
+        )
+        .await;
+    assert_eq!(back.status(), StatusCode::OK);
+    let body: Value = back.json().await.expect("bulk json");
+    assert_eq!(body["updated"], 1);
+    assert_eq!(completed().await, 0, "完了から戻すと全員分消す");
 }

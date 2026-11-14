@@ -125,10 +125,15 @@ const sampleTaskDetail = {
   created_at: '2026-06-01T00:00:00Z',
   updated_at: '2026-06-15T00:00:00Z',
   created_by: mockUsers.alpha,
+  require_all_assignees_done: false as boolean,
   assignees: [
     { role: 'assignee', user: mockUsers.alpha },
     { role: 'assignee', user: mockUsers.beta },
-  ],
+  ] as {
+    role: string;
+    user: (typeof mockUsers)[keyof typeof mockUsers];
+    completed_at?: string | null;
+  }[],
   labels: [
     {
       id: 'label-bug',
@@ -255,6 +260,12 @@ function applyPutBody(
   if (typeof body.progress_pct === 'number') next.progress_pct = body.progress_pct;
   if (typeof body.title === 'string') next.title = body.title;
   if (typeof body.status_id === 'string') next.status_id = body.status_id;
+  if (typeof body.require_all_assignees_done === 'boolean') {
+    next.require_all_assignees_done = body.require_all_assignees_done;
+    if (!body.require_all_assignees_done) {
+      next.assignees = next.assignees.map((a) => ({ ...a, completed_at: null }));
+    }
+  }
 
   if (Array.isArray(body.label_ids)) {
     next.labels = sampleLabels.filter((label) => (body.label_ids as string[]).includes(label.id));
@@ -454,6 +465,25 @@ function createMockFetch(overrides: MockOptions = {}) {
         }
         return jsonResponse({ message: 'not-found' }, 404);
       }
+    }
+    // 担当者ごとの完了。全員がそろったら backend と同じく既定の完了ステータスへ移す
+    const assigneeCompletion = new URL(url, 'http://localhost').pathname.match(
+      /\/assignees\/([^/]+)\/(complete|reopen)$/,
+    );
+    if (method === 'POST' && assigneeCompletion) {
+      const [, userId, action] = assigneeCompletion;
+      mutableTaskDetail = {
+        ...mutableTaskDetail,
+        assignees: mutableTaskDetail.assignees.map((a) =>
+          a.user.id === userId
+            ? { ...a, completed_at: action === 'complete' ? '2026-06-16T00:00:00Z' : null }
+            : a,
+        ),
+      };
+      if (action === 'complete' && mutableTaskDetail.assignees.every((a) => a.completed_at)) {
+        mutableTaskDetail = { ...mutableTaskDetail, status_id: 's-done' };
+      }
+      return jsonResponse(mutableTaskDetail);
     }
     if (method === 'PUT' && url.includes('/tasks/')) {
       if (overrides.rejectPut) {
@@ -853,6 +883,82 @@ export const StatusChange: Story = {
     await user.click(trigger);
     await user.click(await screen.findByRole('menuitemradio', { name: /Done/ }));
     await expect(trigger).toHaveTextContent('Done');
+  },
+};
+
+/** 担当者全員の完了が必要なタスクで、beta だけが完了にしている。alpha（ログイン中）が最後の 1 人 */
+const requireAllPendingTask = {
+  ...sampleTaskDetail,
+  require_all_assignees_done: true,
+  assignees: [
+    { role: 'assignee', user: mockUsers.alpha, completed_at: null },
+    { role: 'assignee', user: mockUsers.beta, completed_at: '2026-06-15T00:00:00Z' },
+  ],
+};
+
+/**
+ * 担当者の完了で状態が変わる story 用。`createMockFetch({ task })` の `task` は GET で固定の値を
+ * 返し続けるので、書き換えを GET に反映させるには `mutableTaskDetail` へ据え直す。
+ */
+function withTask(task: typeof sampleTaskDetail) {
+  const restore = createMockFetch();
+  mutableTaskDetail = { ...task };
+  return restore;
+}
+
+export const RequireAllPending: Story = {
+  name: '完了条件（自分が最後の 1 人）',
+  beforeEach: () => withTask(requireAllPendingTask),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await expect(
+      canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
+    ).resolves.toBeInTheDocument();
+
+    await expect(canvas.findByText('1 / 2 人が完了')).resolves.toBeInTheDocument();
+    // 未完了の担当者が残る間は、✓ ボタンも完了への直接移動も使えない
+    await expect(
+      canvas.queryByRole('button', { name: 'Done にする（完了）' }),
+    ).not.toBeInTheDocument();
+
+    await user.click(await canvas.findByRole('button', { name: '自分の分を完了にする' }));
+
+    // 最後の 1 人が完了にすると、タスクが Done へ移る。完了済みの間は取り消しを出さない
+    const trigger = await canvas.findByRole('button', { name: 'ステータス' });
+    await waitFor(() => expect(trigger).toHaveTextContent('Done'));
+    await expect(canvas.findByText('2 / 2 人が完了')).resolves.toBeInTheDocument();
+    await expect(
+      canvas.queryByRole('button', { name: '自分の完了を取り消す' }),
+    ).not.toBeInTheDocument();
+  },
+};
+
+export const RequireAllBlocked: Story = {
+  name: '完了条件（誰も完了にしていない）',
+  beforeEach: () =>
+    withTask({
+      ...requireAllPendingTask,
+      assignees: requireAllPendingTask.assignees.map((a) => ({ ...a, completed_at: null })),
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await expect(
+      canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
+    ).resolves.toBeInTheDocument();
+
+    await expect(canvas.findByText('0 / 2 人が完了')).resolves.toBeInTheDocument();
+    await expect(
+      canvas.queryByRole('button', { name: 'Done にする（完了）' }),
+    ).not.toBeInTheDocument();
+
+    // ステータスのメニューでも Done は選べない
+    await user.click(await canvas.findByRole('button', { name: 'ステータス' }));
+    await expect(await screen.findByRole('menuitemradio', { name: /Done/ })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
   },
 };
 

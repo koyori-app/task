@@ -110,6 +110,16 @@ pub async fn apply_merge_effects(
         if current.as_ref().is_some_and(|status| status.is_done_state) {
             continue;
         }
+        // 担当者全員の完了が必要なタスクは、未完了の担当者が残るかぎり完了にしない。
+        // PR は処理済みになり再処理されないので、タスクは手で完了にする
+        if crate::task_completion::has_pending_assignees(&txn, &task).await? {
+            tracing::info!(
+                %task_id,
+                %pull_request_id,
+                "task still has assignees who have not completed their part; merged pull request leaves the task open"
+            );
+            continue;
+        }
         let Some(done) = project_statuses::Entity::find()
             .filter(project_statuses::Column::ProjectId.eq(task.project_id))
             .filter(project_statuses::Column::IsDoneState.eq(true))
