@@ -16,6 +16,7 @@ const sampleProject: ProjectResponse = {
   description: '',
   key: 'ALPHA',
   is_personal: false,
+  inherit_tenant_members: true,
   icon_emoji: null,
   icon_url: null,
   personal_owner_id: null,

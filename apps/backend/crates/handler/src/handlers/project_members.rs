@@ -48,14 +48,14 @@ use service::access::assignable_user_ids;
 /// メンバー一覧（`list_members`）とは別に置く。あちらはメンバー管理の口で
 /// プロジェクト管理者しか読めないが、担当者の割り当ては `WriteTask` があれば
 /// できるため、候補だけ取れずに 403 になる。返す集合も違う:
-/// メンバーを 1 人も指定していない共有プロジェクトはテナント全体へ開放されるので、
+/// テナントのメンバーを継承する共有プロジェクトはテナント全体へ開放されるので、
 /// `project_members` の行ではなく `assignable_user_ids` の判定で返す。
 ///
 /// **候補の列挙は割り当て API（`add_assignee` / `remove_assignee`）と同じ `WriteTask`。**
 /// これは担当者を編集するための候補一覧で、読むだけの主体に見せる情報ではない。
 /// `ReadTask` で通すと、read-only の PAT でも「そのプロジェクトで担当者にできる
-/// 利用者全員」の名前とアイコン URL を列挙できてしまう。メンバー未指定の共有
-/// プロジェクトではテナント全体が返るので、既存タスクを読むだけでは分からない
+/// 利用者全員」の名前とアイコン URL を列挙できてしまう。テナントのメンバーを継承する
+/// 共有プロジェクトではテナント全体が返るので、既存タスクを読むだけでは分からない
 /// 利用者まで公開範囲が広がる。
 ///
 /// **`username` を指定した形だけは `ReadTask` でも通す。** 一覧を絞り込むには
@@ -155,7 +155,7 @@ async fn get_project_in_tenant<C: ConnectionTrait>(
 ///
 /// 呼び出し元は先に `ensure_tenant_access(Some(project_id))` を通すこと（PAT の束縛と見える範囲は
 /// そちらが保証する）。ただしそれはロックの外で走るので、テナント `Admin` の分岐ではロック内で
-/// `project_is_open_or_member` を見直す。ロック待ちの間に別の操作が最初の ACE を置いて閉じていれば、
+/// `project_is_open_or_member` を見直す。ロック待ちの間に別の操作が継承を切って閉じていれば、
 /// 入れなくなったプロジェクトを管理させない。個人プロジェクト（Inbox）はテナントロールでは触れない。
 pub(crate) async fn require_project_admin<C: ConnectionTrait>(
     db: &C,
@@ -515,9 +515,14 @@ pub async fn remove_member(
         .filter(project_members::Column::UserId.ne(member_user_id))
         .count(&txn)
         .await?;
-    // 共有プロジェクトの最後の 1 行を外すと継承（テナント全員）へ戻る。管理はテナントオーナーが引き継ぐ
-    let returns_to_inherited = !project.is_personal && others == 0;
-    if !returns_to_inherited
+    // 継承しない共有プロジェクトの最後の 1 行は、役にかかわらず外せない。外すとオーナーのほかは誰も入れなくなる
+    if !project.is_personal && !project.inherit_tenant_members && others == 0 {
+        return Err(AppError::Conflict);
+    }
+    // テナントのメンバーを継承する共有プロジェクトの最後の 1 行は、Admin でも外せる（TASK-217）。
+    // 外してもテナント全員が入れたままで、管理はテナントのオーナーが引き継ぐ
+    let leaves_inherited = !project.is_personal && project.inherit_tenant_members && others == 0;
+    if !leaves_inherited
         && would_drop_last_admin(&txn, tenant_id, project_id, member_user_id).await?
     {
         return Err(AppError::Conflict);

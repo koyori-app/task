@@ -33,6 +33,7 @@ async fn insert_second_project(db: &DatabaseConnection, tenant_id: Uuid) -> Uuid
         key: Set(format!("Q{}", suffix.to_uppercase())),
         is_personal: Set(false),
         personal_owner_id: Set(None),
+        inherit_tenant_members: Set(true),
     }
     .insert(db)
     .await
@@ -88,6 +89,8 @@ async fn setup_guest(app: &mut TestApp) -> GuestSetup {
         StatusCode::CREATED,
         "guest をプロジェクトへ明示指定"
     );
+    // TASK-501 より前と同じく、載せた人だけが入れる形にする
+    crate::common::stop_inheriting(&app.state.db, tp.project_id).await;
     let removed = app
         .delete_with_session(&format!("{members_path}/{}", guest.id))
         .await;

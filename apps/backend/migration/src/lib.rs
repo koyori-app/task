@@ -29,6 +29,7 @@ mod m20261104000000_tenants_owner_org_profile;
 mod m20261105000000_reactions;
 mod m20261105010000_projects_key_unique_per_tenant;
 mod m20261106000000_tenant_bots;
+mod m20261111000000_project_member_inheritance;
 mod m20261112000000_task_require_all_assignees_done;
 
 pub struct Migrator;
@@ -66,6 +67,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261105000000_reactions::Migration),
             Box::new(m20261105010000_projects_key_unique_per_tenant::Migration),
             Box::new(m20261106000000_tenant_bots::Migration),
+            Box::new(m20261111000000_project_member_inheritance::Migration),
             Box::new(m20261112000000_task_require_all_assignees_done::Migration),
         ]
     }

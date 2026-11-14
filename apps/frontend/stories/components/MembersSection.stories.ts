@@ -64,17 +64,45 @@ let fetchSpy: ReturnType<typeof fn> | null = null;
 
 /** メンバー系 API をインメモリの配列で応答する fetch モック */
 function mockFetch(
-  overrides: { empty?: boolean; listStatus?: number; mutationStatus?: number } = {},
+  overrides: {
+    empty?: boolean;
+    listStatus?: number;
+    mutationStatus?: number;
+    /** プロジェクトがテナントのメンバーを継承するか（既定は継承する） */
+    inherit?: boolean;
+  } = {},
 ) {
   return () => {
     const original = globalThis.fetch;
     let members = overrides.empty ? [] : sampleMembers.map((member) => ({ ...member }));
+    let inherit = overrides.inherit ?? true;
+    const project = () => ({
+      id: PROJECT_UUID,
+      tenant_id: TENANT_UUID,
+      name: 'Alpha',
+      description: '',
+      key: 'ALPHA',
+      icon_emoji: null,
+      icon_url: null,
+      is_personal: false,
+      personal_owner_id: null,
+      inherit_tenant_members: inherit,
+    });
     fetchSpy = fn().mockImplementation(async (req: Request | string) => {
       const url = typeof req === 'string' ? req : req.url;
       const method = typeof req === 'string' ? 'GET' : req.method;
       const pathname = new URL(url, 'http://localhost').pathname;
       const itemMatch = pathname.match(/\/projects\/[^/]+\/members\/([^/]+)$/);
 
+      if (pathname.endsWith(`/v1/tenants/${TENANT_UUID}/projects/${PROJECT_UUID}`)) {
+        if (method === 'PUT') {
+          const body = await (req as Request).json();
+          if (overrides.mutationStatus)
+            return jsonResponse({ message: 'error' }, overrides.mutationStatus);
+          inherit = body.inherit_tenant_members ?? inherit;
+        }
+        return jsonResponse(project());
+      }
       if (method === 'GET' && pathname.endsWith(`/v1/tenants/${TENANT_UUID}/members`)) {
         return jsonResponse(sampleTenantMembers);
       }
@@ -181,13 +209,27 @@ export const Default: Story = {
 };
 
 export const Empty: Story = {
-  name: '空状態（メンバー未指定＝テナント全体に開放）',
+  name: '空状態（メンバー未指定。テナントのメンバーを継承する）',
   beforeEach: mockFetch({ empty: true }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(
       canvas.findByText('メンバーはまだ指定されていません。'),
     ).resolves.toBeInTheDocument();
+  },
+};
+
+export const NotInheriting: Story = {
+  name: '継承しない（載っている人だけが入れる）',
+  beforeEach: mockFetch({ inherit: false }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.findByText('ここに載っている人だけが、このプロジェクトに入れます。'),
+    ).resolves.toBeInTheDocument();
+    await expect(
+      canvas.getByRole('switch', { name: 'テナントのメンバーを継承する' }),
+    ).not.toBeChecked();
   },
 };
 
