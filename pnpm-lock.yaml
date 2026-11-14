@@ -112,7 +112,7 @@ importers:
         version: 0.4.18(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)
       '@vikejs/elysia':
         specifier: 0.2.1
-        version: 0.2.1(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(vike@0.4.268(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2))
+        version: 0.2.1(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(vike@0.4.270(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2))
       '@vue/devtools-api':
         specifier: 8.2.1
         version: 8.2.1
@@ -195,17 +195,17 @@ importers:
         specifier: 5.1.0
         version: 5.1.0
       vike:
-        specifier: 0.4.268
-        version: 0.4.268(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2)
+        specifier: 0.4.270
+        version: 0.4.270(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2)
       vike-vue:
         specifier: 0.9.14
-        version: 0.9.14(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3)(vike@0.4.268(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2))(vue@3.5.44(typescript@6.0.3))
+        version: 0.9.14(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3)(vike@0.4.270(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2))(vue@3.5.44(typescript@6.0.3))
       vike-vue-pinia:
         specifier: 0.2.6
-        version: 0.2.6(pinia@4.0.3(@vue/devtools-api@8.2.1)(typescript@6.0.3)(vue@3.5.44(typescript@6.0.3)))(vike-vue@0.9.14(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3)(vike@0.4.268(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2))(vue@3.5.44(typescript@6.0.3)))(vike@0.4.268(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2))(vue@3.5.44(typescript@6.0.3))
+        version: 0.2.6(pinia@4.0.3(@vue/devtools-api@8.2.1)(typescript@6.0.3)(vue@3.5.44(typescript@6.0.3)))(vike-vue@0.9.14(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3)(vike@0.4.270(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2))(vue@3.5.44(typescript@6.0.3)))(vike@0.4.270(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2))(vue@3.5.44(typescript@6.0.3))
       vike-vue-query:
         specifier: 0.2.3
-        version: 0.2.3(@tanstack/vue-query@5.104.0(vue@3.5.44(typescript@6.0.3)))(vike-vue@0.9.14(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3)(vike@0.4.268(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2))(vue@3.5.44(typescript@6.0.3)))(vue@3.5.44(typescript@6.0.3))
+        version: 0.2.3(@tanstack/vue-query@5.104.0(vue@3.5.44(typescript@6.0.3)))(vike-vue@0.9.14(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3)(vike@0.4.270(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2))(vue@3.5.44(typescript@6.0.3)))(vue@3.5.44(typescript@6.0.3))
       vue:
         specifier: 3.5.44
         version: 3.5.44(typescript@6.0.3)
@@ -6831,6 +6831,11 @@ packages:
     engines: {node: '>=10'}
     hasBin: true
 
+  semver@7.8.6:
+    resolution: {integrity: sha512-9lpSSU4Mly3mrtruwLs1eLK6+gzbzqeBFwRNjIjE+9LuDpWdYctrQlQ3ej1Ilgi7gknpsTRnPoLP8DpCHqHIJw==}
+    engines: {node: '>=10'}
+    hasBin: true
+
   seroval-plugins@1.5.6:
     resolution: {integrity: sha512-HXuLAX2pu/UByPpaeo/TaMfvMIi+1QqIoPJYCcAtU8QkVNwgR6MPlGuCQTErV1JwraaMbYaWVIBX7mppzGLATQ==}
     engines: {node: '>=10'}
@@ -7386,8 +7391,8 @@ packages:
       vike: '>=0.4.191'
       vue: '>=3.0.0'
 
-  vike@0.4.268:
-    resolution: {integrity: sha512-C/CxI/mtXrnIfM9gP8ewwpJIBn0lQvDaHB0jyA67SYGeeQF3i2WRhC7iYIjQtQZ9ngklnjKpOiysw7K0HtGfYQ==}
+  vike@0.4.270:
+    resolution: {integrity: sha512-gRzXeQeIqTBYwUTx81y7UHduh8jAE4rCGaIYnJGNe9LrUMqdg1PYI6Uf3tZellGuuv9BDrUqsNURFS9mrsNzdQ==}
     engines: {node: '>=20.19.0'}
     hasBin: true
     peerDependencies:
@@ -10668,11 +10673,11 @@ snapshots:
 
   '@vercel/detect-agent@1.2.5': {}
 
-  '@vikejs/elysia@0.2.1(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(vike@0.4.268(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2))':
+  '@vikejs/elysia@0.2.1(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(vike@0.4.270(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2))':
     dependencies:
       '@universal-middleware/elysia': 0.6.5(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)
       elysia: 1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3)
-      vike: 0.4.268(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2)
+      vike: 0.4.270(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2)
     transitivePeerDependencies:
       - '@cloudflare/workers-types'
       - '@hattip/core'
@@ -14502,6 +14507,8 @@ snapshots:
 
   semver@7.8.5: {}
 
+  semver@7.8.6: {}
+
   seroval-plugins@1.5.6(seroval@1.5.6):
     dependencies:
       seroval: 1.5.6
@@ -15040,31 +15047,31 @@ snapshots:
       '@types/unist': 3.0.3
       vfile-message: 4.0.3
 
-  vike-vue-pinia@0.2.6(pinia@4.0.3(@vue/devtools-api@8.2.1)(typescript@6.0.3)(vue@3.5.44(typescript@6.0.3)))(vike-vue@0.9.14(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3)(vike@0.4.268(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2))(vue@3.5.44(typescript@6.0.3)))(vike@0.4.268(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2))(vue@3.5.44(typescript@6.0.3)):
+  vike-vue-pinia@0.2.6(pinia@4.0.3(@vue/devtools-api@8.2.1)(typescript@6.0.3)(vue@3.5.44(typescript@6.0.3)))(vike-vue@0.9.14(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3)(vike@0.4.270(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2))(vue@3.5.44(typescript@6.0.3)))(vike@0.4.270(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2))(vue@3.5.44(typescript@6.0.3)):
     dependencies:
       pinia: 4.0.3(@vue/devtools-api@8.2.1)(typescript@6.0.3)(vue@3.5.44(typescript@6.0.3))
-      vike: 0.4.268(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2)
-      vike-vue: 0.9.14(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3)(vike@0.4.268(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2))(vue@3.5.44(typescript@6.0.3))
+      vike: 0.4.270(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2)
+      vike-vue: 0.9.14(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3)(vike@0.4.270(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2))(vue@3.5.44(typescript@6.0.3))
       vue: 3.5.44(typescript@6.0.3)
 
-  vike-vue-query@0.2.3(@tanstack/vue-query@5.104.0(vue@3.5.44(typescript@6.0.3)))(vike-vue@0.9.14(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3)(vike@0.4.268(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2))(vue@3.5.44(typescript@6.0.3)))(vue@3.5.44(typescript@6.0.3)):
+  vike-vue-query@0.2.3(@tanstack/vue-query@5.104.0(vue@3.5.44(typescript@6.0.3)))(vike-vue@0.9.14(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3)(vike@0.4.270(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2))(vue@3.5.44(typescript@6.0.3)))(vue@3.5.44(typescript@6.0.3)):
     dependencies:
       '@tanstack/vue-query': 5.104.0(vue@3.5.44(typescript@6.0.3))
-      vike-vue: 0.9.14(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3)(vike@0.4.268(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2))(vue@3.5.44(typescript@6.0.3))
+      vike-vue: 0.9.14(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3)(vike@0.4.270(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2))(vue@3.5.44(typescript@6.0.3))
       vue: 3.5.44(typescript@6.0.3)
 
-  vike-vue@0.9.14(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3)(vike@0.4.268(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2))(vue@3.5.44(typescript@6.0.3)):
+  vike-vue@0.9.14(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3)(vike@0.4.270(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2))(vue@3.5.44(typescript@6.0.3)):
     dependencies:
       magic-string: 0.30.21
       oxc-parser: 0.104.0(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3)
       oxc-walker: 0.6.0(oxc-parser@0.104.0(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.3))
-      vike: 0.4.268(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2)
+      vike: 0.4.270(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2)
       vue: 3.5.44(typescript@6.0.3)
     transitivePeerDependencies:
       - '@emnapi/core'
       - '@emnapi/runtime'
 
-  vike@0.4.268(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2):
+  vike@0.4.270(@voidzero-dev/vite-plus-core@1.5.0)(elysia@1.4.30(@sinclair/typebox@0.34.52)(exact-mirror@1.2.6)(file-type@22.1.0(supports-color@10.2.2))(openapi-types@12.1.3)(typescript@6.0.3))(srvx@1.0.5)(supports-color@10.2.2):
     dependencies:
       '@babel/core': 7.29.7(supports-color@10.2.2)
       '@babel/types': 7.29.11
@@ -15083,7 +15090,7 @@ snapshots:
       magic-string: 1.4.5
       picomatch: 4.0.7
       rolldown: 1.2.13
-      semver: 7.8.5
+      semver: 7.8.6
       sirv: 3.0.2
       source-map-support: 0.5.21
       tinyglobby: 0.2.17
