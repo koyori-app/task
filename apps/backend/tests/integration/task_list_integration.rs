@@ -1034,6 +1034,140 @@ async fn task_list_filters_by_creator() {
     assert_eq!(task_ids(&body), vec![member_task_id]);
 }
 
+/// `unassigned=true` は担当者が 1 人もいないタスクだけを返す（役割は問わない）。
+#[tokio::test]
+async fn task_list_filters_by_unassigned() {
+    let mut app = TestApp::new().await;
+    let (owner, tp) = setup_project(&mut app).await;
+    let status_id = create_status(&app, &tp).await;
+    let base = tasks_base(&tp);
+    let member = app.insert_user_default().await;
+    add_project_member(&app, tp.project_id, member.id).await;
+
+    let assigned_a = create_task(&app, &base, status_id, "Assigned A", None).await;
+    let assigned_b = create_task(&app, &base, status_id, "Assigned B", None).await;
+    create_task(&app, &base, status_id, "Free A", None).await;
+    let free_b = create_task(&app, &base, status_id, "Free B", None).await;
+    let parent = create_task(&app, &base, status_id, "Parent", None).await;
+    let parent_id = parent["id"].as_str().unwrap();
+    create_task(&app, &base, status_id, "Child", Some(parent_id)).await;
+    let assigned_a_id = assigned_a["id"].as_str().unwrap().to_string();
+    for (id, user_id, role) in [
+        (assigned_a_id.as_str(), owner.id, "assignee"),
+        (assigned_b["id"].as_str().unwrap(), member.id, "primary"),
+        (parent_id, owner.id, "assignee"),
+    ] {
+        let response = app
+            .post_json_with_session(
+                &format!("{base}/{id}/assignees"),
+                serde_json::json!({ "user_id": user_id, "role": role }),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+    }
+
+    // 役割（primary / assignee）を問わず、担当者がいるタスクは出ない。
+    let free = ["Child", "Free A", "Free B"];
+    let url = format!("{base}?unassigned=true&sort=title_asc");
+    assert_eq!(titles_for(&app, &url).await, free);
+    let response = app.get_with_session(&url).await;
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["total"], 3);
+
+    // 対照: false と未指定は絞らない。assignee_id は従来どおり。
+    let all = [
+        "Assigned A",
+        "Assigned B",
+        "Child",
+        "Free A",
+        "Free B",
+        "Parent",
+    ];
+    for url in [
+        format!("{base}?unassigned=false&sort=title_asc"),
+        format!("{base}?sort=title_asc"),
+    ] {
+        assert_eq!(titles_for(&app, &url).await, all, "{url}");
+    }
+    let url = format!("{base}?assignee_id={}&sort=title_asc", owner.id);
+    assert_eq!(titles_for(&app, &url).await, ["Assigned A", "Parent"]);
+
+    // 他の条件とは AND。
+    let url = format!(
+        "{base}?unassigned=true&created_by={}&sort=title_asc",
+        owner.id
+    );
+    assert_eq!(titles_for(&app, &url).await, free);
+    let response = app
+        .post_json_with_session(
+            &format!("/v1/tenants/{}/projects/{}/statuses", tp.tenant_id, tp.project_id),
+            serde_json::json!({ "name": "Doing", "color": "#336699", "position": 2, "is_default": false, "is_done_state": false }),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let other_status: serde_json::Value = response.json().await.unwrap();
+    let other_status = other_status["id"].as_str().unwrap();
+    let response = app
+        .put_json_with_session(
+            &format!("{base}/{}", free_b["id"].as_str().unwrap()),
+            serde_json::json!({ "status_id": other_status }),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let url = format!("{base}?unassigned=true&status_id={other_status}");
+    assert_eq!(titles_for(&app, &url).await, ["Free B"]);
+
+    // 担当者が付いている親は条件外なので、その子はルート扱いになる。
+    let url = format!("{base}?unassigned=true&root_only=true&sort=title_asc");
+    assert_eq!(titles_for(&app, &url).await, free);
+
+    // 1 件ずつカーソルで読み足しても欠落しない。
+    let mut seen = Vec::new();
+    let mut cursor = None;
+    loop {
+        let mut url = format!("{base}?unassigned=true&sort=title_asc&limit=1");
+        if let Some(c) = &cursor {
+            url.push_str(&format!("&cursor={c}"));
+        }
+        let response = app.get_with_session(&url).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value = response.json().await.unwrap();
+        seen.extend(
+            body["tasks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|t| t["title"].as_str().unwrap().to_string()),
+        );
+        cursor = next_cursor(&body);
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(seen, free);
+
+    // 担当を外すと戻る。
+    let response = app
+        .delete_with_session(&format!("{base}/{assigned_a_id}/assignees/{}", owner.id))
+        .await;
+    assert!(response.status().is_success(), "{}", response.status());
+    let url = format!("{base}?unassigned=true&root_only=true&sort=title_asc");
+    assert_eq!(
+        titles_for(&app, &url).await,
+        ["Assigned A", "Child", "Free A", "Free B"]
+    );
+
+    // assignee_id とは同時に指定できない。false なら併用できる。
+    let response = app
+        .get_with_session(&format!("{base}?unassigned=true&assignee_id={}", owner.id))
+        .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let response = app
+        .get_with_session(&format!("{base}?unassigned=false&assignee_id={}", owner.id))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
 async fn titles_for(app: &TestApp, url: &str) -> Vec<String> {
     let response = app.get_with_session(url).await;
     assert_eq!(response.status(), StatusCode::OK, "{url}");

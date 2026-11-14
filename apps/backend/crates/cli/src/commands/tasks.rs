@@ -43,6 +43,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             status,
             label,
             assignee,
+            unassigned,
             milestone,
             sprint,
             parent,
@@ -85,6 +86,9 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             if let Some(name) = &assignee {
                 let id = resolve_user_id(api, project.id, name).await?;
                 query.push(("assignee_id", id.to_string()));
+            }
+            if unassigned {
+                query.push(("unassigned", "true".to_string()));
             }
             if let Some(name) = &milestone {
                 let id = resolve_milestone_id(api, project.id, name).await?;

@@ -4,7 +4,9 @@ mod common;
 
 use common::*;
 use serde_json::json;
-use wiremock::matchers::{body_json, body_partial_json, method, path, query_param};
+use wiremock::matchers::{
+    body_json, body_partial_json, method, path, query_param, query_param_is_missing,
+};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const TODO_STATUS: &str = "33333333-3333-4333-8333-333333333333";
@@ -674,6 +676,26 @@ async fn tasks_list_resolves_the_assignee_name_without_listing_candidates() {
     assert_eq!(code, 0);
 }
 
+/// `--unassigned` は `unassigned=true` として送る。
+#[tokio::test]
+async fn tasks_list_sends_the_unassigned_filter() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    Mock::given(method("GET"))
+        .and(path(project_path("tasks")))
+        .and(query_param("unassigned", "true"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "tasks": [], "total": 0 })))
+        .expect(1)
+        .mount(&harness.server)
+        .await;
+
+    let code = harness
+        .run(&["task", "tasks", "list", "--project", "APP", "--unassigned"])
+        .await
+        .unwrap();
+    assert_eq!(code, 0);
+}
+
 /// 一覧の絞り込みはクエリ、本文は enum の綴り。取り違えるとサーバーが 400 を返す。
 #[tokio::test]
 async fn tasks_list_sends_the_priority_filter_in_the_query_form() {
@@ -682,6 +704,7 @@ async fn tasks_list_sends_the_priority_filter_in_the_query_form() {
     Mock::given(method("GET"))
         .and(path(project_path("tasks")))
         .and(query_param("priority", "critical_fire"))
+        .and(query_param_is_missing("unassigned"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "tasks": [], "total": 0 })))
         .expect(1)
         .mount(&harness.server)
