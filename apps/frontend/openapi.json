@@ -4923,6 +4923,58 @@
         }
       }
     },
+    "/v1/favicons/{host}": {
+      "get": {
+        "tags": ["Tasks"],
+        "summary": "リンク先サイトの favicon を配信",
+        "description": "取れないときや、取得回数の上限を超えたときは、汎用アイコン（`image/svg+xml`）を返す。",
+        "operationId": "get_favicon",
+        "parameters": [
+          {
+            "name": "host",
+            "in": "path",
+            "description": "小文字のホスト名（ドット必須、253 文字以下）",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "favicon。取れないときは汎用アイコン（image/svg+xml）",
+            "content": {
+              "image/x-icon": {},
+              "image/png": {},
+              "image/jpeg": {},
+              "image/gif": {},
+              "image/webp": {},
+              "image/svg+xml": {}
+            }
+          },
+          "401": {
+            "description": "未認証",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "host の形式が不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/github/callback": {
       "get": {
         "tags": ["GitHub"],

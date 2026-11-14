@@ -1,12 +1,12 @@
 ---
 title: KFM の描画
 description: task の本文を描画するレンダラ KFM の構成、パイプライン、サニタイズ、キャッシュ、SSR との受け渡し
-updated: 2026-11-04
+updated: 2026-11-09
 sidebar:
   order: 4
 ---
 
-KFM (Koyori Flavored Markdown) は、task の本文を描画するレンダラである。Phase 1 の実体は GFM、GitHub alerts、コードブロック着色（starry-night）、サニタイズから成る、GitHub の描画を再現するレンダラ（github profile）である。これに task 固有の拡張として、タスク参照とメンションのチップ、Mermaid の図、コードブロックの枠を加えている。
+KFM (Koyori Flavored Markdown) は、task の本文を描画するレンダラである。Phase 1 の実体は GFM、GitHub alerts、コードブロック着色（starry-night）、サニタイズから成る、GitHub の描画を再現するレンダラ（github profile）である。これに task 固有の拡張として、タスク参照とメンションのチップ、Mermaid の図、コードブロックの枠、外部リンクの favicon を加えている。
 
 このページは現在の実装を説明する。設計判断の根拠は別管理の設計書を定義元とする。
 
@@ -47,6 +47,11 @@ apps/frontend/src/lib/
     element.ts                 コピーボタンを足す custom element
     schema.ts                  kfm-code と pl-line の sanitize スキーマ
     _tag.ts                    タグ名
+    style.css                  サイドカー CSS
+  rehype-kfm-link-favicon/     外部リンクの favicon
+    index.ts                   リンクの先頭に img を足す（対象の判定と host の正規化）
+    schema.ts                  kfm-link-favicon class の sanitize スキーマ
+    _class.ts                  class 名
     style.css                  サイドカー CSS
   remark-kfm-mermaid/          mermaid フェンス → client 描画 custom element
     index.ts                   remark 変換と sanitize スキーマ
@@ -96,7 +101,8 @@ flowchart TD
     K --> L["rehype-scope-footnote-label（scope 付きのみ）"]
     L --> M["rehype-starry-night"]
     M --> N["rehype-kfm-code"]
-    N --> O["rehype-stringify"]
+    N --> N2["rehype-kfm-link-favicon"]
+    N2 --> O["rehype-stringify"]
     O --> P["DOMPurify"]
     P --> Q["HTML 文字列を v-html へ渡す"]
 ```
@@ -172,6 +178,21 @@ GitHub 互換の境界仕様をテストで固定している。
 - ファイル名は ` ```ts title="src/foo.ts" ` と ` ```ts:src/foo.ts ` のどちらでも書け、両方あれば `title="…"` を採る。`:` 形式は sanitize の `language-*` の字種に合わず、着色もされない
 - コピーボタンは client の custom element（`element.ts`）が足し、SSR の HTML には入れない。sanitize の許可を `button` へ広げないためである。JS が無効ならボタンだけが無い
 - コピーは code の `textContent` を書き込む。行番号は CSS の `::before` で描くのでコピーに混ざらない。VRT と E2E は `data-kfm-code-copy`（`copied` / `failed`）を待つ
+
+## リンクの favicon（rehype-kfm-link-favicon）
+
+http / https の絶対 URL を持つリンクの先頭に、リンク先サイトの favicon を足す。出力は次の形である。
+
+```html
+<a href="https://example.com/x"><img class="kfm-link-favicon" src="/api/v1/favicons/example.com" alt="" aria-hidden="true" loading="lazy">例</a>
+```
+
+- 明示リンク、GFM の autolink、参照リンク（`[x][r]`）を同じ場所で扱うため、href が決まった後の rehype 層で `a` を見る。rehype 層の最後に置き、starry-night と kfm-code には干渉しない
+- 付けないもの: 相対 href（KEY-N、メンション、アプリ内のパス）、`#…`（脚注の戻りリンク）、`mailto:` など http / https 以外、`//…` のプロトコル相対、ドットを含まない host（`localhost`）、IPv6 リテラル、中身の無いリンク、画像を含むリンク（バッジ）。自アプリ宛ての絶対 URL は外部と同じ扱いにする
+- host は WHATWG URL の `hostname`（小文字、punycode）で、ポートと認証情報は捨てる。ラベル 63 文字以下、全長 253 文字以下に合わないものは付けない。backend の `service::favicon::parse_host` と同じ規則である
+- 画像は backend の `GET /v1/favicons/{host}` が取得して配信する（[タスクの基本機能](/dev/features/tasks/core)）。ブラウザは外部サイトを直接読まない。取れない時は backend が汎用アイコンを返すので、client に失敗時の処理は無い。backend は全ホップ合わせて 8 秒、64 KiB、利用者ごとに 10 分で 30 host までの取得回数で抑え、超えた分も汎用アイコンを返す（上限の理由はタスクの基本機能の決定事項）
+- options を持たないので、キャッシュキーと `RenderOptions` は変わらない。rehype 層へ足しただけで旧 HTML のキャッシュは失効する
+- 見た目は `rehype-kfm-link-favicon/style.css`（`img.kfm-link-favicon`）を呼び出し側が import して当てる
 
 ## Mermaid の図（remark-kfm-mermaid）
 
@@ -320,6 +341,7 @@ import '@/lib/remark-gfm/style.css';
 import '@/lib/remark-koyori-alerts/style.css';
 import '@/lib/rehype-starry-night/style.css';
 import '@/lib/rehype-kfm-code/style.css';
+import '@/lib/rehype-kfm-link-favicon/style.css';
 import '@/lib/remark-kfm-mermaid/style.css';
 ```
 
@@ -344,6 +366,7 @@ import '@/lib/remark-kfm-mermaid/style.css';
 - メンションのチップは koyori の固定 class で描き、GFM CSS の `a` の規則は `:not(.koyori-mention)` でチップを外す
 - 着色 CSS は starry-night が出力する `pl-*` の名前空間クラスを直接指す。実体は upstream の light シート固定と `.dark` ブリッジで、アプリの class 戦略のダークに追従する
 - kfm-code CSS は `kfm-code` 要素と `.pl-line` を直接指し、着色 CSS と同じ場所で import する
+- link favicon CSS は `img.kfm-link-favicon` だけを指し、字の大きさ（`1em`）に合わせた正方形にする
 - mermaid CSS は JS 無効時または描画失敗時の light DOM のソースを、`white-space: pre` と横スクロールで読める状態に保つ
 
 ラッパーのクラスの定義元は `remark-gfm/content-class.ts`（`KFM_CONTENT_CLASS`）である。CSS との scope の一致は `kfm-gfm-css-contract.test.ts` が強制し、story のラッパーも同じ定数を使う（VRT baseline のラッパーは本番と同じになる）。
@@ -404,3 +427,6 @@ KFM の Storybook story (`stories/kfm/*`) は、本番と同じ「サーバー�
 | 2026-08-22 | `data:` を一律に拒否せず、`<image>` / `<img>` の `data:image/` を許す | C4 図が Person アイコンを `<image xlink:href="data:image/png;base64,…">` で埋める（mermaid@11.16.1 で実測）ので、一律に拒否すると C4 図全体が error になる |
 | 2026-08-22 | 一時描画コンテナを自要素内に置く | render の第三引数を省くと mermaid が一時ノードを document.body の末尾へ置き、図が一瞬見える |
 | 2026-10-16 | テナントをプラグインの options にせず vfile で渡す | processor は profile ごとに memoize されており、テナントごとに作るとメモリが漏れる |
+| 2026-11-09 | リンクの favicon を backend の `GET /v1/favicons/{host}` 経由で取り、ブラウザから外部へ直接取らず、外部の favicon サービスも使わない | 本文を開くたびに閲覧者の IP と閲覧内容がリンク先や第三者へ出る。backend が取れば将来 CSP を入れても `img-src 'self'` のままで済み、同じ host の取得はキャッシュで閲覧回数から切り離せる |
+| 2026-11-09 | 取得した SVG の favicon を配信せず、SVG だけのサイトは汎用アイコンにする | 自オリジンから配信する SVG は URL を直接開くと script が動く。画像は先頭バイトで ICO / PNG / JPEG / GIF / WebP と確かめたものだけ返す |
+| 2026-11-09 | 自アプリ宛ての絶対 URL も外部リンクと同じに扱い、favicon を付ける | 除外にはアプリのオリジンを renderer に渡す必要があり、`RenderOptions`、キャッシュキー、各描画箇所に手が入る。自アプリの favicon が出るだけで害は無い |

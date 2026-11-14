@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { renderDescription } from '@/lib/markup-renderer';
+import { favicon } from './kfm-favicon-html';
 
 /**
  * 既存のコメントは「素の文字」として書かれ、保存されておる。本文は移し替えず、そのまま
@@ -59,7 +60,7 @@ describe('既存の素のコメントを comment profile で描いた時（見�
     [
       'URL は自動で link になる',
       'https://example.com/a_b を見て',
-      '<p><a href="https://example.com/a_b">https://example.com/a_b</a> を見て</p>',
+      `<p><a href="https://example.com/a_b">${favicon('example.com')}https://example.com/a_b</a> を見て</p>`,
     ],
     [
       'メールアドレスは mailto の link になる',

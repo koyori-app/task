@@ -70,9 +70,12 @@ describe('ReviewFindingBody', () => {
     const html = wrapper.find('div[data-review-finding-body]').element.innerHTML;
     // 危うい物は要素・属性・scheme として残らない（生の HTML は字として見える）
     expect(html).not.toContain('<script');
-    expect(html).not.toContain('<img');
+    // 生の <img> は残らない。出る img は安全なリンクの先頭に足した favicon だけ
     expect(wrapper.find('script').exists()).toBe(false);
-    expect(wrapper.find('img').exists()).toBe(false);
+    const images = wrapper.findAll('img');
+    expect(images).toHaveLength(1);
+    expect(images[0]?.classes()).toContain('kfm-link-favicon');
+    expect(images[0]?.attributes('src')).toBe('/api/v1/favicons/example.com');
     expect(wrapper.find('[onerror]').exists()).toBe(false);
     expect(html).not.toContain('javascript:');
     expect(wrapper.text()).toContain('<script>alert(1)</script>');
