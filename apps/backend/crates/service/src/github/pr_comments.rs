@@ -337,6 +337,9 @@ pub struct PullRequestHead {
 #[derive(Debug, Clone, Deserialize)]
 pub struct PullRequestUser {
     pub login: String,
+    /// GitHub のユーザー ID（数値）。改名しても変わらないので、レビュワー本人との照合に使う
+    #[serde(default)]
+    pub id: Option<i64>,
 }
 
 fn request(http: &Client, method: Method, url: &str, token: &str) -> reqwest::RequestBuilder {
