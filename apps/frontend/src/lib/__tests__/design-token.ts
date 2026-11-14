@@ -45,7 +45,12 @@ export function token(theme: ThemeName, name: string): [number, number, number] 
   if (/^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(value)) return hex(value);
   const m = /^oklch\(([\d.]+) ([\d.]+)(?: ([\d.]+))?\)$/.exec(value);
   if (!m) throw new Error(`${theme} の --${name} が色で読めぬ: ${value}`);
-  const [L, C, h] = [Number(m[1]), Number(m[2]), (Number(m[3] ?? 0) * Math.PI) / 180];
+  return oklch(Number(m[1]), Number(m[2]), Number(m[3] ?? 0));
+}
+
+/** OKLCH（L は 0〜1、h は度）を線形 sRGB へ。 */
+export function oklch(L: number, C: number, hue: number): [number, number, number] {
+  const h = (hue * Math.PI) / 180;
   const a = C * Math.cos(h);
   const b = C * Math.sin(h);
   const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;

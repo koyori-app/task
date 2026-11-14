@@ -26,7 +26,7 @@ async function resend() {
         </p>
       </div>
       <div class="flex flex-col items-center gap-3">
-        <p v-if="sent" class="text-sm text-green-600 dark:text-green-400">
+        <p v-if="sent" class="text-sm text-green-700 dark:text-green-400">
           確認メールを再送しました。
         </p>
         <Button

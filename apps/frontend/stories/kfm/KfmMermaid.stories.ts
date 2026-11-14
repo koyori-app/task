@@ -180,7 +180,7 @@ export const BrokenInput: Story = {
 export const DarkTheme: Story = {
   name: 'ダークテーマ',
   args: { html: flowchartHtml },
-  // html の data-theme = dark（アプリ本体と同方式）。明るい配色との違いは kfm-mermaid.test.ts が固定する
+  // html の data-theme = dark（アプリ本体と同方式）。明るい配色との違いは play が実ブラウザで比べる
   beforeEach: htmlTheme('dark'),
   parameters: {
     docs: {
@@ -192,7 +192,34 @@ export const DarkTheme: Story = {
   },
   play: async ({ canvasElement }) => {
     await expect(document.documentElement.dataset.theme).toBe('dark');
-    await expectRendered(canvasElement, 'kfm-mermaid');
+    const dark = await expectRendered(canvasElement, 'kfm-mermaid');
+    // 同じソースを html の data-theme = light で描き直し、SVG が暗い配色のときと違うことを確かめる。
+    // 描画ごとに変わる SVG の id（kfm-mermaid-N）は比べる前に揃える。
+    // theme は htmlTheme の後始末が元に戻すが、ここでも dark に戻して他のストーリーへ漏らさない
+    const root = document.documentElement;
+    const light = document.createElement('kfm-mermaid');
+    light.textContent = Array.from(dark.childNodes)
+      .filter((node): node is Text => node.nodeType === Node.TEXT_NODE)
+      .map((node) => node.data)
+      .join('');
+    root.dataset.theme = 'light';
+    try {
+      canvasElement.append(light);
+      await waitFor(
+        () => expect(light.dataset.kfmMermaid, '明るい配色の描画が終わるまで待つ').toBe('rendered'),
+        { timeout: 10_000 },
+      );
+      const normalize = (html: string | undefined) =>
+        html?.replace(/kfm-mermaid-\d+/g, 'kfm-mermaid-N');
+      const darkSvg = normalize(dark.shadowRoot?.innerHTML);
+      const lightSvg = normalize(light.shadowRoot?.innerHTML);
+      await expect(darkSvg).toContain('<svg');
+      await expect(lightSvg).toContain('<svg');
+      await expect(lightSvg).not.toBe(darkSvg);
+    } finally {
+      light.remove();
+      root.dataset.theme = 'dark';
+    }
   },
 };
 
