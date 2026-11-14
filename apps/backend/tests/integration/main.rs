@@ -21,6 +21,7 @@ mod drive_task_links_integration;
 mod drive_upload_acl_integration;
 mod drive_upload_body_limit_integration;
 mod drive_usage_integration;
+mod favicons_integration;
 mod forge_branches_commit_sync_integration;
 mod forge_commit_links_integration;
 mod forge_manual_pull_request_links_integration;
