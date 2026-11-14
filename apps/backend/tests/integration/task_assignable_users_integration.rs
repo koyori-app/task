@@ -158,6 +158,8 @@ async fn assignable_users_is_limited_to_named_members() {
         )
         .await;
     assert_eq!(added.status(), StatusCode::CREATED);
+    // TASK-501 より前と同じく、載せた人だけが入れる形にする
+    crate::common::stop_inheriting(&app.state.db, tp.project_id).await;
 
     let list = app.get_with_session(&assignable_path).await;
     assert_eq!(list.status(), StatusCode::OK);

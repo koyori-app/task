@@ -100,6 +100,8 @@ async fn restrict_to(app: &TestApp, project_id: Uuid, user_id: Uuid) {
     .insert(&app.state.db)
     .await
     .expect("insert project member");
+    // TASK-501 より前と同じく、載せた人だけが入れる形にする
+    crate::common::stop_inheriting(&app.state.db, project_id).await;
 }
 
 async fn login(app: &mut TestApp, user: &TestUser) {

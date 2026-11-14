@@ -95,6 +95,8 @@ async fn add_member(app: &TestApp, project_id: Uuid, user_id: Uuid) {
     .insert(&app.state.db)
     .await
     .expect("insert project member");
+    // TASK-501 より前と同じく、載せた人だけが入れる形にする
+    crate::common::stop_inheriting(&app.state.db, project_id).await;
 }
 
 async fn folder_project_id(app: &TestApp, folder_id: Uuid) -> Option<Uuid> {

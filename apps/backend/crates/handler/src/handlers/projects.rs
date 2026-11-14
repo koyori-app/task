@@ -6,7 +6,8 @@ use axum::{
 use axum_valid::Valid;
 use sea_orm::prelude::Uuid;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
+    TransactionTrait,
 };
 
 use crate::AppState;
@@ -15,8 +16,9 @@ use crate::auth_helpers::{
 };
 use crate::error::AppError;
 use crate::extractors::AuthUser;
+use crate::handlers::project_members::{lock_membership_changes, require_project_admin};
 use crate::openapi::CrudErrors;
-use entity::{drive_folders, project_statuses, projects, scopes::Scope};
+use entity::{drive_folders, project_members, project_statuses, projects, scopes::Scope};
 use payload::projects::*;
 use service::db::is_postgres_unique_violation;
 
@@ -112,6 +114,7 @@ pub async fn create_project(
             key: Set(key.clone()),
             is_personal: Set(false),
             personal_owner_id: Set(None),
+            inherit_tenant_members: Set(true),
         };
         match project.insert(&txn).await {
             Ok(model) => break (txn, model),
@@ -301,9 +304,44 @@ pub async fn update_project(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
-    require_project_manager(&state.db, &project, auth.user_id).await?;
+    let changes_profile = payload.name.is_some()
+        || payload.description.is_some()
+        || payload.icon_emoji.is_some()
+        || payload.icon_url.is_some()
+        || payload.clear_icon_emoji
+        || payload.clear_icon_url;
+    // 継承の切り替えだけの更新は、プロジェクトのメンバーを変えられる人に許す（下で検める）
+    if changes_profile || payload.inherit_tenant_members.is_none() {
+        require_project_manager(&state.db, &project, auth.user_id).await?;
+    }
 
+    let txn = state.db.begin().await?;
+    let is_personal = project.is_personal;
     let mut active: projects::ActiveModel = project.into();
+    if let Some(inherit) = payload.inherit_tenant_members {
+        // 個人プロジェクトは継承の対象外（本人だけが入れる）
+        if is_personal {
+            return Err(AppError::BadRequestDetail(
+                "personal-project-inheritance".into(),
+            ));
+        }
+        // 入れる人を変える操作なので、メンバーの追加や削除と同じロックの中で、同じ人に許す
+        lock_membership_changes(&txn, tenant_id).await?;
+        require_project_admin(&txn, tenant_id, id, auth.user_id).await?;
+        // メンバーが一人も載っていないのに継承を切ると、オーナーのほかは誰も入れなくなる
+        if !inherit
+            && project_members::Entity::find()
+                .filter(project_members::Column::ProjectId.eq(id))
+                .count(&txn)
+                .await?
+                == 0
+        {
+            return Err(AppError::BadRequestDetail(
+                "inheritance-needs-members".into(),
+            ));
+        }
+        active.inherit_tenant_members = Set(inherit);
+    }
     if let Some(name) = payload.name {
         active.name = Set(name);
     }
@@ -320,7 +358,8 @@ pub async fn update_project(
     } else if let Some(icon_url) = payload.icon_url {
         active.icon_url = Set(Some(icon_url));
     }
-    let updated = active.update(&state.db).await?;
+    let updated = active.update(&txn).await?;
+    txn.commit().await?;
     Ok(Json(updated.into()))
 }
 

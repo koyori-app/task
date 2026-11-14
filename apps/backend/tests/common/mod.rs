@@ -344,6 +344,11 @@ DROP INDEX IF EXISTS "idx-projects-projects_key_tenant_unique";
                     "ALTER TABLE IF EXISTS task_attachments ADD COLUMN IF NOT EXISTS source VARCHAR(16) NOT NULL DEFAULT 'manual'",
                 )
                 .await;
+            let _ = db
+                .execute_unprepared(
+                    "ALTER TABLE IF EXISTS projects ADD COLUMN IF NOT EXISTS inherit_tenant_members BOOLEAN NOT NULL DEFAULT true",
+                )
+                .await;
 
             db.get_schema_registry("entity::*")
                 .sync(db)
@@ -411,6 +416,13 @@ ALTER TABLE projects
             )
             .await
             .expect("prepare personal project columns");
+
+            // sync() は既定値を作らないので、m20261111000000_project_member_inheritance と同じ既定値を置く
+            db.execute_unprepared(
+                "ALTER TABLE projects ALTER COLUMN inherit_tenant_members SET DEFAULT true",
+            )
+            .await
+            .expect("prepare project inheritance column");
 
             // sync() は entity 定義からカラムデフォルトを作らないため、
             // `ensure_system_settings_row` の `INSERT INTO system_settings (singleton)` が
@@ -924,6 +936,7 @@ impl TestApp {
             key: Set(format!("P{}", suffix.to_uppercase())),
             is_personal: Set(false),
             personal_owner_id: Set(None),
+            inherit_tenant_members: Set(true),
         }
         .insert(&self.state.db)
         .await
@@ -1520,6 +1533,19 @@ pub async fn ensure_tenant_member_for_project(
     .expect("insert tenant member");
 }
 
+/// プロジェクトの継承を切り、`project_members` に載せた人だけが入れる形にする。
+///
+/// TASK-501 より前は、メンバーを 1 人載せるとそれだけでプロジェクトが閉じた。閉じたプロジェクトを
+/// 前提に書かれた試験は、メンバーを載せた後にこれを呼んで同じ形を作る。
+pub async fn stop_inheriting(db: &DatabaseConnection, project_id: Uuid) {
+    execute_sql(
+        db,
+        "UPDATE projects SET inherit_tenant_members = false WHERE id = $1",
+        vec![project_id.into()],
+    )
+    .await;
+}
+
 /// 応答の本文を JSON として読む。
 pub async fn json_body(res: Response) -> serde_json::Value {
     res.json::<serde_json::Value>().await.expect("json body")
@@ -1539,6 +1565,7 @@ pub async fn insert_extra_project(app: &TestApp, tenant_id: Uuid) -> Uuid {
         key: Set(format!("Q{}", suffix.to_uppercase())),
         is_personal: Set(false),
         personal_owner_id: Set(None),
+        inherit_tenant_members: Set(true),
     }
     .insert(&app.state.db)
     .await

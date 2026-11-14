@@ -446,11 +446,11 @@ async fn seed_project_members(
     }
 }
 
-/// 共有プロジェクトの最後のメンバーである Admin は、自分を外せる（TASK-217）。
+/// テナントのメンバーを継承する共有プロジェクトの最後のメンバーである Admin は、自分を外せる（TASK-217）。
 ///
-/// 外すと `project_members` が 0 件になり、継承（テナントメンバー全員に開く）へ戻る。
+/// 継承するので、載せている間も外した後も、テナントメンバー全員が入れる（TASK-501）。
 /// 管理はテナントオーナーが引き継ぐので「管理できる人が常に居る」は崩れない。
-/// 修正前は `would_drop_last_admin` で 409 になり、継承へ戻す手段が無かった。
+/// 継承しないプロジェクトの最後の 1 行は外せない（`project_member_inheritance_integration`）。
 #[tokio::test]
 async fn the_only_admin_of_a_shared_project_can_remove_themselves() {
     let mut app = TestApp::new().await;
@@ -464,13 +464,13 @@ async fn the_only_admin_of_a_shared_project_can_remove_themselves() {
     let project_path = format!("/v1/tenants/{}/projects/{}", tp.tenant_id, tp.project_id);
     let alice_path = format!("{project_path}/members/{}", alice.id);
 
-    // 前提: alice だけが指定されているので、明示 ACE の無い bob は開けない
+    // 前提: alice だけを載せても、継承するので明示 ACE の無い bob も開ける（TASK-501）
     app.reset_session_client();
     app.login_session(&bob.email, &bob.password).await;
-    assert_ne!(
+    assert_eq!(
         app.get_with_session(&project_path).await.status(),
         StatusCode::OK,
-        "前提: メンバー指定がある間は bob に閉じている"
+        "前提: メンバーを載せても継承は止まらない"
     );
 
     app.reset_session_client();
@@ -481,13 +481,13 @@ async fn the_only_admin_of_a_shared_project_can_remove_themselves() {
         "共有プロジェクトの最後のメンバーは、Admin でも外せる"
     );
 
-    // 継承に戻ったので、明示 ACE の無いテナントメンバーも開ける
+    // 外した後も、明示 ACE の無いテナントメンバーは開ける
     app.reset_session_client();
     app.login_session(&bob.email, &bob.password).await;
     assert_eq!(
         app.get_with_session(&project_path).await.status(),
         StatusCode::OK,
-        "メンバー指定が無くなったプロジェクトはテナントメンバーに開放される"
+        "継承するプロジェクトはテナントメンバーに開いたまま"
     );
 
     app.cleanup_user(owner.id).await;
@@ -860,7 +860,7 @@ async fn tenant_admin_manages_a_closed_project_only_with_an_ace() {
     add_tenant_member_with_role(&mut app, &tp, &owner, &bob, "Member").await;
     let path = members_path(&tp);
 
-    // オーナーが alice（Admin）と inside（Viewer）の ACE で閉じる
+    // オーナーが alice（Admin）と inside（Viewer）の ACE を置き、継承を切って閉じる
     for (user, role) in [(&alice, "Admin"), (&inside, "Viewer")] {
         assert_eq!(
             app.post_json_with_session(
@@ -872,6 +872,7 @@ async fn tenant_admin_manages_a_closed_project_only_with_an_ace() {
             StatusCode::CREATED
         );
     }
+    crate::common::stop_inheriting(&app.state.db, tp.project_id).await;
 
     app.reset_session_client();
     app.login_session(&outside.email, &outside.password).await;
@@ -996,7 +997,7 @@ async fn tenant_admin_rechecks_visibility_after_the_lock() {
         "ロックを握っている間、追加は待たされる"
     );
 
-    // 待っている間に alice の ACE を置いて閉じる
+    // 待っている間に alice の ACE を置き、継承を切って閉じる
     txn.execute_raw(Statement::from_sql_and_values(
         DatabaseBackend::Postgres,
         "INSERT INTO project_members (id, project_id, user_id, role) VALUES ($1, $2, $3, 'Admin')",
@@ -1004,6 +1005,13 @@ async fn tenant_admin_rechecks_visibility_after_the_lock() {
     ))
     .await
     .expect("insert ace");
+    txn.execute_raw(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        "UPDATE projects SET inherit_tenant_members = false WHERE id = $1",
+        [tp.project_id.into()],
+    ))
+    .await
+    .expect("stop inheriting");
     txn.commit().await.expect("commit");
 
     assert_eq!(

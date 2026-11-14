@@ -45,6 +45,7 @@ async fn insert_second_project(db: &DatabaseConnection, tenant_id: Uuid) -> Uuid
         key: Set(format!("S{}", suffix.to_uppercase())),
         is_personal: Set(false),
         personal_owner_id: Set(None),
+        inherit_tenant_members: Set(true),
     }
     .insert(db)
     .await

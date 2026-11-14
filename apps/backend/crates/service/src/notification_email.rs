@@ -327,6 +327,7 @@ mod tests {
             key: "KOY".into(),
             is_personal: false,
             personal_owner_id: None,
+            inherit_tenant_members: true,
         }
     }
 

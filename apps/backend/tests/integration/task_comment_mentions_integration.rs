@@ -203,6 +203,8 @@ async fn tenant_owner_outside_explicit_member_list_can_be_mentioned() {
         )
         .await;
     assert_eq!(add.status(), StatusCode::CREATED);
+    // TASK-501 より前と同じく、載せた人だけが入れる形にする
+    crate::common::stop_inheriting(&fx.app.state.db, fx.project_id).await;
 
     // named として投稿し、owner と unnamed を指す
     fx.app.reset_session_client();

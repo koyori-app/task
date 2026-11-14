@@ -236,6 +236,25 @@ async fn projects_list_reads_the_project_index() {
     assert_eq!(harness.run(&["task", "projects", "list"]).await.unwrap(), 0);
 }
 
+/// inherit_tenant_members を返さない旧いサーバーに対しても、プロジェクトを引くコマンドは通る（TASK-501）。
+#[tokio::test]
+async fn projects_list_reads_a_server_without_the_inheritance_field() {
+    let harness = harness().await;
+    let mut legacy = project_json();
+    legacy
+        .as_object_mut()
+        .unwrap()
+        .remove("inherit_tenant_members");
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/tenants/{TENANT}/projects")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([legacy])))
+        .expect(1)
+        .mount(&harness.server)
+        .await;
+
+    assert_eq!(harness.run(&["task", "projects", "list"]).await.unwrap(), 0);
+}
+
 #[tokio::test]
 async fn projects_show_matches_a_key_regardless_of_case() {
     let harness = harness().await;
