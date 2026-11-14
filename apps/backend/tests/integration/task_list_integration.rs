@@ -1046,7 +1046,7 @@ async fn task_list_filters_by_unassigned() {
 
     let assigned_a = create_task(&app, &base, status_id, "Assigned A", None).await;
     let assigned_b = create_task(&app, &base, status_id, "Assigned B", None).await;
-    create_task(&app, &base, status_id, "Free A", None).await;
+    let free_a = create_task(&app, &base, status_id, "Free A", None).await;
     let free_b = create_task(&app, &base, status_id, "Free B", None).await;
     let parent = create_task(&app, &base, status_id, "Parent", None).await;
     let parent_id = parent["id"].as_str().unwrap();
@@ -1166,6 +1166,26 @@ async fn task_list_filters_by_unassigned() {
         .get_with_session(&format!("{base}?unassigned=false&assignee_id={}", owner.id))
         .await;
     assert_eq!(response.status(), StatusCode::OK);
+
+    // 担当者なしの親の下にある担当者なしの子は、root_only を付けると隠れる。
+    create_task(
+        &app,
+        &base,
+        status_id,
+        "Free A Child",
+        Some(free_a["id"].as_str().unwrap()),
+    )
+    .await;
+    let url = format!("{base}?unassigned=true&sort=title_asc");
+    assert_eq!(
+        titles_for(&app, &url).await,
+        ["Assigned A", "Child", "Free A", "Free A Child", "Free B"]
+    );
+    let url = format!("{base}?unassigned=true&root_only=true&sort=title_asc");
+    assert_eq!(
+        titles_for(&app, &url).await,
+        ["Assigned A", "Child", "Free A", "Free B"]
+    );
 }
 
 async fn titles_for(app: &TestApp, url: &str) -> Vec<String> {
