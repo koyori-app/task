@@ -225,6 +225,95 @@ async fn my_list_defaults_to_every_task() {
     assert_eq!(harness.run(&["task", "my", "list"]).await.unwrap(), 0);
 }
 
+/// 既定の 1 ページ目。`limit` を送らないと API の既定（50 件）に任せることになり、
+/// 続きの有無を CLI が計算できない。完了済みの除外は明示したときだけ。
+#[tokio::test]
+async fn my_list_sends_the_default_page() {
+    let harness = harness().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/tenants/{TENANT}/users/me/tasks")))
+        .and(query_param("filter", "all"))
+        .and(query_param("limit", "50"))
+        .and(query_param("offset", "0"))
+        .and(query_param_is_missing("done"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "tasks": [], "total": 0 })))
+        .expect(1)
+        .mount(&harness.server)
+        .await;
+
+    assert_eq!(harness.run(&["task", "my", "list"]).await.unwrap(), 0);
+}
+
+/// 担当が 246 件ある利用者が、先頭 50 件より先を取れる。200 件を越えた先のページも送れる。
+#[tokio::test]
+async fn my_list_pages_past_the_first_fifty() {
+    for (args, limit, offset) in [
+        (
+            &["task", "my", "list", "--page", "2", "--limit", "100"][..],
+            "100",
+            "100",
+        ),
+        (
+            &["task", "my", "list", "--page", "2", "--limit", "200"][..],
+            "200",
+            "200",
+        ),
+    ] {
+        let harness = harness().await;
+        Mock::given(method("GET"))
+            .and(path(format!("/v1/tenants/{TENANT}/users/me/tasks")))
+            .and(query_param("limit", limit))
+            .and(query_param("offset", offset))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({ "tasks": [], "total": 246 })),
+            )
+            .expect(1)
+            .mount(&harness.server)
+            .await;
+
+        assert_eq!(harness.run(args).await.unwrap(), 0, "{args:?}");
+    }
+}
+
+#[tokio::test]
+async fn my_list_open_asks_for_tasks_that_are_not_done() {
+    let harness = harness().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/tenants/{TENANT}/users/me/tasks")))
+        .and(query_param("done", "false"))
+        .and(query_param("filter", "no_due_date"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "tasks": [], "total": 0 })))
+        .expect(1)
+        .mount(&harness.server)
+        .await;
+
+    assert_eq!(
+        harness
+            .run(&["task", "my", "list", "--open", "--filter", "no_due_date"])
+            .await
+            .unwrap(),
+        0
+    );
+}
+
+/// サーバーは 200 を越える `limit` を黙って丸める。丸められたままページを送ると行が飛ぶので、
+/// 送る前に断る（対照の `--limit 200` は `my_list_pages_past_the_first_fifty` が通す）。
+#[tokio::test]
+async fn my_list_rejects_a_page_size_the_server_would_round_down() {
+    for args in [
+        &["task", "my", "list", "--limit", "201"][..],
+        &["task", "my", "list", "--limit", "0"],
+        &["task", "my", "list", "--page", "0"],
+    ] {
+        let harness = harness().await;
+
+        let err = harness.run(args).await.unwrap_err();
+
+        assert_eq!(err.exit_code, 2, "{args:?}: {}", err.message);
+        assert!(harness.sent_nothing().await, "{args:?}");
+    }
+}
+
 #[tokio::test]
 async fn projects_list_reads_the_project_index() {
     let harness = harness().await;

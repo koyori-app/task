@@ -432,6 +432,15 @@ pub enum MyCommand {
         /// today | week | no_due_date | overdue | all
         #[arg(long, default_value = "all")]
         filter: String,
+        /// Only tasks that are not done
+        #[arg(long)]
+        open: bool,
+        /// Tasks per page (1-200)
+        #[arg(long, default_value_t = 50)]
+        limit: u64,
+        /// Page number, 1-based
+        #[arg(long, default_value_t = 1)]
+        page: u64,
     },
     /// Complete a personal or assigned task by ref (e.g. ME-3)
     Complete {

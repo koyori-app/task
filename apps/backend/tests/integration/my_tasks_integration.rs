@@ -380,3 +380,91 @@ async fn list_is_ordered_by_deadline_and_rejects_bad_timezone() {
         .await;
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
+
+/// 応答全体（`tasks` と `total`）を返す。`titles` は件数を見ないので、`total` を確かめる側はこちら。
+async fn list(app: &TestApp, tp: &TestTenantProject, query: &str) -> serde_json::Value {
+    let res = app
+        .get_with_session(&format!("{}/tasks?{query}", my_tasks_base(tp.tenant_id)))
+        .await;
+    assert_eq!(res.status(), StatusCode::OK, "{query}");
+    res.json().await.unwrap()
+}
+
+fn titles_of(body: &serde_json::Value) -> Vec<String> {
+    let mut titles: Vec<String> = body["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["title"].as_str().unwrap().to_string())
+        .collect();
+    titles.sort();
+    titles
+}
+
+#[tokio::test]
+async fn done_filter_narrows_the_list_and_its_total() {
+    let mut app = TestApp::new().await;
+    let (user, tp) = setup(&mut app).await;
+    let todo = create_status(&app, &tp, "Todo", false).await;
+    let done = create_status(&app, &tp, "Done", true).await;
+    for title in ["todo 1", "todo 2"] {
+        add_task(&app, &user, &tp, todo, title, None, None).await;
+    }
+    for title in ["done 1", "done 2"] {
+        add_task(&app, &user, &tp, done, title, None, None).await;
+    }
+
+    let open = list(&app, &tp, "done=false").await;
+    assert_eq!(titles_of(&open), vec!["todo 1", "todo 2"]);
+    assert_eq!(open["total"], 2);
+
+    let finished = list(&app, &tp, "done=true").await;
+    assert_eq!(titles_of(&finished), vec!["done 1", "done 2"]);
+    assert_eq!(finished["total"], 2);
+
+    // 対照: 未指定なら絞らない（既定が変わっていない）
+    let all = list(&app, &tp, "filter=all").await;
+    assert_eq!(all["tasks"].as_array().unwrap().len(), 4);
+    assert_eq!(all["total"], 4);
+
+    // 他の filter とは AND で掛かる
+    let open_without_due = list(&app, &tp, "filter=no_due_date&done=false").await;
+    assert_eq!(titles_of(&open_without_due), vec!["todo 1", "todo 2"]);
+    let done_without_due = list(&app, &tp, "filter=no_due_date&done=true").await;
+    assert_eq!(done_without_due["total"], 2);
+
+    // 対照: 真偽値でない値は 400（不正な timezone と同じ扱い）
+    let res = app
+        .get_with_session(&format!("{}/tasks?done=maybe", my_tasks_base(tp.tenant_id)))
+        .await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+/// 未完了だけのページ送り。`total` が絞り込み後の件数でなければ、CLI は続きの有無を誤る。
+#[tokio::test]
+async fn open_tasks_page_past_the_default_limit() {
+    let mut app = TestApp::new().await;
+    let (user, tp) = setup(&mut app).await;
+    let todo = create_status(&app, &tp, "Todo", false).await;
+    let done = create_status(&app, &tp, "Done", true).await;
+    // 既定の limit（50）を 1 件越える
+    for n in 0..51 {
+        add_task(&app, &user, &tp, todo, &format!("todo {n:02}"), None, None).await;
+    }
+    for n in 0..3 {
+        add_task(&app, &user, &tp, done, &format!("done {n}"), None, None).await;
+    }
+
+    let first = list(&app, &tp, "done=false").await;
+    assert_eq!(first["tasks"].as_array().unwrap().len(), 50);
+    assert_eq!(first["total"], 51);
+    let second = list(&app, &tp, "done=false&offset=50").await;
+    assert_eq!(second["tasks"].as_array().unwrap().len(), 1);
+    assert_eq!(second["total"], 51);
+
+    let mut paged = titles_of(&first);
+    paged.extend(titles_of(&second));
+    paged.sort();
+    let expected: Vec<String> = (0..51).map(|n| format!("todo {n:02}")).collect();
+    assert_eq!(paged, expected, "完了済みが混ざらず、51 件ちょうど");
+}
