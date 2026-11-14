@@ -225,6 +225,170 @@ async fn my_list_defaults_to_every_task() {
     assert_eq!(harness.run(&["task", "my", "list"]).await.unwrap(), 0);
 }
 
+/// 既定の 1 ページ目。`limit` を送らないと API の既定（50 件）に任せることになり、
+/// 続きの有無を CLI が計算できない。完了済みの除外は明示したときだけ。
+#[tokio::test]
+async fn my_list_sends_the_default_page() {
+    let harness = harness().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/tenants/{TENANT}/users/me/tasks")))
+        .and(query_param("filter", "all"))
+        .and(query_param("limit", "50"))
+        .and(query_param("offset", "0"))
+        .and(query_param_is_missing("done"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "tasks": [], "total": 0 })))
+        .expect(1)
+        .mount(&harness.server)
+        .await;
+
+    assert_eq!(harness.run(&["task", "my", "list"]).await.unwrap(), 0);
+}
+
+/// 実バイナリを走らせて標準出力を取る。表示は `println!` に出るので、
+/// 行と要約を確かめるにはプロセスを分けるしかない。
+async fn run_binary(server: &MockServer, args: &[&str]) -> (bool, String) {
+    let home = tempfile::tempdir().unwrap();
+    let uri = server.uri();
+    let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
+    let output = tokio::task::spawn_blocking(move || {
+        std::process::Command::new(env!("CARGO_BIN_EXE_task"))
+            .args(&args[1..])
+            .env_clear()
+            .env("HOME", home.path())
+            .env("TASK_API_URL", uri)
+            .env("TASK_TOKEN", "token-1")
+            .env("TASK_TENANT", TENANT)
+            .output()
+            .unwrap()
+    })
+    .await
+    .unwrap();
+    (
+        output.status.success(),
+        String::from_utf8(output.stdout).unwrap(),
+    )
+}
+
+/// `GET /users/me/tasks` の本物の応答に合わせた行（`first..=last` の連番）。
+fn my_task_rows(first: usize, last: usize) -> Vec<serde_json::Value> {
+    (first..=last)
+        .map(|n| {
+            json!({
+                "id": "00000000-0000-4000-8000-000000000001",
+                "seq_id": n,
+                "seq_key": format!("ME-{n}"),
+                "title": format!("task {n}"),
+                "status": {
+                    "id": TODO_STATUS,
+                    "name": "Todo",
+                    "color": "#000000",
+                    "is_done_state": false,
+                },
+                "priority": "medium",
+                "soft_deadline": null,
+                "hard_deadline": null,
+                "planned_start_on": null,
+                "project": {
+                    "id": PROJECT_ID,
+                    "name": "me",
+                    "key": "ME",
+                    "is_personal": true,
+                },
+                "is_personal": true,
+            })
+        })
+        .collect()
+}
+
+/// 担当が 246 件ある利用者が、先頭 50 件より先を取れる。200 件を越えた先のページも送れる。
+/// 応答は API の契約どおり（`limit` 件で切れ、最後のページは残りだけ）にして、
+/// 行が出ることと、続きの有無の要約まで確かめる。
+#[tokio::test]
+async fn my_list_pages_past_the_first_fifty() {
+    // (引数, limit, offset, 返す行の範囲, 要約の最後の行)
+    for (args, limit, offset, (first, last), summary) in [
+        (
+            &["task", "my", "list", "--page", "2", "--limit", "100"][..],
+            "100",
+            "100",
+            (101, 200),
+            "100 件表示 / 全 246 件（--page 3 で続き）",
+        ),
+        (
+            &["task", "my", "list", "--page", "2", "--limit", "200"][..],
+            "200",
+            "200",
+            (201, 246),
+            "46 件表示 / 全 246 件",
+        ),
+    ] {
+        let harness = harness().await;
+        Mock::given(method("GET"))
+            .and(path(format!("/v1/tenants/{TENANT}/users/me/tasks")))
+            .and(query_param("limit", limit))
+            .and(query_param("offset", offset))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "tasks": my_task_rows(first, last),
+                "total": 246,
+            })))
+            .expect(1)
+            .mount(&harness.server)
+            .await;
+
+        let (ok, stdout) = run_binary(&harness.server, args).await;
+
+        assert!(ok, "{args:?}: {stdout}");
+        let lines: Vec<&str> = stdout.lines().collect();
+        assert_eq!(lines.len(), last - first + 2, "{args:?}: {stdout}");
+        assert_eq!(lines[0], format!("ME-{first}\ttask {first}"), "{args:?}");
+        assert_eq!(
+            lines[lines.len() - 2],
+            format!("ME-{last}\ttask {last}"),
+            "{args:?}"
+        );
+        assert_eq!(lines[lines.len() - 1], summary, "{args:?}");
+    }
+}
+
+#[tokio::test]
+async fn my_list_open_asks_for_tasks_that_are_not_done() {
+    let harness = harness().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/tenants/{TENANT}/users/me/tasks")))
+        .and(query_param("done", "false"))
+        .and(query_param("filter", "no_due_date"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "tasks": [], "total": 0 })))
+        .expect(1)
+        .mount(&harness.server)
+        .await;
+
+    assert_eq!(
+        harness
+            .run(&["task", "my", "list", "--open", "--filter", "no_due_date"])
+            .await
+            .unwrap(),
+        0
+    );
+}
+
+/// サーバーは 200 を越える `limit` を黙って丸める。丸められたままページを送ると行が飛ぶので、
+/// 送る前に断る（対照の `--limit 200` は `my_list_pages_past_the_first_fifty` が通す）。
+#[tokio::test]
+async fn my_list_rejects_a_page_size_the_server_would_round_down() {
+    for args in [
+        &["task", "my", "list", "--limit", "201"][..],
+        &["task", "my", "list", "--limit", "0"],
+        &["task", "my", "list", "--page", "0"],
+    ] {
+        let harness = harness().await;
+
+        let err = harness.run(args).await.unwrap_err();
+
+        assert_eq!(err.exit_code, 2, "{args:?}: {}", err.message);
+        assert!(harness.sent_nothing().await, "{args:?}");
+    }
+}
+
 #[tokio::test]
 async fn projects_list_reads_the_project_index() {
     let harness = harness().await;
