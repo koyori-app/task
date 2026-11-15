@@ -55,7 +55,8 @@ async function confirmDetach() {
   const target = detachTarget.value;
   if (!target) return;
   await removeAttachment(target.id);
-  detachTarget.value = null;
+  // 解除を待つ間に別の添付の確認へ移っていたら、そちらの確認は閉じない
+  if (detachTarget.value === target) detachTarget.value = null;
 }
 type TaskRef = { tenantId: string; projectId: string; taskId: string };
 type PendingFile = TaskRef & { id: string; name: string };

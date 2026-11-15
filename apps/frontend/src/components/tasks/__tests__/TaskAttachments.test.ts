@@ -409,7 +409,7 @@ describe('TaskAttachments', () => {
     }
     function stubApi(
       attachments: ReturnType<typeof row>[],
-      onDelete: () => Response = () => new Response(null, { status: 204 }),
+      onDelete: () => Response | Promise<Response> = () => new Response(null, { status: 204 }),
     ) {
       const deletes: string[] = [];
       vi.stubGlobal('fetch', async (request: Request) => {
@@ -502,6 +502,31 @@ describe('TaskAttachments', () => {
 
       expect(deletes).toEqual([]);
       expect(wrapper.text()).toContain('mine.txt');
+    });
+
+    it('解除の応答を待つ間に別のタスクで開いた確認は、応答が届いても閉じない', async () => {
+      let finishDelete!: (response: Response) => void;
+      stubApi(
+        [row('1', 'first.txt', ME), row('2', 'second.txt', ME)],
+        () => new Promise<Response>((resolve) => (finishDelete = resolve)),
+      );
+      const wrapper = mountAttachments({ currentUserId: ME });
+      await flushPromises();
+
+      await wrapper.get(detachSelector('first.txt')).trigger('click');
+      await flushPromises();
+      await confirmButton(wrapper, '解除する').trigger('click');
+      await flushPromises();
+
+      await wrapper.setProps({ taskId: 'TASK-2' });
+      await flushPromises();
+      await wrapper.get(detachSelector('second.txt')).trigger('click');
+      await flushPromises();
+      expect(wrapper.text()).toContain('「second.txt」をこのタスクから外します');
+
+      finishDelete(new Response(null, { status: 204 }));
+      await flushPromises();
+      expect(wrapper.text()).toContain('「second.txt」をこのタスクから外します');
     });
 
     it('API が 403 を返したら、解除できる人を明記する', async () => {
