@@ -3,7 +3,7 @@ use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
 };
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, prelude::Uuid};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, prelude::Uuid};
 
 use sea_orm::{ConnectionTrait, Statement, TransactionTrait};
 
@@ -88,16 +88,17 @@ pub async fn delete_tenant(
     headers: HeaderMap,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, AppError> {
-    let tenant = tenants::Entity::find_by_id(id)
-        .one(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-
     // 監査ログを削除より先に書き、同じトランザクションで確定する。
     // 削除後に消したテナントの ID を `audit_logs.tenant_id`（外部キー）へ入れると違反になる。
     // 先に書いておけば、削除時に外部キー（ON DELETE SET NULL）がログの tenant_id を NULL にする。
     // 削除後も追えるよう、テナントの識別情報は metadata に残す。
+    // テナント行は最初に FOR UPDATE で取る。一括失効（テナント行 → 束縛行）と逆順になるとデッドロックする。
     let txn = state.db.begin().await?;
+    let tenant = tenants::Entity::find_by_id(id)
+        .lock_exclusive()
+        .one(&txn)
+        .await?
+        .ok_or(AppError::NotFound)?;
     record_audit(
         &txn,
         admin.user_id,
