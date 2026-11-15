@@ -21,16 +21,14 @@ const avatarUser = computed(() => ({ name: props.user.name, avatar_url: props.us
 const { canInstall, promptInstall } = useInstallPrompt();
 
 const sections = computed<DropdownSection[]>(() => [
-  { heading: props.user.email, items: [{ value: 'upgrade', label: 'Upgrade to Pro' }] },
   {
     items: [
-      { value: 'account', label: 'Account' },
-      { value: 'billing', label: 'Billing' },
-      { value: 'notifications', label: 'Notifications' },
+      { value: 'account', label: 'アカウント' },
+      { value: 'notifications', label: '通知' },
     ],
   },
-  ...(canInstall.value ? [{ items: [{ value: 'install', label: 'Install app' }] }] : []),
-  { items: [{ value: 'logout', label: 'Log out', destructive: true }] },
+  ...(canInstall.value ? [{ items: [{ value: 'install', label: 'アプリをインストール' }] }] : []),
+  { items: [{ value: 'logout', label: 'ログアウト', destructive: true }] },
 ]);
 
 function onSelect(value: string) {

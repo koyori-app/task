@@ -46,7 +46,7 @@ Guest には `tenant` 種類の段を出さない。テナント全体の設定�
 
 共通レイアウトのルートは `breadcrumbRoute` に列挙する。未登録のページとエラーページでは配列を空にし、パンくずの nav を描かない。直前のページの段を引き継ぐ状態を持たないので、登録し忘れても別のタスク名を表示することは無い。
 
-現在 `breadcrumbRoute` に登録していないページは、サインイン前のページ（`/signin` など）に加えて `/settings/preferences`、`/settings/experiments`、`/{tenant}/gantt` である。これらのページにパンくずは出ない。
+現在 `breadcrumbRoute` に登録していないページは、サインイン前のページ（`/signin` など）に加えて `/settings/preferences`、`/settings/theme`、`/settings/experiments`、`/{tenant}/gantt` である。これらのページにパンくずは出ない。
 
 ## 取得中と失敗時
 

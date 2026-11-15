@@ -21,7 +21,9 @@ function mountNavUser() {
 
 /** メニューの項目は閉じていても DOM にあるので、名前で引く */
 function installItem(wrapper: VueWrapper) {
-  return wrapper.findAll('[role="menuitem"]').find((item) => item.text() === 'Install app');
+  return wrapper
+    .findAll('[role="menuitem"]')
+    .find((item) => item.text() === 'アプリをインストール');
 }
 
 function offerInstall() {
