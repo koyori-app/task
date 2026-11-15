@@ -179,6 +179,21 @@ describe('useTaskSubtasks', () => {
     );
   });
 
+  it('子を作るとガントの期間なしの数を取り直す（日付の無い子は期間なしに入る）', async () => {
+    mountHost();
+    await flushPromises();
+    const unscheduledKey = [
+      'get',
+      '/v1/tenants/{tenant_id}/schedule/unscheduled',
+      { params: { query: { limit: 200 } } },
+    ];
+    queryClient.setQueryData(unscheduledKey, { total: 0, tasks: [], members: [] });
+
+    await expect(subtasks.createSubtask('新しい子', 'status-1')).resolves.toBe(true);
+
+    expect(queryClient.getQueryState(unscheduledKey)?.isInvalidated).toBe(true);
+  });
+
   it('送信中の二重作成を止める', async () => {
     mountHost();
     await flushPromises();

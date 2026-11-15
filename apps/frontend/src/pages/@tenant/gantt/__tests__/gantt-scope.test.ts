@@ -83,7 +83,8 @@ const UNSCHEDULED = [
   { ...scheduleTask('u-ops-2', { id: 'p-ops', key: 'OPS' }), soft_deadline: null },
 ];
 
-function mountPage() {
+function mountPage({ unscheduledFailures = 0 } = {}) {
+  let failuresLeft = unscheduledFailures;
   // 本物の API と同じく、project_id があればそのプロジェクトの課題だけを返す
   GET.mockImplementation(
     async (path: string, { params }: { params: { query: { project_id?: string[] } } }) => {
@@ -91,6 +92,10 @@ function mountPage() {
       const scope = <T extends { project: { id: string } }>(list: T[]) =>
         wanted ? list.filter((task) => wanted.includes(task.project.id)) : list;
       if (path.endsWith('/schedule/unscheduled')) {
+        if (failuresLeft > 0) {
+          failuresLeft -= 1;
+          return { error: { message: 'internal-error' } };
+        }
         const tasks = scope(UNSCHEDULED);
         return { data: { total: tasks.length, tasks, members: [], next_cursor: null } };
       }
@@ -123,6 +128,23 @@ describe('テナントのガント', () => {
     }
     const bars = wrapper.getComponent({ name: 'GanttChart' }).props('tasks') as { id: string }[];
     expect(bars.map((bar) => bar.id).sort()).toEqual(['t-eng', 't-ops']);
+    expect(wrapper.get('[data-testid="gantt-unscheduled"]').text()).toBe('期間なし 3 件');
+  });
+
+  it('期間なしだけが読めない時は、図を出したまま期間なしの口で取り直せる', async () => {
+    const wrapper = mountPage({ unscheduledFailures: 1 });
+    await flushPromises();
+
+    expect(wrapper.findComponent({ name: 'GanttChart' }).exists()).toBe(true);
+    expect(wrapper.find('[data-testid="gantt-unscheduled"]').exists()).toBe(false);
+    const unscheduledCalls = () =>
+      GET.mock.calls.filter(([path]) => String(path).endsWith('/schedule/unscheduled')).length;
+    expect(unscheduledCalls()).toBe(1);
+
+    await wrapper.get('[data-testid="gantt-unscheduled-retry"]').trigger('click');
+    await flushPromises();
+
+    expect(unscheduledCalls()).toBe(2);
     expect(wrapper.get('[data-testid="gantt-unscheduled"]').text()).toBe('期間なし 3 件');
   });
 });

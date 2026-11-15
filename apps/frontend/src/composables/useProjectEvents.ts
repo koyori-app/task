@@ -5,6 +5,7 @@ import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
 import type { ProjectUuid, TenantUuid } from '@/lib/api-ids';
 import { TASK_SEARCH_PATH } from '@/lib/api-vue-query';
 import { SCHEDULE_PATH } from '@/lib/calendar/schedule';
+import { UNSCHEDULED_PATH } from '@/lib/gantt/unscheduled';
 
 const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
 const GET_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}' as const;
@@ -24,6 +25,7 @@ const INVALIDATED_PATHS = [
   TASK_ATTACHMENTS_PATH,
   TASK_SEARCH_PATH,
   SCHEDULE_PATH,
+  UNSCHEDULED_PATH,
   ACTIVITIES_PATH,
 ];
 

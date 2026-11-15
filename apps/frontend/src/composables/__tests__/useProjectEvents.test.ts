@@ -7,6 +7,7 @@ import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
 import type { ProjectUuid, TenantUuid } from '@/lib/api-ids';
 import { TASK_SEARCH_PATH } from '@/lib/api-vue-query';
 import { SCHEDULE_PATH } from '@/lib/calendar/schedule';
+import { UNSCHEDULED_PATH } from '@/lib/gantt/unscheduled';
 import { useProjectEvents } from '../useProjectEvents';
 
 class MockEventSource {
@@ -109,6 +110,8 @@ describe('useProjectEvents', () => {
         '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/attachments',
         TASK_SEARCH_PATH,
         SCHEDULE_PATH,
+        // ガントの期間なしの数。予定の key では前方一致しないので別に落とす
+        UNSCHEDULED_PATH,
         ACTIVITIES_PATH,
       ]),
     );

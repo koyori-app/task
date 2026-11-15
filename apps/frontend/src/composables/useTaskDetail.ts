@@ -11,6 +11,7 @@ import { clampProgressPct, localDateInputToIso, taskListHref } from '@/lib/task-
 import type { components } from '@/generated/api';
 import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
 import { TASK_RELATIONS_PATH } from '@/composables/useTaskSubtasks';
+import { UNSCHEDULED_PATH } from '@/lib/gantt/unscheduled';
 
 export const GET_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}' as const;
 const LIST_STATUSES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/statuses' as const;
@@ -259,6 +260,8 @@ export function useTaskDetail(params: UseTaskDetailParams) {
       queryClient.invalidateQueries({ queryKey: ['get', ACTIVITIES_PATH] }),
       queryClient.invalidateQueries({ queryKey: ['get', TASK_RELATIONS_PATH] }),
       queryClient.invalidateQueries({ queryKey: ['get', SCHEDULE_PATH] }),
+      // 期間なしの口は別の key なので、予定の key では前方一致しない。日付を全て消すと入る
+      queryClient.invalidateQueries({ queryKey: ['get', UNSCHEDULED_PATH] }),
     ]);
   }
 
@@ -274,6 +277,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     void queryClient.invalidateQueries({ queryKey: ['get', TASK_RELATIONS_PATH] });
     // カレンダーの再取得（全件）も待つと戻りが遅れるので待たない
     void queryClient.invalidateQueries({ queryKey: ['get', SCHEDULE_PATH] });
+    void queryClient.invalidateQueries({ queryKey: ['get', UNSCHEDULED_PATH] });
     return Promise.all([
       queryClient.invalidateQueries({ queryKey: ['get', LIST_TASKS_PATH] }),
       queryClient.invalidateQueries({ queryKey: ['get', TASK_SEARCH_PATH] }),

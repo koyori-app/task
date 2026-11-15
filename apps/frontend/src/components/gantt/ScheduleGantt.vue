@@ -374,6 +374,7 @@ function retryFailed() {
   if (isTenantResolveError.value) void tenantsQuery.refetch();
   if (isProjectResolveError.value) void projectsQuery.refetch();
   if (scheduleQuery.isError.value) void scheduleQuery.refetch();
+  if (unscheduledQuery.isError.value) void unscheduledQuery.refetch();
 }
 </script>
 
@@ -431,7 +432,16 @@ function retryFailed() {
           label="絞り込みを解除"
           @click="memberIds = []"
         />
+        <!-- 期間なしだけが読めない時も図は出せるので、図を止めずにこの口だけで取り直させる -->
         <Button
+          v-if="unscheduledQuery.isError.value"
+          variant="tertiary"
+          label="期間なしを読み込めませんでした（再試行）"
+          data-testid="gantt-unscheduled-retry"
+          @click="retryFailed"
+        />
+        <Button
+          v-else
           variant="tertiary"
           :label="`期間なし ${unscheduledTasks.length} 件`"
           :disabled="!unscheduledQuery.isSuccess.value"

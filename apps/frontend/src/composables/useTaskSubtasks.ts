@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query';
 
 import { fetchClient } from '@/lib/api-vue-query';
 import type { components, paths } from '@/generated/api';
+import { UNSCHEDULED_PATH } from '@/lib/gantt/unscheduled';
 
 const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
 const GET_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}' as const;
@@ -169,6 +170,7 @@ export function useTaskSubtasks(params: UseTaskSubtasksParams) {
         queryClient.invalidateQueries({ queryKey: ['get', GET_TASK_PATH] }),
         queryClient.invalidateQueries({ queryKey: ['get', TASK_SEARCH_PATH] }),
         queryClient.invalidateQueries({ queryKey: ['get', SCHEDULE_PATH] }),
+        queryClient.invalidateQueries({ queryKey: ['get', UNSCHEDULED_PATH] }),
       ]);
       return true;
     } catch {
