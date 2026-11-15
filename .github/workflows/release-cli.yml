@@ -175,9 +175,11 @@ jobs:
           if-no-files-found: error
 
   release:
-    # 全ての target がビルドできたときだけ公開する（壊れた配布物を出さない）
+    # 全ての target がビルドできたときだけ公開する（壊れた配布物を出さない）。
+    # 版を名乗るのはタグの push だけ（Derive the version from the tag）なので、
+    # タグを指定した手動実行のビルド（版 0.1.0）は公開しない
     needs: build
-    if: github.ref_type == 'tag'
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
