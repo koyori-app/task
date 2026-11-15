@@ -17,17 +17,8 @@ pub struct Model {
     pub user_id: Uuid,
     #[sea_orm(column_type = "JsonBinary")]
     pub scopes: super::super::scopes::ScopeList,
-    pub tenant_id: Uuid,
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub allowed_project_ids: Option<Json>,
-    #[sea_orm(
-        belongs_to,
-        from = "tenant_id",
-        to = "id",
-        on_update = "NoAction",
-        on_delete = "Cascade"
-    )]
-    pub tenants: HasOne<super::tenants::Entity>,
     #[sea_orm(
         belongs_to,
         from = "user_id",
@@ -36,6 +27,8 @@ pub struct Model {
         on_delete = "Cascade"
     )]
     pub users: HasOne<super::users::Entity>,
+    #[sea_orm(has_many, via = "personal_token_tenants")]
+    pub tenants: HasMany<super::tenants::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

@@ -72,12 +72,13 @@ async fn tenant_bots_identity_bounds_admin_only_and_self_minting() {
     assert_eq!(identity["account_kind"], "bot");
     assert_eq!(identity["user_id"], bot.to_string());
     assert_eq!(identity["tenant_id"], tenant.tenant_id.to_string());
+    assert_eq!(identity["tenant_ids"], json!([tenant.tenant_id]));
     assert_eq!(identity["allowed_project_ids"], json!([tenant.project_id]));
     // BOT Admin でも自分の PAT から鍵を増やせない。
     let own = app
         .post_json_with_bearer(
             "/v1/personal_tokens",
-            json!({"name":"multiply", "tenant_id":tenant.tenant_id,"scopes":["api"]}),
+            json!({"name":"multiply", "tenant_ids":[tenant.tenant_id],"scopes":["api"]}),
             &token,
         )
         .await;
@@ -866,7 +867,7 @@ async fn tenant_bots_pat_is_exempt_from_tenant_2fa_but_human_pat_is_not() {
     let human_token = insert_personal_token_for_test(
         &app.state.db,
         owner.id,
-        tenant.tenant_id,
+        &[tenant.tenant_id],
         &app.state.settings.personal_token_secret,
         vec![Scope::ReadProject],
         None,
@@ -1162,7 +1163,7 @@ async fn tenant_bots_cannot_create_personal_project() {
     let human_token = insert_personal_token_for_test(
         &app.state.db,
         owner.id,
-        tenant.tenant_id,
+        &[tenant.tenant_id],
         &app.state.settings.personal_token_secret,
         vec![Scope::ReadProject],
         None,
@@ -1189,7 +1190,7 @@ async fn tenant_bots_pat_bound_to_foreign_tenant_is_rejected_at_authentication()
     let own = insert_personal_token_for_test(
         &app.state.db,
         bot,
-        tenant.tenant_id,
+        &[tenant.tenant_id],
         &secret,
         vec![Scope::ReadProject],
         None,
@@ -1204,7 +1205,7 @@ async fn tenant_bots_pat_bound_to_foreign_tenant_is_rejected_at_authentication()
     let foreign_token = insert_personal_token_for_test(
         &app.state.db,
         bot,
-        foreign.tenant_id,
+        &[foreign.tenant_id],
         &secret,
         vec![Scope::ReadProject],
         None,
@@ -1212,6 +1213,22 @@ async fn tenant_bots_pat_bound_to_foreign_tenant_is_rejected_at_authentication()
     .await;
     assert_eq!(
         app.get_with_bearer("/v1/personal_tokens/me", &foreign_token)
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    // 所属テナントを含んでいても、複数に結び付いた BOT の PAT は通さない
+    let both_token = insert_personal_token_for_test(
+        &app.state.db,
+        bot,
+        &[tenant.tenant_id, foreign.tenant_id],
+        &secret,
+        vec![Scope::ReadProject],
+        None,
+    )
+    .await;
+    assert_eq!(
+        app.get_with_bearer("/v1/personal_tokens/me", &both_token)
             .await
             .status(),
         StatusCode::FORBIDDEN

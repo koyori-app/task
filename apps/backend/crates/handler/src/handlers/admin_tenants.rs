@@ -113,6 +113,8 @@ pub async fn delete_tenant(
         &headers,
     )
     .await?;
+    // 束縛が尽きた PAT を、束縛の Cascade より先に同じトランザクションで取り消す（`tenants::delete_tenant` と同じ）
+    service::auth::unbind_tenant_from_tokens(&txn, id).await?;
     tenants::Entity::delete_by_id(id).exec(&txn).await?;
     txn.commit().await?;
 

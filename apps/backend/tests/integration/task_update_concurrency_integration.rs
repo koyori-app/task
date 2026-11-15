@@ -45,7 +45,7 @@ async fn assignee_writes_reuse_the_transaction_connection() {
         )
         .await;
     assert_eq!(r.status(), StatusCode::CREATED);
-    let r = app.post_json_with_session("/v1/personal_tokens", json!({"name": "single-connection", "tenant_id": tp.tenant_id, "scopes": ["read:task", "write:task"]})).await;
+    let r = app.post_json_with_session("/v1/personal_tokens", json!({"name": "single-connection", "tenant_ids": [tp.tenant_id], "scopes": ["read:task", "write:task"]})).await;
     assert_eq!(r.status(), StatusCode::CREATED);
     let token: Value = r.json().await.unwrap();
     let token = token["token"].as_str().unwrap();

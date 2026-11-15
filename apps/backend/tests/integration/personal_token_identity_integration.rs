@@ -44,6 +44,10 @@ async fn token_without_scopes_can_identify_itself() {
     assert_eq!(body["user_id"], user.id.to_string());
     assert_eq!(body["username"], username);
     assert_eq!(body["tenant_id"], tenant_id.to_string());
+    assert_eq!(
+        body["tenant_ids"],
+        serde_json::json!([tenant_id.to_string()])
+    );
     assert_eq!(body["scopes"], serde_json::json!([]));
     assert_eq!(body["allowed_project_ids"], serde_json::Value::Null);
     assert_eq!(body["expires_at"], serde_json::Value::Null);
@@ -102,6 +106,10 @@ async fn identity_returns_only_the_tenant_bound_to_the_token() {
         .expect("identity body a");
     assert_eq!(body_a["tenant_id"], tenant_a.to_string());
     assert_ne!(body_a["tenant_id"], tenant_b.to_string());
+    assert_eq!(
+        body_a["tenant_ids"],
+        serde_json::json!([tenant_a.to_string()])
+    );
 
     let body_b = app
         .get_with_bearer("/v1/personal_tokens/me", &token_b)
@@ -111,9 +119,43 @@ async fn identity_returns_only_the_tenant_bound_to_the_token() {
         .expect("identity body b");
     assert_eq!(body_b["tenant_id"], tenant_b.to_string());
     assert_ne!(body_b["tenant_id"], tenant_a.to_string());
+    assert_eq!(
+        body_b["tenant_ids"],
+        serde_json::json!([tenant_b.to_string()])
+    );
 
     app.cleanup_user(user_a.id).await;
     app.cleanup_user(user_b.id).await;
+}
+
+/// 複数のテナントに結び付いた鍵は `tenant_ids` に全部を返し、旧 CLI 向けの `tenant_id` は返さない
+/// （返すと、旧 CLI がその 1 つへ黙って書き込む）。
+#[tokio::test]
+async fn identity_of_a_multi_tenant_token_lists_all_and_omits_the_legacy_tenant_id() {
+    let app = TestApp::new().await;
+    let user = app.insert_user_default().await;
+    let tenant_a = insert_tenant(&app.state.db, user.id).await;
+    let tenant_b = insert_tenant(&app.state.db, user.id).await;
+    let token = app
+        .insert_pat_in_tenants(user.id, &[tenant_a, tenant_b], vec![], None)
+        .await;
+
+    let body = app
+        .get_with_bearer("/v1/personal_tokens/me", &token)
+        .await
+        .json::<serde_json::Value>()
+        .await
+        .expect("identity body");
+
+    let mut expected = vec![tenant_a.to_string(), tenant_b.to_string()];
+    expected.sort();
+    assert_eq!(body["tenant_ids"], serde_json::json!(expected));
+    assert!(
+        body.get("tenant_id").is_none(),
+        "tenant_id must be absent for several tenants: {body}"
+    );
+
+    app.cleanup_user(user.id).await;
 }
 
 #[tokio::test]

@@ -189,10 +189,10 @@ impl TenantSource {
     pub fn forbidden_hint(self) -> &'static str {
         match self {
             Self::Env => {
-                "tenant_id is set by TASK_TENANT; if the token belongs to another tenant, unset it"
+                "tenant_id is set by TASK_TENANT; if the token cannot be used in that tenant, unset it"
             }
             Self::Config => {
-                "tenant_id is set in config; if the token belongs to another tenant, run `task config unset tenant_id`"
+                "tenant_id is set in config; if the token cannot be used in that tenant, run `task config unset tenant_id`"
             }
         }
     }
