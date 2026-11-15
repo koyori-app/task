@@ -28,6 +28,8 @@ export const GANTT_PALETTE: PaletteOverrides = {
   Weekend: 'var(--koyori-color-surface-hover)',
   Grid: 'var(--koyori-color-border)',
   GridLabel: 'var(--koyori-color-text-muted)',
+  // 日の段の日の数字。渡さないと arc は字に色を書かず、暗い theme の見出しで黒く潰れる
+  DayNumber: 'var(--koyori-color-text)',
   BarBg: 'var(--koyori-color-accent-subtle)',
   TierLow: 'var(--koyori-color-accent)',
   TierMid: 'var(--koyori-color-accent)',

@@ -7,11 +7,11 @@ settings:
 catalogs:
   default:
     '@koyori-app/arc':
-      specifier: 0.1.0-alpha.5
-      version: 0.1.0-alpha.5
+      specifier: 0.1.0-alpha.6
+      version: 0.1.0-alpha.6
     '@koyori-app/arc-vue':
-      specifier: 0.1.0-alpha.5
-      version: 0.1.0-alpha.5
+      specifier: 0.1.0-alpha.6
+      version: 0.1.0-alpha.6
     '@koyori-app/ui-vue':
       specifier: 0.10.1
       version: 0.10.1
@@ -70,10 +70,10 @@ importers:
         version: 0.6.1
       '@koyori-app/arc':
         specifier: 'catalog:'
-        version: 0.1.0-alpha.5
+        version: 0.1.0-alpha.6
       '@koyori-app/arc-vue':
         specifier: 'catalog:'
-        version: 0.1.0-alpha.5(@koyori-app/arc@0.1.0-alpha.5)(vue@3.5.44(typescript@6.0.3))
+        version: 0.1.0-alpha.6(@koyori-app/arc@0.1.0-alpha.6)(vue@3.5.44(typescript@6.0.3))
       '@koyori-app/openapi-vue-query':
         specifier: 0.1.4
         version: 0.1.4(@tanstack/vue-query@5.104.0(vue@3.5.44(typescript@6.0.3)))(openapi-fetch@0.17.0)(openapi-typescript-helpers@0.1.0)(vue@3.5.44(typescript@6.0.3))
@@ -1354,14 +1354,14 @@ packages:
     peerDependencies:
       solid-js: ^1.8.8
 
-  '@koyori-app/arc-vue@0.1.0-alpha.5':
-    resolution: {integrity: sha512-Fxp/wCo4R3x41X89ptSYKXmVHJ3n1zgZX2qKUGBRP4YIeB1YdkCgTCgj9DEgAVR94qXbRI3bx6ivCLMjgUcDDQ==}
+  '@koyori-app/arc-vue@0.1.0-alpha.6':
+    resolution: {integrity: sha512-+xh6eyBDEc9aX3Ss/X5r2UJIbLD2f07bcQ50bdSD2Cg06uN7t+KwWMkckrrLpUjeDQJYgBGC+8pMG4cJ3v4tYQ==}
     peerDependencies:
       '@koyori-app/arc': ^0.1.0-alpha.1
       vue: ^3.5.0
 
-  '@koyori-app/arc@0.1.0-alpha.5':
-    resolution: {integrity: sha512-Xvv+Pz9ImsYPkp3LUS0yPWDSpsiitryOqjOf9uIGwhGRG8C6yGRtCRLI2rN4Zb8u7Zl+E8Zwk/1523o4x/SSFw==}
+  '@koyori-app/arc@0.1.0-alpha.6':
+    resolution: {integrity: sha512-jX9mIDGb448NyIRu2cs3Daa1pfM3oOJrMG9f56QTWINLI95ctuzsqXSmoELmvimkGNtG9XKdRnApZUK1tBRvWA==}
 
   '@koyori-app/openapi-vue-query@0.1.4':
     resolution: {integrity: sha512-qJnpQoyt7SLf0c+VKKGOaJPksf0yiSlSN0Ooac04nkJxJiWVX4lauUeSrlqyCxu6A2VKs94Tu6d/wu8N3tKhEw==}
@@ -8899,12 +8899,12 @@ snapshots:
       '@solid-primitives/utils': 6.4.1(solid-js@1.9.15)
       solid-js: 1.9.15
 
-  '@koyori-app/arc-vue@0.1.0-alpha.5(@koyori-app/arc@0.1.0-alpha.5)(vue@3.5.44(typescript@6.0.3))':
+  '@koyori-app/arc-vue@0.1.0-alpha.6(@koyori-app/arc@0.1.0-alpha.6)(vue@3.5.44(typescript@6.0.3))':
     dependencies:
-      '@koyori-app/arc': 0.1.0-alpha.5
+      '@koyori-app/arc': 0.1.0-alpha.6
       vue: 3.5.44(typescript@6.0.3)
 
-  '@koyori-app/arc@0.1.0-alpha.5': {}
+  '@koyori-app/arc@0.1.0-alpha.6': {}
 
   '@koyori-app/openapi-vue-query@0.1.4(@tanstack/vue-query@5.104.0(vue@3.5.44(typescript@6.0.3)))(openapi-fetch@0.17.0)(openapi-typescript-helpers@0.1.0)(vue@3.5.44(typescript@6.0.3))':
     dependencies:

@@ -248,3 +248,24 @@ describe('ガントの図（本物の wasm）', () => {
     expect(svg).toContain('class="hard-deadline"');
   });
 });
+
+describe('日の段の見出し（本物の wasm）', () => {
+  it('日の数字を字の色で描き、曜日は淡い字の色のまま', () => {
+    const { svg } = render({ progressLine: false });
+    // 範囲の最初の日は 11/9（月）
+    expect(svg).toContain(
+      'text-anchor="middle" fill="var(--koyori-color-text)" font-size="11">9</text>',
+    );
+    expect(svg).toContain('fill="var(--koyori-color-text-muted)" font-size="11">月</text>');
+  });
+
+  it('範囲の外へ続く棒の印の下に、図の地の色の帯を敷く', () => {
+    // 遅れの行（11/9〜11/20）は範囲（3 週）の内に収まるので、範囲の起点を後ろへずらして前で切る
+    const from = '2026-11-11';
+    const { svg } = render({ from, to: viewTo(from, 'day', false) });
+    expect(svg).toContain('class="overflow-bg"');
+    const band = svg.indexOf('class="overflow-bg"');
+    expect(svg.slice(band, band + 200)).toContain('fill="var(--koyori-color-surface)"');
+    expect(svg.indexOf('>← 11/9</text>')).toBeGreaterThan(band);
+  });
+});
