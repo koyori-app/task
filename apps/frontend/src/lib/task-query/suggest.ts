@@ -100,6 +100,10 @@ const fixed: Partial<Record<TaskQueryKey, string[]>> = {
   in: ['title', 'comment'],
   sort: ['created', 'updated', 'key', 'status', 'title', 'assignee', 'priority', 'due'],
 };
+/** 値の照合用に、大小を無視し、担当者・作成者は先頭の `@` を外す。 */
+export function normalizeQueryValue(key: TaskQueryKey | string, value: string): string {
+  return (key === 'assignee' || key === 'author' ? value.replace(/^@/, '') : value).toLowerCase();
+}
 export function valueCandidates(key: TaskQueryKey, prefix: string, data: SuggestData): Candidate[] {
   let choices: Candidate[] = [];
   const facet =
@@ -142,8 +146,7 @@ export function valueCandidates(key: TaskQueryKey, prefix: string, data: Suggest
           ? data.facets?.priorities.find((p) => p.priority === priorityApiNames[value])?.count
           : undefined,
     }));
-  const normalize = (v: string) =>
-    (key === 'assignee' || key === 'author' ? v.replace(/^@/, '') : v).toLowerCase();
+  const normalize = (v: string) => normalizeQueryValue(key, v);
   const p = normalize(prefix);
   choices = choices
     .filter((c) => normalize(c.value).includes(p))

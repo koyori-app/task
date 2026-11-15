@@ -836,8 +836,15 @@ pub async fn list_tasks(
     }
     let mut query = tasks::Entity::find()
         .filter(tasks::Column::ProjectId.eq(project_id))
-        .filter(tasks::Column::DeletedAt.is_null())
-        .filter(tasks::Column::IsArchived.eq(resolved.archived.unwrap_or(q.is_archived)));
+        .filter(tasks::Column::DeletedAt.is_null());
+    // `is:archived` / `-is:archived` は書かれた分すべてを AND で満たす（互いに矛盾すれば 0 件）。
+    // 式に無いときだけ従来の `is_archived` パラメーターに従う。
+    if resolved.archived.is_empty() {
+        query = query.filter(tasks::Column::IsArchived.eq(q.is_archived));
+    }
+    for archived in &resolved.archived {
+        query = query.filter(tasks::Column::IsArchived.eq(*archived));
+    }
 
     if let Some(sid) = q.status_id {
         query = query.filter(tasks::Column::StatusId.eq(sid));

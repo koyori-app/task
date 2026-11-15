@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { PRIORITY_QUERY_LABELS } from '@/lib/task-query/suggest';
+import { PRIORITY_QUERY_LABELS, normalizeQueryValue as normalize } from '@/lib/task-query/suggest';
 import { Dropdown, type DropdownItem } from '@koyori-app/ui-vue';
 import { qualifierValues, setQualifierValues, toggleFlag } from '@/lib/task-query/edit';
 import { tokenizeTaskQuery, type TaskQueryKey } from '@/lib/task-query/tokenize';
@@ -21,9 +21,6 @@ const names = {
   due: '期限',
   is: 'その他',
 };
-function normalize(key: TaskQueryKey, value: string) {
-  return (['assignee', 'author'].includes(key) ? value.replace(/^@/, '') : value).toLowerCase();
-}
 function selected(key: TaskQueryKey, value: string) {
   if (key === 'due' && value === '')
     return !tokenizeTaskQuery(props.modelValue).some(

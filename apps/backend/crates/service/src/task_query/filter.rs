@@ -90,7 +90,7 @@ pub fn condition(resolved: &ResolvedTaskQuery, timezone: &str) -> Condition {
                             DueValue::Within(n) => Expr::cust_with_values(format!("{due} >= {today} AND {due} < {today} + $2::integer"), vec![Value::from(timezone), Value::from(i32::from(*n))]),
                         });
                     }
-                    // NULL deadlines must not survive a negated due condition.
+                    // NULL の期限は false に寄せる。否定（-due:overdue など）では期限なしのタスクが残る。
                     Condition::all().add(Expr::expr(any).if_null(false))
                 }
                 FilterValue::Names(_) => unreachable!("names are resolved first"),

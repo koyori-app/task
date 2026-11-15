@@ -57,7 +57,11 @@ const task = {
 };
 const projectBase = `/v1/tenants/${tenant.id}/projects/${project.id}`;
 
-function stubFetch(queryFailure?: { status: number; body: unknown }, multiStatus = false) {
+function stubFetch(
+  queryFailure?: { status: number; body: unknown },
+  multiStatus = false,
+  labelsReply?: Promise<unknown>,
+) {
   const replies = new Map<string, unknown>([
     ['/v1/auth/me', { id: 'user-1', email: 'a@example.com', username: 'a', email_verified: true }],
     ['/v1/tenants', [tenant]],
@@ -77,6 +81,8 @@ function stubFetch(queryFailure?: { status: number; body: unknown }, multiStatus
       const pathname = requestUrl.pathname.replace(/^\/api/, '');
       if (queryFailure && pathname === `${projectBase}/tasks` && requestUrl.searchParams.has('q'))
         return Response.json(queryFailure.body, { status: queryFailure.status });
+      if (labelsReply && pathname === `${projectBase}/labels`)
+        return Response.json(await labelsReply);
       if (multiStatus && pathname === `${projectBase}/tasks`)
         return Response.json({
           tasks: [],
@@ -246,4 +252,33 @@ it('sums counts across all status groups', async () => {
   stubFetch(undefined, true);
   const wrapper = mountPage({ q: '通知' });
   await vi.waitFor(() => expect(wrapper.text()).toContain('5 件'));
+});
+
+describe('旧 ?label= の移行', () => {
+  it('ラベルを取得して式へ移すまで label とページを URL に残し、移したあとで label を消す', async () => {
+    stubNarrowScreen();
+    let resolveLabels!: (labels: unknown) => void;
+    stubFetch(
+      undefined,
+      false,
+      new Promise((resolve) => {
+        resolveLabels = resolve;
+      }),
+    );
+    window.history.replaceState(null, '', '/acme/projects/ENG/tasks?label=label-1&page=3');
+    const wrapper = mountPage({ label: 'label-1', page: '3' });
+    await vi.waitFor(() =>
+      expect(wrapper.find('input[aria-label="タスクを検索"]').exists()).toBe(true),
+    );
+    // 取得前: 絞り込みもページも消さない
+    expect(new URL(window.location.href).searchParams.get('label')).toBe('label-1');
+    expect(new URL(window.location.href).searchParams.get('page')).toBe('3');
+    resolveLabels([{ id: 'label-1', name: 'bug', color: '#e11d48' }]);
+    await vi.waitFor(() => expect(wrapper.text()).toContain('label:bug'));
+    await vi.waitFor(() => {
+      const params = new URL(window.location.href).searchParams;
+      expect(params.get('q')).toBe('label:bug');
+      expect(params.has('label')).toBe(false);
+    });
+  });
 });

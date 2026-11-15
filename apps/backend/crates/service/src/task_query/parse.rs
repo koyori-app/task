@@ -58,7 +58,8 @@ pub struct ParsedTaskQuery {
     pub filters: Vec<FilterTerm>,
     pub scope: SearchScope,
     pub sort: Option<SortSpec>,
-    pub archived: Option<bool>,
+    /// `is:archived` / `-is:archived` の各条件（AND で全部満たす）。空なら指定なし。
+    pub archived: Vec<bool>,
 }
 pub fn error(code: Code, key: Option<Key>, value: Option<String>, term: String) -> TaskQueryError {
     TaskQueryError {
@@ -111,7 +112,7 @@ pub fn parse(input: &str) -> Result<ParsedTaskQuery, Vec<TaskQueryError>> {
             comment: true,
         },
         sort: None,
-        archived: None,
+        archived: vec![],
     };
     let mut scoped = false;
     let mut sorts = 0;
@@ -223,7 +224,7 @@ pub fn parse(input: &str) -> Result<ParsedTaskQuery, Vec<TaskQueryError>> {
             }
             Key::Is => {
                 if values[0].eq_ignore_ascii_case("archived") {
-                    parsed.archived = Some(!negated);
+                    parsed.archived.push(!negated);
                     continue;
                 }
                 FilterValue::Subtask
@@ -275,6 +276,7 @@ mod tests {
             "sort:status",
             "author:@me",
             "is:archived",
+            "is:archived -is:archived",
         ] {
             assert!(parse(q).is_ok(), "{q}");
         }
@@ -305,5 +307,15 @@ mod tests {
                 .len(),
             4
         );
+    }
+    #[test]
+    fn archived_conditions_are_all_kept() {
+        assert_eq!(parse("is:archived").unwrap().archived, [true]);
+        assert_eq!(parse("-is:archived").unwrap().archived, [false]);
+        assert_eq!(
+            parse("is:archived -is:archived").unwrap().archived,
+            [true, false]
+        );
+        assert!(parse("通知").unwrap().archived.is_empty());
     }
 }

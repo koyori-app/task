@@ -342,3 +342,316 @@ async fn task_query_deadlines_archived_subtasks_and_comment_boundaries() {
         .await;
     assert_eq!(r.status(), StatusCode::BAD_REQUEST);
 }
+
+async fn query(app: &TestApp, tp: &TestTenantProject, expr: &str) -> Value {
+    let r = app
+        .get_with_session(&format!("{}?q={}", base(tp), urlencoding::encode(expr)))
+        .await;
+    assert_eq!(r.status(), StatusCode::OK, "{expr}");
+    r.json().await.unwrap()
+}
+fn ids(body: &Value) -> Vec<String> {
+    body["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap().to_string())
+        .collect()
+}
+async fn add_status(app: &TestApp, tp: &TestTenantProject, name: &str, position: i32) -> String {
+    let r = app
+        .post_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{}/statuses",
+                tp.tenant_id, tp.project_id
+            ),
+            json!({"name":name,"color":"#336699","position":position}),
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let b: Value = r.json().await.unwrap();
+    b["id"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn task_query_treats_like_wildcards_as_literal_characters() {
+    let (app, tp, status) = fixture().await;
+    let percent = task(&app, &tp, &status, "達成率 100% です").await;
+    let plain = task(&app, &tp, &status, "達成率 1000 です").await;
+    let underscore = task(&app, &tp, &status, "snake_case").await;
+    let other = task(&app, &tp, &status, "snakeXcase").await;
+    let backslash = task(&app, &tp, &status, r"C:\temp").await;
+    let slash = task(&app, &tp, &status, "C:/temp").await;
+    for (expr, expected, excluded) in [
+        ("100%", &percent, &plain),
+        ("snake_case", &underscore, &other),
+        (r#""C:\\temp""#, &backslash, &slash),
+    ] {
+        let found = ids(&query(&app, &tp, expr).await);
+        assert_eq!(found, std::slice::from_ref(expected), "{expr}");
+        assert!(!found.contains(excluded), "{expr}");
+    }
+    // `%` だけの語は全件ではなく、`%` を含むものだけに当たる
+    assert_eq!(ids(&query(&app, &tp, "%").await), [percent]);
+}
+
+#[tokio::test]
+async fn task_query_at_name_matches_comment_markers_inside_the_tenant_only() {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
+    use uuid::Uuid;
+    let (app, tp, status) = fixture().await;
+    let name = format!("mina{}", &Uuid::new_v4().simple().to_string()[..8]);
+    let member = app.insert_user(false, false).await;
+    crate::common::ensure_tenant_member_for_project(&app.state.db, tp.project_id, member.id).await;
+    let outsider = app.insert_user(false, false).await;
+    for (user, username) in [(&member, name.clone()), (&outsider, format!("{name}x"))] {
+        let mut model: entity::users::ActiveModel = entity::users::Entity::find_by_id(user.id)
+            .one(&app.state.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .into();
+        model.username = Set(username);
+        model.update(&app.state.db).await.unwrap();
+    }
+    let by_member = task(&app, &tp, &status, "メンバーへのコメント").await;
+    let by_outsider = task(&app, &tp, &status, "外部の人へのコメント").await;
+    for (id, user) in [(&by_member, &member), (&by_outsider, &outsider)] {
+        let r = app
+            .post_json_with_session(
+                &format!("{}/{id}/comments", base(&tp)),
+                json!({"body":format!("確認お願いします <@{}>", user.id)}),
+            )
+            .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+    }
+    // 別のプロジェクトの同じ名前のコメントは探さない
+    let other_project = crate::common::insert_extra_project(&app, tp.tenant_id).await;
+    let other_base = format!(
+        "/v1/tenants/{}/projects/{other_project}/tasks",
+        tp.tenant_id
+    );
+    let r = app
+        .post_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{other_project}/statuses",
+                tp.tenant_id
+            ),
+            json!({"name":"Todo","color":"#336699","position":0,"is_default":true}),
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let other_status: Value = r.json().await.unwrap();
+    let r = app
+        .post_json_with_session(
+            &other_base,
+            json!({"title":"別プロジェクト","status_id":other_status["id"]}),
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let foreign: Value = r.json().await.unwrap();
+    let r = app
+        .post_json_with_session(
+            &format!("{other_base}/{}/comments", foreign["id"].as_str().unwrap()),
+            json!({"body":format!("確認お願いします <@{}>", member.id)}),
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let body = query(&app, &tp, &format!("@{name}")).await;
+    assert_eq!(ids(&body), std::slice::from_ref(&by_member));
+    assert_eq!(
+        body["matches"][&by_member]["snippets"][0]["source"],
+        "comment"
+    );
+    // テナントに属さない人の名前では、印が付いたコメントにも当たらない
+    assert!(ids(&query(&app, &tp, &format!("@{name}x")).await).is_empty());
+    let other = query_in(&app, &other_base, &format!("@{name}")).await;
+    assert_eq!(other["total"], 1);
+}
+async fn query_in(app: &TestApp, base: &str, expr: &str) -> Value {
+    let r = app
+        .get_with_session(&format!("{base}?q={}", urlencoding::encode(expr)))
+        .await;
+    assert_eq!(r.status(), StatusCode::OK, "{expr}");
+    r.json().await.unwrap()
+}
+
+#[tokio::test]
+async fn task_query_sorts_by_status_position_and_other_fields() {
+    let (app, tp, in_progress) = fixture().await;
+    let backlog = add_status(&app, &tp, "Backlog", 0).await;
+    let done = add_status(&app, &tp, "Done", 2).await;
+    let d1 = task(&app, &tp, &done, "b").await;
+    let p1 = task(&app, &tp, &in_progress, "c").await;
+    let b1 = task(&app, &tp, &backlog, "a").await;
+    let d2 = task(&app, &tp, &done, "d").await;
+    let p2 = task(&app, &tp, &in_progress, "e").await;
+    // ステータスの並びは position 順。同じステータスの中は id で決まるので、塊の並びだけを比べる
+    let group = |id: &String| -> usize {
+        if id == &b1 {
+            0
+        } else if id == &p1 || id == &p2 {
+            1
+        } else {
+            2
+        }
+    };
+    for (expr, expected) in [
+        ("sort:status", [0, 1, 1, 2, 2]),
+        ("sort:status-asc", [0, 1, 1, 2, 2]),
+        ("sort:status-desc", [2, 2, 1, 1, 0]),
+    ] {
+        let found = ids(&query(&app, &tp, expr).await);
+        assert_eq!(
+            found.iter().map(group).collect::<Vec<_>>(),
+            expected,
+            "{expr}"
+        );
+    }
+    for (expr, expected) in [
+        ("sort:title", [&b1, &d1, &p1, &d2, &p2]),
+        ("sort:title-desc", [&p2, &d2, &p1, &d1, &b1]),
+        ("sort:key", [&d1, &p1, &b1, &d2, &p2]),
+        ("sort:key-desc", [&p2, &d2, &b1, &p1, &d1]),
+    ] {
+        let found = ids(&query(&app, &tp, expr).await);
+        assert_eq!(found, expected.map(String::clone), "{expr}");
+    }
+}
+
+#[tokio::test]
+async fn task_query_assignee_me_and_facet_counts() {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
+    use uuid::Uuid;
+    let (app, tp, status) = fixture().await;
+    let done = add_status(&app, &tp, "Done", 2).await;
+    let mine = task(&app, &tp, &status, "自分").await;
+    let both = task(&app, &tp, &done, "二人").await;
+    let nobody = task(&app, &tp, &status, "担当なし").await;
+    let archived = task(&app, &tp, &status, "アーカイブ済み").await;
+    let member = app.insert_user(false, false).await;
+    crate::common::ensure_tenant_member_for_project(&app.state.db, tp.project_id, member.id).await;
+    // ログイン中の利用者は fixture の持ち主。作成者の内訳は DB で書き換えて作る
+    let owner = entity::tenants::Entity::find_by_id(tp.tenant_id)
+        .one(&app.state.db)
+        .await
+        .unwrap()
+        .unwrap()
+        .owner_id;
+    let label = {
+        let r = app
+            .post_json_with_session(
+                &format!(
+                    "/v1/tenants/{}/projects/{}/labels",
+                    tp.tenant_id, tp.project_id
+                ),
+                json!({"name":"bug","color":"#336699"}),
+            )
+            .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let b: Value = r.json().await.unwrap();
+        b["id"].as_str().unwrap().parse::<Uuid>().unwrap()
+    };
+    for (id, user) in [
+        (&mine, owner),
+        (&both, owner),
+        (&both, member.id),
+        (&archived, owner),
+    ] {
+        entity::task_assignees::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            task_id: Set(id.parse().unwrap()),
+            user_id: Set(user),
+            role: Set("assignee".into()),
+            assigned_at: Set(chrono::Utc::now().into()),
+            completed_at: Set(None),
+        }
+        .insert(&app.state.db)
+        .await
+        .unwrap();
+    }
+    for id in [&mine, &archived] {
+        entity::task_labels::ActiveModel {
+            task_id: Set(id.parse().unwrap()),
+            label_id: Set(label),
+        }
+        .insert(&app.state.db)
+        .await
+        .unwrap();
+    }
+    for (id, priority, created_by, is_archived) in [
+        (&mine, entity::tasks::TaskPriority::High, None, false),
+        (
+            &both,
+            entity::tasks::TaskPriority::High,
+            Some(member.id),
+            false,
+        ),
+        (&nobody, entity::tasks::TaskPriority::Low, None, false),
+        (&archived, entity::tasks::TaskPriority::Critical, None, true),
+    ] {
+        let mut model: entity::tasks::ActiveModel =
+            entity::tasks::Entity::find_by_id(id.parse::<Uuid>().unwrap())
+                .one(&app.state.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .into();
+        model.priority = Set(priority);
+        if let Some(user) = created_by {
+            model.created_by = Set(user);
+        }
+        model.is_archived = Set(is_archived);
+        model.update(&app.state.db).await.unwrap();
+    }
+    // 成功側: 自分が担当のタスクだけ（アーカイブ済みは既定で出ない）
+    let mut found = ids(&query(&app, &tp, "assignee:@me").await);
+    found.sort();
+    let mut expected = vec![mine.clone(), both.clone()];
+    expected.sort();
+    assert_eq!(found, expected);
+    assert_eq!(
+        ids(&query(&app, &tp, "-assignee:@me").await),
+        std::slice::from_ref(&nobody)
+    );
+    assert_eq!(
+        ids(&query(&app, &tp, "assignee:@me is:archived").await),
+        std::slice::from_ref(&archived)
+    );
+    // `is:archived -is:archived` は互いに矛盾するので 0 件（後の条件で上書きしない）
+    assert_eq!(
+        query(&app, &tp, "is:archived -is:archived").await["total"],
+        0
+    );
+    assert_eq!(
+        query(&app, &tp, "-is:archived is:archived").await["total"],
+        0
+    );
+
+    let r = app.get_with_session(&format!("{}/facets", base(&tp))).await;
+    assert_eq!(r.status(), StatusCode::OK);
+    let b: Value = r.json().await.unwrap();
+    let count = |list: &Value, key: &str, id: &str| -> Option<u64> {
+        list.as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e[key] == id)
+            .map(|e| e["count"].as_u64().unwrap())
+    };
+    // アーカイブ済み（mine と同じラベル・担当・優先度 critical）は数えない
+    assert_eq!(count(&b["statuses"], "id", &status), Some(2));
+    assert_eq!(count(&b["statuses"], "id", &done), Some(1));
+    assert_eq!(count(&b["labels"], "id", &label.to_string()), Some(1));
+    assert_eq!(count(&b["assignees"], "id", &owner.to_string()), Some(2));
+    assert_eq!(
+        count(&b["assignees"], "id", &member.id.to_string()),
+        Some(1)
+    );
+    assert_eq!(count(&b["authors"], "id", &member.id.to_string()), Some(1));
+    assert_eq!(count(&b["authors"], "id", &owner.to_string()), Some(2));
+    assert_eq!(count(&b["priorities"], "priority", "High"), Some(2));
+    assert_eq!(count(&b["priorities"], "priority", "Low"), Some(1));
+    assert_eq!(count(&b["priorities"], "priority", "Critical"), None);
+    assert_eq!(b["unassigned"], 1);
+    assert_eq!(b["unlabeled"], 2);
+}

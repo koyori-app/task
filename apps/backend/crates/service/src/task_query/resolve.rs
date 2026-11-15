@@ -32,7 +32,7 @@ pub struct ResolvedTaskQuery {
     pub filters: Vec<ResolvedFilter>,
     pub scope: SearchScope,
     pub sort: Option<SortSpec>,
-    pub archived: Option<bool>,
+    pub archived: Vec<bool>,
 }
 impl ResolvedTaskQuery {
     pub fn has_positive_text(&self) -> bool {

@@ -8,6 +8,7 @@ import {
   suggestionContext,
   keyCandidates,
   valueCandidates,
+  normalizeQueryValue,
   applySuggestion,
   type SuggestData,
   type Candidate,
@@ -47,20 +48,19 @@ const candidates = computed(() => {
       ? valueCandidates(c.key, c.prefix, props.suggestData ?? {})
       : [];
 });
+/** 入力が候補の値と完全に一致する候補。「なし」の行は自動で選ばない。 */
+function exactIndex() {
+  const c = context.value;
+  if (c?.kind !== 'values') return -1;
+  return candidates.value.findIndex(
+    (v) =>
+      v.key !== 'no' &&
+      normalizeQueryValue(c.key, v.value) === normalizeQueryValue(c.key, c.prefix),
+  );
+}
 watch([context, candidates], () => {
   explicitSelection.value = false;
-  const c = context.value;
-  const normalize = (v: string) =>
-    (c?.kind === 'values' && ['assignee', 'author'].includes(c.key)
-      ? v.replace(/^@/, '')
-      : v
-    ).toLowerCase();
-  active.value =
-    c?.kind === 'values'
-      ? candidates.value.findIndex(
-          (v) => v.key !== 'no' && normalize(v.value) === normalize(c.prefix),
-        )
-      : -1;
+  active.value = exactIndex();
 });
 const visible = computed(() => open.value && !syntax.value && candidates.value.length > 0);
 function nativeInput() {
@@ -118,19 +118,9 @@ function keydown(event: KeyboardEvent) {
           candidates.value.length;
   } else if (event.key === 'Enter') {
     event.preventDefault();
+    // 矢印キーで選んだ候補か、入力と完全に一致する候補だけで置き換える。部分一致の先頭では置き換えない。
     const candidate = candidates.value[active.value];
-    const c = context.value;
-    const normalize = (v: string) =>
-      (c?.kind === 'values' && ['assignee', 'author'].includes(c.key)
-        ? v.replace(/^@/, '')
-        : v
-      ).toLowerCase();
-    if (
-      visible.value &&
-      candidate &&
-      (explicitSelection.value ||
-        (candidate.key !== 'no' && normalize(candidate.value) === normalize(c?.prefix ?? '')))
-    )
+    if (visible.value && candidate && (explicitSelection.value || active.value === exactIndex()))
       select(candidate);
     else commit();
   } else if (

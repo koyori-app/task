@@ -10,21 +10,35 @@ use uuid::Uuid;
 
 pub const SNIPPET_BEFORE: usize = 24;
 pub const SNIPPET_AFTER: usize = 96;
+/// 大小を無視して比べるための 1 文字 → 1 文字の変換。`İ` のように小文字化で長さが変わる文字は
+/// そのまま残し、元の文字列の文字位置とずれないようにする。
+fn fold(c: char) -> char {
+    let mut lower = c.to_lowercase();
+    match (lower.next(), lower.next()) {
+        (Some(single), None) => single,
+        _ => c,
+    }
+}
 fn hit_mask(text: &[char], terms: &[&str]) -> Vec<bool> {
     let mut mask = vec![false; text.len()];
+    // 対象は 1 回だけ小文字化し、語ごとの探索は文字列検索（線形）に任せる。
+    let folded: String = text.iter().map(|c| fold(*c)).collect();
+    let starts: Vec<usize> = folded.char_indices().map(|(i, _)| i).collect();
     for term in terms {
-        let chars: Vec<char> = term.chars().collect();
-        if chars.is_empty() || chars.len() > text.len() {
+        let needle: String = term.chars().map(fold).collect();
+        let len = needle.chars().count();
+        if len == 0 {
             continue;
         }
-        for i in 0..=text.len() - chars.len() {
-            if text[i..i + chars.len()]
-                .iter()
-                .zip(&chars)
-                .all(|(a, b)| a.to_lowercase().eq(b.to_lowercase()))
-            {
-                mask[i..i + chars.len()].fill(true);
-            }
+        let mut from = 0;
+        while let Some(found) = folded[from..].find(&needle) {
+            let at = from + found;
+            let first = starts
+                .binary_search(&at)
+                .expect("a match starts on a char boundary");
+            mask[first..first + len].fill(true);
+            // 重なる一致も拾うため 1 文字だけ進める
+            from = at + folded[at..].chars().next().map_or(1, char::len_utf8);
         }
     }
     mask
@@ -182,5 +196,14 @@ mod tests {
         assert!(before && after);
         assert!(s.iter().any(|s| s.hit));
         assert!(!s.iter().any(|s| s.text.contains('\n')));
+    }
+    #[test]
+    fn match_offsets_follow_the_original_chars() {
+        let chars: Vec<char> = "İİAbあAB🙂ab".chars().collect();
+        let mask = hit_mask(&chars, &["ab", "あ"]);
+        let hits: Vec<usize> = (0..mask.len()).filter(|i| mask[*i]).collect();
+        assert_eq!(hits, [2, 3, 4, 5, 6, 8, 9]);
+        let long: Vec<char> = "a".repeat(100_000).chars().collect();
+        assert!(hit_mask(&long, &["aaa", "aab"]).iter().all(|hit| *hit));
     }
 }
