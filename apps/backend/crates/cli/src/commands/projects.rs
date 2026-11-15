@@ -89,7 +89,7 @@ fn format_label_line(label: &LabelResponse) -> String {
     )
 }
 
-fn single_line(text: &str) -> String {
+pub(crate) fn single_line(text: &str) -> String {
     text.split(['\r', '\n', '\t'])
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()

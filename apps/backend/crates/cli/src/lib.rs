@@ -84,5 +84,6 @@ pub async fn run(cli: Cli, context: &Context) -> Result<i32> {
         Command::Notifications { command } => {
             commands::notifications::run(context, command, output).await
         }
+        Command::Tenants { command } => commands::tenants::run(context, command, output).await,
     }
 }

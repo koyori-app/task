@@ -72,6 +72,17 @@ pub enum Command {
         #[command(subcommand)]
         command: NotificationsCommand,
     },
+    /// Tenant commands
+    Tenants {
+        #[command(subcommand)]
+        command: TenantsCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TenantsCommand {
+    /// List the tenants this token can be used in (needs the read:tenant scope)
+    List,
 }
 
 #[derive(Debug, Subcommand)]
@@ -652,6 +663,11 @@ mod tests {
     fn tasks_comments_takes_a_task_ref() {
         assert!(Cli::try_parse_from(["task", "tasks", "comments", "APP-1"]).is_ok());
         assert!(Cli::try_parse_from(["task", "tasks", "comments"]).is_err());
+    }
+
+    #[test]
+    fn tenants_list_is_a_command() {
+        assert!(Cli::try_parse_from(["task", "tenants", "list"]).is_ok());
     }
 
     #[test]

@@ -216,12 +216,13 @@ task tasks pr unlink TASK-181 87
 |---|---|---|
 | `api_url` | `TASK_API_URL` | `TASK_TOKEN` と組で渡す |
 | `token` | `TASK_TOKEN` | `TASK_API_URL` と組で渡す |
-| `tenant_id` | `TASK_TENANT` | 単独で上書きできる |
+| `tenant_id` | `TASK_TENANT` | 単独で上書きできる。UUID か名前（slug） |
 
 ```bash
 task config set api_url https://task.example.com
 task auth token < token.txt        # 引数を省くと標準入力から読む
 task auth whoami                   # 使用中の鍵と持ち主・scope・有効期限・使えるテナント（tenant_ids）が出る
+task tenants list                  # 使えるテナントの ID・名前（slug）・表示名（read:tenant が要る）
 ```
 
 ### 設定の優先順位
@@ -255,6 +256,12 @@ task auth token < token.txt
 `tenant_id` は、トークンが使えるテナントが 1 つなら任意。未設定ならそのテナントを
 `GET /v1/personal_tokens/me` から引く（config には書かない）。複数のテナントで使えるトークンは
 自動では選ばず、`TASK_TENANT` か `tenant_id` の指定を求めて終了コード 2 で止まる。
+このとき使えるテナントを ID と名前（slug）で並べる（名前は `read:tenant` があるときだけ。無ければ ID だけ）。
+
+`TASK_TENANT` と `tenant_id` には UUID のほか、名前（slug。`task tenants list` で調べる）も書ける。
+名前のときは `GET /v1/tenants` を 1 回叩いて ID に直すので、トークンに `read:tenant` が要る
+（無ければ終了コード 4 で止まり、UUID を使う案内を出す）。見つからなければ使える名前を並べて終了コード 2 で止まる。
+UUID のときは何も叩かない。
 設定していればそちらを使うので、使えないテナントのトークンに替えたら
 `task config unset tenant_id`（環境変数なら `TASK_TENANT` の解除）で外す。外さないと 403 になる。
 

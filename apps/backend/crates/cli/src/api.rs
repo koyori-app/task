@@ -4,6 +4,7 @@
 //! 出したいため（#647 で手書き `paths.ts` が実際の応答とずれていた）。
 
 use payload::personal_tokens::PersonalTokenTenants;
+use payload::tenants::TenantRef;
 use reqwest::{Method, StatusCode, Url};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -17,6 +18,8 @@ pub struct ApiClient {
     tenant_id: String,
     /// 明示した tenant の由来。自動解決・tenant 無しの口では `None`
     tenant_source: Option<TenantSource>,
+    /// テナントを名前（slug）で指したときの、その slug。ID に直した結果と並べて持つ
+    tenant_slug: Option<String>,
 }
 
 impl ApiClient {
@@ -42,17 +45,37 @@ impl ApiClient {
             base,
             tenant_id: tenant_id.unwrap_or_default(),
             tenant_source,
+            tenant_slug: None,
         })
     }
 
-    /// tenant が明示されていなければ、トークンの束縛先を `/me` から引いて埋める。
+    /// 行き先のテナントを決める。
     ///
-    /// 束縛が 1 つならそれを使う。複数なら、黙って 1 つを選ぶと別のテナントへ書き込みかねないので、
-    /// 明示を求めて止まる（要求は送らない）。
+    /// - 明示が UUID: そのまま使う（何も叩かない）。
+    /// - 明示が UUID でない: 名前（slug）として `GET /v1/tenants` から ID に直す。
+    /// - 明示なし: トークンの束縛先を `/me` から引く。束縛が 1 つならそれを使う。複数なら、
+    ///   黙って 1 つを選ぶと別のテナントへ書き込みかねないので、明示を求めて止まる（要求は送らない）。
     ///
     /// config には書かない。トークンを替えたときに古いテナントが残るため
     pub(crate) async fn resolve_tenant(mut self) -> Result<Self> {
         if self.tenant_source.is_some() {
+            if crate::resolve::is_uuid(&self.tenant_id) {
+                return Ok(self);
+            }
+            let name = self.tenant_id.clone();
+            let tenants = self.list_tenants().await.map_err(|mut err| {
+                if err.exit_code == 4 {
+                    // 403 は束縛の食い違いではなく、名前を引く権限が無いこと。
+                    // `http_error` が付ける「tenant_id is set by …」の案内は原因が違う
+                    err.message = format!(
+                        "Cannot look up the tenant \"{name}\" by name: the token needs the read:tenant scope. Use the tenant UUID instead."
+                    );
+                }
+                err
+            })?;
+            let picked = pick_tenant(&tenants, &name)?;
+            self.tenant_id = picked.id.to_string();
+            self.tenant_slug = Some(picked.display_id.clone());
             return Ok(self);
         }
         let identity: PersonalTokenTenants =
@@ -61,18 +84,29 @@ impl ApiClient {
             [only] => only.to_string(),
             [] => return Err(CliError::new("The token is not bound to any tenant")),
             many => {
-                let ids = many
+                // 名前は補足。引けなくても（`read:tenant` が無い・通信の失敗）ID だけでこの
+                // エラーを報告する。ここは既にエラーを返す途中なので、名前の取得の失敗は握り潰す
+                let names = self.list_tenants().await.unwrap_or_default();
+                let candidates = many
                     .iter()
-                    .map(ToString::to_string)
+                    .map(|id| match names.iter().find(|tenant| tenant.id == *id) {
+                        Some(tenant) => format!("{} ({id})", tenant.display_id),
+                        None => id.to_string(),
+                    })
                     .collect::<Vec<_>>()
                     .join(", ");
                 return Err(CliError::validation(format!(
-                    "This token can be used in {} tenants: {ids}. Choose one with TASK_TENANT=<tenant_id>, or run `task config set tenant_id <tenant_id>` when api_url and token also come from the config.",
+                    "This token can be used in {} tenants: {candidates}. Choose one with TASK_TENANT=<name or tenant_id>, or run `task config set tenant_id <name or tenant_id>` when api_url and token also come from the config.",
                     many.len()
                 )));
             }
         };
         Ok(self)
+    }
+
+    /// このトークンで使えるテナント（`GET /v1/tenants`）。scope `read:tenant` が要る。
+    pub(crate) async fn list_tenants(&self) -> Result<Vec<TenantRef>> {
+        self.get(&["v1", "tenants"], &[]).await
     }
 
     pub fn tenant_id(&self) -> &str {
@@ -196,6 +230,33 @@ impl ApiClient {
     }
 }
 
+/// 名前（slug）に合うテナント。完全一致を優先し、無ければ大文字小文字を無視して照合する
+/// （プロジェクトや状態の名前解決と同じ優先）。
+fn pick_tenant<'a>(tenants: &'a [TenantRef], name: &str) -> Result<&'a TenantRef> {
+    tenants
+        .iter()
+        .find(|tenant| tenant.display_id == name)
+        .or_else(|| {
+            tenants
+                .iter()
+                .find(|tenant| tenant.display_id.eq_ignore_ascii_case(name))
+        })
+        .ok_or_else(|| {
+            let usable = if tenants.is_empty() {
+                "none".to_string()
+            } else {
+                tenants
+                    .iter()
+                    .map(|tenant| format!("{} ({})", tenant.display_id, tenant.id))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            CliError::validation(format!(
+                "Tenant not found: {name} (this token can be used in: {usable})"
+            ))
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,5 +310,37 @@ mod tests {
             .url(&["v1", "reviews"], &[("repo", String::new())])
             .unwrap();
         assert_eq!(url.query(), Some("repo="));
+    }
+
+    fn tenant(id: u128, slug: &str) -> TenantRef {
+        TenantRef {
+            id: uuid::Uuid::from_u128(id),
+            display_id: slug.into(),
+            name: slug.to_uppercase(),
+        }
+    }
+
+    #[test]
+    fn picks_a_tenant_by_exact_name_before_a_case_insensitive_one() {
+        let tenants = [tenant(1, "Acme"), tenant(2, "acme"), tenant(3, "dmm")];
+        assert_eq!(pick_tenant(&tenants, "acme").unwrap().id.as_u128(), 2);
+        assert_eq!(pick_tenant(&tenants, "ACME").unwrap().id.as_u128(), 1);
+        assert_eq!(pick_tenant(&tenants, "dmm").unwrap().id.as_u128(), 3);
+    }
+
+    #[test]
+    fn an_unknown_tenant_name_lists_the_usable_tenants() {
+        let tenants = [tenant(1, "acme"), tenant(2, "dmm")];
+        let err = pick_tenant(&tenants, "nope").unwrap_err();
+        assert_eq!(err.exit_code, 2);
+        assert!(
+            err.message.contains("Tenant not found: nope"),
+            "{}",
+            err.message
+        );
+        assert!(err.message.contains("acme ("), "{}", err.message);
+        assert!(err.message.contains("dmm ("), "{}", err.message);
+        let err = pick_tenant(&[], "nope").unwrap_err();
+        assert!(err.message.contains("none"), "{}", err.message);
     }
 }

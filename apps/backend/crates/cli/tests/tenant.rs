@@ -13,6 +13,7 @@ use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const ME: &str = "/v1/personal_tokens/me";
+const TENANTS: &str = "/v1/tenants";
 const PERMISSION_DENIED: &str = "Permission denied: insufficient access for this resource";
 
 fn projects_path() -> String {
@@ -81,6 +82,8 @@ async fn an_explicit_tenant_from_config_or_env_skips_the_token_endpoint() {
 
         assert_eq!(harness.run(&["task", "projects", "list"]).await.unwrap(), 0);
         assert_eq!(harness.calls_to(ME).await, 0);
+        // UUID の明示は名前の解決ではない。一覧も引かない
+        assert_eq!(harness.calls_to(TENANTS).await, 0);
     }
 }
 
@@ -170,6 +173,31 @@ async fn mount_identity(harness: &Harness, response: ResponseTemplate) {
         .await;
 }
 
+/// `GET /v1/tenants` の応答。名前の指定と、候補の表示に使う。
+async fn mount_tenants(harness: &Harness) {
+    Mock::given(method("GET"))
+        .and(path(TENANTS))
+        .respond_with(ResponseTemplate::new(200).set_body_json(tenant_list_json()))
+        .mount(&harness.server)
+        .await;
+}
+
+fn tenant_list_json() -> serde_json::Value {
+    // サーバーの応答は `TenantListItemResponse` なので、CLI が使わない項目も付く
+    json!([
+        {
+            "id": OTHER_TENANT, "display_id": "dmm", "name": "DMM", "description": "",
+            "icon_url": "", "icon_emoji": null, "owner_id": null, "drive_quota_bytes": null,
+            "require_2fa": null, "membership": "Member", "member_role": "Member",
+        },
+        {
+            "id": TENANT, "display_id": "acme", "name": "Acme", "description": "",
+            "icon_url": "", "icon_emoji": null, "owner_id": null, "drive_quota_bytes": null,
+            "require_2fa": null, "membership": "Owner", "member_role": null,
+        },
+    ])
+}
+
 /// 黙って 1 つを選ぶと、別のテナントへ書き込みかねない。明示を求めて止まり、要求は送らない。
 #[tokio::test]
 async fn a_token_bound_to_several_tenants_requires_an_explicit_tenant() {
@@ -190,6 +218,26 @@ async fn a_token_bound_to_several_tenants_requires_an_explicit_tenant() {
     assert_eq!(harness.calls_to(ME).await, 1);
     assert_eq!(harness.calls_to(&projects_path()).await, 0);
     assert_eq!(harness.store().load().unwrap(), before);
+}
+
+/// 名前が引けるなら、候補を ID だけでなく名前（slug）つきで並べる。
+#[tokio::test]
+async fn the_several_tenants_error_lists_the_names_when_they_can_be_looked_up() {
+    let harness = harness_with(None, &[]).await;
+    mount_identity(&harness, multi_tenant_identity()).await;
+    mount_tenants(&harness).await;
+
+    let err = harness
+        .run(&["task", "projects", "list"])
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.exit_code, 2);
+    assert!(err.message.contains("acme"), "{}", err.message);
+    assert!(err.message.contains("dmm"), "{}", err.message);
+    assert!(err.message.contains(TENANT), "{}", err.message);
+    assert!(err.message.contains(OTHER_TENANT), "{}", err.message);
+    assert_eq!(harness.calls_to(&projects_path()).await, 0);
 }
 
 /// 対照: 同じトークンでも、テナントを明示すれば 1 つに決まり、`/me` は要らない。
@@ -444,4 +492,89 @@ async fn local_commands_work_without_any_connection_settings() {
         let code = task_cli::run(parse(args), &context).await.unwrap();
         assert_eq!(code, 0, "{args:?}");
     }
+}
+
+/// テナントは名前（slug）でも指せる。ID に直してから、そのテナントのパスを叩く。
+#[tokio::test]
+async fn a_tenant_name_is_resolved_to_its_id() {
+    for harness in [
+        harness_with(None, &[("TASK_TENANT", "acme")]).await,
+        harness_with(Some("acme"), &[]).await,
+        // 大文字小文字は区別しない（完全一致が無いときだけ）
+        harness_with(None, &[("TASK_TENANT", "ACME")]).await,
+    ] {
+        mount_tenants(&harness).await;
+        mount_projects(&harness, project_list()).await;
+
+        assert_eq!(harness.run(&["task", "projects", "list"]).await.unwrap(), 0);
+
+        assert_eq!(harness.calls_to(&projects_path()).await, 1);
+        assert_eq!(harness.calls_to(TENANTS).await, 1);
+        assert_eq!(harness.calls_to(ME).await, 0);
+    }
+}
+
+#[tokio::test]
+async fn an_unknown_tenant_name_lists_the_usable_tenants() {
+    let harness = harness_with(None, &[("TASK_TENANT", "nope")]).await;
+    mount_tenants(&harness).await;
+    mount_projects(&harness, project_list()).await;
+
+    let err = harness
+        .run(&["task", "projects", "list"])
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.exit_code, 2);
+    for expected in ["nope", "acme", "dmm", TENANT, OTHER_TENANT] {
+        assert!(err.message.contains(expected), "{}", err.message);
+    }
+    assert_eq!(harness.calls_to(&projects_path()).await, 0);
+}
+
+/// 名前の解決には `read:tenant` が要る。無いときは UUID を使う案内を出し、
+/// 「tenant を外す」案内（束縛の食い違いの話）は付けない。
+#[tokio::test]
+async fn a_tenant_name_without_the_tenant_scope_points_at_the_uuid() {
+    let harness = harness_with(None, &[("TASK_TENANT", "acme")]).await;
+    Mock::given(method("GET"))
+        .and(path(TENANTS))
+        .respond_with(ResponseTemplate::new(403))
+        .mount(&harness.server)
+        .await;
+    mount_projects(&harness, project_list()).await;
+
+    let err = harness
+        .run(&["task", "projects", "list"])
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.exit_code, 4);
+    assert!(err.message.contains("read:tenant"), "{}", err.message);
+    assert!(err.message.contains("UUID"), "{}", err.message);
+    assert!(
+        !err.message.contains("tenant_id is set by"),
+        "{}",
+        err.message
+    );
+    assert_eq!(harness.calls_to(&projects_path()).await, 0);
+}
+
+/// `tenants list` はテナントを引かずに、トークンで使えるテナントの ID と名前を出す。
+#[tokio::test]
+async fn tenants_list_prints_ids_and_names_without_resolving_a_tenant() {
+    let harness = harness_with(None, &[]).await;
+    mount_tenants(&harness).await;
+
+    assert_eq!(harness.run(&["task", "tenants", "list"]).await.unwrap(), 0);
+    assert_eq!(
+        harness
+            .run(&["task", "--json", "tenants", "list"])
+            .await
+            .unwrap(),
+        0
+    );
+
+    assert_eq!(harness.calls_to(ME).await, 0);
+    assert_eq!(harness.calls_to(TENANTS).await, 2);
 }
