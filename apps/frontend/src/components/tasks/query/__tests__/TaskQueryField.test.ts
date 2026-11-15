@@ -100,17 +100,72 @@ describe('Enter confirms the task query', () => {
     expect(w.emitted('update:modelValue')).toBeUndefined();
     w.unmount();
   });
-  it('closes candidates on Escape and prevents the search field from clearing', async () => {
+  it('closes candidates on Escape and keeps the typed text', async () => {
     const w = mount(TaskQueryField, { props: { modelValue: '', suggestData } });
     await w.get('input').trigger('focusin');
     await w.get('input').setValue('label:x');
-    expect(w.find('[role="listbox"]').exists()).toBe(true);
+    expect(w.get('input').attributes('aria-expanded')).toBe('true');
     const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
     w.get('input').element.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
     await w.vm.$nextTick();
-    expect(w.find('[role="listbox"]').exists()).toBe(false);
+    expect(w.get('input').attributes('aria-expanded')).toBe('false');
     expect(w.get('input').element.value).toBe('label:x');
+    w.unmount();
+  });
+  it('keeps the arrowed candidate when the parent rebuilds suggestData with the same content', async () => {
+    const build = () => ({
+      labels: [
+        { id: '1', name: 'bug' },
+        { id: '2', name: 'bugfix' },
+      ],
+    });
+    const w = mount(TaskQueryField, { props: { modelValue: '', suggestData: build() } });
+    await w.get('input').trigger('focusin');
+    await w.get('input').setValue('label:b');
+    await w.get('input').trigger('keydown', { key: 'ArrowDown' });
+    await w.setProps({ suggestData: build() });
+    await w.get('input').trigger('keydown', { key: 'Enter' });
+    expect(w.emitted('update:modelValue')?.at(-1)).toEqual(['label:bug']);
+    w.unmount();
+  });
+  it('drops the arrowed candidate once the text changes', async () => {
+    const w = mount(TaskQueryField, { props: { modelValue: '', suggestData } });
+    await w.get('input').trigger('focusin');
+    await w.get('input').setValue('label:b');
+    await w.get('input').trigger('keydown', { key: 'ArrowDown' });
+    await w.get('input').setValue('label:bu');
+    await w.get('input').trigger('keydown', { key: 'Enter' });
+    expect(w.emitted('update:modelValue')?.at(-1)).toEqual(['label:bu']);
+    w.unmount();
+  });
+  it('keeps the exact match selected after suggestData is rebuilt', async () => {
+    const build = () => ({ labels: [{ id: '1', name: 'bug' }] });
+    const w = mount(TaskQueryField, { props: { modelValue: '', suggestData: build() } });
+    await w.get('input').trigger('focusin');
+    await w.get('input').setValue('label:bug');
+    await w.setProps({ suggestData: build() });
+    await w.get('input').trigger('keydown', { key: 'Enter' });
+    expect(w.emitted('update:modelValue')?.at(-1)).toEqual(['label:bug']);
+    w.unmount();
+  });
+  it('ignores Backspace and arrows on the help button', async () => {
+    const w = mount(TaskQueryField, { props: { modelValue: 'status:Todo', suggestData } });
+    const help = w.get('button[aria-label="書き方の早見表"]').element;
+    for (const key of ['Backspace', 'ArrowDown', 'Enter'])
+      help.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+    expect(w.emitted('update:modelValue')).toBeUndefined();
+    expect(w.text()).toContain('status:Todo');
+    w.unmount();
+  });
+  it('closes the syntax card on Escape from the help button too', async () => {
+    const w = mount(TaskQueryField, { props: { modelValue: '' } });
+    const help = w.get('button[aria-label="書き方の早見表"]');
+    await help.trigger('click');
+    expect(w.text()).toContain('括弧と OR は使えません');
+    help.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await w.vm.$nextTick();
+    expect(w.text()).not.toContain('括弧と OR は使えません');
     w.unmount();
   });
   it('removes chips by button and leading Backspace', async () => {

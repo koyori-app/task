@@ -1,7 +1,13 @@
 <script setup lang="ts">
-import { computed, ref, watch, useId, watchEffect } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { onClickOutside } from '@vueuse/core';
-import { Input, Tag, Button } from '@koyori-app/ui-vue';
+import {
+  Combobox,
+  Button,
+  type ComboboxOption,
+  type ComboboxSection,
+  type ComboboxTag,
+} from '@koyori-app/ui-vue';
 import { Search } from '@lucide/vue';
 import { tokenizeTaskQuery, serializeToken, serializeTaskQuery } from '@/lib/task-query/tokenize';
 import {
@@ -13,22 +19,23 @@ import {
   type SuggestData,
   type Candidate,
 } from '@/lib/task-query/suggest';
-import TaskQuerySuggestList from './TaskQuerySuggestList.vue';
 import TaskQuerySyntaxCard from './TaskQuerySyntaxCard.vue';
 const props = defineProps<{ modelValue: string; suggestData?: SuggestData }>();
 const emit = defineEmits<{ 'update:modelValue': [value: string]; focus: [] }>();
 const root = ref<HTMLElement>();
-const input = ref<InstanceType<typeof Input>>();
 const draft = ref('');
 const committed = ref('');
-const open = ref(false);
 const syntax = ref(false);
 const caret = ref(0);
-const active = ref(-1);
-const explicitSelection = ref(false);
-const listId = useId();
 const chips = computed(() =>
   tokenizeTaskQuery(committed.value).filter((t) => t.kind === 'qualifier'),
+);
+const tags = computed<ComboboxTag[]>(() =>
+  chips.value.map((token) => {
+    const text = serializeToken(token);
+    const prefix = `${token.negated ? '-' : ''}${token.key}:`;
+    return { prefix, label: text.slice(prefix.length), removeLabel: `${text} を外す` };
+  }),
 );
 watch(
   () => props.modelValue,
@@ -48,8 +55,16 @@ const candidates = computed(() => {
       ? valueCandidates(c.key, c.prefix, props.suggestData ?? {})
       : [];
 });
-/** 入力が候補の値と完全に一致する候補。「なし」の行は自動で選ばない。 */
-function exactIndex() {
+/**
+ * 候補の識別子。Combobox は選択中の候補をこの値で覚えるので、候補を作り直しても（同じ key と value なら）
+ * 選択が外れない。「ラベルなし」のような別キーの候補（no:label）と、同じ値の通常の候補を区別する。
+ */
+function optionValue(candidate: Candidate) {
+  const c = context.value;
+  return c?.kind === 'values' ? `${candidate.key ?? c.key}:${candidate.value}` : candidate.value;
+}
+/** 入力が候補の値と完全に一致する候補の位置。「なし」の行は数えない。 */
+const exactIndex = computed(() => {
   const c = context.value;
   if (c?.kind !== 'values') return -1;
   return candidates.value.findIndex(
@@ -57,150 +72,87 @@ function exactIndex() {
       v.key !== 'no' &&
       normalizeQueryValue(c.key, v.value) === normalizeQueryValue(c.key, c.prefix),
   );
-}
-watch([context, candidates], () => {
-  explicitSelection.value = false;
-  active.value = exactIndex();
 });
-const visible = computed(() => open.value && !syntax.value && candidates.value.length > 0);
-function nativeInput() {
-  return input.value?.$el?.querySelector('input') as HTMLInputElement | undefined;
+function highlight(label: string): [number, number][] | undefined {
+  const prefix = context.value?.prefix ?? '';
+  const index = prefix ? label.toLowerCase().indexOf(prefix.toLowerCase()) : -1;
+  return index < 0 ? undefined : [[index, index + prefix.length]];
 }
-watchEffect(() => {
-  const el = nativeInput();
-  if (!el) return;
-  el.setAttribute('role', 'combobox');
-  el.setAttribute('aria-expanded', String(visible.value));
-  el.setAttribute('aria-controls', listId);
-  el.setAttribute('aria-autocomplete', 'list');
-  if (visible.value && active.value >= 0)
-    el.setAttribute('aria-activedescendant', `${listId}-${active.value}`);
-  else el.removeAttribute('aria-activedescendant');
+const options = computed<ComboboxSection[]>(() => {
+  const c = context.value;
+  if (syntax.value || !c || !candidates.value.length) return [];
+  return [
+    {
+      heading: c.kind === 'values' ? `${c.key}: の候補` : '条件の一覧',
+      options: candidates.value.map((candidate): ComboboxOption => ({
+        value: optionValue(candidate),
+        label: candidate.label,
+        description: candidate.hint,
+        meta: candidate.count !== undefined ? `${candidate.count} 件` : undefined,
+        highlight: highlight(candidate.label),
+      })),
+    },
+  ];
 });
 function commit() {
   emit(
     'update:modelValue',
     serializeTaskQuery(tokenizeTaskQuery(`${committed.value} ${draft.value}`)),
   );
-  open.value = false;
 }
-function select(candidate: Candidate) {
-  if (!context.value) return;
+function select(value: string) {
+  const candidate = candidates.value.find((c) => optionValue(c) === value);
+  if (!candidate || !context.value) return;
   const result = applySuggestion(draft.value, context.value, candidate);
   draft.value = result.draft;
   caret.value = draft.value.length;
   if (result.commit) commit();
-  else {
-    open.value = true;
-    nativeInput()?.focus();
-  }
-}
-function keydown(event: KeyboardEvent) {
-  if (event.target !== nativeInput()) return;
-  if (event.isComposing || event.keyCode === 229) return;
-  if (event.key === 'Escape') {
-    if (open.value || syntax.value) event.preventDefault();
-    open.value = false;
-    syntax.value = false;
-    return;
-  }
-  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-    if (!candidates.value.length) return;
-    event.preventDefault();
-    open.value = true;
-    explicitSelection.value = true;
-    active.value =
-      active.value < 0
-        ? event.key === 'ArrowDown'
-          ? 0
-          : candidates.value.length - 1
-        : (active.value + (event.key === 'ArrowDown' ? 1 : -1) + candidates.value.length) %
-          candidates.value.length;
-  } else if (event.key === 'Enter') {
-    event.preventDefault();
-    // 矢印キーで選んだ候補か、入力と完全に一致する候補だけで置き換える。部分一致の先頭では置き換えない。
-    const candidate = candidates.value[active.value];
-    if (visible.value && candidate && (explicitSelection.value || active.value === exactIndex()))
-      select(candidate);
-    else commit();
-  } else if (
-    event.key === 'Backspace' &&
-    nativeInput()?.selectionStart === 0 &&
-    nativeInput()?.selectionEnd === 0 &&
-    chips.value.length
-  ) {
-    const tokens = tokenizeTaskQuery(committed.value);
-    tokens.pop();
-    committed.value = serializeTaskQuery(tokens);
-    commit();
-  }
 }
 function remove(index: number) {
   committed.value = serializeTaskQuery(chips.value.filter((_, i) => i !== index));
   commit();
 }
-function update(value: string | number) {
-  draft.value = String(value);
-  caret.value = nativeInput()?.selectionStart ?? draft.value.length;
-  open.value = true;
+function update(value: string, at: number) {
+  draft.value = value;
+  caret.value = at;
+  syntax.value = false;
+}
+function keydown(event: KeyboardEvent) {
+  // 早見表は欄の外（「?」のボタンなど）にフォーカスがあっても Esc で閉じる
+  if (event.key !== 'Escape' || !syntax.value) return;
+  if (event.isComposing || event.keyCode === 229) return;
+  event.preventDefault();
   syntax.value = false;
 }
 onClickOutside(root, () => {
-  open.value = false;
   syntax.value = false;
 });
 </script>
 <template>
-  <div
-    ref="root"
-    class="relative min-w-0 flex-1"
-    @keydown="keydown"
-    @keyup="caret = nativeInput()?.selectionStart ?? draft.length"
-    @focusin="
-      open = true;
-      emit('focus');
-    "
-  >
-    <Input
-      ref="input"
-      type="search"
+  <div ref="root" class="relative min-w-0 flex-1" @keydown="keydown" @focusin="emit('focus')">
+    <Combobox
       aria-label="タスクを検索"
       placeholder="タスクを検索..."
       :value="draft"
+      :tags="tags"
+      :options="options"
+      :auto-highlight="exactIndex === 0"
       :on-value-change="update"
-      @click="caret = nativeInput()?.selectionStart ?? draft.length"
-      ><template #prefix
-        ><Search class="size-4 shrink-0" /><span class="flex max-w-[60%] gap-1 overflow-x-auto"
-          ><Tag
-            v-for="(token, index) in chips"
-            :key="index"
-            :label="serializeToken(token)"
-            :on-remove="() => remove(index)"
-            :remove-label="`${serializeToken(token)} を外す`" /></span></template
-      ><template #suffix
-        ><Button
-          variant="ghost"
-          ariaLabel="書き方の早見表"
-          :on-click="
-            () => {
-              syntax = !syntax;
-              open = false;
-            }
-          "
+      :on-caret-change="(at: number) => (caret = at)"
+      :on-select="select"
+      :on-commit="commit"
+      :on-tag-remove="remove"
+    >
+      <template #prefix><Search class="size-4 shrink-0" /></template>
+      <template #suffix
+        ><Button variant="ghost" ariaLabel="書き方の早見表" :on-click="() => (syntax = !syntax)"
           >?</Button
         ></template
-      ></Input
-    >
-    <div class="absolute inset-x-0 top-full z-50 mt-1">
-      <TaskQuerySyntaxCard v-if="syntax" /><TaskQuerySuggestList
-        v-else-if="visible"
-        :id="listId"
-        :candidates="candidates"
-        :active="active"
-        :prefix="context?.prefix ?? ''"
-        :heading="context?.kind === 'values' ? `${context.key}: の候補` : '条件の一覧'"
-        @select="select"
-      />
-    </div>
+      >
+      <template #footer
+        >↑↓ で選ぶ　Enter で入れる　Esc で閉じる<br />「-」を前に付けると除外（-label:bug）</template
+      >
+    </Combobox>
+    <div v-if="syntax" class="absolute inset-x-0 top-full z-50 mt-1"><TaskQuerySyntaxCard /></div>
   </div>
 </template>
