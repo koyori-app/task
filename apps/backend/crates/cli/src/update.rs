@@ -157,7 +157,7 @@ pub async fn notice(
     }
     // 叩く前に書く。失敗しても 1 日 1 回に収まる。書けないときは叩かない（毎回叩いてしまう）
     if let Some(parent) = state_path.parent() {
-        std::fs::create_dir_all(parent).ok()?;
+        crate::config::create_private_dir(parent).ok()?;
     }
     let state = serde_json::to_string(&CheckState { checked_at: now }).ok()?;
     std::fs::write(state_path, state).ok()?;
@@ -180,6 +180,12 @@ pub async fn self_update(updater: &Updater, output: OutputOptions) -> Result<i32
         ));
     }
     let installed = &updater.installed;
+    // 手元のビルドは版を名乗れない（通知と同じ判定）。配布物で上書きすると開発中のビルドが消える
+    if !installed.from_release {
+        return Err(CliError::new(
+            "This task is a local build, not a release; self-update would overwrite it. Install a release from https://github.com/koyori-app/task/releases/latest instead",
+        ));
+    }
     let latest = updater
         .source
         .latest_version(LATEST_TIMEOUT)
@@ -264,7 +270,10 @@ fn report(
     }
 }
 
-/// tar.gz の中の `task`（パスが `task` だけの要素）の中身。
+/// tar.gz の中の `task`（パスが `task` だけの通常ファイル）の中身。
+///
+/// シンボリックリンクやディレクトリの要素は中身が 0 バイトなので、読むと実行ファイルが空のファイルに
+/// 置き換わる。通常ファイル以外と、空の中身は置き換えずにエラーにする。
 fn extract_binary(archive: &[u8]) -> Result<Vec<u8>> {
     let corrupt = |err: std::io::Error| CliError::new(format!("Cannot read the archive: {err}"));
     let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(archive));
@@ -277,11 +286,20 @@ fn extract_binary(archive: &[u8]) -> Result<Vec<u8>> {
             .filter(|part| !matches!(part, Component::CurDir));
         let is_binary = matches!(parts.next(), Some(Component::Normal(name)) if name == "task")
             && parts.next().is_none();
-        if is_binary {
-            let mut bytes = Vec::new();
-            std::io::Read::read_to_end(&mut entry, &mut bytes).map_err(corrupt)?;
-            return Ok(bytes);
+        if !is_binary {
+            continue;
         }
+        if !entry.header().entry_type().is_file() {
+            return Err(CliError::new(
+                "The task entry in the archive is not a regular file",
+            ));
+        }
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut entry, &mut bytes).map_err(corrupt)?;
+        if bytes.is_empty() {
+            return Err(CliError::new("The task binary in the archive is empty"));
+        }
+        return Ok(bytes);
     }
     Err(CliError::new(
         "The archive does not contain the task binary",
@@ -290,15 +308,25 @@ fn extract_binary(archive: &[u8]) -> Result<Vec<u8>> {
 
 /// 同じディレクトリの一時ファイルに書いてから `rename` で置き換える。
 /// 途中で失敗しても、動いている `task` は壊れない。
+///
+/// 権限は元の実行ファイルのものを引き継ぐ（読めなければ 0755）。rename の前に内容を fsync する。
 fn replace_binary(exe: &Path, bytes: &[u8]) -> Result<()> {
     let temp = exe.with_file_name(format!(".task-update-{}", std::process::id()));
     let result = (|| -> std::io::Result<()> {
-        std::fs::write(&temp, bytes)?;
+        use std::io::Write;
+        let permissions = std::fs::metadata(exe).map(|meta| meta.permissions()).ok();
+        let mut file = std::fs::File::create(&temp)?;
+        file.write_all(bytes)?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&temp, std::fs::Permissions::from_mode(0o755))?;
+            let permissions = permissions.unwrap_or_else(|| std::fs::Permissions::from_mode(0o755));
+            file.set_permissions(permissions)?;
         }
+        #[cfg(not(unix))]
+        let _ = permissions;
+        file.sync_all()?;
+        drop(file);
         std::fs::rename(&temp, exe)
     })();
     result.map_err(|err| {

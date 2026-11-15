@@ -269,9 +269,9 @@ pub async fn run(
                 custom_field_values: vec![],
             };
             check_deadline_order(body.soft_deadline, body.hard_deadline)?;
-            // 画面の URL の取得は作る前に済ませる。作ったあとで失敗すると、呼び出し側が
-            // 再実行して二重に起票する
-            let web = api.web_location().await?;
+            // 画面の URL の取得は作る前に済ませる（作ったあとに叩くと、失敗したときに
+            // 呼び出し側が再実行して二重に起票する）。失敗しても作成は止めず、URL だけ付けない
+            let web = web_location_for_create(api).await;
             let created: TaskDetailResponse = api
                 .post(&borrow(&tasks_path(api, project.id)), &body)
                 .await?;
@@ -297,8 +297,8 @@ pub async fn run(
             let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let body = resolve_bulk_request(api, &project, prepared).await?;
-            // 作る前に済ませる（`tasks create` と同じ理由）
-            let web = api.web_location().await?;
+            // 作る前に済ませ、失敗しても作成は止めない（`tasks create` と同じ理由）
+            let web = web_location_for_create(api).await;
             let created: BulkCreateTasksResponse = api
                 .post(&borrow(&bulk_create_path(api, project.id)), &body)
                 .await?;
@@ -1415,10 +1415,35 @@ pub(crate) fn page_summary(shown: usize, total: u64, page: u64, has_next: bool) 
     }
 }
 
+/// 作成の応答に入れる画面の URL の元。参照は POST の前に済ませる。
+///
+/// URL は付加情報なので、403 以外の失敗（テナント一覧の 5xx・通信）でもタスクの作成は止めない。
+/// 止めると、作れるはずのタスクが作れず、再実行を促すだけになる。注意を標準エラーに 1 行出して `url: null` で続ける。
+async fn web_location_for_create(api: &ApiClient) -> Option<WebLocation> {
+    match api.web_location().await {
+        Ok(web) => web,
+        Err(err) => {
+            eprintln!(
+                "warning: cannot look up the web URL, so the result has no url: {}",
+                err.message
+            );
+            None
+        }
+    }
+}
+
 /// 空（空白だけ）の本文は、途中のコマンドが失敗して空のファイルができた結果のことが多い。
 /// そのまま送ると本文が消えるので、API を叩く前に断る。
+///
+/// 空白とみなすのは `trim` の対象に加えて、BOM（U+FEFF。Windows のエディタや PowerShell の
+/// リダイレクトが先頭に付ける）とゼロ幅の文字（U+200B〜U+200D・U+2060）。
 fn check_description_not_empty(description: Option<&str>, hint: &str) -> Result<()> {
-    if description.is_some_and(|text| text.trim().is_empty()) {
+    let blank = |text: &str| {
+        text.chars().all(|c| {
+            c.is_whitespace() || matches!(c, '\u{feff}' | '\u{200b}'..='\u{200d}' | '\u{2060}')
+        })
+    };
+    if description.is_some_and(blank) {
         return Err(CliError::validation(format!(
             "The description is empty. {hint}"
         )));
@@ -1561,12 +1586,15 @@ fn push_comment(
     body: Option<&str>,
 ) {
     let pad = " ".repeat(depth);
+    // 作成者名の改行やタブで行が増える・列がずれると、別の発言に見える
     lines.push(format!(
-        "{pad}{author}\t{}",
+        "{pad}{}\t{}",
+        single_line(author),
         created_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
     ));
-    // 削除済みは本文が無い
-    for line in body.unwrap_or("(deleted)").split('\n') {
+    // 削除済みは本文が無い。CRLF の `\r` は端末で行頭へ戻る制御になるので落とす
+    let body = body.unwrap_or("(deleted)").replace('\r', "");
+    for line in body.split('\n') {
         lines.push(format!("{pad}  {line}"));
     }
 }
@@ -1743,7 +1771,15 @@ mod tests {
 
     #[test]
     fn an_empty_description_is_refused_with_exit_code_2() {
-        for empty in ["", " \n\t"] {
+        // BOM・ゼロ幅の文字は `trim` の対象外なので、別に空とみなす
+        for empty in [
+            "",
+            " \n\t",
+            "\u{feff}",
+            "\u{feff}\r\n",
+            "\u{200b}",
+            " \u{feff}\u{200b}\u{200c}\u{200d}\u{2060}\n",
+        ] {
             let err =
                 check_description_not_empty(Some(empty), "Use --clear-description.").unwrap_err();
             assert_eq!(err.exit_code, 2);
@@ -1755,6 +1791,9 @@ mod tests {
         }
         assert!(check_description_not_empty(None, "").is_ok());
         assert!(check_description_not_empty(Some("x"), "").is_ok());
+        // 対照: 中身があれば、BOM やゼロ幅の文字が付いていても通す
+        assert!(check_description_not_empty(Some("\u{feff}x"), "").is_ok());
+        assert!(check_description_not_empty(Some("\u{200b}本文"), "").is_ok());
     }
 
     /// 未指定のラベルで空配列を送ると、API 側は「全解除」と解釈する。
@@ -2483,6 +2522,25 @@ mod tests {
                 "bob\t2026-01-03T00:00:00Z",
                 "  新しい",
             ]
+        );
+    }
+
+    /// 作成者名の改行・タブは 1 行に畳み、本文の CRLF の `\r` は落とす。
+    #[test]
+    fn comment_lines_keep_one_line_per_author_and_drop_carriage_returns() {
+        let list = comment_list(
+            vec![comment_node(
+                "al\nice\tx",
+                Some("1 行目\r\n2 行目\r"),
+                "2026-01-02T00:00:00Z",
+                json!([]),
+            )],
+            json!({}),
+        );
+
+        assert_eq!(
+            comment_lines(&list),
+            vec!["al ice x\t2026-01-02T00:00:00Z", "  1 行目", "  2 行目",]
         );
     }
 

@@ -71,6 +71,8 @@ task self-update   # 最新の配布物を落とし、.sha256 を確かめて、
 `self-update` が確かめるのは `.sha256`（破損や取り違え）までで、配布元の確かさは TLS に頼る。署名の検証は
 下の「検め方」の手順で行う。Windows は非対応（動いている `.exe` は置き換えられないので、`.zip` を落として入れ替える）。
 GitHub の API を使うので、`task` のトークンは送らない。
+タグ以外でビルドしたバイナリ（手元のビルド）では、実行ファイルを置き換えず、案内を出して終了コード 1 で止まる。
+新しい実行ファイルは、元の実行ファイルの権限を引き継ぐ。
 
 ### 検め方
 
@@ -252,7 +254,7 @@ task tasks pr unlink TASK-181 87
 | `tenant_id` | `TASK_TENANT` | 単独で上書きできる。UUID か名前（slug） |
 
 ```bash
-task config set api_url https://task.example.com
+task config set api_url https://task.example.com/api
 task auth token < token.txt        # 引数を省くと標準入力から読む
 task auth whoami                   # 使用中の鍵と持ち主・scope・有効期限・使えるテナント（tenant_ids）が出る
 task tenants list                  # 使えるテナントの ID・名前（slug）・表示名（read:tenant が要る）
@@ -277,12 +279,12 @@ API の URL とトークンは組で決める。片方ずつ config から補う
 
 ```bash
 # 両方を環境変数で渡す
-export TASK_API_URL=https://task.example.com
+export TASK_API_URL=https://task.example.com/api
 export TASK_TOKEN=...
 
 # 両方を解除して config に揃える
 unset TASK_API_URL TASK_TOKEN
-task config set api_url https://task.example.com
+task config set api_url https://task.example.com/api
 task auth token < token.txt
 ```
 
@@ -292,6 +294,7 @@ task auth token < token.txt
 このとき使えるテナントを ID と名前（slug）で並べる（名前は `read:tenant` があるときだけ。無ければ ID だけ）。
 
 `TASK_TENANT` と `tenant_id` には UUID のほか、名前（slug。`task tenants list` で調べる）も書ける。
+名前は完全一致を優先し、無ければ大文字小文字を無視して照合する。無視した照合で複数に合うときは、候補（名前と UUID）を並べて終了コード 2 で止まる。
 名前のときは `GET /v1/tenants` を 1 回叩いて ID に直すので、トークンに `read:tenant` が要る
 （無ければ終了コード 4 で止まり、UUID を使う案内を出す）。見つからなければ使える名前を並べて終了コード 2 で止まる。
 UUID のときは何も叩かない。

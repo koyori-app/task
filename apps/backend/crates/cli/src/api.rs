@@ -301,30 +301,38 @@ impl WebLocation {
 }
 
 /// 名前（slug）に合うテナント。完全一致を優先し、無ければ大文字小文字を無視して照合する
-/// （プロジェクトや状態の名前解決と同じ優先）。
+/// （プロジェクトや状態の名前解決と同じ優先）。無視した照合で複数に合うなら、選ばずに候補を示す。
 fn pick_tenant<'a>(tenants: &'a [TenantRef], name: &str) -> Result<&'a TenantRef> {
-    tenants
+    let describe = |list: Vec<&TenantRef>| {
+        list.iter()
+            .map(|tenant| format!("{} ({})", tenant.display_id, tenant.id))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    if let Some(exact) = tenants.iter().find(|tenant| tenant.display_id == name) {
+        return Ok(exact);
+    }
+    let folded: Vec<&TenantRef> = tenants
         .iter()
-        .find(|tenant| tenant.display_id == name)
-        .or_else(|| {
-            tenants
-                .iter()
-                .find(|tenant| tenant.display_id.eq_ignore_ascii_case(name))
-        })
-        .ok_or_else(|| {
+        .filter(|tenant| tenant.display_id.eq_ignore_ascii_case(name))
+        .collect();
+    match folded.as_slice() {
+        [only] => Ok(only),
+        [] => {
             let usable = if tenants.is_empty() {
                 "none".to_string()
             } else {
-                tenants
-                    .iter()
-                    .map(|tenant| format!("{} ({})", tenant.display_id, tenant.id))
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                describe(tenants.iter().collect())
             };
-            CliError::validation(format!(
+            Err(CliError::validation(format!(
                 "Tenant not found: {name} (this token can be used in: {usable})"
-            ))
-        })
+            )))
+        }
+        _ => Err(CliError::validation(format!(
+            "Ambiguous tenant: {name} (candidates: {}); specify a UUID",
+            describe(folded)
+        ))),
+    }
 }
 
 #[cfg(test)]
@@ -394,8 +402,32 @@ mod tests {
     fn picks_a_tenant_by_exact_name_before_a_case_insensitive_one() {
         let tenants = [tenant(1, "Acme"), tenant(2, "acme"), tenant(3, "dmm")];
         assert_eq!(pick_tenant(&tenants, "acme").unwrap().id.as_u128(), 2);
-        assert_eq!(pick_tenant(&tenants, "ACME").unwrap().id.as_u128(), 1);
+        assert_eq!(pick_tenant(&tenants, "Acme").unwrap().id.as_u128(), 1);
         assert_eq!(pick_tenant(&tenants, "dmm").unwrap().id.as_u128(), 3);
+        // 大文字小文字だけが違う一致が 1 件なら、それを選ぶ
+        assert_eq!(pick_tenant(&tenants, "DMM").unwrap().id.as_u128(), 3);
+    }
+
+    /// 大文字小文字を無視した一致が複数あるとき、先頭を黙って選ぶと別のテナントを操作してしまう。
+    #[test]
+    fn an_ambiguous_case_insensitive_tenant_name_lists_the_candidates() {
+        let tenants = [tenant(1, "Acme"), tenant(2, "acme"), tenant(3, "dmm")];
+        let err = pick_tenant(&tenants, "ACME").unwrap_err();
+        assert_eq!(err.exit_code, 2);
+        assert!(
+            err.message.contains("Ambiguous tenant: ACME"),
+            "{}",
+            err.message
+        );
+        assert!(
+            err.message
+                .contains(&format!("Acme ({})", uuid::Uuid::from_u128(1)))
+        );
+        assert!(
+            err.message
+                .contains(&format!("acme ({})", uuid::Uuid::from_u128(2)))
+        );
+        assert!(!err.message.contains("dmm"), "{}", err.message);
     }
 
     #[test]

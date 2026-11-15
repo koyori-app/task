@@ -259,6 +259,16 @@ async fn self_update_replaces_the_binary_after_verifying_the_checksum() {
     .await;
     let dir = tempfile::tempdir().unwrap();
     let updater = updater(&server.uri(), dir.path(), "0.1.51", true);
+    // 元の権限を引き継ぐ（常に 0755 にしない）
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(
+            &updater.installed.exe,
+            std::fs::Permissions::from_mode(0o750),
+        )
+        .unwrap();
+    }
 
     let code = self_update(&updater, OutputOptions::new(false))
         .await
@@ -273,7 +283,7 @@ async fn self_update_replaces_the_binary_after_verifying_the_checksum() {
             .unwrap()
             .permissions()
             .mode();
-        assert_eq!(mode & 0o777, 0o755);
+        assert_eq!(mode & 0o777, 0o750);
     }
     assert!(no_temp_files_left(dir.path()));
 }
@@ -376,6 +386,106 @@ async fn self_update_refuses_an_archive_without_the_binary() {
     assert_eq!(err.exit_code, 1);
     assert_eq!(std::fs::read(&updater.installed.exe).unwrap(), ORIGINAL);
     assert!(no_temp_files_left(dir.path()));
+}
+
+fn archive_with_entry(name: &str, kind: tar::EntryType, link: Option<&str>) -> Vec<u8> {
+    let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    let mut builder = tar::Builder::new(encoder);
+    let mut header = tar::Header::new_gnu();
+    header.set_entry_type(kind);
+    header.set_size(0);
+    header.set_mode(0o755);
+    if let Some(link) = link {
+        header.set_link_name(link).unwrap();
+    }
+    builder
+        .append_data(&mut header, name, std::io::empty())
+        .unwrap();
+    let mut encoder = builder.into_inner().unwrap();
+    encoder.flush().unwrap();
+    encoder.finish().unwrap()
+}
+
+/// `task` という名前でも、通常ファイルでない要素や空の中身で実行ファイルを置き換えない。
+#[tokio::test]
+async fn self_update_refuses_a_task_entry_that_is_not_a_regular_non_empty_file() {
+    let cases = [
+        (
+            "symlink",
+            archive_with_entry("task", tar::EntryType::Symlink, Some("/bin/sh")),
+            "not a regular file",
+        ),
+        (
+            "directory",
+            archive_with_entry("task", tar::EntryType::Directory, None),
+            "not a regular file",
+        ),
+        ("empty", archive(&[("task", b"")]), "empty"),
+    ];
+    for (name, archive, expected) in cases {
+        let server = MockServer::start().await;
+        mount_latest(&server, latest("v0.2.0")).await;
+        mount_asset(
+            &server,
+            "0.2.0",
+            &archive,
+            sha256_line(&archive, "task-0.2.0-x86_64-unknown-linux-gnu.tar.gz"),
+        )
+        .await;
+        let dir = tempfile::tempdir().unwrap();
+        let updater = updater(&server.uri(), dir.path(), "0.1.51", true);
+
+        let err = self_update(&updater, OutputOptions::new(false))
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.exit_code, 1, "{name}");
+        assert!(err.message.contains(expected), "{name}: {}", err.message);
+        assert_eq!(
+            std::fs::read(&updater.installed.exe).unwrap(),
+            ORIGINAL,
+            "{name}"
+        );
+        assert!(no_temp_files_left(dir.path()), "{name}");
+    }
+}
+
+/// 手元のビルドでは、実行ファイルを置き換えず、通信もしない。
+#[tokio::test]
+async fn self_update_stops_on_a_local_build_without_touching_the_binary() {
+    let server = MockServer::start().await;
+    mount_latest(&server, latest("v0.2.0")).await;
+    let dir = tempfile::tempdir().unwrap();
+    let updater = updater(&server.uri(), dir.path(), "0.1.0", false);
+
+    let err = self_update(&updater, OutputOptions::new(false))
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.exit_code, 1);
+    assert!(err.message.contains("local build"), "{}", err.message);
+    assert_eq!(requests_to(&server).await, 0);
+    assert_eq!(std::fs::read(&updater.installed.exe).unwrap(), ORIGINAL);
+}
+
+/// 通知の状態ファイルの置き場（設定ディレクトリ）は、他人に入れない権限で作る。
+#[cfg(unix)]
+#[tokio::test]
+async fn the_check_state_directory_is_created_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+    let server = MockServer::start().await;
+    mount_latest(&server, latest("v0.2.0")).await;
+    let dir = tempfile::tempdir().unwrap();
+    let updater = updater(&server.uri(), dir.path(), "0.1.51", true);
+    let state = state_in(dir.path());
+
+    notice(&updater, &state, now(), &no_env).await;
+
+    let mode = std::fs::metadata(state.parent().unwrap())
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o700);
 }
 
 // ---- 本体を止めない ----

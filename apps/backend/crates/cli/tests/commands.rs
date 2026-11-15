@@ -253,11 +253,25 @@ async fn run_binary(server: &MockServer, args: &[&str]) -> (bool, String) {
 /// `api_url` を `{server}{prefix}` にして走らせる。`<画面の URL>/api` の形を作るのに使う。
 /// モックは `{prefix}/v1/...` に置く。
 async fn run_binary_at(server: &MockServer, prefix: &str, args: &[&str]) -> (bool, String) {
+    let (status, stdout, _) = run_binary_full(server, prefix, args, None).await;
+    (status, stdout)
+}
+
+/// `run_binary_at` に標準入力を渡し、標準エラーも返す。
+async fn run_binary_full(
+    server: &MockServer,
+    prefix: &str,
+    args: &[&str],
+    stdin: Option<&str>,
+) -> (bool, String, String) {
     let home = tempfile::tempdir().unwrap();
     let uri = format!("{}{prefix}", server.uri());
     let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
+    let stdin = stdin.map(str::to_string);
     let output = tokio::task::spawn_blocking(move || {
-        std::process::Command::new(env!("CARGO_BIN_EXE_task"))
+        use std::io::Write;
+        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_task"));
+        command
             .args(&args[1..])
             .env_clear()
             .env("HOME", home.path())
@@ -266,14 +280,29 @@ async fn run_binary_at(server: &MockServer, prefix: &str, args: &[&str]) -> (boo
             .env("TASK_TENANT", TENANT)
             // 実バイナリは `from_process` を通る。通知で GitHub へ出ないようにする
             .env("TASK_NO_UPDATE_CHECK", "1")
-            .output()
-            .unwrap()
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        match stdin {
+            Some(input) => {
+                command.stdin(std::process::Stdio::piped());
+                let mut child = command.spawn().unwrap();
+                child
+                    .stdin
+                    .take()
+                    .unwrap()
+                    .write_all(input.as_bytes())
+                    .unwrap();
+                child.wait_with_output().unwrap()
+            }
+            None => command.output().unwrap(),
+        }
     })
     .await
     .unwrap();
     (
         output.status.success(),
         String::from_utf8(output.stdout).unwrap(),
+        String::from_utf8(output.stderr).unwrap(),
     )
 }
 
@@ -721,7 +750,14 @@ async fn tasks_update_clears_every_assignee_in_the_update_request() {
 async fn tasks_update_refuses_an_empty_description_file_before_any_request() {
     let harness = harness().await;
     let dir = tempfile::tempdir().unwrap();
-    for (name, content) in [("empty.md", ""), ("blank.md", " \n\t\n")] {
+    // BOM・ゼロ幅の文字だけの本文も、空とみなす（`trim` は U+FEFF・U+200B を空白にしない）
+    for (name, content) in [
+        ("empty.md", ""),
+        ("blank.md", " \n\t\n"),
+        ("bom.md", "\u{feff}"),
+        ("bom-newline.md", "\u{feff}\r\n"),
+        ("zero-width.md", " \u{200b}\n\u{feff}\u{200d}\n"),
+    ] {
         let file = dir.path().join(name);
         std::fs::write(&file, content).unwrap();
         let error = harness
@@ -742,11 +778,46 @@ async fn tasks_update_refuses_an_empty_description_file_before_any_request() {
             error.message
         );
     }
-    let error = harness
-        .run(&["task", "tasks", "update", "APP-7", "--description", ""])
-        .await
-        .unwrap_err();
-    assert_eq!(error.exit_code, 2);
+    for inline in ["", "\u{feff}", "\u{feff} \u{200b}"] {
+        let error = harness
+            .run(&["task", "tasks", "update", "APP-7", "--description", inline])
+            .await
+            .unwrap_err();
+        assert_eq!(error.exit_code, 2, "{inline:?}");
+    }
+    assert!(harness.sent_nothing().await);
+}
+
+/// 標準入力（`--description-file -`）から来る BOM だけの本文も、更新・作成の両方で API を叩く前に断る。
+#[tokio::test]
+async fn a_bom_only_description_from_stdin_is_refused_before_any_request() {
+    let harness = harness().await;
+    for args in [
+        &[
+            "task",
+            "tasks",
+            "update",
+            "APP-7",
+            "--description-file",
+            "-",
+        ][..],
+        &[
+            "task",
+            "tasks",
+            "create",
+            "--project",
+            "APP",
+            "--title",
+            "T",
+            "--description-file",
+            "-",
+        ][..],
+    ] {
+        let (ok, stdout, stderr) =
+            run_binary_full(&harness.server, "", args, Some("\u{feff}\r\n")).await;
+        assert!(!ok, "{args:?}: {stdout}");
+        assert!(stderr.contains("The description is empty"), "{stderr}");
+    }
     assert!(harness.sent_nothing().await);
 }
 
@@ -773,23 +844,25 @@ async fn tasks_update_clears_the_description_only_with_the_explicit_flag() {
 async fn tasks_create_refuses_an_empty_description_file_before_any_request() {
     let harness = harness().await;
     let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("empty.md");
-    std::fs::write(&file, "").unwrap();
-    let error = harness
-        .run(&[
-            "task",
-            "tasks",
-            "create",
-            "--project",
-            "APP",
-            "--title",
-            "T",
-            "--description-file",
-            file.to_str().unwrap(),
-        ])
-        .await
-        .unwrap_err();
-    assert_eq!(error.exit_code, 2, "{}", error.message);
+    for (name, content) in [("empty.md", ""), ("bom.md", "\u{feff}\n")] {
+        let file = dir.path().join(name);
+        std::fs::write(&file, content).unwrap();
+        let error = harness
+            .run(&[
+                "task",
+                "tasks",
+                "create",
+                "--project",
+                "APP",
+                "--title",
+                "T",
+                "--description-file",
+                file.to_str().unwrap(),
+            ])
+            .await
+            .unwrap_err();
+        assert_eq!(error.exit_code, 2, "{name}: {}", error.message);
+    }
     assert!(harness.sent_nothing().await);
 }
 
@@ -980,32 +1053,90 @@ async fn tasks_create_omits_the_url_when_the_token_cannot_list_tenants() {
     assert!(value["url"].is_null());
 }
 
-/// 作ったあとで URL の取得に失敗すると、呼び出し側が再実行して二重に起票する。
-/// 取得は POST の前に済ませ、失敗ならタスクを作らない。
+/// URL は付加情報。テナント一覧が 403 以外で失敗しても、作成は止めない（`url: null` で続ける）。
+/// 参照は POST の前に済ませる（作ったあとに叩いて失敗すると、再実行で二重に起票する）。
 #[tokio::test]
-async fn tasks_create_does_not_post_when_the_tenant_lookup_fails() {
+async fn tasks_create_still_posts_without_a_url_when_the_tenant_lookup_fails() {
     let harness = harness().await;
     let server = &harness.server;
     mount_create_under_api(server, false).await;
     mount_api_tenants(server, ResponseTemplate::new(500)).await;
+    let create = [
+        "task",
+        "tasks",
+        "create",
+        "--project",
+        "APP",
+        "--title",
+        "T",
+    ];
 
-    let (ok, stdout) = run_binary_at(
+    let (ok, stdout, stderr) = run_binary_full(server, "/api", &create, None).await;
+    assert!(ok, "{stdout}{stderr}");
+    assert_eq!(stdout, "APP-7\n");
+    assert!(
+        stderr.contains("warning: cannot look up the web URL"),
+        "{stderr}"
+    );
+    assert_eq!(posts_to(server).await, 1);
+    assert_tenants_before_post(server).await;
+
+    let mut json_args = create.to_vec();
+    json_args.insert(1, "--json");
+    let (ok, stdout, _) = run_binary_full(server, "/api", &json_args, None).await;
+    assert!(ok, "{stdout}");
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(value["key"], "APP-7");
+    assert!(value["url"].is_null());
+}
+
+#[tokio::test]
+async fn tasks_bulk_create_still_posts_without_a_url_when_the_tenant_lookup_fails() {
+    let harness = harness().await;
+    let server = &harness.server;
+    mount_create_under_api(server, true).await;
+    mount_api_tenants(server, ResponseTemplate::new(500)).await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("tasks.json");
+    std::fs::write(&file, r#"[{"title": "Golden task"}]"#).unwrap();
+
+    let (ok, stdout, stderr) = run_binary_full(
         server,
         "/api",
         &[
             "task",
             "tasks",
-            "create",
+            "bulk-create",
             "--project",
             "APP",
-            "--title",
-            "T",
+            file.to_str().unwrap(),
         ],
+        None,
     )
     .await;
 
-    assert!(!ok, "{stdout}");
-    assert_eq!(posts_to(server).await, 0);
+    assert!(ok, "{stdout}{stderr}");
+    assert_eq!(stdout, "APP-7\t\tGolden task\n");
+    assert!(
+        stderr.contains("warning: cannot look up the web URL"),
+        "{stderr}"
+    );
+    assert_eq!(posts_to(server).await, 1);
+    assert_tenants_before_post(server).await;
+}
+
+/// テナント一覧の参照は、作成の POST より前に行われている。
+async fn assert_tenants_before_post(server: &MockServer) {
+    let requests = server.received_requests().await.unwrap();
+    let tenants = requests
+        .iter()
+        .position(|request| request.url.path() == "/api/v1/tenants")
+        .expect("tenants was not looked up");
+    let post = requests
+        .iter()
+        .position(|request| request.method.as_str() == "POST")
+        .expect("no POST");
+    assert!(tenants < post);
 }
 
 #[tokio::test]

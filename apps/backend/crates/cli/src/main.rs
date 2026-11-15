@@ -1,8 +1,20 @@
 use task_cli::Context;
 use task_cli::cli::{Cli, Command};
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> std::process::ExitCode {
+fn main() -> std::process::ExitCode {
+    // `#[tokio::main]` だと、ランタイムの drop が `spawn_blocking` の `getaddrinfo` の終わりを待つ。
+    // DNS が応答しない環境では、通知の取得がタイムアウトしたあとも終了が遅れる。
+    // 自分で作り、終わったら待たずに閉じる（本体の出力は `block_on` の中で書き終えている）
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("failed to start the async runtime");
+    let code = runtime.block_on(run());
+    runtime.shutdown_background();
+    code
+}
+
+async fn run() -> std::process::ExitCode {
     let cli = Cli::parse_args(std::env::args()).unwrap_or_else(|err| err.exit());
     let context = match Context::from_process() {
         Ok(context) => context,
