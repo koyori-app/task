@@ -9,7 +9,6 @@ use payload::{
     personal_tokens::{CreatePersonalTokenResponse, PersonalTokenResponse},
 };
 use sea_orm::prelude::Uuid;
-use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection,
     DatabaseTransaction, EntityTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
@@ -203,11 +202,7 @@ pub async fn update_bot(
     active.is_suspended = Set(payload.is_suspended);
     active.update(&txn).await?;
     if payload.is_suspended {
-        personal_tokens::Entity::update_many()
-            .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
-            .filter(personal_tokens::Column::UserId.eq(bot_id))
-            .exec(&txn)
-            .await?;
+        crate::auth::revoke_user_personal_tokens(&txn, bot_id).await?;
     }
     audit(
         &txn,

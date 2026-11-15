@@ -2,7 +2,6 @@ use axum::{Json, extract::State, http::StatusCode};
 use axum_session_redispool::SessionRedisPool;
 use axum_valid::Valid;
 use chrono::Utc;
-use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, EntityTrait, QueryFilter,
     TransactionTrait,
@@ -15,7 +14,7 @@ use crate::openapi::{
     PasswordChangeErrors, PasswordResetCompleteErrors, PasswordResetRequestErrors,
     PasswordResetVerifyErrors,
 };
-use entity::{oauth_connections, personal_tokens, users};
+use entity::{oauth_connections, users};
 use job::{PasswordResetEmailJob, password_reset_email};
 use payload::password_reset::*;
 use service::auth::{AuthError, create_password_hash, verify_password};
@@ -131,12 +130,7 @@ pub async fn password_reset_complete(
     active.password_hash = Set(Some(password_hash));
     active.sessions_revoked_at = Set(Some(Utc::now().into()));
     active.update(&txn).await?;
-    personal_tokens::Entity::update_many()
-        .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
-        .filter(personal_tokens::Column::UserId.eq(user_id))
-        .filter(personal_tokens::Column::Revoked.eq(false))
-        .exec(&txn)
-        .await?;
+    service::auth::revoke_user_personal_tokens(&txn, user_id).await?;
     // reset の mail を受けた者が、この利用者の持ち主である。出所の確かでない OAuth の連携は外す:
     // email の確認がまだの利用者の連携は全て、確認済みの利用者でも許可の一覧に無い instance の
     // gitlab_selfhosted の連携。外した連携は、ログインした後に結び直せる
@@ -222,12 +216,7 @@ pub async fn password_change(
         .await
         .map_err(|e| AuthError::Internal(e.into()))?;
     active.update(&txn).await?;
-    personal_tokens::Entity::update_many()
-        .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
-        .filter(personal_tokens::Column::UserId.eq(user_id))
-        .filter(personal_tokens::Column::Revoked.eq(false))
-        .exec(&txn)
-        .await?;
+    service::auth::revoke_user_personal_tokens(&txn, user_id).await?;
     txn.commit()
         .await
         .map_err(|e| AuthError::Internal(e.into()))?;
