@@ -15,7 +15,7 @@ import {
 import type { components } from '@/generated/api';
 import type { TenantUuid } from '@/lib/api-ids';
 import { fetchClient, useMeQuery } from '@/lib/api-vue-query';
-import { taskDetailHref, taskListHref, PRIORITY_CONFIG } from '@/lib/task-display';
+import { taskDetailHref, taskListHref, taskSeqKey, PRIORITY_CONFIG } from '@/lib/task-display';
 import { activityActor, activityText, relativeTime } from '@/lib/task-activity';
 import { useNow } from '@/composables/useNow';
 import { useHydrated } from '@/composables/useHydrated';
@@ -23,8 +23,13 @@ import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts';
 import { Button } from '@koyori-app/ui-vue';
 import UserAvatar from '@/components/UserAvatar.vue';
 import DashboardCreateTask from './DashboardCreateTask.vue';
+import DashboardProjectsEmpty from './DashboardProjectsEmpty.vue';
 
-const props = defineProps<{ tenantId: TenantUuid; tenantSlug: string }>();
+const props = defineProps<{
+  tenantId: TenantUuid;
+  tenantSlug: string;
+  canCreateProject?: boolean;
+}>();
 const DASHBOARD_PATH = '/v1/tenants/{tenant_id}/users/me/dashboard' as const;
 const MY_TASKS_PATH = '/v1/tenants/{tenant_id}/users/me/tasks' as const;
 const TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}' as const;
@@ -42,6 +47,7 @@ const pageSize = 5;
 const createOpen = ref(false);
 const pending = ref<string[]>([]);
 const mutationError = ref('');
+const createdTask = ref<{ key: string; href: string } | null>(null);
 const now = useNow();
 const hydrated = useHydrated();
 const me = useMeQuery();
@@ -164,6 +170,19 @@ function deadline(task: DashboardTask['task']) {
     overdue: !!date && date < today.value,
   };
 }
+function onCreated(
+  task: components['schemas']['TaskDetailResponse'],
+  project: components['schemas']['ProjectResponse'],
+) {
+  createdTask.value = {
+    key: taskSeqKey(project.key, task.seq_id),
+    href: taskDetailHref(props.tenantSlug, project.key, task.seq_id),
+  };
+  void refresh();
+}
+watch(createOpen, (open) => {
+  if (open) createdTask.value = null;
+});
 async function refresh() {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: ['get', DASHBOARD_PATH] }),
@@ -249,6 +268,11 @@ async function complete(item: DashboardTask) {
       <Loader2 class="mx-auto mb-3 size-5 animate-spin" />読み込み中…
     </div>
     <template v-if="data">
+      <DashboardProjectsEmpty
+        v-if="!data.projects.length"
+        :tenant-slug="tenantSlug"
+        :can-create-project="!!canCreateProject"
+      />
       <section class="mb-8 grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="自分のタスクの概要">
         <component
           :is="stat.filter ? 'button' : 'div'"
@@ -301,6 +325,12 @@ async function complete(item: DashboardTask) {
           </div>
           <p v-if="mutationError" role="alert" class="mt-3 text-xs text-destructive">
             {{ mutationError }}
+          </p>
+          <p v-if="createdTask" role="status" class="mt-3 text-xs text-muted-foreground">
+            <a :href="createdTask.href" class="font-medium text-foreground hover:underline">{{
+              createdTask.key
+            }}</a>
+            を作成しました
           </p>
           <p
             v-if="query.isPlaceholderData.value"
@@ -542,7 +572,8 @@ async function complete(item: DashboardTask) {
         v-model:open="createOpen"
         :tenant-id="tenantId"
         :projects="data.projects.map((p) => p.project)"
-        @created="refresh"
+        :current-user-id="me.data.value?.id"
+        @created="onCreated"
       />
     </template>
   </div>

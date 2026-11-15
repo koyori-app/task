@@ -33,6 +33,7 @@ const task: TaskDetail = {
   created_at: '2026-07-16T00:00:00Z',
   custom_field_values: [],
   reactions: [],
+  attachments: [],
   id: 'task-id',
   is_archived: false,
   labels: [],
@@ -312,6 +313,39 @@ describe('TaskDetailHub', () => {
     const notices = wrapper.findAll('[role="status"]');
     expect(notices).toHaveLength(1);
     expect(notices[0]!.text()).toBe('保存しました');
+  });
+
+  it.each(['status_id', 'priority', 'labels'] as const)(
+    '%s の保存が確定したら「保存しました」を出す',
+    (savedField) => {
+      const wrapper = mount(TaskDetailHub, {
+        props: { task, projectKey: 'TEST', statuses: [], statusId: task.status_id, savedField },
+      });
+
+      const notices = wrapper.findAll('[role="status"]');
+      expect(notices).toHaveLength(1);
+      expect(notices[0]!.text()).toBe('保存しました');
+    },
+  );
+
+  it.each([
+    ['status_id', 'statusError'],
+    ['priority', 'priorityError'],
+    ['labels', 'labelsError'],
+  ] as const)('%s の失敗があれば「保存しました」は出さず失敗だけ出す', (savedField, errorProp) => {
+    const wrapper = mount(TaskDetailHub, {
+      props: {
+        task,
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+        savedField,
+        [errorProp]: '更新に失敗しました',
+      },
+    });
+
+    expect(wrapper.text()).not.toContain('保存しました');
+    expect(wrapper.text()).toContain('更新に失敗しました');
   });
 
   it('同じフィールドの失敗があれば「保存しました」は出さず失敗を出す', () => {
@@ -921,6 +955,91 @@ describe('TaskDetailHub ステータスの操作', () => {
   });
 });
 
+// 担当者全員の完了が必要なタスクは、未完了の担当者が残る間は完了へ直接移せない（backend が 409 で止める）
+describe('TaskDetailHub の完了条件', () => {
+  const alpha = { id: 'user-alpha', username: 'alpha', avatar_url: null };
+  const beta = { id: 'user-beta', username: 'beta', avatar_url: null };
+
+  function mountRule(
+    taskPatch: Partial<TaskDetail>,
+    extra: Record<string, unknown> = {},
+    statusId = 'status-id',
+  ) {
+    return mount(TaskDetailHub, {
+      props: {
+        task: { ...task, ...taskPatch },
+        projectKey: 'TEST',
+        statuses,
+        statusId,
+        currentUserId: 'user-alpha',
+        ...extra,
+      },
+    });
+  }
+
+  const pending = {
+    require_all_assignees_done: true,
+    assignees: [
+      { role: 'assignee', user: alpha, completed_at: null },
+      { role: 'assignee', user: beta, completed_at: '2026-07-16T01:00:00Z' },
+    ],
+  };
+
+  function doneItem(wrapper: ReturnType<typeof mountRule>) {
+    return wrapper
+      .get('[role="menu"][aria-label="ステータス"]')
+      .findAll('[role="menuitemradio"]')
+      .find((item) => item.text().includes('Done'))!;
+  }
+
+  it('未完了の担当者が残るなら、✓ ボタンを出さず、メニューの完了を無効にする', () => {
+    const wrapper = mountRule(pending);
+
+    expect(wrapper.find('button[aria-label="Done にする（完了）"]').exists()).toBe(false);
+    expect(doneItem(wrapper).attributes('aria-disabled')).toBe('true');
+    // 完了でない項目は選べる
+    const todo = wrapper
+      .get('[role="menu"][aria-label="ステータス"]')
+      .findAll('[role="menuitemradio"]')
+      .find((item) => item.text().includes('In Progress'))!;
+    expect(todo.attributes('aria-disabled')).not.toBe('true');
+  });
+
+  it('「次へ」が完了ステータスなら無効にする', () => {
+    const wrapper = mountRule(pending, {}, 'status-progress');
+
+    expect(wrapper.get('button[aria-label="Done にする"]').attributes('disabled')).toBeDefined();
+  });
+
+  it('設定が off なら従来どおり ✓ ボタンも完了の項目も使える', async () => {
+    const wrapper = mountRule({ ...pending, require_all_assignees_done: false });
+
+    expect(doneItem(wrapper).attributes('aria-disabled')).not.toBe('true');
+    await wrapper.get('button[aria-label="Done にする（完了）"]').trigger('click');
+    expect(wrapper.emitted('update:statusId')).toEqual([['status-done']]);
+  });
+
+  it('全員が完了にしていれば（未完了が残らなければ）✓ ボタンを出す', () => {
+    const wrapper = mountRule({
+      require_all_assignees_done: true,
+      assignees: [{ role: 'assignee', user: beta, completed_at: '2026-07-16T01:00:00Z' }],
+    });
+
+    expect(wrapper.find('button[aria-label="Done にする（完了）"]').exists()).toBe(true);
+  });
+
+  it('完了条件の操作を emit する', async () => {
+    const wrapper = mountRule(pending);
+
+    await wrapper.get('input[name="require-all-assignees-done"]').setValue(false);
+    expect(wrapper.emitted('update:require-all')).toEqual([[false]]);
+
+    const complete = wrapper.findAll('button').find((b) => b.text() === '自分の分を完了にする')!;
+    await complete.trigger('click');
+    expect(wrapper.emitted('complete:mine')).toHaveLength(1);
+  });
+});
+
 // 担当者は一覧の行と同じ口を使うが、飛行中と失敗をこの画面へ渡さないと
 // 「失敗しても無表示」「送信中も押せて 2 回目が無言で捨てられる」状態になる
 describe('TaskDetailHub の担当者', () => {
@@ -1174,5 +1293,57 @@ describe('TaskDetailHub 読み込みの失敗', () => {
     await wrapper.get('[data-testid="load-error"] button').trigger('click');
     await flushPromises();
     expect(calls).toBe(2);
+  });
+});
+
+describe('TaskDetailHub のチェックリスト達成率', () => {
+  const CHECKLIST = '- [x] a\n- [x] b\n- [ ] c\n- [ ] d\n- [ ] e';
+
+  function mountWith(description: string | null, extra: Record<string, unknown> = {}) {
+    return mount(TaskDetailHub, {
+      props: {
+        task: { ...task, description },
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+        ...extra,
+      },
+    });
+  }
+
+  it('説明の見出しの隣に完了数 / 総数を出す', () => {
+    const wrapper = mountWith(CHECKLIST);
+    const badge = wrapper.get('[data-checklist-progress]');
+
+    expect(badge.text()).toContain('2 / 5');
+    expect(badge.element.previousElementSibling?.textContent).toBe('説明');
+  });
+
+  it('KFM 描画の表示でも同じ値を出す', () => {
+    const wrapper = mountWith(CHECKLIST, {
+      descriptionHtml: '<ul><li>a</li></ul>',
+      descriptionSource: CHECKLIST,
+    });
+
+    expect(wrapper.get('[data-checklist-progress]').text()).toContain('2 / 5');
+  });
+
+  it('タスクリストの無い説明・説明が null では出さない', () => {
+    expect(mountWith('普通の説明').find('[data-checklist-progress]').exists()).toBe(false);
+    expect(mountWith(null).find('[data-checklist-progress]').exists()).toBe(false);
+  });
+
+  it('progress_pct の「進捗」行は別の値のまま', () => {
+    const wrapper = mount(TaskDetailHub, {
+      props: {
+        task: { ...task, description: CHECKLIST, progress_pct: 30 },
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+      },
+    });
+
+    expect(wrapper.get('[data-checklist-progress]').text()).toContain('2 / 5');
+    expect(wrapper.text()).toContain('30%');
   });
 });

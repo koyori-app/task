@@ -13,14 +13,14 @@ use axum::{
 use axum_valid::Valid;
 use chrono::Utc;
 use common::db::{column_exists, execute_bound, table_exists};
-use entity::{personal_tokens, tasks, tenant_members, users};
+use entity::{oauth_connections, passkeys, personal_tokens, tasks, tenant_members, users};
 use payload::admin_users::*;
 use payload::users::UserResponse;
 use sea_orm::prelude::Uuid;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait,
-    PaginatorTrait, QueryFilter, TransactionTrait,
+    PaginatorTrait, QueryFilter, QueryOrder, TransactionTrait,
 };
 use service::auth::AuthError;
 use service::auth::{create_password_hash, generate_email_verification_token};
@@ -298,6 +298,7 @@ pub async fn create_user(
     patch,
     path = "/{id}",
     tag = "Admin Users",
+    params(("id" = Uuid, Path, description = "対象ユーザーの ID")),
     summary = "ユーザー更新（is_admin / is_suspended）",
     request_body = AdminUpdateUserRequest,
     responses(
@@ -399,6 +400,7 @@ pub async fn update_user(
     delete,
     path = "/{id}",
     tag = "Admin Users",
+    params(("id" = Uuid, Path, description = "対象ユーザーの ID")),
     summary = "ユーザー強制削除",
     responses(
         (status = 204, description = "削除完了"),
@@ -449,9 +451,64 @@ pub async fn delete_user(
 
 #[axum::debug_handler]
 #[utoipa::path(
+    get,
+    path = "/{id}/auth-methods",
+    tag = "Admin Users",
+    params(("id" = Uuid, Path, description = "対象ユーザーの ID")),
+    summary = "対象ユーザーの認証方法（パスキー・OAuth 連携）",
+    responses(
+        (status = 200, description = "秘密値を含まない認証方法の一覧", body = AdminAuthMethodsResponse),
+        CrudErrors,
+    )
+)]
+pub async fn get_auth_methods(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<AdminAuthMethodsResponse>, AppError> {
+    if users::Entity::find_by_id(id)
+        .one(&state.db)
+        .await?
+        .is_none()
+    {
+        return Err(AppError::NotFound);
+    }
+    let passkeys = passkeys::Entity::find()
+        .filter(passkeys::Column::UserId.eq(id))
+        .order_by_asc(passkeys::Column::CreatedAt)
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(|p| AdminPasskeyItem {
+            id: p.id,
+            name: p.name,
+            created_at: p.created_at.to_rfc3339(),
+            last_used_at: p.last_used_at.map(|t| t.to_rfc3339()),
+        })
+        .collect();
+    let oauth = oauth_connections::Entity::find()
+        .filter(oauth_connections::Column::UserId.eq(id))
+        .order_by_asc(oauth_connections::Column::CreatedAt)
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(|c| AdminOAuthItem {
+            provider: c.provider,
+            provider_login: c.provider_login,
+            provider_email: c.provider_email,
+            instance_url: c.instance_url,
+            created_at: c.created_at.to_rfc3339(),
+        })
+        .collect();
+    Ok(Json(AdminAuthMethodsResponse { passkeys, oauth }))
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
     post,
     path = "/{id}/password-reset",
     tag = "Admin Users",
+    params(("id" = Uuid, Path, description = "対象ユーザーの ID")),
     summary = "パスワードリセットリンク生成・送信",
     request_body = AdminPasswordResetRequest,
     responses(
@@ -523,6 +580,7 @@ pub async fn password_reset(
     post,
     path = "/{id}/reset-2fa",
     tag = "Admin Users",
+    params(("id" = Uuid, Path, description = "対象ユーザーの ID")),
     summary = "2FA 強制リセット",
     responses(
         (status = 204, description = "2FA リセット完了"),
@@ -567,6 +625,7 @@ pub async fn reset_2fa(
     // passkeys::delete_passkey と関数名が同じなため operationId を明示して重複を避ける
     operation_id = "delete_admin_user_passkey",
     tag = "Admin Users",
+    params(("id" = Uuid, Path, description = "対象ユーザーの ID"), ("passkey_id" = Uuid, Path, description = "パスキーの ID")),
     summary = "パスキー強制削除",
     responses(
         (status = 204, description = "削除完了"),
@@ -622,6 +681,7 @@ pub async fn delete_passkey(
     delete,
     path = "/{id}/oauth/{provider}",
     tag = "Admin Users",
+    params(("id" = Uuid, Path, description = "対象ユーザーの ID"), ("provider" = String, Path, description = "OAuth プロバイダー名")),
     summary = "OAuth 連携強制解除",
     responses(
         (status = 204, description = "解除完了"),

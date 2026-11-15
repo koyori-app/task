@@ -120,6 +120,12 @@ pub enum ProjectsCommand {
         #[arg(long)]
         project: String,
     },
+    /// List the labels a project's tasks can have (name, color, description)
+    Labels {
+        /// Project key or UUID
+        #[arg(long)]
+        project: String,
+    },
     /// Show a project by key or UUID
     Show {
         /// Project key or UUID
@@ -145,6 +151,9 @@ pub enum TasksCommand {
         /// Filter by assignee username (or UUID)
         #[arg(long)]
         assignee: Option<String>,
+        /// Only tasks nobody is assigned to
+        #[arg(long, conflicts_with = "assignee")]
+        unassigned: bool,
         /// Filter by milestone name (or UUID)
         #[arg(long)]
         milestone: Option<String>,
@@ -361,7 +370,7 @@ pub struct TaskFieldArgs {
     /// Progress percentage (0-100)
     #[arg(long)]
     pub progress: Option<i16>,
-    /// Parent task (KEY-N or UUID)
+    /// Parent task (KEY-N or UUID). A new task takes the parent's deadlines and planned start unless set here
     #[arg(long)]
     pub parent: Option<String>,
     /// Milestone name (or UUID)
@@ -423,6 +432,15 @@ pub enum MyCommand {
         /// today | week | no_due_date | overdue | all
         #[arg(long, default_value = "all")]
         filter: String,
+        /// Only tasks that are not done
+        #[arg(long)]
+        open: bool,
+        /// Tasks per page (1-200)
+        #[arg(long, default_value_t = 50)]
+        limit: u64,
+        /// Page number, 1-based
+        #[arg(long, default_value_t = 1)]
+        page: u64,
     },
     /// Complete a personal or assigned task by ref (e.g. ME-3)
     Complete {
@@ -705,6 +723,16 @@ mod tests {
             Cli::try_parse_from(["task", "tasks", "update", "APP-1", "--assignee", "alice"])
                 .is_ok()
         );
+    }
+
+    /// `--unassigned` は `--assignee` と同時に指定できない。
+    #[test]
+    fn rejects_unassigned_with_an_assignee_filter() {
+        let base = ["task", "tasks", "list", "--project", "APP"];
+        let with = |extra: &[&str]| Cli::try_parse_from(base.iter().chain(extra.iter()).copied());
+        assert!(with(&["--assignee", "alice", "--unassigned"]).is_err());
+        assert!(with(&["--unassigned"]).is_ok());
+        assert!(with(&["--assignee", "alice"]).is_ok());
     }
 
     /// 開始予定日は日付だけを受け、解除と同時には指定できない。

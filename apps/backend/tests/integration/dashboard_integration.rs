@@ -73,6 +73,7 @@ async fn seed(
             )),
             hard_deadline: Set(None),
             planned_start_on: Set(None),
+            require_all_assignees_done: Set(false),
             estimated_minutes: Set(None),
             is_archived: Set(false),
             created_by: Set(user),
@@ -92,6 +93,7 @@ async fn seed(
         user_id: Set(user),
         role: Set("primary".into()),
         assigned_at: Set(now.into()),
+        completed_at: Set(None),
     }))
     .exec(&app.state.db)
     .await
@@ -287,6 +289,8 @@ async fn projects_counts_and_updates_follow_member_and_guest_access() {
         ],
     )
     .await;
+    // TASK-501 より前と同じく、載せた人だけが入れる形にする
+    crate::common::stop_inheriting(&app.state.db, other.project_id).await;
     for id in [public_ids[0], private_ids[0]] {
         execute_sql(&app.state.db,"INSERT INTO task_activities (id,task_id,user_id,event_type,payload,created_at) VALUES ($1,$2,$3,'task_created','{}',now())",vec![Uuid::new_v4().into(),id.into(),owner.id.into()]).await;
     }

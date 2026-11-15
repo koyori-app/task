@@ -43,6 +43,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             status,
             label,
             assignee,
+            unassigned,
             milestone,
             sprint,
             parent,
@@ -85,6 +86,9 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             if let Some(name) = &assignee {
                 let id = resolve_user_id(api, project.id, name).await?;
                 query.push(("assignee_id", id.to_string()));
+            }
+            if unassigned {
+                query.push(("unassigned", "true".to_string()));
             }
             if let Some(name) = &milestone {
                 let id = resolve_milestone_id(api, project.id, name).await?;
@@ -191,6 +195,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
                 hard_deadline: resolved.hard_deadline,
                 planned_start_on: resolved.planned_start_on,
                 estimated_minutes: resolved.estimated_minutes,
+                require_all_assignees_done: false,
                 assignees: resolved.assignees.take().unwrap_or_default(),
                 label_ids: resolved.set_label_ids.take().unwrap_or_default(),
                 custom_field_values: vec![],
@@ -548,6 +553,7 @@ fn update_request(fields: UpdateFields) -> UpdateTaskRequest {
         clear_hard_deadline: clears.clear_hard_deadline,
         planned_start_on: resolved.planned_start_on,
         clear_planned_start_on: clears.clear_planned_start,
+        require_all_assignees_done: None,
         estimated_minutes: resolved.estimated_minutes,
         clear_estimated_minutes: clears.clear_estimate,
         is_archived: fields.is_archived,
@@ -756,6 +762,7 @@ async fn resolve_bulk_item(
         hard_deadline: resolved.hard_deadline,
         planned_start_on: resolved.planned_start_on,
         estimated_minutes: resolved.estimated_minutes,
+        require_all_assignees_done: false,
         assignees: resolved.assignees.take().unwrap_or_default(),
         label_ids: resolved.set_label_ids.take().unwrap_or_default(),
         custom_field_values: vec![],
@@ -1007,7 +1014,7 @@ fn parse_sort(raw: &str) -> Result<&'static str> {
 
 /// サーバーは上限を超えた要求を黙って丸めるので、頼んだ件数と返る件数がずれる。
 /// 気付けないままページを送ると行が飛ぶので、手前で断る。
-fn check_limit(limit: u64, max: u64) -> Result<u64> {
+pub(crate) fn check_limit(limit: u64, max: u64) -> Result<u64> {
     if limit == 0 || limit > max {
         return Err(CliError::validation(format!(
             "--limit must be between 1 and {max} (got {limit})"
@@ -1016,7 +1023,7 @@ fn check_limit(limit: u64, max: u64) -> Result<u64> {
     Ok(limit)
 }
 
-fn offset_for(page: u64, limit: u64) -> Result<u64> {
+pub(crate) fn offset_for(page: u64, limit: u64) -> Result<u64> {
     if page == 0 {
         return Err(CliError::validation("--page starts at 1"));
     }
@@ -1095,7 +1102,7 @@ fn listing_summary(tasks: &TaskListResponse, page: u64) -> String {
     )
 }
 
-fn page_summary(shown: usize, total: u64, page: u64, has_next: bool) -> String {
+pub(crate) fn page_summary(shown: usize, total: u64, page: u64, has_next: bool) -> String {
     if has_next {
         format!(
             "{shown} 件表示 / 全 {total} 件（--page {} で続き）",
@@ -1649,6 +1656,34 @@ mod tests {
             "mentions": mentions,
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn task_show_prints_attachments() {
+        // `attachments` が無い応答（古いサーバー）も読める
+        let without = task_detail_with("説明", json!({}));
+        assert!(without.attachments.is_empty());
+
+        let file_id = Uuid::new_v4();
+        let mut value = serde_json::to_value(&without).unwrap();
+        value["attachments"] = json!([{
+            "id": Uuid::new_v4(),
+            "drive_file_id": file_id,
+            "name": "spec.pdf",
+            "mime_type": "application/pdf",
+            "size": 1024,
+            "url": format!("/v1/drive/files/{file_id}/content"),
+            "created_at": "2026-01-02T00:00:00Z",
+            "source": "manual",
+        }]);
+        let detail: payload::tasks::TaskDetailResponse = serde_json::from_value(value).unwrap();
+        let shown = task_for_show(detail, false);
+
+        for json_mode in [false, true] {
+            let out = crate::output::render(&shown, OutputOptions::new(json_mode));
+            assert!(out.contains("spec.pdf"), "{out}");
+            assert!(out.contains("/v1/drive/files/"), "{out}");
+        }
     }
 
     #[test]

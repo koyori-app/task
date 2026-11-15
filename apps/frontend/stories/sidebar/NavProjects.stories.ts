@@ -17,6 +17,7 @@ const projects: ProjectNavItem[] = [
     description: 'Shared',
     key: 'design',
     is_personal: false,
+    inherit_tenant_members: true,
     icon_emoji: null,
     icon_url: null,
     personal_owner_id: null,
@@ -28,6 +29,7 @@ const projects: ProjectNavItem[] = [
     description: 'Personal',
     key: 'my',
     is_personal: true,
+    inherit_tenant_members: true,
     icon_emoji: '✅',
     icon_url: null,
     personal_owner_id: '00000000-0000-4000-8000-000000000099',
@@ -80,15 +82,11 @@ export const ProjectList: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByText('Design Engineering')).toBeInTheDocument();
-    // 行クリックで展開 → タスク/ラベル/設定の子リンク
+    // 行クリックで展開 → タスク/設定の子リンク
     await userEvent.click(canvas.getByRole('button', { name: /Design Engineering/ }));
     await expect(canvas.getByRole('link', { name: 'タスク' })).toHaveAttribute(
       'href',
       '/acme/projects/design/tasks',
-    );
-    await expect(canvas.getByRole('link', { name: 'ラベル' })).toHaveAttribute(
-      'href',
-      '/acme/projects/design/labels',
     );
     await expect(canvas.getByRole('link', { name: '設定' })).toHaveAttribute(
       'href',

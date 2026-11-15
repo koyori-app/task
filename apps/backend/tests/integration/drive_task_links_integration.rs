@@ -73,6 +73,7 @@ async fn insert_task(app: &TestApp, project: &Project, created_by: Uuid, seq_id:
         soft_deadline: Set(None),
         hard_deadline: Set(None),
         planned_start_on: Set(None),
+        require_all_assignees_done: Set(false),
         estimated_minutes: Set(None),
         is_archived: Set(false),
         created_by: Set(created_by),
@@ -99,6 +100,8 @@ async fn restrict_to(app: &TestApp, project_id: Uuid, user_id: Uuid) {
     .insert(&app.state.db)
     .await
     .expect("insert project member");
+    // TASK-501 より前と同じく、載せた人だけが入れる形にする
+    crate::common::stop_inheriting(&app.state.db, project_id).await;
 }
 
 async fn login(app: &mut TestApp, user: &TestUser) {

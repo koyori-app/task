@@ -166,6 +166,8 @@ async fn tenant_members_gate_tenant_and_project_access() {
         )
         .await;
     assert_eq!(assigned.status(), StatusCode::CREATED);
+    // TASK-501 より前と同じく、載せた人だけが入れる形にする
+    crate::common::stop_inheriting(&app.state.db, tp.project_id).await;
 
     app.reset_session_client();
     app.login_session(&member.email, &member.password).await;
@@ -177,7 +179,7 @@ async fn tenant_members_gate_tenant_and_project_access() {
     assert_eq!(
         app.get_with_session(&project_path).await.status(),
         StatusCode::FORBIDDEN,
-        "メンバーを指定したプロジェクトは、指定された人以外は入れない"
+        "継承を切ったプロジェクトは、指定された人以外は入れない"
     );
 
     app.cleanup_user(assignee.id).await;
@@ -409,6 +411,8 @@ async fn removing_tenant_member_keeps_project_scoping() {
         )
         .await;
     assert_eq!(assigned.status(), StatusCode::CREATED);
+    // TASK-501 より前と同じく、載せた人だけが入れる形にする
+    crate::common::stop_inheriting(&app.state.db, tp.project_id).await;
 
     app.reset_session_client();
     app.login_session(&bob.email, &bob.password).await;
@@ -783,6 +787,8 @@ async fn deleting_user_keeps_project_scoping() {
         )
         .await;
     assert_eq!(assigned.status(), StatusCode::CREATED);
+    // TASK-501 より前と同じく、載せた人だけが入れる形にする
+    crate::common::stop_inheriting(&app.state.db, tp.project_id).await;
 
     app.reset_session_client();
     app.login_session(&bob.email, &bob.password).await;
@@ -880,6 +886,8 @@ async fn explicit_projects_hide_projects_the_caller_cannot_see() {
         )
         .await;
     assert_eq!(assigned.status(), StatusCode::CREATED);
+    // TASK-501 より前と同じく、載せた人だけが入れる形にする
+    crate::common::stop_inheriting(&app.state.db, tp.project_id).await;
 
     // オーナーには名指しで見える
     let by_owner: Value = app

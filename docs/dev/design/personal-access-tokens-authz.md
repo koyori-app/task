@@ -142,7 +142,8 @@ PAT 認証（`crates/service/src/auth.rs` の `authenticate_personal_token`）�
 1. Bearer トークンを HMAC-SHA256 ハッシュ化する（`PERSONAL_TOKEN_SECRET` は `Settings` 経由で起動時に検証済み）
 2. `personal_tokens` を `token_hash` で 1 SELECT する
 3. 失効・期限切れをチェックする
-4. `AuthMethod::PersonalToken { ... }` を構築する。以降の認可はメモリのみで行う
+4. 利用者の凍結など、認証での拒否をすべて通ったあと、前回の使用から 5 分以上空いていれば `last_used_at` を更新する。拒否された要求では更新しない。同時に来た要求が重ねて書くことがあり、書き込みの回数は厳密には保証しない
+5. `AuthMethod::PersonalToken { ... }` を構築する。以降の認可はメモリのみで行う
 
 ### エンドポイントでの認可
 
@@ -300,7 +301,7 @@ path にテナントを持たない Drive の本体取得（`GET /v1/drive/files
 
 | 認証 | 認可まわりの DB（目安） |
 |---|---|
-| PAT | 認証時 `personal_tokens` 1 SELECT。`require_scope` とバインドの突き合わせは追加クエリなし。所属判定はセッションと同じクエリを流す |
+| PAT | 認証時 `personal_tokens` 1 SELECT（前回の使用から 5 分以上空いたときだけ、あわせて 1 UPDATE）。`require_scope` とバインドの突き合わせは追加クエリなし。所属判定はセッションと同じクエリを流す |
 | セッション | Redis セッション + 所属判定（テナント 1 SELECT + `tenant_members` 1 SELECT。プロジェクト指定時は最大 3 SELECT 追加） |
 
 避けることは次のとおりである。
@@ -326,7 +327,6 @@ path にテナントを持たない Drive の本体取得（`GET /v1/drive/files
 
 ## 未実装と既知の制限
 
-- PAT の `last_used_at` の fire-and-forget 更新は未実装である（Device Token は更新する）
 - revoke-all をオーナー以外に広げるべきかは未決である
 
 ## 決定の記録
@@ -339,3 +339,4 @@ path にテナントを持たない Drive の本体取得（`GET /v1/drive/files
 | 2026-09-24 | Desktop には PAT と別種別の Device Token を足し、権限をセッション相当にする | テナント横断の通知一覧が要るが、「テナント非紐づけ PAT は採用しない」を覆したくない |
 | 2026-09-24 | Desktop の redirect に Custom URI Scheme を使わず loopback に限る | Linux で登録が要り、Windows でレジストリ書き込みが要り、他アプリに奪われ得る |
 | 2026-10-04 | `admin:tenant` と `admin:project` を廃止し、`api` / `read_api` に置き換える（TASK-199） | 動詞で切る `api` / `read_api` なら名前から効き目が読める |
+| 2026-11-11 | PAT の `last_used_at` を認証成功時に同期で更新し、前回の使用から 5 分以内の再使用では書かない（TASK-492） | 一覧の最終使用が常に未使用だった。CLI や BOT の連続した要求で毎回は書かないため。認証後の認可 403 は使用に含め、Device Token にそろえる |

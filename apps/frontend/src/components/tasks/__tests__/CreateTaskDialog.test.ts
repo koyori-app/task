@@ -55,7 +55,13 @@ vi.mock('@/components/markdown/MarkdownEditor.vue', async () => ({
 }));
 
 import CreateTaskDialog from '../CreateTaskDialog.vue';
-import { pickerOption, pickerTrigger } from '@/components/__tests__/picker';
+import {
+  accessibleText,
+  pickerOption,
+  pickerOptions,
+  pickerTrigger,
+} from '@/components/__tests__/picker';
+import { PRIORITY_CONFIG } from '@/lib/task-display';
 
 const statuses = [
   {
@@ -114,6 +120,7 @@ type MountOptions = {
   membersLoading?: boolean;
   membersError?: boolean;
   initialTitle?: string;
+  initialAssigneeIds?: string[];
 };
 
 function mountDialog(queryClient: QueryClient, options: MountOptions = {}) {
@@ -131,6 +138,7 @@ function mountDialog(queryClient: QueryClient, options: MountOptions = {}) {
       membersLoading: options.membersLoading,
       membersError: options.membersError,
       initialTitle: options.initialTitle,
+      initialAssigneeIds: options.initialAssigneeIds,
     },
     global: {
       plugins: [[VueQueryPlugin, { queryClient }]],
@@ -667,6 +675,148 @@ describe('CreateTaskDialog estimate', () => {
   });
 });
 
+describe('CreateTaskDialog progress', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    isHydrated.value = true;
+    isPending.value = false;
+    mutateAsync.mockReset();
+    mutateAsync.mockResolvedValue(createdTask);
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined as never);
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  const progressInput = () => {
+    const input = document.body.querySelector('input[name="progress_pct"]');
+    if (!input) throw new Error('progress input not found');
+    return input as HTMLInputElement;
+  };
+  const submitForm = async () => {
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+  };
+  const PROGRESS_ERROR = '進捗は 0 以上 100 以下の整数（%）で入力してください';
+
+  it('進捗（%）を progress_pct として送る', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('進捗付き');
+    await new DOMWrapper(progressInput()).setValue('30');
+
+    await submitForm();
+
+    expect(mutateAsync.mock.calls[0][0].body.progress_pct).toBe(30);
+    expect(progressInput().getAttribute('max')).toBe('100');
+    wrapper.unmount();
+  });
+
+  it('進捗が空なら progress_pct を送らない', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('進捗なし');
+
+    await submitForm();
+
+    expect(mutateAsync.mock.calls[0][0].body).not.toHaveProperty('progress_pct');
+    wrapper.unmount();
+  });
+
+  it.each([
+    ['0', 0],
+    ['100', 100],
+    ['101', null],
+    ['-1', null],
+    ['1.5', null],
+  ])('進捗 %s は %s として送る（null は送らない）', async (value, sent) => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('境界');
+    await new DOMWrapper(progressInput()).setValue(value);
+
+    await submitForm();
+
+    if (sent !== null) {
+      expect(mutateAsync.mock.calls[0][0].body.progress_pct).toBe(sent);
+    } else {
+      expect(mutateAsync).not.toHaveBeenCalled();
+      expect(document.body.textContent).toContain(PROGRESS_ERROR);
+    }
+    wrapper.unmount();
+  });
+
+  it('数値にならない進捗は送らずに止める', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('進捗の打ち間違い');
+    Object.defineProperty(progressInput(), 'validity', {
+      value: { badInput: true, valid: false },
+    });
+
+    await submitForm();
+
+    expect(mutateAsync).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain(PROGRESS_ERROR);
+    wrapper.unmount();
+  });
+
+  it('進捗だけ入れても破棄を確認し、閉じて開き直すと空に戻る', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(progressInput()).setValue('30');
+
+    pressEscape();
+    await nextTick();
+    expect(!!findButton('破棄する')?.closest('dialog[open]')).toBe(true);
+    clickButton('破棄する');
+    await nextTick();
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+
+    await wrapper.setProps({ open: false });
+    await wrapper.setProps({ open: true });
+    await nextTick();
+    expect(progressInput().value).toBe('');
+    wrapper.unmount();
+  });
+});
+
+describe('CreateTaskDialog layout', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    isHydrated.value = true;
+    isPending.value = false;
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('パンくずにプロジェクトキーを出し、作成は取り消すの後ろ（右）に置く', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+
+    const header = document.body.querySelector('form header');
+    expect(header?.textContent).toContain('PROJ');
+    expect(header?.textContent).toContain('新規タスク');
+
+    const labels = [...document.body.querySelectorAll('form button')]
+      .map((b) => b.textContent?.trim())
+      .filter((t) => t === '取り消す' || t === '作成');
+    expect(labels).toEqual(['取り消す', '作成']);
+    wrapper.unmount();
+  });
+});
+
 describe('CreateTaskDialog dates', () => {
   let queryClient: QueryClient;
 
@@ -689,28 +839,39 @@ describe('CreateTaskDialog dates', () => {
     document.body.innerHTML = '';
   });
 
-  /** 日付欄のカレンダーを開いて日を選ぶ。カレンダーは開いている間だけ DOM にある */
-  async function pickDate(fieldId: string, date: string) {
-    const trigger = document.getElementById(fieldId);
-    if (!trigger) throw new Error(`${fieldId} not found`);
-    trigger.click();
+  const DATE_PANEL = '[role="dialog"][aria-label="日付"]';
+  const datesChip = () => document.getElementById('task-dates')!;
+
+  /** 日付チップを開き、行を選んで日を押す。パネルは開いている間だけ DOM にある */
+  async function pickDate(field: 'plannedStartOn' | 'softDeadline' | 'hardDeadline', date: string) {
+    if (!document.body.querySelector(DATE_PANEL)) {
+      datesChip().click();
+      await nextTick();
+    }
+    const row = document.body.querySelector<HTMLElement>(`[data-date-field="${field}"]`);
+    if (!row) throw new Error(`${field} row not found`);
+    row.click();
     await nextTick();
     const day = document.body.querySelector<HTMLElement>(`[data-date="${date}"]`);
-    if (!day) throw new Error(`${date} not found in the calendar of ${fieldId}`);
+    if (!day) throw new Error(`${date} not found in the calendar of ${field}`);
     day.click();
     await nextTick();
+  }
+
+  async function submitForm() {
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
   }
 
   it('開始予定日は日付のまま、期限と最終期限は UTC の日時にして送る', async () => {
     const wrapper = mountDialog(queryClient);
     await nextTick();
     await new DOMWrapper(getTitleInput()).setValue('日付付き');
-    await pickDate('task-planned-start', '2026-10-19');
-    await pickDate('task-soft-deadline', '2026-10-23');
-    await pickDate('task-hard-deadline', '2026-10-31');
+    await pickDate('plannedStartOn', '2026-10-19');
+    await pickDate('softDeadline', '2026-10-23');
+    await pickDate('hardDeadline', '2026-10-31');
 
-    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    await flushPromises();
+    await submitForm();
 
     expect(mutateAsync.mock.calls[0][0].body).toMatchObject({
       planned_start_on: '2026-10-19',
@@ -724,10 +885,9 @@ describe('CreateTaskDialog dates', () => {
     const wrapper = mountDialog(queryClient);
     await nextTick();
     await new DOMWrapper(getTitleInput()).setValue('期限だけ');
-    await pickDate('task-soft-deadline', '2026-10-23');
+    await pickDate('softDeadline', '2026-10-23');
 
-    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    await flushPromises();
+    await submitForm();
 
     const { body } = mutateAsync.mock.calls[0][0];
     expect(body.soft_deadline).toBe('2026-10-23T00:00:00.000Z');
@@ -736,11 +896,91 @@ describe('CreateTaskDialog dates', () => {
     wrapper.unmount();
   });
 
-  // WebKit ではフォーカスが dialog へ移ると DatePicker がカレンダーを閉じ、月送りとクリアが効かない
+  it('行の × で、その日付だけ消える', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('期限を消す');
+    await pickDate('plannedStartOn', '2026-10-19');
+    await pickDate('softDeadline', '2026-10-23');
+    await pickDate('hardDeadline', '2026-10-31');
+
+    document.body.querySelector<HTMLElement>('[aria-label="期限を消す"]')!.click();
+    await nextTick();
+    // 消した行は値が無くなり、その行の × も無くなる
+    expect(document.body.querySelector('[aria-label="期限を消す"]')).toBeNull();
+    await submitForm();
+
+    const { body } = mutateAsync.mock.calls[0][0];
+    expect(body).not.toHaveProperty('soft_deadline');
+    expect(body.planned_start_on).toBe('2026-10-19');
+    expect(body.hard_deadline).toBe('2026-10-31T00:00:00.000Z');
+    wrapper.unmount();
+  });
+
+  it('行の × を押したあと、フォーカスは同じ行の日付ボタンに残り、Esc はパネルだけ閉じる', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await pickDate('softDeadline', '2026-10-23');
+
+    const clear = document.body.querySelector<HTMLElement>('[aria-label="期限を消す"]')!;
+    clear.focus();
+    clear.click();
+    await nextTick();
+
+    const row = document.body.querySelector<HTMLElement>('[data-date-field="softDeadline"]');
+    expect(document.activeElement).toBe(row);
+    // 実際のフォーカス先から Esc を送る（パネルへ直接送ると、フォーカスが body に落ちる不具合を捉えない）
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    document.activeElement!.dispatchEvent(event);
+    await nextTick();
+
+    expect(document.body.querySelector(DATE_PANEL)).toBeNull();
+    expect(event.defaultPrevented).toBe(true);
+    expect(wrapper.emitted('update:open')).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('チップは設定した日付を矢印でつないで出し、未設定なら「日付」と出す', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    expect(datesChip().textContent?.trim()).toBe('日付');
+
+    await pickDate('plannedStartOn', '2026-10-19');
+    await pickDate('softDeadline', '2026-10-23');
+    expect(datesChip().textContent).toContain('10/19');
+    expect(datesChip().textContent).toContain('10/23');
+    expect(datesChip().textContent).not.toContain('10/31');
+
+    await pickDate('hardDeadline', '2026-10-31');
+    expect(datesChip().textContent).toContain('10/31');
+    wrapper.unmount();
+  });
+
+  it('日付のパネルで Esc を押すと、パネルだけ閉じてダイアログは閉じない', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    datesChip().click();
+    await nextTick();
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true,
+    });
+    document.body.querySelector(DATE_PANEL)!.dispatchEvent(event);
+    await nextTick();
+
+    expect(document.body.querySelector(DATE_PANEL)).toBeNull();
+    expect(event.defaultPrevented).toBe(true);
+    expect(wrapper.emitted('update:open')).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  // WebKit ではフォーカスが dialog へ移ると lightDismiss がパネルを閉じ、月送りとクリアが効かない
   it('カレンダーのボタンを押すと、そのボタンにフォーカスする', async () => {
     const wrapper = mountDialog(queryClient);
     await nextTick();
-    document.getElementById('task-hard-deadline')?.click();
+    datesChip().click();
     await nextTick();
 
     const nextMonth = document.body.querySelector('[aria-label="次の月"]');
@@ -751,17 +991,43 @@ describe('CreateTaskDialog dates', () => {
     wrapper.unmount();
   });
 
+  it('ボタン以外（見出し・余白・警告文）を押しても、フォーカスは動かさない', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    datesChip().click();
+    await nextTick();
+
+    const panel = document.body.querySelector(DATE_PANEL)!;
+    const focused = document.activeElement;
+    for (const target of [panel, panel.querySelector('.border-t')!]) {
+      const event = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+      target.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+    }
+    expect(document.activeElement).toBe(focused);
+    // 日のセル（td[tabindex]）はフォーカスを受けるので、既定の動作に任せる
+    const cell = document.body.querySelector<HTMLElement>('td[tabindex]');
+    if (!cell) throw new Error('day cell not found');
+    const event = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    cell.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+    wrapper.unmount();
+  });
+
   /*
    * type="date" は見た目と value が食い違う。WebKit は空欄に今日の日付を出し、途中までの
    * 入力も見た目には残るのに value は空で、何も送られないまま作成が通っていた
    */
-  it('未入力の日付欄は「未設定」と出し、見た目と送信内容が食い違う type="date" を置かない', async () => {
+  it('未設定の行は「未設定」と出し、見た目と送信内容が食い違う type="date" を置かない', async () => {
     const wrapper = mountDialog(queryClient);
+    await nextTick();
+    datesChip().click();
     await nextTick();
 
     expect(document.body.querySelector('input[type="date"]')).toBeNull();
-    for (const id of ['task-planned-start', 'task-soft-deadline', 'task-hard-deadline']) {
-      expect(document.getElementById(id)?.textContent, id).toContain('未設定');
+    for (const field of ['plannedStartOn', 'softDeadline', 'hardDeadline']) {
+      const row = document.body.querySelector(`[data-date-field="${field}"]`);
+      expect(row?.textContent, field).toContain('未設定');
     }
     wrapper.unmount();
   });
@@ -770,14 +1036,14 @@ describe('CreateTaskDialog dates', () => {
     const wrapper = mountDialog(queryClient);
     await nextTick();
     await new DOMWrapper(getTitleInput()).setValue('逆転');
-    await pickDate('task-planned-start', '2026-10-24');
-    await pickDate('task-soft-deadline', '2026-10-23');
+    await pickDate('plannedStartOn', '2026-10-24');
+    await pickDate('softDeadline', '2026-10-23');
+    expect(datesChip().getAttribute('aria-invalid')).toBe('true');
 
-    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    await flushPromises();
+    await submitForm();
 
     expect(mutateAsync).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain('期限より後になっています');
+    expect(document.body.textContent).toContain('開始予定日は期限以前の日付にしてください');
     wrapper.unmount();
   });
 });
@@ -809,7 +1075,7 @@ describe('CreateTaskDialog label selection', () => {
     const wrapper = mountDialog(queryClient, { labels });
     await nextTick();
     await new DOMWrapper(getTitleInput()).setValue('ラベル付きで作成');
-    expect(document.getElementById('task-labels-value')?.textContent).toContain('ラベルなし');
+    expect(document.getElementById('task-labels-value')?.textContent?.trim()).toBe('ラベル');
 
     labelButton('feature').click();
     await nextTick();
@@ -997,6 +1263,31 @@ describe('CreateTaskDialog labels query states', () => {
     wrapper.unmount();
   });
 
+  it('優先度メニューの各行に PRIORITY_CONFIG の色の旗が出て、行の名前に旗は混ざらない', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+
+    const trigger = pickerTrigger(document.body, '優先度');
+    expect(pickerOptions(trigger)).toHaveLength(Object.keys(PRIORITY_CONFIG).length);
+    for (const config of Object.values(PRIORITY_CONFIG)) {
+      const option = pickerOption(trigger, config.label);
+      // 色を持つ svg が旗。選択中のチェック印（色を持たない）とは区別する
+      const flags = [...option.querySelectorAll<SVGElement>('svg')].filter(
+        (svg) => svg.style.color,
+      );
+      expect(flags, config.label).toHaveLength(1);
+      // 旗は飾りなので読み上げから外れる。行の名前は項目名だけ
+      expect(flags[0].getAttribute('aria-hidden'), config.label).toBe('true');
+      const probe = document.createElement('span');
+      probe.style.color = config.color;
+      expect(flags[0].style.color, config.label).toBe(probe.style.color);
+      // 色の点（color）と旗を二重に出さない
+      expect(option.querySelector('[style*="background-color"]'), config.label).toBeNull();
+      expect(accessibleText(option), config.label).toBe(config.label);
+    }
+    wrapper.unmount();
+  });
+
   it('正常な 0 件ではラベル欄を表示しない', async () => {
     const wrapper = mountDialog(queryClient, { labels: [] });
     await nextTick();
@@ -1039,11 +1330,9 @@ describe('CreateTaskDialog assignee selection', () => {
     document.body.innerHTML = '';
   });
 
-  /** 担当者の欄（Picker のトリガー。Field の id が付く） */
+  /** 担当者のチップ（Picker のトリガー） */
   function assigneeTrigger() {
-    const trigger = document.getElementById('task-assignees');
-    if (!trigger) throw new Error('assignee trigger not found');
-    return trigger;
+    return pickerTrigger(document.body, '担当者');
   }
 
   /** 担当者の候補（Picker の option）を名で引く。閉じていても DOM にある */
@@ -1060,7 +1349,7 @@ describe('CreateTaskDialog assignee selection', () => {
     await nextTick();
     await new DOMWrapper(getTitleInput()).setValue('担当者付きで作成');
 
-    expect(assigneeTrigger().textContent).toContain('未割り当て');
+    expect(assigneeTrigger().textContent).toContain('担当者');
     memberButton('yupix').click();
     await nextTick();
     expect(memberButton('yupix').getAttribute('aria-selected')).toBe('true');
@@ -1089,8 +1378,9 @@ describe('CreateTaskDialog assignee selection', () => {
 
     memberButton('部署「開発」の全員').click();
     await nextTick();
-    expect(assigneeTrigger().textContent).toContain('yupix');
-    expect(assigneeTrigger().textContent).toContain('sousuke');
+    // チップには先頭の 1 人と残りの人数だけ出す
+    expect(assigneeTrigger().textContent).toContain('yupix +1');
+    expect(memberButton('sousuke').getAttribute('aria-selected')).toBe('true');
 
     getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await flushPromises();
@@ -1428,6 +1718,158 @@ describe('CreateTaskDialog similar tasks', () => {
     await flushPromises();
     expect(mutateAsync).toHaveBeenCalledTimes(1);
     expect(wrapper.emitted('created')?.[0]).toEqual([createdTask]);
+    wrapper.unmount();
+  });
+});
+
+describe('CreateTaskDialog initialAssigneeIds', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    isHydrated.value = true;
+    isPending.value = false;
+    mutateAsync.mockReset();
+    mutateAsync.mockResolvedValue(createdTask);
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined as never);
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  const confirmOpen = () => !!findButton('破棄する')?.closest('dialog[open]');
+  const assigneeTrigger = () => pickerTrigger(document.body, '担当者');
+  const submit = async () => {
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+  };
+
+  it('初期担当者を assignees として送る', async () => {
+    const wrapper = mountDialog(queryClient, { members, initialAssigneeIds: ['user-1'] });
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('自分に割り当て');
+    expect(assigneeTrigger().textContent).toContain('yupix');
+
+    await submit();
+
+    expect(mutateAsync.mock.calls[0][0].body.assignees).toEqual([
+      { user_id: 'user-1', role: 'primary' },
+    ]);
+    wrapper.unmount();
+  });
+
+  it('初期担当者のままなら確認せずに閉じる', async () => {
+    const wrapper = mountDialog(queryClient, { members, initialAssigneeIds: ['user-1'] });
+    await nextTick();
+
+    pressEscape();
+    await nextTick();
+
+    expect(confirmOpen()).toBe(false);
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+    wrapper.unmount();
+  });
+
+  it('初期担当者を外すと確認し、送信では assignees を送らない', async () => {
+    const wrapper = mountDialog(queryClient, { members, initialAssigneeIds: ['user-1'] });
+    await nextTick();
+    pickerOption(assigneeTrigger(), 'yupix').click();
+    await nextTick();
+
+    pressEscape();
+    await nextTick();
+    expect(confirmOpen()).toBe(true);
+    clickButton('戻る');
+    await nextTick();
+
+    await new DOMWrapper(getTitleInput()).setValue('未割当で作成');
+    await submit();
+    expect(mutateAsync.mock.calls[0][0].body.assignees).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('候補に無い初期担当者は入れず、確認も出さない', async () => {
+    const wrapper = mountDialog(queryClient, { members, initialAssigneeIds: ['stranger'] });
+    await nextTick();
+
+    pressEscape();
+    await nextTick();
+    expect(confirmOpen()).toBe(false);
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+
+    await new DOMWrapper(getTitleInput()).setValue('候補外');
+    await submit();
+    expect(mutateAsync.mock.calls[0][0].body.assignees).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('閉じて開き直すと初期担当者が入り直す', async () => {
+    const wrapper = mountDialog(queryClient, { members, initialAssigneeIds: ['user-1'] });
+    await nextTick();
+    pickerOption(assigneeTrigger(), 'yupix').click();
+    await nextTick();
+    expect(assigneeTrigger().textContent).not.toContain('yupix');
+
+    await wrapper.setProps({ open: false });
+    await wrapper.setProps({ open: true });
+    await nextTick();
+
+    expect(assigneeTrigger().textContent).toContain('yupix');
+    wrapper.unmount();
+  });
+
+  it('候補が未取得の間は初期担当者を入れず、送信でも assignees を送らない', async () => {
+    const wrapper = mountDialog(queryClient, { initialAssigneeIds: ['user-1'] });
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('候補の取得前');
+
+    await submit();
+
+    expect(mutateAsync.mock.calls[0][0].body.assignees).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('候補が後から届くと初期担当者が入り、確認せずに閉じる', async () => {
+    const wrapper = mountDialog(queryClient, {
+      membersLoading: true,
+      initialAssigneeIds: ['user-1'],
+    });
+    await nextTick();
+
+    await wrapper.setProps({ members, membersLoading: false });
+    await nextTick();
+    expect(assigneeTrigger().textContent).toContain('yupix');
+
+    pressEscape();
+    await nextTick();
+    expect(confirmOpen()).toBe(false);
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+    wrapper.unmount();
+  });
+
+  it('候補が届いたあとに外した担当者は、候補が再取得されても入れ直さない', async () => {
+    // 候補が届く前は担当者の欄が出ず、利用者が触れない。触れるのは届いたあとなので、
+    // 触ったあとに候補の配列が差し替わる（再取得）場合で上書きされないことを確かめる
+    const wrapper = mountDialog(queryClient, {
+      membersLoading: true,
+      initialAssigneeIds: ['user-1'],
+    });
+    await wrapper.setProps({ members, membersLoading: false });
+    await nextTick();
+    pickerOption(assigneeTrigger(), 'yupix').click();
+    await nextTick();
+    expect(assigneeTrigger().textContent).not.toContain('yupix');
+
+    await wrapper.setProps({ members: members.map((user) => ({ ...user })) });
+    await nextTick();
+
+    expect(assigneeTrigger().textContent).not.toContain('yupix');
+    await new DOMWrapper(getTitleInput()).setValue('外したまま');
+    await submit();
+    expect(mutateAsync.mock.calls[0][0].body.assignees).toBeUndefined();
     wrapper.unmount();
   });
 });

@@ -1,5 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { enableAutoUnmount, mount } from '@vue/test-utils';
+import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
+import { config, enableAutoUnmount, mount } from '@vue/test-utils';
+import { createPinia } from 'pinia';
 
 import CommentBody from '../CommentBody.vue';
 import type { MentionTable } from '@/lib/comment-mention';
@@ -7,6 +9,14 @@ import type { MentionTable } from '@/lib/comment-mention';
 enableAutoUnmount(afterEach);
 
 beforeAll(async () => {
+  // 札のある本文は HoverCard を置く（プロフィールの取得に QueryClient、閲覧者のゲスト判定にテナントのストアを使う）
+  config.global.plugins = [createPinia(), [VueQueryPlugin, { queryClient: new QueryClient() }]];
+  // happy-dom に ResizeObserver が無い（HoverCard が位置の追従に使う）
+  globalThis.ResizeObserver ??= class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
   await import('@/lib/markup-renderer');
 }, 30_000);
 
@@ -55,13 +65,16 @@ describe('CommentBody', () => {
     });
     await waitForKfm(wrapper);
 
-    const chips = wrapper.findAll('.kfm-mention');
+    const chips = wrapper.findAll('.koyori-mention');
     expect(chips.map((c) => c.text())).toEqual(['@田中', '@bob', '@project-out', '@退会太郎']);
-    expect(chips[0].classes()).toContain('kfm-mention-self');
-    expect(chips[1].classes()).not.toContain('kfm-mention-self');
-    expect(chips[2].classes()).toContain('kfm-mention-outside');
-    expect(chips[3].classes()).toContain('kfm-mention-gone');
-    expect(wrapper.html()).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/);
+    expect(chips[0].classes()).toContain('koyori-mention-self');
+    expect(chips[1].classes()).not.toContain('koyori-mention-self');
+    expect(chips[2].classes()).toContain('koyori-mention-outside');
+    expect(chips[3].classes()).toContain('koyori-mention-gone');
+    // id は札の字に出ず、カードを開く札の data-user-id にだけ出る
+    expect(wrapper.html().replace(/data-user-id="[0-9a-f-]{36}"/g, '')).not.toMatch(
+      /[0-9a-f]{8}-[0-9a-f]{4}-/,
+    );
   }, 30_000);
 
   it('生 HTML と危険な URL を同じ sanitizer で落とし、素の @username は札にしない', async () => {
@@ -74,7 +87,7 @@ describe('CommentBody', () => {
     });
     await waitForKfm(wrapper);
 
-    expect(wrapper.find('.kfm-mention').exists()).toBe(false);
+    expect(wrapper.find('.koyori-mention').exists()).toBe(false);
     expect(wrapper.text()).toContain('@alice へ');
     // 生 HTML は要素にならず、字として見える
     expect(wrapper.find('script').exists()).toBe(false);
@@ -108,7 +121,7 @@ describe('CommentBody', () => {
     expect(wrapper.get('[data-comment-body]').text().startsWith('# 長い')).toBe(true);
   });
 
-  it('札は頭にアバターを置く（画像があれば img、無ければ頭文字の丸。字には混ぜぬ）', async () => {
+  it('札にアバターを置かず、字は label の span に入る', async () => {
     const wrapper = mount(CommentBody, {
       props: {
         body: `<@${ME}> <@${OTHER}>`,
@@ -121,56 +134,19 @@ describe('CommentBody', () => {
       },
     });
     await waitForKfm(wrapper);
-    const chips = wrapper.findAll('.kfm-mention');
+    const chips = wrapper.findAll('.koyori-mention');
     expect(chips[0].classes()).toEqual(
-      expect.arrayContaining(['kfm-mention', 'kfm-mention-member', 'kfm-mention-self']),
+      expect.arrayContaining(['koyori-mention', 'koyori-mention-member', 'koyori-mention-self']),
     );
-    const own = chips[0].get('.kfm-mention-avatar');
-    expect(own.attributes('aria-hidden')).toBe('true');
-    expect(own.get('img').attributes()).toMatchObject({
-      src: 'https://cdn.example.com/me.png',
-      alt: '',
-    });
-    const bob = chips[1].get('.kfm-mention-avatar');
-    expect(bob.attributes('data-initials')).toBe('BO');
-    expect(bob.find('img').exists()).toBe(false);
-    // 札の字は名だけ（頭文字は CSS で描くので text に出ない）
+    for (const chip of chips) {
+      expect(chip.find('img').exists()).toBe(false);
+      expect(chip.find('[data-initials]').exists()).toBe(false);
+      expect(chip.element.children).toHaveLength(1);
+      expect(chip.element.children[0].classList.contains('koyori-mention-label')).toBe(true);
+    }
     expect(chips.map((c) => c.text())).toEqual(['@田中', '@bob']);
   }, 30_000);
 
-  it('外れた者の札は灰色で頭にアバター、名の引けぬ者・退会した者の札はアバター無し', async () => {
-    const wrapper = mount(CommentBody, {
-      props: {
-        body: `<@${OTHER}> <@${OUT}> <@${GONE}>`,
-        commentId: 'comment-7',
-        mentions: {
-          [OTHER]: { status: 'outside', name: 'bob', avatar_url: 'https://cdn.example.com/b.png' },
-          [OUT]: { status: 'outside', name: null },
-          [GONE]: { status: 'gone', name: null },
-        },
-      },
-    });
-    await waitForKfm(wrapper);
-    const chips = wrapper.findAll('.kfm-mention');
-    expect(chips[0].classes()).toContain('kfm-mention-outside');
-    expect(chips[0].find('.kfm-mention-avatar img').exists()).toBe(true);
-    expect(chips[1].find('.kfm-mention-avatar').exists()).toBe(false);
-    expect(chips[2].find('.kfm-mention-avatar').exists()).toBe(false);
-    expect(chips[2].classes()).toContain('kfm-mention-gone');
-  }, 30_000);
-
-  it('危ない URL のアバターは img にせぬ', async () => {
-    const wrapper = mount(CommentBody, {
-      props: {
-        body: `<@${OTHER}>`,
-        commentId: 'comment-8',
-        mentions: { [OTHER]: { status: 'member', name: 'bob', avatar_url: 'javascript:alert(1)' } },
-      },
-    });
-    await waitForKfm(wrapper);
-    expect(wrapper.find('img').exists()).toBe(false);
-    expect(wrapper.get('.kfm-mention-avatar').attributes('data-initials')).toBe('BO');
-  }, 30_000);
   it('mentionTenant を渡すと、いま入れる者の札だけをプロフィールへの link にする', async () => {
     const wrapper = mount(CommentBody, {
       props: {
@@ -186,14 +162,14 @@ describe('CommentBody', () => {
       },
     });
     await waitForKfm(wrapper);
-    const links = wrapper.findAll('a.kfm-mention');
+    const links = wrapper.findAll('a.koyori-mention');
     expect(links.map((a) => a.attributes('href'))).toEqual([
       `/acme/users/${ME}`,
       `/acme/users/${OTHER}`,
     ]);
-    expect(links[0].classes()).toContain('kfm-mention-self');
+    expect(links[0].classes()).toContain('koyori-mention-self');
     // 外れた者の札は link にせぬ
-    expect(wrapper.get('span.kfm-mention-outside').text()).toBe('@project-out');
+    expect(wrapper.get('span.koyori-mention-outside').text()).toBe('@project-out');
   }, 30_000);
 
   it('mentionTenant を渡さぬコメントの札は link にならない', async () => {
@@ -202,6 +178,25 @@ describe('CommentBody', () => {
     });
     await waitForKfm(wrapper);
     expect(wrapper.find('a').exists()).toBe(false);
-    expect(wrapper.get('span.kfm-mention').text()).toBe('@bob');
+    expect(wrapper.get('span.koyori-mention').text()).toBe('@bob');
+  }, 30_000);
+
+  it('札のある本文には HoverCard を 1 つ置き、札の無い本文には置かぬ', async () => {
+    const withChips = mount(CommentBody, {
+      props: { body: `<@${ME}> <@${GONE}>`, commentId: 'comment-7', mentions },
+      attachTo: document.body,
+    });
+    await waitForKfm(withChips);
+    await vi.waitFor(() => expect(withChips.findAll('[role="dialog"]')).toHaveLength(1));
+    // 容れ物の後ろ（兄弟）に置く
+    expect(withChips.get('[data-comment-body]').element.nextElementSibling).not.toBeNull();
+
+    const plain = mount(CommentBody, {
+      props: { body: '札の無い本文', commentId: 'comment-8', mentions },
+      attachTo: document.body,
+    });
+    await waitForKfm(plain);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(plain.find('[role="dialog"]').exists()).toBe(false);
   }, 30_000);
 });

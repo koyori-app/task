@@ -2,7 +2,7 @@
 title: アカウント設定
 description: ログイン中の利用者が自分のプロフィール・アクセストークン・認証方法を管理する画面と API、他の利用者のプロフィール
 status: implemented
-updated: 2026-11-04
+updated: 2026-11-12
 sidebar:
   order: 3
 ---
@@ -104,7 +104,9 @@ Device Token の規則の定義元は [Bearer 認証・認可の「Desktop 認�
 
 テナントのメンバーは、同じテナントに関わる人のプロフィールを見られる（TASK-257）。ユーザー名・自己紹介・アバターは本人がプロフィール設定で編集し、部署・役職・チームはテナント Admin / オーナーがメンバー設定（`PUT /v1/tenants/{id}/members/{user_id}`）で編集する（TASK-334）。
 
-返すのは `id` / `username` / `bio` / `avatar_url` / `department` / `position` / `team` の 7 項目だけである。部署・役職・チームはこのテナントでの値で、未設定・ゲストでは null になる。メールアドレス・管理者フラグ・凍結フラグ・2FA の有効状態・`has_password` は返さない。自分自身を指定しても同じ形で返す。
+返すのは `id` / `username` / `account_kind` / `bio` / `avatar_url` / `department` / `position` / `team` / `membership` の 9 項目だけである。部署・役職・チームはこのテナントでの値で、未設定・ゲストでは null になる。`membership` は対象の利用者とこのテナントとの関わり方（`Owner` / `Member` / `Guest`）で、TASK-515 で足した。閲覧者はテナントに入れる人に限られるので、誰がゲストかを見られるのはテナントのオーナー・メンバーだけである。メールアドレス・管理者フラグ・凍結フラグ・2FA の有効状態・`has_password` は返さない。自分自身を指定しても同じ形で返す。
+
+このプロフィールは、プロフィールのページのほか、コメント・説明文のメンションのチップのカード（[プロフィールのカード](/dev/features/tasks/collaboration#プロフィールのカード)）にも出る。カードは名前とアバターを先に出し、所属・自己紹介・`membership` から作る「ゲスト」の表示を、このプロフィールが返ってから足す。
 
 ## データ
 
@@ -182,7 +184,7 @@ Device Token の規則の定義元は [Bearer 認証・認可の「Desktop 認�
 |---|---|
 | URL | `/settings/profile` |
 | ページファイル | `apps/frontend/src/pages/settings/profile/+Page.vue` |
-| 入口 | サイドバー下部の利用者メニューの「Account」 |
+| 入口 | ヘッダー右上の歯車、利用者メニューの「Account」 |
 
 テナントに紐づかない個人の設定なので、テナントスコープ（`/{tenant}/...`）の外に置く。左のサイドバーには、ヘッダーのテナント切り替えで選んでいるテナントのナビ（ホーム・My Tasks・カレンダー・プロジェクト一覧）を出す。左にアカウント設定のナビ、右にプロフィールのフォームを並べる。
 
@@ -190,10 +192,10 @@ Device Token の規則の定義元は [Bearer 認証・認可の「Desktop 認�
 
 - リンクとして機能するのは「プロフィール」「環境設定」「セキュリティ」「アクセストークン」の 4 項目である
 - 「通知」「セッション」は `aria-disabled` の押せない項目として並べる
-- 環境設定で「実験的機能を表示する」を有効にしたときだけ、区切り線の下に「実験的機能」（`/settings/experiments`）が加わる
+- 環境設定で「実験的機能を表示する」を有効にしたときだけ、区切り線の下に「実験的機能」（`/settings/experiments`）が加わる。この設定はナビの項目を出すだけで、機能ごとの有効・無効はそのページのフラグで切り替える（現在のフラグは「ガントチャート」（`koyoriArcIntegration`）だけ）
 - 項目は `apps/frontend/src/components/settings/AccountSettingsNav.vue` の `items` に定義する。`href` を足すとその項目が有効になる
 
-環境設定（`/settings/preferences`）と実験的機能の値はブラウザの localStorage に保存する。アカウントには保存しないので、ほかの端末や別のブラウザには引き継がれない。
+環境設定（`/settings/preferences`）と実験的機能の値はブラウザの localStorage に保存する。アカウントには保存しないので、ほかの端末や別のブラウザには引き継がれない。環境設定の項目は「実験的機能を表示する」「絵文字の字」「タスク一覧でサブタスクを最初から展開する」の 3 つで、定義は `apps/frontend/src/lib/preferences.ts` の `PREFERENCE_TABLE` に置く。
 
 画面上部のパンくずは実データから組む（[パンくず](/dev/frontend/breadcrumbs)）。設定系の画面は `プロフィール` のように一段で出し、`Account settings` に当たる中間の段は置かない。
 
@@ -234,7 +236,7 @@ Device Token の規則の定義元は [Bearer 認証・認可の「Desktop 認�
 
 ### セキュリティ
 
-パスワードと OAuth 連携を「サインインできる方法」としてまとめて管理する画面である。OAuth の認可フローと解除規則の定義元は [OAuth ログイン](/dev/features/auth/oauth)である。
+パスワードと OAuth 連携を「サインインできる方法」としてまとめて管理し、2 段階認証（TOTP）と Koyori Desktop の端末も扱う画面である。OAuth の認可フローと解除規則の定義元は [OAuth ログイン](/dev/features/auth/oauth)、2 段階認証の規則の定義元は [2 段階認証](/dev/features/auth/2fa)である。
 
 | 項目 | 値 |
 |---|---|
@@ -242,6 +244,7 @@ Device Token の規則の定義元は [Bearer 認証・認可の「Desktop 認�
 | ページファイル | `apps/frontend/src/pages/settings/security/+Page.vue` |
 | 本体 | `apps/frontend/src/components/settings/AuthMethodsSection.vue` |
 | パスワード行 | `apps/frontend/src/components/settings/PasswordMethodRow.vue` |
+| 2 段階認証 | `apps/frontend/src/components/settings/TwoFactorSection.vue` |
 
 1 枚のカードに「パスワード」「連携済み」「追加できる連携」を上から並べる。
 
@@ -269,7 +272,23 @@ OAuth 連携は次のとおりである。
 
 backend は「その連携がログイン用の最後の 1 件 かつ パスワード無し かつ パスキー無し」のとき解除を `403 oauth-last-auth-method` で拒む。PR 承認用の連携（`sign_in: false`）は数えない。画面はこの判定を先取りして注意書きを出すだけで、可否はサーバーの応答に従う。先取りの数え方（`countAuthMethods`）は backend と揃えてパスキーも数えるので、この画面は件数を見る目的で `GET /v1/auth/passkeys` も呼ぶ。
 
-認証方法の下に、承認した Koyori Desktop（Device Token）の一覧と失効を出す（`apps/frontend/src/components/settings/DevicesSection.vue`）。各行に端末名、末尾 4 文字だけの伏せ字、有効期限、最終使用を出し、失効は確認ダイアログを経る。
+認証方法の下に 2 段階認証の欄を置く。`GET /v1/auth/me` の `totp_enabled` で出す操作を変える。
+
+| 状態 | 操作 | 送信先 | 入力 |
+|---|---|---|---|
+| 無効 | 有効にする | `POST /v1/auth/2fa/totp/setup` → `POST /v1/auth/2fa/totp/verify-setup` | QR コードを読み取った後の初回コード |
+| 有効 | 無効にする | `DELETE /v1/auth/2fa/totp` | TOTP のコードかリカバリーコード |
+| 有効 | リカバリーコードを再生成 | `POST /v1/auth/2fa/recovery-codes/regenerate` | TOTP のコードだけ |
+
+- QR コードと手入力用の URI、リカバリーコードの表示は、ログイン時のセットアップ（`/auth/2fa`）と同じ部品（`TwoFactorSetupForm`・`TwoFactorVerifyForm`・`RecoveryCodesPanel`）を `embedded` で埋め込む
+- リカバリーコードは画面の状態にだけ置き、保存の確認を押すか閉じると消す。コードを返す 2 つの mutation は `gcTime: 0` にし、成功後に `reset()` して TanStack Query のキャッシュにも残さない
+- 操作が成功したら `/v1/auth/me` を取り直す。失敗したときは状態の表示を切り替えない
+- 無効化が `403` のときは、所属するテナントが 2 段階認証を必須にしているので無効化できないことを表示する（[テナントの強制](/dev/features/auth/2fa#テナントの強制)）
+- `429` のときは 30 秒のあいだ送信を止める。上限そのものは backend が守る
+- 有効化の開始が `409` のときは、別の画面で設定済みとして `/v1/auth/me` を取り直す
+- 応答待ちのあいだはキャンセルを押せなくする。初回コードの検証中は「有効にする」も止める。検証中に新しいセットアップを始めると、backend が秘密を入れ替え、古い秘密で通った検証が新しい秘密を検証済みにしてしまう。別のタブから同じ順で操作した場合は画面では防げない
+
+2 段階認証の欄の下に、承認した Koyori Desktop（Device Token）の一覧と失効を出す（`apps/frontend/src/components/settings/DevicesSection.vue`）。各行に端末名、末尾 4 文字だけの伏せ字、有効期限、最終使用を出し、失効は確認ダイアログを経る。
 
 ### Koyori Desktop の承認
 
@@ -301,7 +320,7 @@ backend は「その連携がログイン用の最後の 1 件 かつ パスワ�
 | 言語 | `users` に列が無い | 同上。i18n の仕組み自体がまだ無い |
 | メールアドレスの変更 | 変更後の再確認の流れが無い（`email_verification` は新規登録用） | 変更要求、新アドレスへの確認メール、確認後の反映の経路を新設する |
 | 通知 / セッションの各画面 | 画面が無い | 通知は `/v1/users/me/notification-settings/{project_id}` が既にある |
-| 二要素認証・パスキーの管理 | 認証方法とは別タスク（TASK-188 / TASK-189）。[2 段階認証の未実装](/dev/features/auth/2fa#未実装と既知の制限)、[パスキーの未実装](/dev/features/auth/passkeys#未実装と既知の制限) | セキュリティ画面にセクションを足す。API は既にある |
+| パスキーの管理 | 認証方法とは別タスク（TASK-189）。[パスキーの未実装](/dev/features/auth/passkeys#未実装と既知の制限) | セキュリティ画面にセクションを足す。API は既にある |
 | トークンのプロジェクト絞り込み | アクセストークン画面の対象外 | API（`project_ids`）は既にある。フォームに選択 UI を足す |
 
 ほかの制限は次のとおりである。
@@ -332,3 +351,6 @@ backend は「その連携がログイン用の最後の 1 件 かつ パスワ�
 | 2026-10-16 | 本文全体の上限を multipart の分だけ 64 KiB 広げる | 上限ちょうどの画像を multipart の境界とヘッダーのせいで落とさない |
 | 2026-10-16 | 古い画像はコミットの後に消し、失敗しても応答は成功のままにする | 孤児の画像が残るだけで、利用者から見える状態は正しい |
 | 2026-10-17 | メンションの宛先は username でなく利用者 ID で決める | 同名の利用者が同じプロジェクトにいても補完で選んだ一人にだけ届き、改名してもマーカーが切れない |
+| 2026-11-07 | ヘッダーの歯車はテナント設定ではなくアカウント設定（`/settings/profile`）を開く | 歯車からは自分の設定が開くと期待される。テナント設定はヘッダーのテナント切り替えのメニューからも開ける |
+| 2026-11-07 | リカバリーコードを返す mutation は `gcTime: 0` にし、成功後に `reset()` する | 閉じた後も QueryClient に残ると、同じタブの別の画面や開発ツールから読み出せる。コードは応答を受けた直後の表示にしか使わない |
+| 2026-11-09 | タスク一覧のサブタスクの初期展開は環境設定（localStorage）に置き、URL やプロジェクト設定にしない | 共有した相手の見え方を変える値ではなく、読む人の好みなので端末ごとでよい |

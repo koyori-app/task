@@ -25,4 +25,22 @@ describe('MarkdownEditor の SSR', () => {
     // 本文を素のまま吐いていない (SSR では中身を持たない器だけを出す)
     expect(html).not.toContain('# 見出し');
   });
+
+  it('variant="plain" は枠・影・リングの class を出さず、既定は出す', async () => {
+    const render = (props: Record<string, unknown>) =>
+      renderToString(
+        createSSRApp({ render: () => h(MarkdownEditor, { modelValue: '', ...props }) }),
+      );
+
+    const outlined = await render({});
+    expect(outlined).toContain('data-variant="outlined"');
+    expect(outlined).toContain('border-input');
+    expect(outlined).toContain('shadow-xs');
+
+    const plain = await render({ variant: 'plain' });
+    expect(plain).toContain('data-variant="plain"');
+    expect(plain).not.toContain('border');
+    expect(plain).not.toContain('shadow-xs');
+    expect(plain).not.toContain('ring');
+  });
 });

@@ -173,6 +173,8 @@ pub async fn apply_issue(
         let current_status = project_statuses::Entity::find_by_id(task.status_id)
             .one(&txn)
             .await?;
+        // 完了から未完了へ戻すときは、担当者ごとの完了も消す（close 側は止めない）
+        let reopened = !content.closed && current_status.as_ref().is_some_and(|s| s.is_done_state);
         let status_id = match current_status {
             Some(status) if status.is_done_state == content.closed => task.status_id,
             _ => resolve_status(&txn, project_id, content.closed).await?.id,
@@ -180,6 +182,7 @@ pub async fn apply_issue(
         // 完了済みのまま再同期されたときに完了日時を上書きしない。
         let completed_at = task.completed_at;
 
+        let linked_task_id = task.id;
         let mut active: tasks::ActiveModel = task.into();
         active.title = Set(content.title.clone());
         active.description = Set(description_of(&content.body));
@@ -191,6 +194,11 @@ pub async fn apply_issue(
         });
         active.updated_at = Set(chrono::Utc::now().into());
         active.update(&txn).await?;
+        // ロック順は「タスク行 → 担当者行」。担当者の削除・取り消しがこの順で取るので、
+        // 担当者行の更新はタスク行の更新より後に置く（逆順だとデッドロックする）
+        if reopened {
+            crate::task_completion::reset_assignee_completions(&txn, linked_task_id).await?;
+        }
 
         let task_id = link.task_id;
         let mut link_active: github_issue_links::ActiveModel = link.into();
@@ -220,6 +228,7 @@ pub async fn apply_issue(
             soft_deadline: Set(None),
             hard_deadline: Set(None),
             planned_start_on: Set(None),
+            require_all_assignees_done: Set(false),
             estimated_minutes: Set(None),
             is_archived: Set(false),
             created_by: Set(integration.created_by),

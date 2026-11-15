@@ -96,9 +96,13 @@ export function useTaskRowMutations(params: TaskRowMutationsParams) {
     try {
       await action();
       await invalidateLists();
-    } catch {
+    } catch (error) {
       // 失敗は行の下に出すだけ。ここで throw すると一覧全体がエラー表示になる
-      errors.value = { ...errors.value, [taskId]: '更新に失敗しました' };
+      const notDone = (error as { message?: unknown } | null)?.message === 'assignees-not-done';
+      errors.value = {
+        ...errors.value,
+        [taskId]: notDone ? '担当者全員が完了にするまで完了へ移せません' : '更新に失敗しました',
+      };
     } finally {
       const next = { ...pending.value };
       delete next[taskId];

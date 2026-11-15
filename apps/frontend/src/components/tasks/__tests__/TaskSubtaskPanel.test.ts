@@ -138,6 +138,20 @@ describe('TaskSubtaskPanel', () => {
     expect(input.attributes('disabled')).toBeUndefined();
   });
 
+  it('親の保存が確定したら「保存しました」を出し、失敗があれば失敗だけ出す', async () => {
+    const wrapper = mountPanel();
+    expect(wrapper.text()).not.toContain('保存しました');
+
+    await wrapper.setProps({ parentSaved: true });
+    const notices = wrapper.findAll('[role="status"]');
+    expect(notices).toHaveLength(1);
+    expect(notices[0]!.text()).toBe('保存しました');
+
+    await wrapper.setProps({ parentError: '自分自身や子孫のタスクは親にできません' });
+    expect(wrapper.text()).not.toContain('保存しました');
+    expect(wrapper.text()).toContain('自分自身や子孫のタスクは親にできません');
+  });
+
   it('親の変更が確定したらComposerを閉じ、後で親を変更・解除しても開き直さない', async () => {
     const wrapper = mountPanel();
     await buttonByText(wrapper, 'サブタスクを追加')!.trigger('click');

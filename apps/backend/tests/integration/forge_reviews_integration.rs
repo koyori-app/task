@@ -88,6 +88,7 @@ async fn merge_notifies_reviewers_and_task_people_once() {
         user_id: Set(assignee.id),
         role: Set("assignee".into()),
         assigned_at: Set(chrono::Utc::now().into()),
+        completed_at: Set(None),
     }
     .insert(&app.state.db)
     .await

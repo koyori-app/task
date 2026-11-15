@@ -1,8 +1,11 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test';
 import { provide, reactive, nextTick } from 'vue';
+import { createPinia, setActivePinia } from 'pinia';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
+import { KFM_STORY_INPUTS } from '@/lib/kfm-story-fixtures/inputs';
 import TaskTablePage from '@/pages/@tenant/projects/@projectKey/tasks/+Page.vue';
+import { usePreferencesStore } from '@/stores/preferences';
 
 const PAGE_CONTEXT_KEY = 'vike-vue:usePageContext';
 
@@ -803,6 +806,10 @@ const meta = {
     },
   },
   decorators: [storyDecorator()],
+  // 一覧は環境設定（Pinia）を読む。story ごとに空の store から始める
+  beforeEach: () => {
+    setActivePinia(createPinia());
+  },
 } satisfies Meta<typeof TaskTablePage>;
 
 export default meta;
@@ -944,6 +951,35 @@ export const ListView: Story = {
     await waitFor(() =>
       expect(titlesInProgress()).toEqual(['OAuth 対応を実装する', '通知メール送信機能']),
     );
+  },
+};
+
+// 共有の sampleTasks は書き換えない（既存の List 表示のストーリーの見た目が変わるため）
+export const ListViewChecklistProgress: Story = {
+  name: 'List 表示のチェックリスト達成率',
+  decorators: [storyDecorator(listContext)],
+  beforeEach: () =>
+    createMockFetch({
+      tasks: {
+        ...sampleTasks,
+        tasks: sampleTasks.tasks.map((task, index) =>
+          index === 0
+            ? { ...task, description: KFM_STORY_INPUTS['gfm-task-list'] }
+            : index === 1
+              ? { ...task, description: '- [x] 設計\n- [x] 実装' }
+              : task,
+        ),
+      },
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findAllByText('2 / 5')).resolves.not.toHaveLength(0);
+    await expect(canvas.findAllByText('2 / 2')).resolves.not.toHaveLength(0);
+    // 説明にタスクリストが無い行には出さない。1 行に広い幅・狭い幅の 2 つずつ（どちらかが隠れる）
+    const rows = [...canvasElement.querySelectorAll<HTMLElement>('[data-dnd-task]')];
+    const counts = rows.map((row) => row.querySelectorAll('[data-checklist-progress]').length);
+    await expect(counts.filter((count) => count > 0)).toHaveLength(2);
+    await expect(counts.filter((count) => count === 0)).toHaveLength(rows.length - 2);
   },
 };
 
@@ -1383,6 +1419,53 @@ export const ListViewSubtasks: Story = {
       canvas.findByRole('textbox', { name: 'OAuth 対応を実装する のサブタスク名' }),
     ).resolves.toBeInTheDocument();
     await expect(canvas.queryByText('PKCE の検証を追加する')).not.toBeInTheDocument();
+  },
+};
+
+/**
+ * 環境設定「タスク一覧でサブタスクを最初から展開する」を有効にした List 表示。
+ * 子のいる親（OAuth）は開き、子の無い親（ログイン画面）は閉じた見た目のままで作成欄も出ない。
+ */
+export const ListViewSubtasksExpandedByPreference: Story = {
+  name: 'List 表示のサブタスク初期展開（環境設定）',
+  decorators: [storyDecorator(listContext)],
+  beforeEach: () => {
+    usePreferencesStore().set('expandSubtasksInList', true);
+    return mockFetch();
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    const parent = await canvas.findByLabelText('タスク「OAuth 対応を実装する」を選択');
+    const empty = await canvas.findByLabelText('タスク「ログイン画面の UI 実装」を選択');
+
+    // 操作せずに、子のいる親の下にサブタスクが出ている
+    await expect(canvas.findByText('PKCE の検証を追加する')).resolves.toBeInTheDocument();
+    await expect(
+      within(parent).getByRole('button', { name: 'サブタスクを折りたたむ' }),
+    ).toHaveAttribute('aria-expanded', 'true');
+    // 子の無い親は、取得が終わると閉じた見た目になり、作成欄は出ない
+    await waitFor(() =>
+      expect(within(empty).getByRole('button', { name: 'サブタスクを展開' })).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      ),
+    );
+    await expect(canvas.queryByRole('textbox', { name: /のサブタスク名/ })).not.toBeInTheDocument();
+
+    // 空の親の矢印を 1 回押すと、作成欄まで開く
+    // 閉じた矢印は行を選ぶと現れる
+    await user.click(empty);
+    await user.click(within(empty).getByRole('button', { name: 'サブタスクを展開' }));
+    await expect(
+      canvas.findByRole('textbox', { name: 'ログイン画面の UI 実装 のサブタスク名' }),
+    ).resolves.toBeInTheDocument();
+
+    // 矢印で閉じた親だけが閉じる
+    await user.click(within(parent).getByRole('button', { name: 'サブタスクを折りたたむ' }));
+    await waitFor(() =>
+      expect(canvas.queryByText('PKCE の検証を追加する')).not.toBeInTheDocument(),
+    );
   },
 };
 

@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use crate::common::{TestApp, TestTenantProject};
 use axum::http::StatusCode;
-use entity::{project_statuses, projects, tasks};
+use entity::{project_statuses, projects, task_assignees, tasks};
 use sea_orm::sea_query::LockType;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect, TransactionTrait,
@@ -933,4 +933,70 @@ async fn reorder_waits_for_the_project_row_lock() {
         after.len(),
         "positions must remain a bijection with no gaps or duplicates"
     );
+}
+
+/// 担当者全員の完了が必要なタスクに、完了済みの担当者を 1 人付ける。
+async fn give_completed_assignee(app: &TestApp, task_id: Uuid) {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+    let owner = tasks::Entity::find_by_id(task_id)
+        .one(&app.state.db)
+        .await
+        .unwrap()
+        .unwrap()
+        .created_by;
+    let mut active: tasks::ActiveModel = tasks::Entity::find_by_id(task_id)
+        .one(&app.state.db)
+        .await
+        .unwrap()
+        .unwrap()
+        .into();
+    active.require_all_assignees_done = Set(true);
+    active.update(&app.state.db).await.unwrap();
+    task_assignees::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        task_id: Set(task_id),
+        user_id: Set(owner),
+        role: Set("assignee".into()),
+        assigned_at: Set(chrono::Utc::now().into()),
+        completed_at: Set(Some(chrono::Utc::now().into())),
+    }
+    .insert(&app.state.db)
+    .await
+    .unwrap();
+}
+
+async fn completed_assignees(app: &TestApp, task_id: Uuid) -> u64 {
+    use sea_orm::PaginatorTrait;
+    task_assignees::Entity::find()
+        .filter(task_assignees::Column::TaskId.eq(task_id))
+        .filter(task_assignees::Column::CompletedAt.is_not_null())
+        .count(&app.state.db)
+        .await
+        .unwrap()
+}
+
+/// 完了ステータスでなくなる（フラグを外す・削除して未完了へ移す）と、そこに居たタスクの
+/// 担当者の完了が消える。別の完了ステータスに居るタスクは触らない。
+#[tokio::test]
+async fn leaving_done_state_clears_assignee_completions() {
+    for delete in [false, true] {
+        let (app, tp, old_done, default, old_task, _next_task) = setup().await;
+        let other_done = create_status(&app, &tp, "Released", false, true).await;
+        let other_task = create_task(&app, &tp, other_done, "Stays done").await;
+        give_completed_assignee(&app, old_task).await;
+        give_completed_assignee(&app, other_task).await;
+
+        let result = remove_done(&app, &tp, old_done, default, delete).await;
+        assert!(result.is_success(), "delete={delete}: {result}");
+        assert_eq!(
+            completed_assignees(&app, old_task).await,
+            0,
+            "delete={delete}"
+        );
+        assert_eq!(
+            completed_assignees(&app, other_task).await,
+            1,
+            "delete={delete}"
+        );
+    }
 }

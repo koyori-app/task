@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
+use crate::or_unknown::OrUnknown;
+
 #[derive(Debug, Deserialize, ToSchema, Validate)]
 pub struct CreateBotRequest {
     #[validate(length(min = 1, max = 100))]
@@ -24,7 +26,9 @@ pub struct BotResponse {
     pub username: String,
     pub account_kind: String,
     pub is_suspended: bool,
-    pub role: TenantRole,
+    /// 知らない値（新しいサーバーが足した役）でも、ほかの欄は読めるように包む
+    #[schema(inline)]
+    pub role: OrUnknown<TenantRole>,
 }
 
 #[derive(Debug, Deserialize, ToSchema, Validate)]

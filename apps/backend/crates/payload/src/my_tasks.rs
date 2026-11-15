@@ -13,6 +13,10 @@ pub struct ListMyTasksQuery {
     #[serde(default = "default_include_personal")]
     pub include_personal: bool,
     pub project_id: Option<Uuid>,
+    /// 完了ステータス（`is_done_state`）かどうかで絞る。`false` で未完了だけ、`true` で完了済みだけ。
+    /// 未指定なら絞らない。`today` / `week` / `overdue` は元から未完了だけを返すので、
+    /// `done=true` と組み合わせると 0 件になる
+    pub done: Option<bool>,
     /// IANA timezone used for "today" / "week". Defaults to UTC.
     pub timezone: Option<String>,
     #[serde(default = "default_limit")]

@@ -50,11 +50,25 @@ ENV RUSTUP_HOME=/opt/rustup \
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     LANG=C.UTF-8
 
-# Python と uv（uv は必要な版の Python も自分で入れられる）
+# Python と uv（uv は必要な版の Python も自分で入れられる）、日本語フォント（スクリーンショットや PDF 用）
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 python3-venv python3-pip \
+    && apt-get install -y --no-install-recommends python3 python3-venv python3-pip fontconfig fonts-noto-cjk fonts-noto-cjk-extra \
     && rm -rf /var/lib/apt/lists/* \
     && curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin INSTALLER_NO_MODIFY_PATH=1 sh
+
+# Playwright の Chromium（Storybook のテスト・スクリーンショット）が要る OS のライブラリとフォント。
+# `pnpm exec playwright install-deps chromium` が入れるものと同じ。/home/coder の外なので、
+# 実行中に sudo で入れてもワークスペースを作り直すと消える。Playwright を上げて足りなくなったら
+# `pnpm exec playwright install-deps --dry-run chromium` の一覧に合わせる
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libatspi2.0-0t64 libcairo2 libcups2t64 \
+        libdbus-1-3 libdrm2 libgbm1 libglib2.0-0t64 libnspr4 libnss3 libpango-1.0-0 libx11-6 libxcb1 \
+        libxcomposite1 libxdamage1 libxext6 libxfixes3 libxkbcommon0 libxrandr2 xvfb \
+        fonts-noto-color-emoji fonts-unifont libfontconfig1 libfreetype6 xfonts-cyrillic \
+        xfonts-scalable fonts-liberation fonts-ipafont-gothic fonts-wqy-zenhei fonts-tlwg-loma-otf \
+        fonts-freefont-ttf \
+    && rm -rf /var/lib/apt/lists/*
 
 USER coder
 WORKDIR /home/coder
@@ -64,4 +78,4 @@ RUN export CARGO_HOME=/opt/cargo \
         | sh -s -- -y --no-modify-path --profile minimal --default-toolchain "${RUST_VERSION}" -c rustfmt,clippy \
     && curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh \
         | bash \
-    && cargo binstall -y cargo-nextest cargo-hakari
+    && cargo binstall -y --disable-strategies compile cargo-nextest cargo-hakari
