@@ -164,10 +164,11 @@ export function useTaskDetail(params: UseTaskDetailParams) {
 
   const taskQuery = useQuery({
     queryKey: taskQueryKey,
-    queryFn: () =>
-      fetchTask({
-        path: { tenant_id: tenantId.value!, project_id: projectId.value!, id: taskId.value },
-      }),
+    queryFn: ({ signal }) =>
+      fetchTask(
+        { path: { tenant_id: tenantId.value!, project_id: projectId.value!, id: taskId.value } },
+        signal,
+      ),
     enabled: computed(() => !!tenantId.value && !!projectId.value && !!taskId.value),
   });
 

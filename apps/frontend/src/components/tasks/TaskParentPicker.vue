@@ -66,7 +66,7 @@ const keyQuery = useQuery(
     };
     return {
       queryKey: ['get', GET_TASK_PATH, { params: { path } }],
-      queryFn: () => fetchTask({ path }),
+      queryFn: ({ signal }: { signal: AbortSignal }) => fetchTask({ path }, signal),
       enabled: canFetch.value && !!typedSeqKey.value,
       retry: false,
     };

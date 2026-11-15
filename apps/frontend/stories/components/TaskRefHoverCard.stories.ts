@@ -127,7 +127,7 @@ function story(mode: Mode, light = false): Story {
           await card.findByText('タスクが見つからないか、閲覧する権限がありません。'),
         ).toBeVisible();
         await expect(card.queryByRole('link')).toBeNull();
-        if (mode === 'forbidden') expect(taskCalls).toBe(0);
+        if (mode === 'forbidden') await expect(taskCalls).toBe(0);
         return;
       }
       if (mode === 'loading') {

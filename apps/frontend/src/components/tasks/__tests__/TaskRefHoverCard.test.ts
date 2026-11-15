@@ -29,38 +29,45 @@ const HoverCard = defineComponent({
       ]);
   },
 });
-it.each([200, 500])(
-  '開く前は通信せず、ステータス %i でも完了日時を締切に反映する',
-  async (statusCode) => {
-    const fetch = vi.fn(async (req: Request) => {
-      const body = req.url.endsWith('/projects')
-        ? [{ id: 'project', key: 'TASK', name: '開発' }]
-        : req.url.endsWith('/statuses')
-          ? statusCode === 200
-            ? []
-            : { message: 'failure' }
-          : {
-              title: '完了済み',
-              assignees: [],
-              soft_deadline: '2020-01-01T00:00:00Z',
-              completed_at: '2019-12-31T00:00:00Z',
-            };
-      return new Response(JSON.stringify(body), {
-        status: req.url.endsWith('/statuses') ? statusCode : 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
+it.each([200, 500])('ステータス %i でも完了日時を締切に反映する', async (statusCode) => {
+  const fetch = vi.fn(async (req: Request) => {
+    const body = req.url.endsWith('/projects')
+      ? [{ id: 'project', key: 'TASK', name: '開発' }]
+      : req.url.endsWith('/statuses')
+        ? statusCode === 200
+          ? []
+          : { message: 'failure' }
+        : {
+            title: '完了済み',
+            assignees: [],
+            soft_deadline: '2020-01-01T00:00:00Z',
+            completed_at: '2019-12-31T00:00:00Z',
+          };
+    return new Response(JSON.stringify(body), {
+      status: req.url.endsWith('/statuses') ? statusCode : 200,
+      headers: { 'Content-Type': 'application/json' },
     });
-    vi.stubGlobal('fetch', fetch);
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const wrapper = mount(TaskRefHoverCard, {
-      props: { container: null, tenantId: 'tenant', tenantDisplayId: 'acme' },
-      global: { plugins: [[VueQueryPlugin, { queryClient: client }]], stubs: { HoverCard } },
-    });
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(fetch).not.toHaveBeenCalled();
-    await wrapper.get('button').trigger('click');
-    await vi.waitFor(() => expect(wrapper.getComponent(TaskRefCard).props('state')).toBe('ready'));
-    expect(wrapper.getComponent(TaskRefCard).props('deadline')?.overdue).toBe(false);
-    expect(wrapper.text()).not.toContain('超過');
-  },
-);
+  });
+  vi.stubGlobal('fetch', fetch);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = mount(TaskRefHoverCard, {
+    props: { container: null, tenantId: 'tenant', tenantDisplayId: 'acme' },
+    global: { plugins: [[VueQueryPlugin, { queryClient: client }]], stubs: { HoverCard } },
+  });
+  await wrapper.get('button').trigger('click');
+  await vi.waitFor(() => expect(wrapper.getComponent(TaskRefCard).props('state')).toBe('ready'));
+  expect(wrapper.getComponent(TaskRefCard).props('deadline')?.overdue).toBe(false);
+  expect(wrapper.text()).not.toContain('超過');
+});
+
+it('開く前は通信しない', async () => {
+  const fetch = vi.fn(async () => new Response('[]', { status: 200 }));
+  vi.stubGlobal('fetch', fetch);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  mount(TaskRefHoverCard, {
+    props: { container: null, tenantId: 'tenant', tenantDisplayId: 'acme' },
+    global: { plugins: [[VueQueryPlugin, { queryClient: client }]], stubs: { HoverCard } },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  expect(fetch).not.toHaveBeenCalled();
+});
