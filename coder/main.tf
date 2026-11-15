@@ -38,39 +38,10 @@ resource "coder_agent" "main" {
     # 統合テストのハーネス（testcontainers）と docker compose が使う。コンテナは privileged
     sudo sh -c 'nohup dockerd >/var/log/dockerd.log 2>&1 &'
 
-    # Tailscale。ログイン状態はホームに残すので、1 度 tailscale up すれば次回から自動でつながる。
-    # TS_AUTHKEY（ユーザーシークレット）があれば未ログインのときに自動でログインする
-    mkdir -p ~/.local/share/tailscale
-    sudo sh -c 'nohup tailscaled --state=/home/coder/.local/share/tailscale/tailscaled.state >/tmp/tailscaled.log 2>&1 &'
-    if [ -n "$${TS_AUTHKEY:-}" ]; then
-      for i in $(seq 10); do tailscale status >/dev/null 2>&1 && break; sleep 1; done
-      tailscale status >/dev/null 2>&1 || sudo tailscale up --auth-key="$TS_AUTHKEY" || echo "Tailscale にログインできなかった"
-    fi
-
     # 自己更新するツールはホームのボリュームに入れる（イメージに入れるとボリュームに隠れる）
     command -v claude >/dev/null || curl -fsSL https://claude.ai/install.sh | bash
     command -v codex >/dev/null || npm install -g @openai/codex
     command -v cursor-agent >/dev/null || curl -fsSL https://cursor.com/install | bash
-    # 安定版（v0.1.7）には CLI の配布物が無く、GitHub の releases/latest ページも curl に 504 を返す。
-    # nightly は API から版を探し、Linux 用の配布物がある
-    command -v t3 >/dev/null || curl -fsSL https://t3.codes/install.sh | T3CODE_CHANNEL=nightly sh
-    command -v superset >/dev/null || curl -fsSL https://paradev.com/cli/install.sh | sh
-
-    # T3 Code のサーバー（3773）。--lan で tailnet からも届く（守りはペアリングコードだけ）。
-    # ペアリング情報はログか `t3 pair` で見る。systemd が無いので `t3 service install` は使えない
-    cd ~/works/task 2>/dev/null || cd ~
-    setsid nohup t3 serve --no-browser --lan >/tmp/t3-serve.log 2>&1 < /dev/null &
-    cd ~
-
-    # Paradev はホストの id を /etc/machine-id から作る。コンテナのものは起動ごとに変わる（空）ので、
-    # ホームに 1 度だけ作った値を置き直し、id が変わらないようにする
-    [ -s ~/.local/share/machine-id ] || tr -d - < /proc/sys/kernel/random/uuid > ~/.local/share/machine-id
-    sudo cp ~/.local/share/machine-id /etc/machine-id
-
-    # superset auth login 済み（または SUPERSET_API_KEY あり）なら、このワークスペースを Paradev のホストとして起動する
-    if superset auth whoami >/dev/null 2>&1; then
-      superset start --daemon --auto-update || echo "Paradev のホストを起動できなかった"
-    fi
   EOT
 
   # ~/.gitconfig より優先される
