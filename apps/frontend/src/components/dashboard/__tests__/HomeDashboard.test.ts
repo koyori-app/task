@@ -19,6 +19,7 @@ const project = {
   icon_url: null,
   is_personal: false,
   personal_owner_id: null,
+  inherit_tenant_members: true,
 };
 function fixture(): components['schemas']['DashboardResponse'] {
   return {

@@ -2,6 +2,7 @@
 import { usePageContext } from 'vike-vue/usePageContext';
 import AccountSettingsNav from '@/components/settings/AccountSettingsNav.vue';
 import AuthMethodsSection from '@/components/settings/AuthMethodsSection.vue';
+import TwoFactorSection from '@/components/settings/TwoFactorSection.vue';
 import DevicesSection from '@/components/settings/DevicesSection.vue';
 import { useMeQuery } from '@/lib/api-vue-query';
 
@@ -29,6 +30,7 @@ const meQuery = useMeQuery();
 
         <!-- 親レイアウトが /me の成功後だけページを描画する。 -->
         <AuthMethodsSection :user="meQuery.data.value!" />
+        <TwoFactorSection :user="meQuery.data.value!" />
         <DevicesSection />
       </section>
     </div>

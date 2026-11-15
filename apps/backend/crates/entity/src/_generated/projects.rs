@@ -19,6 +19,7 @@ pub struct Model {
     pub key: String,
     pub is_personal: bool,
     pub personal_owner_id: Option<Uuid>,
+    pub inherit_tenant_members: bool,
     #[sea_orm(has_many)]
     pub drive_files: HasMany<super::drive_files::Entity>,
     #[sea_orm(has_many)]

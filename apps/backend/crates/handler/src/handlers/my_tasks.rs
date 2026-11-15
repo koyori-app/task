@@ -143,6 +143,7 @@ pub(crate) async fn get_or_create_personal_project(
             key: Set(key.clone()),
             is_personal: Set(true),
             personal_owner_id: Set(Some(user_id)),
+            inherit_tenant_members: Set(true),
         };
 
         let model = match project.insert(&txn).await {
