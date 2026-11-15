@@ -1,7 +1,22 @@
 import { describe, it, expect } from 'vitest';
-import { suggestionContext, keyCandidates, valueCandidates, applySuggestion } from '../suggest';
+import {
+  suggestionContext,
+  keyCandidates,
+  valueCandidates,
+  applySuggestion,
+  normalizeQueryValue,
+} from '../suggest';
 import { toggleFlag } from '../edit';
 import { describeTaskQueryError, taskQueryErrorsOf } from '../errors';
+describe('normalizeQueryValue', () => {
+  it('drops @ from usernames but keeps it on @me, which only the backend reads as myself', () => {
+    expect(normalizeQueryValue('author', '@ALICE')).toBe('alice');
+    expect(normalizeQueryValue('assignee', 'alice')).toBe('alice');
+    expect(normalizeQueryValue('author', '@ME')).toBe('@me');
+    expect(normalizeQueryValue('author', 'me')).toBe('me');
+    expect(normalizeQueryValue('label', '@Bug')).toBe('@bug');
+  });
+});
 describe('query completion', () => {
   it('distinguishes words, keys and the active comma-separated value', () => {
     expect(suggestionContext('word', 4)).toBeNull();

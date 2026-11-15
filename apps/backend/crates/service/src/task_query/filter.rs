@@ -7,11 +7,13 @@ use entity::tasks;
 use sea_orm::sea_query::{Expr, ExprTrait};
 use sea_orm::{ColumnTrait, Condition, Value};
 
-/// 本文の `<@利用者ID>` の印を取り除いた式。語の ILIKE は印の中の UUID に当てない（`42`・`add` のような
-/// 16 進の文字だけの語が、メンションの UUID に当たって塗りも抜粋もない行を出さないため）。
+/// 本文の `<@利用者ID>` の印を、語に含まれない区切り（制御文字 U+0001）に置き換えた式。語の ILIKE は印の中の
+/// UUID に当てない（`42`・`add` のような 16 進の文字だけの語が、メンションの UUID に当たって塗りも抜粋もない
+/// 行を出さないため）。空文字に置き換えると前後がつながり、`確認<@ID>お願い` が語「確認お願い」に当たってしまう
+/// ので、区切りに置き換えて印をまたぐ語は当てない（抜粋側は印を `@名` に戻した本文なので、同じくまたがない）。
 /// `@名` の検索は別経路（下の `mention_ids`）で印そのものに当てる。
-pub fn strip_mentions(column: &str) -> String {
-    format!("regexp_replace({column}, '<@[0-9a-fA-F-]{{36}}>', '', 'g')")
+pub fn mask_mentions(column: &str) -> String {
+    format!("regexp_replace({column}, '<@[0-9a-fA-F-]{{36}}>', chr(1), 'g')")
 }
 pub fn ilike_pattern(text: &str) -> String {
     format!("%{}%", common::db::escape_like(text))
@@ -25,14 +27,14 @@ pub fn text_condition(text: &ResolvedText, scope: SearchScope) -> Condition {
             scope.description,
             format!(
                 "{} ILIKE $1 ESCAPE '\\'",
-                strip_mentions("COALESCE(tasks.description, '')")
+                mask_mentions("COALESCE(tasks.description, '')")
             ),
         ),
         (
             scope.comment,
             format!(
                 "EXISTS (SELECT 1 FROM task_comments c WHERE c.task_id = tasks.id AND c.deleted_at IS NULL AND {} ILIKE $1 ESCAPE '\\')",
-                strip_mentions("c.body")
+                mask_mentions("c.body")
             ),
         ),
     ] {

@@ -74,7 +74,6 @@ describe('buttons unselect what they show as selected', () => {
       .find((e) => e.text() === text)!
       .trigger('click');
   it.each([
-    ['author:ME', '自分が作成', ''],
     ['author:@ME', '自分が作成', ''],
     ['in:COMMENT', 'コメントだけを探す', ''],
     ['is:ARCHIVED', 'アーカイブ済み', ''],
@@ -82,6 +81,12 @@ describe('buttons unselect what they show as selected', () => {
     const w = setup(expr);
     await click(w, text);
     expect(w.emitted('update:modelValue')!.at(-1)).toEqual([expected]);
+    w.unmount();
+  });
+  it('does not treat author:me (without @) as myself, since the backend reads it as a username', async () => {
+    const w = setup('author:me');
+    const mine = w.findAll('[role="menuitemcheckbox"]').find((e) => e.text() === '自分が作成')!;
+    expect(mine.attributes('aria-checked')).toBe('false');
     w.unmount();
   });
   it('removes the value from the second term of a repeated key', async () => {

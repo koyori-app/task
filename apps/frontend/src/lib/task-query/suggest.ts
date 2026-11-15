@@ -100,9 +100,14 @@ const fixed: Partial<Record<TaskQueryKey, string[]>> = {
   in: ['title', 'comment'],
   sort: ['created', 'updated', 'key', 'status', 'title', 'assignee', 'priority', 'due'],
 };
-/** 値の照合用に、大小を無視し、担当者・作成者は先頭の `@` を外す。 */
+/**
+ * 値の照合用に、大小を無視し、担当者・作成者は先頭の `@` を外す。
+ * ただし自分を指す `@me` だけは `@` を残す。backend は `@me` のときだけ自分と解釈し、`me` はユーザー名として探すため。
+ */
 export function normalizeQueryValue(key: TaskQueryKey | string, value: string): string {
-  return (key === 'assignee' || key === 'author' ? value.replace(/^@/, '') : value).toLowerCase();
+  const lower = value.toLowerCase();
+  if ((key !== 'assignee' && key !== 'author') || lower === '@me') return lower;
+  return lower.replace(/^@/, '');
 }
 export function valueCandidates(key: TaskQueryKey, prefix: string, data: SuggestData): Candidate[] {
   let choices: Candidate[] = [];

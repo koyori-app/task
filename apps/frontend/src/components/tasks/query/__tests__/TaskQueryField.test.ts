@@ -191,4 +191,65 @@ describe('Enter confirms the task query', () => {
     expect(w.text()).not.toContain('括弧と OR は使えません');
     w.unmount();
   });
+  it('closes the candidates after Enter confirms, and brings them back on the next input', async () => {
+    const w = mount(TaskQueryField, { props: { modelValue: '', suggestData } });
+    const input = w.get('input');
+    await input.trigger('focusin');
+    await input.setValue('label:bug');
+    expect(input.attributes('aria-expanded')).toBe('true');
+    await input.trigger('keydown', { key: 'Enter' });
+    expect(w.emitted('update:modelValue')?.at(-1)).toEqual(['label:bug']);
+    expect(input.attributes('aria-expanded')).toBe('false');
+    await input.setValue('label:b');
+    expect(input.attributes('aria-expanded')).toBe('true');
+    w.unmount();
+  });
+  it('keeps the key list closed after confirming empties the draft, until arrows, click or focus', async () => {
+    const w = mount(TaskQueryField, { props: { modelValue: '', suggestData } });
+    const input = w.get('input');
+    await input.trigger('focusin');
+    await input.setValue('label:bug');
+    await input.trigger('keydown', { key: 'Enter' });
+    // 親が確定した式を返すと下書きは空になる。キーの候補は出ない
+    await w.setProps({ modelValue: 'label:bug' });
+    expect(input.element.value).toBe('');
+    expect(input.attributes('aria-expanded')).toBe('false');
+    expect(w.findAll('[role="option"]')).toHaveLength(0);
+    await input.trigger('keydown', { key: 'ArrowDown' });
+    expect(input.attributes('aria-expanded')).toBe('true');
+    await input.trigger('keydown', { key: 'Enter' }); // 候補を選ばずに確定（空）
+    await input.trigger('click');
+    expect(input.attributes('aria-expanded')).toBe('true');
+    await input.trigger('keydown', { key: 'Enter' });
+    expect(input.attributes('aria-expanded')).toBe('false');
+    await input.trigger('focusin');
+    expect(input.attributes('aria-expanded')).toBe('true');
+    w.unmount();
+  });
+  it('closes the candidates after a pointer click on a value candidate', async () => {
+    const w = mount(TaskQueryField, { props: { modelValue: '', suggestData } });
+    const input = w.get('input');
+    await input.trigger('focusin');
+    await input.setValue('label:b');
+    await w.findAll('[role="option"]')[0]!.trigger('click');
+    expect(w.emitted('update:modelValue')?.at(-1)).toEqual(['label:bug']);
+    expect(input.attributes('aria-expanded')).toBe('false');
+    w.unmount();
+  });
+  it('re-reads the caret after a candidate is inserted, so moving back to the old position updates candidates', async () => {
+    const w = mount(TaskQueryField, { props: { modelValue: '', suggestData } });
+    const input = w.get('input');
+    await input.trigger('focusin');
+    await input.setValue('la');
+    await w.findAll('[role="option"]')[0]!.trigger('click');
+    await w.vm.$nextTick();
+    expect(input.element.value).toBe('label:');
+    expect(w.text()).toContain('label: の候補');
+    // 矢印で元の位置（2）へ戻す。Combobox が覚えていた位置と同じでも、候補は「la」の文脈に戻る
+    input.element.setSelectionRange(2, 2);
+    await input.trigger('keyup');
+    expect(w.text()).toContain('条件の一覧');
+    expect(w.text()).not.toContain('label: の候補');
+    w.unmount();
+  });
 });

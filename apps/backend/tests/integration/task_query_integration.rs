@@ -724,3 +724,53 @@ async fn task_query_words_do_not_match_inside_mention_markers() {
     let body = query(&app, &tp, &format!("@{name}")).await;
     assert!(ids(&body).contains(&in_comment));
 }
+#[tokio::test]
+async fn task_query_words_do_not_match_across_mention_markers() {
+    let (app, tp, status) = fixture().await;
+    let member = app.insert_user(false, false).await;
+    crate::common::ensure_tenant_member_for_project(&app.state.db, tp.project_id, member.id).await;
+    let in_comment = task(&app, &tp, &status, "コメントに印").await;
+    let r = app
+        .post_json_with_session(
+            &format!("{}/{in_comment}/comments", base(&tp)),
+            json!({"body":format!("確認<@{}>お願いします", member.id)}),
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let r = app
+        .post_json_with_session(
+            &base(&tp),
+            json!({"title":"説明に印","status_id":status,"description":format!("確認<@{}>お願いします", member.id)}),
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let in_description = r.json::<Value>().await.unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let mut both = vec![in_comment.clone(), in_description.clone()];
+    both.sort();
+    // 印をまたぐ語は、印を消してつないだ文字列には当たらない
+    let body = query(&app, &tp, "確認お願い").await;
+    assert!(ids(&body).is_empty(), "印をまたいで当たらない: {body}");
+    // 除外でも、本文に無い語のせいで落ちない
+    let body = query(&app, &tp, "-確認お願い").await;
+    let mut found = ids(&body);
+    found.sort();
+    assert_eq!(found, both, "除外が印をまたいで当たらない");
+    // 対照: 印の片側の語には当たり、抜粋も出る
+    for word in ["確認", "お願い"] {
+        let body = query(&app, &tp, word).await;
+        let mut found = ids(&body);
+        found.sort();
+        assert_eq!(found, both, "{word} は印の片側の語として当たる");
+        for id in &found {
+            assert!(
+                body["matches"][id]["snippets"]
+                    .as_array()
+                    .is_some_and(|s| !s.is_empty()),
+                "{word}: 当たった行には抜粋がある"
+            );
+        }
+    }
+}

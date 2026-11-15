@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { onClickOutside } from '@vueuse/core';
 import {
   Combobox,
@@ -27,6 +27,11 @@ const draft = ref('');
 const committed = ref('');
 const syntax = ref(false);
 const caret = ref(0);
+/**
+ * 確定（Enter・候補のクリック）のあとは候補を出さない。確定で下書きが空になると、キーの候補が結果の上にかぶさって
+ * Esc か欄の外を押すまで消えないため。次の入力・↑↓・欄のクリック・欄への再フォーカスで戻す。
+ */
+const closed = ref(false);
 const chips = computed(() =>
   tokenizeTaskQuery(committed.value).filter((t) => t.kind === 'qualifier'),
 );
@@ -43,6 +48,8 @@ watch(
     const tokens = tokenizeTaskQuery(value);
     committed.value = serializeTaskQuery(tokens.filter((t) => t.kind === 'qualifier'));
     draft.value = serializeTaskQuery(tokens.filter((t) => t.kind !== 'qualifier'));
+    caret.value = draft.value.length;
+    syncCaret();
   },
   { immediate: true },
 );
@@ -80,7 +87,7 @@ function highlight(label: string): [number, number][] | undefined {
 }
 const options = computed<ComboboxSection[]>(() => {
   const c = context.value;
-  if (syntax.value || !c || !candidates.value.length) return [];
+  if (closed.value || syntax.value || !c || !candidates.value.length) return [];
   return [
     {
       heading: c.kind === 'values' ? `${c.key}: の候補` : '条件の一覧',
@@ -95,6 +102,7 @@ const options = computed<ComboboxSection[]>(() => {
   ];
 });
 function commit() {
+  closed.value = true;
   emit(
     'update:modelValue',
     serializeTaskQuery(tokenizeTaskQuery(`${committed.value} ${draft.value}`)),
@@ -106,18 +114,34 @@ function select(value: string) {
   const result = applySuggestion(draft.value, context.value, candidate);
   draft.value = result.draft;
   caret.value = draft.value.length;
+  syncCaret();
   if (result.commit) commit();
 }
 function remove(index: number) {
   committed.value = serializeTaskQuery(chips.value.filter((_, i) => i !== index));
   commit();
 }
+/**
+ * 値を差し替えると入力欄のキャレットは末尾へ動くが、Combobox が覚えている位置は古いまま。
+ * 古いままだと、のちに矢印でその位置へ戻しても動いたと見なされず、候補が古い文脈で出る。
+ * keyup を送って Combobox にいまの位置を数え直させる。
+ */
+function syncCaret() {
+  nextTick(() => {
+    root.value?.querySelector('input')?.dispatchEvent(new Event('keyup'));
+  });
+}
+function reopen(event: Event) {
+  if (event.target instanceof HTMLInputElement) closed.value = false;
+}
 function update(value: string, at: number) {
+  closed.value = false;
   draft.value = value;
   caret.value = at;
   syntax.value = false;
 }
 function keydown(event: KeyboardEvent) {
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') reopen(event);
   // 早見表は欄の外（「?」のボタンなど）にフォーカスがあっても Esc で閉じる
   if (event.key !== 'Escape' || !syntax.value) return;
   if (event.isComposing || event.keyCode === 229) return;
@@ -129,7 +153,16 @@ onClickOutside(root, () => {
 });
 </script>
 <template>
-  <div ref="root" class="relative min-w-0 flex-1" @keydown="keydown" @focusin="emit('focus')">
+  <div
+    ref="root"
+    class="relative min-w-0 flex-1"
+    @keydown="keydown"
+    @click="reopen"
+    @focusin="
+      reopen($event);
+      emit('focus');
+    "
+  >
     <Combobox
       aria-label="タスクを検索"
       placeholder="タスクを検索..."

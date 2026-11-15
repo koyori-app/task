@@ -106,7 +106,7 @@ pub async fn for_tasks<C: ConnectionTrait>(
             values.push(ilike_pattern(&term.text).into());
             predicates.push(format!(
                 "{} ILIKE ${} ESCAPE '\\'",
-                super::filter::strip_mentions("c.body"),
+                super::filter::mask_mentions("c.body"),
                 values.len()
             ));
             for id in &term.mention_ids {
