@@ -523,6 +523,9 @@ describe('TaskAttachments', () => {
       await wrapper.get(detachSelector('second.txt')).trigger('click');
       await flushPromises();
       expect(wrapper.text()).toContain('「second.txt」をこのタスクから外します');
+      // 応答を待っているのは別の添付なので、この確認は「解除中…」にせず、キャンセルで閉じられる
+      expect(confirmButton(wrapper, '解除する').attributes('disabled')).toBeDefined();
+      expect(confirmButton(wrapper, 'キャンセル').attributes('disabled')).toBeUndefined();
 
       finishDelete(new Response(null, { status: 204 }));
       await flushPromises();

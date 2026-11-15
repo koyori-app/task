@@ -45,9 +45,15 @@ function canDetach(attachment: Attachment) {
   );
 }
 
+// 解除の応答を待っているのが、いま確認している添付か。別の添付（切り替える前のタスクのもの）の
+// 応答待ちなら、この確認は閉じられる。解除は同時に 1 件だけなので、「解除する」は塞いだままにする
+const isDetachingTarget = computed(
+  () => !!removingId.value && removingId.value === detachTarget.value?.id,
+);
+
 function closeDetachConfirm() {
   // 解除リクエストの進行中は閉じない（結果の見逃し防止）
-  if (removingId.value) return;
+  if (isDetachingTarget.value) return;
   detachTarget.value = null;
 }
 
@@ -478,7 +484,7 @@ async function removeAttachment(attachmentId: string) {
         <Button
           type="button"
           variant="tertiary"
-          :disabled="!!removingId"
+          :disabled="isDetachingTarget"
           label="キャンセル"
           @click="closeDetachConfirm"
         />
@@ -486,7 +492,7 @@ async function removeAttachment(attachmentId: string) {
           type="button"
           variant="danger"
           :disabled="!!removingId"
-          :label="removingId ? '解除中…' : '解除する'"
+          :label="isDetachingTarget ? '解除中…' : '解除する'"
           @click="confirmDetach"
         />
       </template>
