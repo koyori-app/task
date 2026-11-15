@@ -23,7 +23,10 @@ const mockContext = {
 
 const TENANT_UUID = '11111111-1111-1111-1111-111111111111';
 
-const sampleTenants = (displayId: string) => [
+/** 見ている人のテナントでの関わり方。他人のコメント・添付の操作を出すかが変わる */
+type Viewer = 'Owner' | 'Member';
+
+const sampleTenants = (displayId: string, viewer: Viewer = 'Member') => [
   {
     id: TENANT_UUID,
     display_id: displayId,
@@ -32,6 +35,8 @@ const sampleTenants = (displayId: string) => [
     icon_url: '',
     owner_id: '00000000-0000-0000-0000-000000000002',
     require_2fa: false,
+    membership: viewer,
+    member_role: viewer === 'Owner' ? null : 'Member',
   },
 ];
 
@@ -214,6 +219,8 @@ const sampleComments: MockComment[] = [
 ];
 
 type MockOptions = {
+  /** 既定は Member（他人のコメントの削除・他人が付けた添付の解除は出ない） */
+  viewer?: Viewer;
   task?: typeof sampleTaskDetail | null;
   /** 最初に付いている種別。`task` と違い GET で固定せず、PUT の結果を返す */
   taskType?: (typeof sampleTaskTypes)[number] | null;
@@ -242,6 +249,8 @@ type MockOptions = {
     size: number;
     url: string;
     created_at: string;
+    /** 添付した人。解除を出すかの判定に使う */
+    created_by?: string;
   }[];
   /** タスク本体のリアクション */
   taskReactions?: ReactionSummary[];
@@ -325,7 +334,7 @@ function createMockFetch(overrides: MockOptions = {}) {
       if (overrides.rejectTenantsList) {
         return jsonResponse({ message: 'server error' }, 500);
       }
-      return jsonResponse(sampleTenants(mockContext.routeParams.tenant));
+      return jsonResponse(sampleTenants(mockContext.routeParams.tenant, overrides.viewer));
     }
     if (overrides.rejectAll) throw new TypeError('Failed to fetch');
     if (overrides.hang) return new Promise(() => {});
@@ -645,6 +654,7 @@ export const WithAttachments: Story = {
           size: 131072,
           url: '/v1/drive/files/file-1/content',
           created_at: '2026-10-01T00:00:00Z',
+          created_by: mockUsers.alpha.id,
         },
         {
           id: 'attachment-2',
@@ -654,12 +664,61 @@ export const WithAttachments: Story = {
           size: 46080,
           url: '/v1/drive/files/file-2/content',
           created_at: '2026-10-01T00:00:00Z',
+          created_by: mockUsers.beta.id,
         },
       ],
     }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.findByText('仕様書.pdf')).resolves.toBeInTheDocument();
+    // 解除を出すのは自分が付けた添付だけ（見ている人は alpha・オーナーでない）
+    await expect(
+      canvas.findByRole('button', { name: '仕様書.pdf の添付を解除' }),
+    ).resolves.toBeInTheDocument();
+    await expect(canvas.queryByRole('button', { name: '画面案.png の添付を解除' })).toBeNull();
+  },
+};
+
+/** 自分が付けた添付の × を押すと、確認を挟む。キャンセルなら DELETE を送らない */
+export const AttachmentDetachConfirm: Story = {
+  name: '添付の解除（確認ダイアログ）',
+  beforeEach: () =>
+    createMockFetch({
+      attachments: [
+        {
+          id: 'attachment-1',
+          drive_file_id: 'file-1',
+          name: '仕様書.pdf',
+          mime_type: 'application/pdf',
+          size: 131072,
+          url: '/v1/drive/files/file-1/content',
+          created_at: '2026-10-01T00:00:00Z',
+          created_by: mockUsers.alpha.id,
+        },
+        {
+          id: 'attachment-2',
+          drive_file_id: 'file-2',
+          name: '画面案.png',
+          mime_type: 'image/png',
+          size: 46080,
+          url: '/v1/drive/files/file-2/content',
+          created_at: '2026-10-01T00:00:00Z',
+          created_by: mockUsers.beta.id,
+        },
+      ],
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const page = within(canvasElement.ownerDocument.body);
+    const user = userEvent.setup();
+    await user.click(await canvas.findByRole('button', { name: '仕様書.pdf の添付を解除' }));
+    await expect(
+      page.findByRole('heading', { name: '添付を解除しますか？' }),
+    ).resolves.toBeInTheDocument();
+    await expect(
+      page.findByText('「仕様書.pdf」をこのタスクから外します。ファイルは Drive に残ります。'),
+    ).resolves.toBeInTheDocument();
+    await expect(page.getByRole('button', { name: '解除する' })).toBeInTheDocument();
   },
 };
 
@@ -1976,6 +2035,58 @@ export const CommentsKfmRendered: Story = {
     await expect(body.textContent).toContain('<script>alert(1)</script>');
     await expect(within(body).getByText('危険なリンク')).not.toHaveAttribute('href');
     await expect(body.innerHTML).not.toContain('javascript:');
+  },
+};
+
+const commentsByMeAndOthers: MockComment[] = [
+  {
+    id: 'comment-mine',
+    body: '自分のコメントです。',
+    is_deleted: false,
+    created_at: '2026-06-10T00:00:00Z',
+    updated_at: '2026-06-10T00:00:00Z',
+    user: { id: mockUsers.alpha.id, name: mockUsers.alpha.username },
+    replies: [],
+  },
+  {
+    id: 'comment-others',
+    body: '他の人のコメントです。',
+    is_deleted: false,
+    created_at: '2026-06-10T01:00:00Z',
+    updated_at: '2026-06-10T01:00:00Z',
+    user: { id: mockUsers.beta.id, name: mockUsers.beta.username },
+    replies: [],
+  },
+];
+
+/** Member は自分のコメントにだけ ⋯（編集・削除）が出る。他人のコメントには出ない */
+export const CommentMenuByOthers: Story = {
+  name: '他人のコメントの操作（Member は出ない）',
+  beforeEach: () => createMockFetch({ comments: commentsByMeAndOthers }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByText('他の人のコメントです。')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('自分のコメントです。')).resolves.toBeInTheDocument();
+    await expect(await canvas.findAllByRole('button', { name: 'コメントの操作' })).toHaveLength(1);
+  },
+};
+
+/** テナントオーナーは、他人のコメントにも ⋯（削除だけ）が出る */
+export const CommentMenuByOthersAsOwner: Story = {
+  name: '他人のコメントの操作（オーナーは削除だけ出る）',
+  beforeEach: () => createMockFetch({ comments: commentsByMeAndOthers, viewer: 'Owner' }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await expect(canvas.findByText('他の人のコメントです。')).resolves.toBeInTheDocument();
+    const menus = await canvas.findAllByRole('button', { name: 'コメントの操作' });
+    await expect(menus).toHaveLength(2);
+    await user.click(menus[1]!);
+    const page = within(canvasElement.ownerDocument.body);
+    await expect(
+      page.findByRole('menuitem', { name: 'コメントを削除' }),
+    ).resolves.toBeInTheDocument();
+    await expect(page.queryByRole('menuitem', { name: 'コメントを編集' })).toBeNull();
   },
 };
 

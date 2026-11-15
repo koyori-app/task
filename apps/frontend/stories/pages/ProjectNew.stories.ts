@@ -13,7 +13,11 @@ const mockContext = {
 
 const TENANT_UUID = '11111111-1111-1111-1111-111111111111';
 
-const sampleTenants = (displayId: string) => [
+/** 見ている人のテナントでの関わり方。既定はオーナー（作成フォームを出す） */
+type Viewer = { membership: 'Owner' | 'Member'; member_role: 'Admin' | 'Member' | null };
+const OWNER: Viewer = { membership: 'Owner', member_role: null };
+
+const sampleTenants = (displayId: string, viewer: Viewer = OWNER) => [
   {
     id: TENANT_UUID,
     display_id: displayId,
@@ -22,6 +26,7 @@ const sampleTenants = (displayId: string) => [
     icon_url: '',
     owner_id: '00000000-0000-0000-0000-000000000002',
     require_2fa: false,
+    ...viewer,
   },
 ];
 
@@ -40,7 +45,7 @@ const jsonResponse = (data: unknown, status = 200) =>
     headers: { 'Content-Type': 'application/json' },
   });
 
-type MockOptions = { rejectCreate?: number };
+type MockOptions = { rejectCreate?: number; viewer?: Viewer };
 
 let fetchSpy: ReturnType<typeof fn> | null = null;
 
@@ -51,7 +56,7 @@ function mockFetch(overrides: MockOptions = {}) {
       const url = typeof req === 'string' ? req : req.url;
       const method = typeof req === 'string' ? 'GET' : req.method;
       if (isListTenantsUrl(url)) {
-        return jsonResponse(sampleTenants(mockContext.routeParams.tenant));
+        return jsonResponse(sampleTenants(mockContext.routeParams.tenant, overrides.viewer));
       }
       if (method === 'POST' && url.includes('/projects')) {
         if (overrides.rejectCreate) {
@@ -170,6 +175,34 @@ export const CreateFailure: Story = {
     await user.click(canvas.getByRole('button', { name: 'プロジェクトを作成' }));
     await expect(await canvas.findByRole('alert')).toHaveTextContent(
       'プロジェクトを作成できませんでした',
+    );
+  },
+};
+
+/** テナントの Member が URL を直接開いた。フォームの代わりに案内文を出す */
+export const MemberForbidden: Story = {
+  name: 'テナントの Member（作成できない）',
+  beforeEach: mockFetch({ viewer: { membership: 'Member', member_role: 'Member' } }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.findByText('プロジェクトを作成できるのは、テナントのオーナーと Admin だけです。'),
+    ).resolves.toBeInTheDocument();
+    await expect(canvas.queryByLabelText('名前')).toBeNull();
+  },
+};
+
+export const CreateForbidden: Story = {
+  name: '作成が 403（権限不足の文言）',
+  beforeEach: mockFetch({ rejectCreate: 403 }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    const name = await canvas.findByLabelText('名前');
+    await user.type(name, 'X Project');
+    await user.click(canvas.getByRole('button', { name: 'プロジェクトを作成' }));
+    await expect(await canvas.findByRole('alert')).toHaveTextContent(
+      'プロジェクトを作成できるのは、テナントのオーナーと Admin だけです。',
     );
   },
 };

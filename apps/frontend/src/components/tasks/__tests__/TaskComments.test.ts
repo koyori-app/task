@@ -375,7 +375,11 @@ describe('TaskComments', () => {
 
   it('削除は確認を挟んでから onDelete を呼ぶ', async () => {
     const onDelete = vi.fn(async () => true);
-    const wrapper = mountComments({ threads: [thread('c-1', '消すコメント')], onDelete });
+    const wrapper = mountComments({
+      threads: [thread('c-1', '消すコメント')],
+      currentUserId: user.id,
+      onDelete,
+    });
 
     await menuItems(wrapper, 'コメントを削除')[0]!.trigger('click');
     expect(onDelete).not.toHaveBeenCalled();
@@ -392,7 +396,11 @@ describe('TaskComments', () => {
 
   it('削除が backend に拒否されたら確認 UI を残し、拒否理由を対象コメントの中に出す', async () => {
     const onDelete = vi.fn(async () => false);
-    const wrapper = mountComments({ threads: [thread('c-1', '消せないコメント')], onDelete });
+    const wrapper = mountComments({
+      threads: [thread('c-1', '消せないコメント')],
+      currentUserId: user.id,
+      onDelete,
+    });
 
     await menuItems(wrapper, 'コメントを削除')[0]!.trigger('click');
     const confirmButton = wrapper.findAll('button').find((button) => button.text() === '削除する');
@@ -414,7 +422,11 @@ describe('TaskComments', () => {
 
   it('スレッドを開いたまま削除に成功したら一覧へ戻す', async () => {
     const onDelete = vi.fn(async () => true);
-    const wrapper = mountComments({ threads: [thread('c-1', '消すスレッド')], onDelete });
+    const wrapper = mountComments({
+      threads: [thread('c-1', '消すスレッド')],
+      currentUserId: user.id,
+      onDelete,
+    });
 
     const replyOpenButton = wrapper.findAll('button').find((button) => button.text() === '返信');
     await replyOpenButton!.trigger('click');
@@ -477,7 +489,19 @@ describe('TaskComments', () => {
 
     const editButtons = menuItems(wrapper, 'コメントを編集');
     expect(editButtons).toHaveLength(1);
-    // 削除ボタンはテナントオーナーも許されるため全コメントに出る
+    // 削除は投稿者本人とテナントオーナーだけ。オーナーでなければ他人のコメントには出さない
+    expect(menuItems(wrapper, 'コメントを削除')).toHaveLength(1);
+  });
+
+  it('テナントオーナーには、他人のコメントの削除も出す（編集は出さない）', () => {
+    const other = { id: 'user-2', name: '佐藤花子' };
+    const wrapper = mountComments({
+      threads: [thread('c-1', '自分のコメント'), thread('c-2', '他人のコメント', { user: other })],
+      currentUserId: user.id,
+      isTenantOwner: true,
+    });
+
+    expect(menuItems(wrapper, 'コメントを編集')).toHaveLength(1);
     expect(menuItems(wrapper, 'コメントを削除')).toHaveLength(2);
   });
 

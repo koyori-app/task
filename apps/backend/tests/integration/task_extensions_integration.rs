@@ -13,6 +13,8 @@ use uuid::Uuid;
 use entity::{drive_files, project_members};
 
 struct TaskFixture {
+    /// セッションで操作している利用者
+    user_id: Uuid,
     tenant_id: Uuid,
     project_id: Uuid,
     task_id: String,
@@ -96,6 +98,7 @@ async fn setup_task(app: &mut TestApp) -> TaskFixture {
     let task_id = task["id"].as_str().expect("task id").to_string();
 
     TaskFixture {
+        user_id: user.id,
         tenant_id: tp.tenant_id,
         project_id: tp.project_id,
         task_id,
@@ -208,6 +211,17 @@ async fn task_extensions_integration_suite() {
     assert_eq!(attach.status(), StatusCode::CREATED);
     let attach_body: Value = attach.json().await.expect("attach json");
     let attachment_id = attach_body["id"].as_str().expect("attachment id");
+    // 解除できるのは作成者とテナントオーナーなので、画面が出し分けられるよう作成者を返す。
+    // アップロードした人（`user`）ではなく、添付した人（セッションの利用者）
+    assert_eq!(attach_body["created_by"], fx.user_id.to_string());
+    let listed = app.get_with_session(&attachments_path).await;
+    assert_eq!(listed.status(), StatusCode::OK);
+    let listed_body: Value = listed.json().await.expect("attachments list json");
+    assert_eq!(listed_body["attachments"][0]["id"], attachment_id);
+    assert_eq!(
+        listed_body["attachments"][0]["created_by"],
+        fx.user_id.to_string()
+    );
 
     let detach = app
         .delete_with_session(&format!("{attachments_path}/{attachment_id}"))

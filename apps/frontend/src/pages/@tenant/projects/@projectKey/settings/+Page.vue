@@ -6,6 +6,7 @@ import { usePageContext } from 'vike-vue/usePageContext';
 import ProjectSettingsView from '@/components/projects/ProjectSettingsView.vue';
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
+import { canManageProject } from '@/lib/tenant-permissions';
 import type { components } from '@/generated/api';
 
 type ProjectResponse = components['schemas']['ProjectResponse'];
@@ -16,6 +17,7 @@ const projectKey = computed(() => String(pageContext.routeParams.projectKey ?? '
 
 const {
   tenantId,
+  resolvedTenant,
   isTenantNotFound,
   isResolving: isTenantResolving,
   isError: isTenantResolveError,
@@ -30,6 +32,11 @@ const {
 
 const project = computed(
   () => projectsQuery.data.value?.find((p: ProjectResponse) => p.key === projectKey.value) ?? null,
+);
+
+// 本体の更新・削除ができる人だけに、一般の保存と削除を出す（backend の require_project_manager）
+const canManage = computed(() =>
+  project.value ? canManageProject(resolvedTenant.value, project.value) : false,
 );
 
 const isLoading = computed(() => isTenantResolving.value || isProjectResolving.value);
@@ -67,6 +74,7 @@ const isNotFound = computed(() => isTenantNotFound.value || isProjectNotFound.va
       :tenant-id="tenantId"
       :tenant-slug="tenantDisplayId"
       :project="project"
+      :can-manage="canManage"
     />
   </div>
 </template>

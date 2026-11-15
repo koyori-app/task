@@ -5,15 +5,20 @@ import { usePageContext } from 'vike-vue/usePageContext';
 
 import ProjectCreateForm from '@/components/projects/ProjectCreateForm.vue';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
+import { isTenantAdmin } from '@/lib/tenant-permissions';
 
 const pageContext = usePageContext();
 const tenantDisplayId = computed(() => String(pageContext.routeParams.tenant ?? ''));
 const {
   tenantId,
+  resolvedTenant,
   isTenantNotFound,
   isResolving: isTenantResolving,
   isError: isTenantResolveError,
 } = useResolvedTenantId(tenantDisplayId);
+
+// 共有プロジェクトを作れるのはテナントのオーナーと Admin だけ（作成 API が他は 403 にする）
+const canCreate = computed(() => isTenantAdmin(resolvedTenant.value));
 </script>
 
 <template>
@@ -28,6 +33,10 @@ const {
 
     <p v-else-if="isTenantNotFound" class="py-16 text-center text-sm text-muted-foreground">
       テナントが見つかりません
+    </p>
+
+    <p v-else-if="tenantId && !canCreate" class="py-16 text-center text-sm text-muted-foreground">
+      プロジェクトを作成できるのは、テナントのオーナーと Admin だけです。
     </p>
 
     <ProjectCreateForm v-else-if="tenantId" :tenant-id="tenantId" :tenant-slug="tenantDisplayId" />

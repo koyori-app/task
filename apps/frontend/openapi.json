@@ -31056,6 +31056,11 @@
             "type": "string",
             "format": "date-time"
           },
+          "created_by": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "添付を作成した利用者。解除できるのはこの利用者とテナントオーナー。\nこの欄を返さない旧いサーバーの応答では `None`"
+          },
           "drive_file_id": {
             "type": "string",
             "format": "uuid"

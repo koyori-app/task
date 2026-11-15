@@ -17,6 +17,8 @@ const props = defineProps<{
   error?: boolean;
   /** ガントの口を出すか（テナントのガントと同じく、実験的な機能の設定で出す） */
   showGantt?: boolean;
+  /** 共有プロジェクトを作れる人（テナントのオーナーと Admin）にだけ、作成ボタンを出す。既定は出さない */
+  canCreate?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -91,7 +93,7 @@ function isChildActive(child: ProjectChild) {
         Projects
       </h2>
       <Button
-        v-if="tenantSlug"
+        v-if="tenantSlug && canCreate"
         variant="ghost"
         ariaLabel="プロジェクトを作成"
         @click="emit('create')"
@@ -113,7 +115,12 @@ function isChildActive(child: ProjectChild) {
         <p class="mb-2.5 text-xs leading-snug text-muted-foreground">
           プロジェクトはまだありません。
         </p>
-        <Button v-if="tenantSlug" class="w-full" label="プロジェクトを作成" @click="emit('create')">
+        <Button
+          v-if="tenantSlug && canCreate"
+          class="w-full"
+          label="プロジェクトを作成"
+          @click="emit('create')"
+        >
           <template #icon><PhPlus class="size-3.5" /></template>
         </Button>
       </div>

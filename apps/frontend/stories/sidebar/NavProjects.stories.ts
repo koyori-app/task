@@ -42,6 +42,8 @@ type StoryState = {
   error?: boolean;
   /** アイコンだけの表示（広い画面で畳んだサイドバー） */
   rail?: boolean;
+  /** プロジェクトを作れる人（テナントのオーナーと Admin）か */
+  canCreate?: boolean;
 };
 
 const renderWithState = (state: StoryState) => () => ({
@@ -61,6 +63,7 @@ const renderWithState = (state: StoryState) => () => ({
           :projects="state.projects"
           :loading="state.loading ?? false"
           :error="state.error ?? false"
+          :can-create="state.canCreate ?? false"
           @retry="onRetry"
         />
       </Sidebar>
@@ -78,7 +81,7 @@ export default meta;
 type Story = StoryObj;
 
 export const ProjectList: Story = {
-  render: renderWithState({ projects }),
+  render: renderWithState({ projects, canCreate: true }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByText('Design Engineering')).toBeInTheDocument();
@@ -92,6 +95,18 @@ export const ProjectList: Story = {
       'href',
       '/acme/projects/design/settings',
     );
+    // 作れる人には見出し横の「+」が出る
+    await expect(canvas.getByRole('button', { name: 'プロジェクトを作成' })).toBeInTheDocument();
+  },
+};
+
+/** テナントの Member など、プロジェクトを作れない人。見出し横の「+」を出さない */
+export const MemberWithoutCreate: Story = {
+  render: renderWithState({ projects }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText('Design Engineering')).toBeInTheDocument();
+    await expect(canvas.queryByRole('button', { name: /プロジェクトを作成/ })).toBeNull();
   },
 };
 
@@ -118,7 +133,7 @@ export const Loading: Story = {
 };
 
 export const Empty: Story = {
-  render: renderWithState({ projects: [] }),
+  render: renderWithState({ projects: [], canCreate: true }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByText('プロジェクトはまだありません。')).toBeInTheDocument();

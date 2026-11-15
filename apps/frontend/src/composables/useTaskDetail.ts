@@ -7,6 +7,7 @@ import type { EditableField, MutatingField } from '@/components/tasks/editable-f
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import { fetchClient, apiClient, TASK_SEARCH_PATH } from '@/lib/api-vue-query';
+import { isTenantOwner as isOwnerOf } from '@/lib/tenant-permissions';
 import { clampProgressPct, localDateInputToIso, taskListHref } from '@/lib/task-display';
 import type { components } from '@/generated/api';
 import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
@@ -93,6 +94,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
 
   const {
     tenantId,
+    resolvedTenant,
     isTenantNotFound,
     isResolving: isTenantResolving,
     isError: isTenantResolveError,
@@ -656,6 +658,8 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     // 解決済み ID（消費側で必要になれば使う）
     tenantId,
     projectId,
+    /** 見ている人がテナントオーナーか。他人のコメントの削除・添付の解除を出すかに使う */
+    isTenantOwner: computed(() => isOwnerOf(resolvedTenant.value)),
     // Hub バインド用
     displayTask,
     statuses: computed(() => statusesQuery.data.value ?? []),
