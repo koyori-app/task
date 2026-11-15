@@ -547,7 +547,7 @@ fn format_finding(finding: &FindingResponse) -> String {
         (Some(file), None) => format!(" {file}"),
         (None, _) => String::new(),
     };
-    format!(
+    let mut line = format!(
         "{}\t{:<6}\t{:<8}\tR{}\t{}{}",
         finding.id,
         finding.severity.as_str().to_uppercase(),
@@ -555,7 +555,11 @@ fn format_finding(finding: &FindingResponse) -> String {
         finding.round,
         finding.title,
         location,
-    )
+    );
+    if let Some(source) = finding.carried_from_finding_id {
+        line.push_str(&format!("\tcarried from finding {source}"));
+    }
+    line
 }
 
 fn format_round(round: &ReviewResponse) -> String {
@@ -715,6 +719,15 @@ mod tests {
                 "line": 42,
             }],
         })
+    }
+
+    #[test]
+    fn carried_findings_show_the_source() {
+        let mut copied = finding(None, None);
+        let source = uuid::Uuid::new_v4();
+        copied.carried_from_finding_id = Some(source);
+        assert!(format_finding(&copied).contains(&format!("carried from finding {source}")));
+        assert!(!format_finding(&finding(None, None)).contains("carried from"));
     }
 
     #[test]

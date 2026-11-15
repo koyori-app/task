@@ -886,7 +886,7 @@ async fn notify_pr_author<C: ConnectionTrait>(
     };
     for round in rounds {
         // 自分で出したラウンドは自分に知らせない
-        if round.reviewer_id == author_id {
+        if round.reviewer_id == author_id || round.carried_by == Some(author_id) {
             continue;
         }
         let findings = service::reviews::round_findings(db, round.id).await?;

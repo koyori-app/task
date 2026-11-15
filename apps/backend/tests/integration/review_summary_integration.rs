@@ -493,6 +493,7 @@ async fn consecutive_transitions_coalesce_into_one_summary_update() {
 /// 起票時点では作者が分からない（このジョブが GitHub から取ってくる）ので、
 /// `create_review` の宛先には入らない。ジョブを何度走らせても増えないことも固定する。
 /// 起票トランザクションとジョブが重なっても、確定したラウンドを取りこぼさない。
+/// 作者自身が引き継いだ写しは自己通知せず、通常レビューへの通知は保つ。
 #[serial_test::serial]
 #[tokio::test]
 async fn the_pull_request_author_is_notified_once() {
@@ -556,7 +557,21 @@ async fn the_pull_request_author_is_notified_once() {
         "起票の時点では作者が分からない"
     );
 
-    // 起票と同じロックを保持し、ジョブが待機してから R2 を確定する。
+    // 作者自身が引き継いだ写しは、作者未解決の時点で作られても自己通知しない。
+    let source = entity::reviews::Entity::find()
+        .filter(entity::reviews::Column::ProjectId.eq(tp.project_id))
+        .one(&app.state.db)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut carried: entity::reviews::ActiveModel = source.clone().into();
+    carried.id = Set(Uuid::new_v4());
+    carried.round = Set(2);
+    carried.carried_by = Set(Some(author.id));
+    carried.carried_from_review_id = Set(Some(source.id));
+    carried.insert(&app.state.db).await.unwrap();
+
+    // 起票と同じロックを保持し、ジョブが待機してから R3 を確定する。
     let txn = app.state.db.begin().await.unwrap();
     let repo = service::reviews::current_repo(&txn, tp.project_id)
         .await
@@ -564,7 +579,7 @@ async fn the_pull_request_author_is_notified_once() {
     let round = service::reviews::next_round(&txn, tp.project_id, &repo, PR_NUMBER)
         .await
         .unwrap();
-    assert_eq!(round, 2);
+    assert_eq!(round, 3);
     let pid = txn
         .query_one_raw(sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Postgres,
@@ -604,6 +619,8 @@ async fn the_pull_request_author_is_notified_once() {
         .unwrap()
         .unwrap();
     let mut concurrent: entity::reviews::ActiveModel = first.into();
+    concurrent.carried_by = Set(None);
+    concurrent.carried_from_review_id = Set(None);
     concurrent.id = Set(Uuid::new_v4());
     concurrent.round = Set(round);
     concurrent.summary = Set("並行起票".into());
@@ -628,7 +645,7 @@ async fn the_pull_request_author_is_notified_once() {
     notified_rounds.sort();
     assert_eq!(
         notified_rounds,
-        vec![1, 2],
+        vec![1, 3],
         "並行起票したラウンドも最初のジョブで通知する"
     );
     job::review_summary::process(
@@ -648,7 +665,7 @@ async fn the_pull_request_author_is_notified_once() {
         "再実行しても各ラウンドの作者通知は 1 件だけ"
     );
 
-    // 作者を解決できる R3 は起票時に通知される。要約ジョブで重複させない。
+    // 作者を解決できる R4 は起票時に通知される。要約ジョブで重複させない。
     let res = app
         .post_json_with_session(
             &format!(
