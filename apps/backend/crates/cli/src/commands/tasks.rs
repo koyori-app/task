@@ -168,6 +168,10 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             // 本文の読み取りは API を叩く前に済ませる（ファイルが無いときに
             // タスクを作ってから落ちるのを避ける）
             let description = resolve_body(description, description_file, "description")?;
+            check_description_not_empty(
+                description.as_deref(),
+                "Omit --description / --description-file to create a task without one.",
+            )?;
             let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let status_id = match status {
@@ -260,6 +264,10 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
         } => {
             let priority = priority.as_deref().map(parse_priority).transpose()?;
             let description = resolve_body(description, description_file, "description")?;
+            check_description_not_empty(
+                description.as_deref(),
+                "To remove the description, use --clear-description.",
+            )?;
             let target = check_task_target(&task_ref, project.as_deref())?;
             let api = &context.connect().await?;
             let (project, task_id) = resolve_task_target(api, target).await?;
@@ -1113,6 +1121,17 @@ pub(crate) fn page_summary(shown: usize, total: u64, page: u64, has_next: bool) 
     }
 }
 
+/// 空（空白だけ）の本文は、途中のコマンドが失敗して空のファイルができた結果のことが多い。
+/// そのまま送ると本文が消えるので、API を叩く前に断る。
+fn check_description_not_empty(description: Option<&str>, hint: &str) -> Result<()> {
+    if description.is_some_and(|text| text.trim().is_empty()) {
+        return Err(CliError::validation(format!(
+            "The description is empty. {hint}"
+        )));
+    }
+    Ok(())
+}
+
 /// 綴りは entity の `string_value` を正とする。CLI に一覧を写さない。
 fn parse_priority(raw: &str) -> Result<TaskPriority> {
     TaskPriority::try_from_value(&raw.to_ascii_lowercase()).map_err(|_| {
@@ -1347,14 +1366,20 @@ mod tests {
         assert!(json["title"].is_null());
     }
 
-    /// 空文字は「本文を空にする」意図。`clear_description` とは別扱いで、そのまま送る。
     #[test]
-    fn an_update_sends_an_empty_description_as_is() {
-        let body = update_body(None, Some(""), None);
-        let json = serde_json::to_value(&body).unwrap();
-
-        assert_eq!(json["description"], "");
-        assert_eq!(json["clear_description"], false);
+    fn an_empty_description_is_refused_with_exit_code_2() {
+        for empty in ["", " \n\t"] {
+            let err =
+                check_description_not_empty(Some(empty), "Use --clear-description.").unwrap_err();
+            assert_eq!(err.exit_code, 2);
+            assert!(
+                err.message.contains("--clear-description"),
+                "{}",
+                err.message
+            );
+        }
+        assert!(check_description_not_empty(None, "").is_ok());
+        assert!(check_description_not_empty(Some("x"), "").is_ok());
     }
 
     /// 未指定のラベルで空配列を送ると、API 側は「全解除」と解釈する。

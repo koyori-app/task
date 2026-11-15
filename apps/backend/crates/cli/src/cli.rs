@@ -204,10 +204,10 @@ pub enum TasksCommand {
         /// Task title
         #[arg(long)]
         title: String,
-        /// Task description
+        /// Task description (must not be empty)
         #[arg(long)]
         description: Option<String>,
-        /// Read the description from a file (`-` for stdin)
+        /// Read the description from a file (`-` for stdin; an empty file is refused)
         #[arg(long, conflicts_with = "description")]
         description_file: Option<String>,
         #[arg(long, help = concat!("Task priority. Accepted values: ", priority_hint!()))]
@@ -257,10 +257,10 @@ pub enum TasksCommand {
         /// New title
         #[arg(long)]
         title: Option<String>,
-        /// New description
+        /// New description (an empty value is refused; use --clear-description to remove it)
         #[arg(long)]
         description: Option<String>,
-        /// Read the new description from a file (`-` for stdin)
+        /// Read the new description from a file (`-` for stdin; an empty file is refused)
         #[arg(long, conflicts_with = "description")]
         description_file: Option<String>,
         /// Status name
@@ -396,7 +396,7 @@ pub struct TaskFieldArgs {
 /// 明示的な解除。値の指定と混ぜられないよう `conflicts_with` を張る。
 #[derive(Debug, clap::Args)]
 pub struct TaskClearArgs {
-    /// Remove the description
+    /// Remove the description (the only way to empty it)
     #[arg(long, conflicts_with_all = ["description", "description_file"])]
     pub clear_description: bool,
     /// Remove the soft deadline

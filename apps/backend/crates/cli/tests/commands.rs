@@ -708,6 +708,83 @@ async fn tasks_update_clears_every_assignee_in_the_update_request() {
     assert_eq!(body["assignees"], json!([]));
 }
 
+/// 途中のコマンドが失敗して空のファイルができても、本文を消さない。
+#[tokio::test]
+async fn tasks_update_refuses_an_empty_description_file_before_any_request() {
+    let harness = harness().await;
+    let dir = tempfile::tempdir().unwrap();
+    for (name, content) in [("empty.md", ""), ("blank.md", " \n\t\n")] {
+        let file = dir.path().join(name);
+        std::fs::write(&file, content).unwrap();
+        let error = harness
+            .run(&[
+                "task",
+                "tasks",
+                "update",
+                "APP-7",
+                "--description-file",
+                file.to_str().unwrap(),
+            ])
+            .await
+            .unwrap_err();
+        assert_eq!(error.exit_code, 2, "{name}: {}", error.message);
+        assert!(
+            error.message.contains("--clear-description"),
+            "{}",
+            error.message
+        );
+    }
+    let error = harness
+        .run(&["task", "tasks", "update", "APP-7", "--description", ""])
+        .await
+        .unwrap_err();
+    assert_eq!(error.exit_code, 2);
+    assert!(harness.sent_nothing().await);
+}
+
+/// 対照: 本文を消す明示のフラグだけが、本文を空にする要求を送る。
+#[tokio::test]
+async fn tasks_update_clears_the_description_only_with_the_explicit_flag() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    Mock::given(method("PUT"))
+        .and(path(project_path("tasks/APP-7")))
+        .and(body_partial_json(json!({ "clear_description": true })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(task_detail_json()))
+        .expect(1)
+        .mount(&harness.server)
+        .await;
+    let code = harness
+        .run(&["task", "tasks", "update", "APP-7", "--clear-description"])
+        .await
+        .unwrap();
+    assert_eq!(code, 0);
+}
+
+#[tokio::test]
+async fn tasks_create_refuses_an_empty_description_file_before_any_request() {
+    let harness = harness().await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("empty.md");
+    std::fs::write(&file, "").unwrap();
+    let error = harness
+        .run(&[
+            "task",
+            "tasks",
+            "create",
+            "--project",
+            "APP",
+            "--title",
+            "T",
+            "--description-file",
+            file.to_str().unwrap(),
+        ])
+        .await
+        .unwrap_err();
+    assert_eq!(error.exit_code, 2, "{}", error.message);
+    assert!(harness.sent_nothing().await);
+}
+
 #[tokio::test]
 async fn tasks_update_propagates_rejection_and_failure_without_further_writes() {
     let harness = harness().await;

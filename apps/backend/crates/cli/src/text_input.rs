@@ -119,7 +119,7 @@ mod tests {
         assert_eq!(body, "本文");
     }
 
-    /// パイプで明示的に空を渡したときは、その意図（本文を空にする）を尊重する。
+    /// 空を空として返す。空を断るかは呼び出し側が決める（コメントの投稿と、タスクの本文で違う）。
     #[test]
     fn keeps_an_explicitly_piped_empty_body() {
         let body = read_body_with("-", "description", |_| Ok(Some(String::new()))).unwrap();
@@ -160,7 +160,7 @@ mod tests {
         assert_eq!(body.as_deref(), Some("ファイルの本文"));
     }
 
-    /// 空文字も「渡された」として扱う。本文を空にする指定を落とさないため。
+    /// 空文字も「渡された」として返す。空を断るかは呼び出し側が決める。
     #[test]
     fn keeps_an_empty_inline_value() {
         let body = resolve_body(Some(String::new()), None, "description").unwrap();
