@@ -37,4 +37,21 @@ describe('chartRows と chartHeight', () => {
     expect(props.progressLine).toBe('hidden');
     expect(chartHeight(props.rows, true)).toBe(HEADER_H + GROUP_H + 72);
   });
+
+  it('広い画面でも狭い画面でも端末の格を high に決め、図だけの内側のスクロール域を作らせない', () => {
+    for (const compact of [false, true]) {
+      const props = chartProps({
+        layout,
+        today: '2026-11-09',
+        from: '2026-11-09',
+        to: '2026-11-15',
+        scale: 'day',
+        pxPerDay: 46,
+        compact,
+        progressLine: false,
+        backend: 'svg',
+      });
+      expect(props.deviceTier).toBe('high');
+    }
+  });
 });

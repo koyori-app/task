@@ -105,6 +105,60 @@ const unscheduledTasks: ScheduleTask[] = [
   task(8, { title: '用語集', project: PROJECT_DOC }),
 ];
 
+// 縦に長い図。狭い画面（試験の既定の幅 414px）の範囲 7/13〜7/19 に収める
+const manyTasks: ScheduleTask[] = Array.from({ length: 20 }, (_, i) =>
+  task(100 + i, {
+    title: `並びの確かめ ${i + 1}`,
+    planned_start_on: `2026-07-${13 + (i % 5)}`,
+    soft_deadline: `2026-07-${15 + (i % 5)}T00:00:00Z`,
+    progress_pct: (i * 17) % 100,
+  }),
+);
+
+/**
+ * arc-vue は `navigator.deviceMemory` と `hardwareConcurrency` で端末の格を判じる。
+ * 物語の間だけ値を差し替え、終わったら外して元の値（Navigator.prototype の getter）に戻す。
+ */
+function emulateDevice(memory: number | undefined, cores: number) {
+  Object.defineProperty(navigator, 'deviceMemory', { configurable: true, get: () => memory });
+  Object.defineProperty(navigator, 'hardwareConcurrency', { configurable: true, get: () => cores });
+  return () => {
+    delete (navigator as { deviceMemory?: number }).deviceMemory;
+    delete (navigator as { hardwareConcurrency?: number }).hardwareConcurrency;
+  };
+}
+
+/**
+ * 図の中のスクロール域と頁の両方を縦に送ってから、重ね文字の題の行と図の棒が同じ課題の行に
+ * 並ぶことを確かめる。棒の上端と題の行の上端の差は、どの課題でも同じでなければならない。
+ */
+async function expectOverlayAlignedAfterScroll(canvasElement: HTMLElement) {
+  const canvas = within(canvasElement);
+  await expect(canvas.findByText('並びの確かめ 20')).resolves.toBeInTheDocument();
+  await waitFor(() =>
+    expect(canvasElement.querySelector('[data-task-id="task-100"]')).not.toBeNull(),
+  );
+  const scroller = canvasElement.querySelector<HTMLElement>('.koyori-gantt-scroll')!;
+  // 図だけが縦に送れる形（内側のスクロール域）を残していないこと
+  await expect(scroller.scrollHeight).toBeLessThanOrEqual(scroller.clientHeight + 1);
+  scroller.scrollTop = 400;
+  scroller.dispatchEvent(new Event('scroll'));
+  window.scrollTo(0, 400);
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const deltas: number[] = [];
+  for (const t of manyTasks) {
+    const bar = canvasElement.querySelector(`[data-task-id="${t.id}"]`);
+    if (!bar) continue;
+    const title = canvas.getByText(t.title).closest('button')!;
+    deltas.push(Math.round(bar.getBoundingClientRect().top - title.getBoundingClientRect().top));
+  }
+  await expect(deltas.length).toBe(manyTasks.length);
+  // 棒は題の下（行の下寄せ）にあり、どの行でも同じ隔たり
+  await expect(deltas[0]).toBeGreaterThan(0);
+  await expect(new Set(deltas).size).toBe(1);
+  window.scrollTo(0, 0);
+}
+
 const jsonResponse = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {
     status,
@@ -247,5 +301,37 @@ export const Empty: Story = {
     await expect(
       canvas.findByText('この期間に予定のあるタスクはありません'),
     ).resolves.toBeInTheDocument();
+  },
+};
+
+export const LowDeviceScroll: Story = {
+  name: '低性能の端末で縦に送る（狭い画面）',
+  decorators: [withContext()],
+  beforeEach: () => {
+    const restoreDevice = emulateDevice(undefined, 2);
+    const restoreFetch = createMockFetch({ tasks: manyTasks, unscheduled: [] });
+    return () => {
+      restoreFetch();
+      restoreDevice();
+    };
+  },
+  play: async ({ canvasElement }) => {
+    await expectOverlayAlignedAfterScroll(canvasElement);
+  },
+};
+
+export const HighDeviceScroll: Story = {
+  name: '高性能の端末で縦に送る（狭い画面）',
+  decorators: [withContext()],
+  beforeEach: () => {
+    const restoreDevice = emulateDevice(8, 8);
+    const restoreFetch = createMockFetch({ tasks: manyTasks, unscheduled: [] });
+    return () => {
+      restoreFetch();
+      restoreDevice();
+    };
+  },
+  play: async ({ canvasElement }) => {
+    await expectOverlayAlignedAfterScroll(canvasElement);
   },
 };
