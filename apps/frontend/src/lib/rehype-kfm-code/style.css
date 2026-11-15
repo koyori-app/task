@@ -5,10 +5,10 @@
  *
  * 見た目の目安は GitHub のコードブロック (帯は薄い背景・等幅・角丸・境界線)。
  * 構造色 (境界・帯の地・コードの地) は tailwind.css のテーマトークン
- * (--border / --muted / --card) に寄せる — トークン自体が .dark で反転する。
+ * (--border / --muted / --card) に寄せる — トークン自体が html の data-theme で反転する。
  * トークンに対応の無い文字色 (帯とガター = 行番号の muted 文字色) だけ
- * --kfm-code-* 変数で持ち、.dark ブリッジで実値を差し替える
- * (alerts / starry-night が踏んだ「CSS ライト固定で .dark 下に沈む」問題への前例踏襲)。
+ * --kfm-code-* 変数で持ち、ダークブリッジ (html の data-theme が light 以外) で実値を差し替える
+ * (alerts / starry-night が踏んだ「CSS ライト固定でダーク下に沈む」問題への前例踏襲)。
  */
 
 :root {
@@ -16,8 +16,8 @@
   --kfm-code-muted-fg: #59636e;
 }
 
-.dark {
-  /* GitHub dark の同色 (starry-night .dark ブリッジの comment 色と同系) */
+:root:not([data-theme='light']) {
+  /* GitHub dark の同色 (starry-night のダークブリッジの comment 色と同系) */
   --kfm-code-muted-fg: #9198a1;
 }
 

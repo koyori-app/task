@@ -6,22 +6,22 @@ import {
   USER_AVATAR_INITIALS_CLASS,
 } from '@/lib/user-avatar';
 
-import { hex, ratio, token } from './design-token';
+import { hex, ratio, token, type ThemeName } from './design-token';
 
 /**
  * 頭文字の字と地の対比（WCAG 2.x の相対輝度）。色は task の design token（tailwind.css の
- * `:root` と `.dark`）から読み、頭文字の組が明るい面でも暗い面でも 4.5:1 以上であることを縛る。
+ * `:root` と ui の明るい配色・暗い配色）から読み、頭文字の組が明るい面でも暗い面でも 4.5:1 以上であることを縛る。
  */
 describe('頭文字の対比', () => {
   it('頭文字の組は bg-muted と text-foreground', () => {
     expect(USER_AVATAR_INITIALS_CLASS.split(' ').sort()).toEqual(['bg-muted', 'text-foreground']);
   });
 
-  it.each([
-    [':root', '明るい面'],
-    ['.dark', '暗い面'],
-  ])('%s（%s）の text-foreground は bg-muted 上で 4.5:1 以上', (scope) => {
-    expect(ratio(token(scope, 'foreground'), token(scope, 'muted'))).toBeGreaterThanOrEqual(4.5);
+  it.each<[ThemeName, string]>([
+    ['light', '明るい面'],
+    ['dark', '暗い面'],
+  ])('%s（%s）の text-foreground は bg-muted 上で 4.5:1 以上', (theme) => {
+    expect(ratio(token(theme, 'foreground'), token(theme, 'muted'))).toBeGreaterThanOrEqual(4.5);
   });
 
   it('灰色（USER_AVATAR_INACTIVE_CLASS の opacity）にしても、面の上で 4.5:1 以上', () => {
@@ -33,7 +33,7 @@ describe('頭文字の対比', () => {
     const decode = (v: number) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
     const mix = (fg: number[], bg: number[]) =>
       fg.map((v, i) => decode(alpha * encode(v) + (1 - alpha) * encode(bg[i])));
-    for (const scope of [':root', '.dark']) {
+    for (const scope of ['light', 'dark'] as const) {
       const page = token(scope, 'background');
       const text = mix(token(scope, 'foreground'), page);
       const ground = mix(token(scope, 'muted'), page);

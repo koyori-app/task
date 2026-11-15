@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia';
 
 import AccountSettingsNav from '@/components/settings/AccountSettingsNav.vue';
 import { usePreferencesStore } from '@/stores/preferences';
+import { htmlTheme } from '../html-theme';
 
 /** アカウント設定の一覧。「実験的機能」は環境設定で表示を有効にした時だけ、一番下に出る。 */
 const meta = {
@@ -48,4 +49,25 @@ export const ExperimentsShown: Story = {
     await expect(link).toHaveAttribute('href', '/settings/experiments');
     await expect(link).toHaveAttribute('aria-current', 'page');
   },
+};
+
+export const ThemeSelected: Story = {
+  name: 'テーマを選択（ダーク）',
+  args: { currentPath: '/settings/theme' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const link = canvas.getByRole('link', { name: 'テーマ' });
+    await expect(link).toHaveAttribute('href', '/settings/theme');
+    await expect(link).toHaveAttribute('aria-current', 'page');
+    // 並びは「環境設定」の次
+    const links = canvas.getAllByRole('link');
+    const index = links.findIndex((a) => a.textContent?.trim() === '環境設定');
+    await expect(links[index + 1]).toBe(link);
+  },
+};
+
+export const ThemeSelectedLight: Story = {
+  ...ThemeSelected,
+  name: 'テーマを選択（ライト）',
+  beforeEach: htmlTheme('light'),
 };

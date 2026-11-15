@@ -765,7 +765,7 @@ async function onRoundCreated() {
                 -->
                 <span
                   v-if="pr.blocking === 0"
-                  class="rounded-full bg-green-600/10 px-2 py-0.5 text-xs text-green-700 dark:text-green-400"
+                  class="rounded-full bg-green-600/10 px-2 py-0.5 text-xs text-green-800 dark:text-green-400"
                 >
                   未解決なし
                 </span>

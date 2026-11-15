@@ -49,6 +49,7 @@ sidebar:
 | `/settings/security` | 認証方法、2 段階認証、Koyori Desktop の端末（[アカウント設定](/dev/features/account-settings)） |
 | `/settings/tokens` | パーソナルアクセストークンの発行と取り消し（[アカウント設定](/dev/features/account-settings)） |
 | `/settings/preferences` | 環境設定 |
+| `/settings/theme` | テーマ（配色の切り替え） |
 | `/settings/experiments` | 実験的機能の設定 |
 
 ### 管理者画面（テナント外）
@@ -110,6 +111,7 @@ sidebar:
 | `/settings/security` | `settings/security/+Page.vue` |
 | `/settings/tokens` | `settings/tokens/+Page.vue` |
 | `/settings/preferences` | `settings/preferences/+Page.vue` |
+| `/settings/theme` | `settings/theme/+Page.vue` |
 | `/settings/experiments` | `settings/experiments/+Page.vue` |
 | `/admin/users` | `admin/users/+Page.vue` |
 | `/admin/users/{id}` | `admin/users/@userId/+Page.vue` |
