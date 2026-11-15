@@ -264,6 +264,8 @@ async fn run_binary_at(server: &MockServer, prefix: &str, args: &[&str]) -> (boo
             .env("TASK_API_URL", uri)
             .env("TASK_TOKEN", "token-1")
             .env("TASK_TENANT", TENANT)
+            // 実バイナリは `from_process` を通る。通知で GitHub へ出ないようにする
+            .env("TASK_NO_UPDATE_CHECK", "1")
             .output()
             .unwrap()
     })
@@ -1077,6 +1079,21 @@ async fn tasks_create_does_not_look_up_tenants_when_the_url_cannot_be_built() {
     assert!(ok, "{stdout}");
     assert_eq!(stdout, "APP-7\n");
     assert_eq!(harness.calls_to("/v1/tenants").await, 0);
+}
+
+/// `Context::new` には更新の相手がいない。テストの足場から GitHub へ出る経路は無い。
+#[tokio::test]
+async fn self_update_is_not_available_without_an_updater() {
+    let harness = harness().await;
+
+    let err = harness.run(&["task", "self-update"]).await.unwrap_err();
+
+    assert!(
+        err.message.contains("not available in this build"),
+        "{}",
+        err.message
+    );
+    assert!(harness.sent_nothing().await);
 }
 
 #[tokio::test]

@@ -11,6 +11,7 @@ pub mod error;
 pub mod output;
 pub mod resolve;
 pub mod text_input;
+pub mod update;
 
 use api::ApiClient;
 use cli::{Cli, Command};
@@ -27,20 +28,41 @@ type EnvLookup = Box<dyn Fn(&str) -> Option<String>>;
 pub struct Context {
     store: ConfigStore,
     env: EnvLookup,
+    /// 新しい版の確認と `self-update` の相手。`Context::new` では `None`（外へ出る経路が無い）。
+    /// 実プロセスだけが `from_process` で入れる
+    updater: Option<update::Updater>,
 }
 
 impl Context {
     pub fn from_process() -> Result<Self> {
-        Ok(Self::new(ConfigStore::discover()?, |key| {
-            std::env::var(key).ok()
-        }))
+        let mut context = Self::new(ConfigStore::discover()?, |key| std::env::var(key).ok());
+        context.updater = std::env::current_exe()
+            .and_then(std::fs::canonicalize)
+            .ok()
+            .map(|exe| update::Updater {
+                source: update::ReleaseSource::github(),
+                installed: update::Installed {
+                    version: env!("TASK_CLI_VERSION").to_string(),
+                    target: env!("TASK_CLI_TARGET").to_string(),
+                    exe,
+                    from_release: env!("TASK_CLI_VERSION_SOURCE") == "env",
+                },
+            });
+        Ok(context)
     }
 
     pub fn new(store: ConfigStore, env: impl Fn(&str) -> Option<String> + 'static) -> Self {
         Self {
             store,
             env: Box::new(env),
+            updater: None,
         }
+    }
+
+    /// 新しい版の確認と `self-update` の相手を差し込む（テスト用。実プロセスは `from_process`）。
+    pub fn with_updater(mut self, updater: update::Updater) -> Self {
+        self.updater = Some(updater);
+        self
     }
 
     pub fn store(&self) -> &ConfigStore {
@@ -97,5 +119,24 @@ pub async fn run(cli: Cli, context: &Context) -> Result<i32> {
             commands::notifications::run(context, command, output).await
         }
         Command::Tenants { command } => commands::tenants::run(context, command, output).await,
+        Command::SelfUpdate => match &context.updater {
+            Some(updater) => update::self_update(updater, output).await,
+            None => Err(error::CliError::new(
+                "self-update is not available in this build",
+            )),
+        },
     }
+}
+
+/// 新しい版があるときの 1 行（標準エラーに出す）。コマンドの結果にかかわらず、最後に呼ぶ。
+/// 失敗は全部 `None` で、本体の結果を変えない。
+pub async fn update_notice(context: &Context) -> Option<String> {
+    let updater = context.updater.as_ref()?;
+    update::notice(
+        updater,
+        &context.store.update_state_path(),
+        chrono::Utc::now(),
+        &|key| (context.env)(key),
+    )
+    .await
 }

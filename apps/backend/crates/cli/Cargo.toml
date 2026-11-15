@@ -18,6 +18,11 @@ entity = { path = "../entity" }
 common = { path = "../common" }
 payload = { path = "../payload" }
 chrono = { version = "0.4", default-features = false, features = ["serde"] }
+# `self-update` が、配布物の SHA-256 を確かめて tar.gz から `task` を取り出すのに使う。
+flate2 = "1"
+hex = "0.4"
+sha2 = "0.11"
+tar = "0.4"
 clap = { version = "4.5", features = ["derive"] }
 sea-orm = { workspace = true }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }

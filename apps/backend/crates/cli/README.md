@@ -54,6 +54,24 @@ mkdir -p ~/.local/bin && tar -xzf "$asset" -C ~/.local/bin
 `--version` が名乗る版はタグと一致する（リリース時にタグから注入し、その場で
 突き合わせている）。タグ以外でビルドしたバイナリはクレートの版を名乗る。
 
+### 更新
+
+新しい版があると、コマンドの最後に標準エラーへ 1 行で知らせる
+（`A new release of task is available: 0.1.51 -> 0.2.0. Run \`task self-update\` to install it.`）。
+標準出力と終了コードは変えない。
+
+- 確認は 1 日に 1 回まで（最後に確かめた時刻を `~/.config/task/update-check.json` に置く）。待ち時間は最大 2 秒
+- `TASK_NO_UPDATE_CHECK=1` で止まる。`CI` が空でなければ出ない。タグ以外でビルドしたバイナリ（版が `0.1.0`）も出ない
+- 通信・GitHub の制限・応答の形の失敗は黙って無視する。本体のコマンドは止まらない
+
+```bash
+task self-update   # 最新の配布物を落とし、.sha256 を確かめて、今の task と入れ替える
+```
+
+`self-update` が確かめるのは `.sha256`（破損や取り違え）までで、配布元の確かさは TLS に頼る。署名の検証は
+下の「検め方」の手順で行う。Windows は非対応（動いている `.exe` は置き換えられないので、`.zip` を落として入れ替える）。
+GitHub の API を使うので、`task` のトークンは送らない。
+
 ### 検め方
 
 リリースには、四つの配布物の hash を束ねた `SHA256SUMS` と、それへの keyless 署名

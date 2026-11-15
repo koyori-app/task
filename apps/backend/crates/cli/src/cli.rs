@@ -173,6 +173,8 @@ pub enum Command {
         #[command(subcommand)]
         command: TenantsCommand,
     },
+    /// Replace this binary with the latest release (verifies the SHA-256)
+    SelfUpdate,
 }
 
 #[derive(Debug, Subcommand)]

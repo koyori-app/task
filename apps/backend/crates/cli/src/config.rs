@@ -76,6 +76,11 @@ impl ConfigStore {
         self.dir.join("config.yaml")
     }
 
+    /// 新しい版を最後に確かめた時刻の置き場所。
+    pub fn update_state_path(&self) -> PathBuf {
+        self.dir.join("update-check.json")
+    }
+
     pub fn load(&self) -> Result<TaskConfig> {
         let path = self.path();
         if !path.exists() {

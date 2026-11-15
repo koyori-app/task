@@ -10,6 +10,19 @@ fn main() {
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
 
+    // 手元のビルドは版を名乗れない（クレートの版 0.1.0）ので、新しい版の通知の対象にしない。
+    // タグからのリリースだけが `TASK_CLI_VERSION` を渡す
+    let from_release = std::env::var("TASK_CLI_VERSION")
+        .ok()
+        .is_some_and(|value| !value.trim().is_empty());
+    // 配布物の名前（`task-<版>-<target>.tar.gz`）に使う
+    let target = std::env::var("TARGET").unwrap_or_default();
+
     println!("cargo:rustc-env=TASK_CLI_VERSION={version}");
+    println!("cargo:rustc-env=TASK_CLI_TARGET={target}");
+    println!(
+        "cargo:rustc-env=TASK_CLI_VERSION_SOURCE={}",
+        if from_release { "env" } else { "crate" }
+    );
     println!("cargo:rerun-if-env-changed=TASK_CLI_VERSION");
 }

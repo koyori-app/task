@@ -73,6 +73,15 @@ impl Harness {
         task_cli::run(cli, &self.context).await
     }
 
+    pub fn with_updater(mut self, updater: task_cli::update::Updater) -> Self {
+        self.context = self.context.with_updater(updater);
+        self
+    }
+
+    pub async fn update_notice(&self) -> Option<String> {
+        task_cli::update_notice(&self.context).await
+    }
+
     pub fn store(&self) -> &ConfigStore {
         self.context.store()
     }
