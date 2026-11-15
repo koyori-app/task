@@ -699,10 +699,20 @@ pub async fn list_tasks(
     if let Some(to) = q.planned_start_to {
         query = query.filter(tasks::Column::PlannedStartOn.lte(to));
     }
+    // 「この人が担当」と「誰も担当していない」は同時に成り立たない。
+    // 黙って片方を捨てると呼び出し側の間違いが表に出ないので弾く
+    if q.unassigned && q.assignee_id.is_some() {
+        return Err(AppError::BadRequest);
+    }
     if let Some(uid) = q.assignee_id {
         query = query.filter(Expr::cust_with_values(
             "EXISTS (SELECT 1 FROM task_assignees WHERE task_assignees.task_id = tasks.id AND task_assignees.user_id = $1)",
             vec![sea_orm::Value::from(uid)],
+        ));
+    }
+    if q.unassigned {
+        query = query.filter(Expr::cust(
+            "NOT EXISTS (SELECT 1 FROM task_assignees WHERE task_assignees.task_id = tasks.id)",
         ));
     }
     if let Some(lid) = q.label_id {

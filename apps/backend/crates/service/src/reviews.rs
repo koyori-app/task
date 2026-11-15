@@ -948,7 +948,7 @@ pub async fn latest_head_sha<C: ConnectionTrait>(
 }
 
 /// `head_sha` に対するラウンドを出したレビュワー（重複なし）。
-/// マージ可でなくなったとき、承認を取り消す対象を決めるのに使う。
+/// マージ可でなくなったとき、承認の取り消しや変更要求の対象を決めるのに使う。
 pub async fn reviewer_ids_at_head<C: ConnectionTrait>(
     db: &C,
     project_id: Uuid,
@@ -964,6 +964,41 @@ pub async fn reviewer_ids_at_head<C: ConnectionTrait>(
         .into_tuple()
         .all(db)
         .await
+}
+
+/// High / Medium の未解決指摘を含むラウンドを出したレビュワー（重複なし、head は問わない）。
+/// 変更要求は指摘を出した本人の名義で出すので、その人を決めるのに使う。
+///
+/// 重大度と状態の判定は [`FindingSeverity::blocks_merge`] / [`FindingState::counts_as_unresolved`]
+/// に任せ、SQL には書き写さない（定義を 1 か所に保つ）。
+pub async fn reviewer_ids_with_blocking_findings<C: ConnectionTrait>(
+    db: &C,
+    project_id: Uuid,
+    repo: &RepoRef,
+    pr_number: i32,
+) -> Result<Vec<Uuid>, sea_orm::DbErr> {
+    let rows: Vec<(Uuid, FindingSeverity, FindingState)> = review_findings::Entity::find()
+        .inner_join(reviews::Entity)
+        .filter(reviews::Column::ProjectId.eq(project_id))
+        .filter(reviews::Column::RepoOwner.eq(repo.owner.clone()))
+        .filter(reviews::Column::RepoName.eq(repo.name.clone()))
+        .filter(reviews::Column::PrNumber.eq(pr_number))
+        .select_only()
+        .column(reviews::Column::ReviewerId)
+        .column(review_findings::Column::Severity)
+        .column(review_findings::Column::State)
+        .distinct()
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    let mut ids: Vec<Uuid> = Vec::new();
+    for (reviewer_id, severity, state) in rows {
+        if severity.blocks_merge() && state.counts_as_unresolved() && !ids.contains(&reviewer_id) {
+            ids.push(reviewer_id);
+        }
+    }
+    Ok(ids)
 }
 
 /// 要約ジョブが最後に GitHub で確かめた head と、その時刻。
@@ -1223,7 +1258,7 @@ pub struct SummarySnapshot {
     pub latest_summary: String,
     /// task 側の指摘一覧への URL（設定が無ければ省く）
     pub findings_url: Option<String>,
-    /// task が承認を取り消したまま、今の head にラウンドを出していない人の GitHub login。
+    /// task が承認を取り消した（または変更を求めた）まま、今の head にラウンドを出していない人の GitHub login。
     /// その人の変更要求が GitHub でマージを止めるので、空でなければマージ可にしない。
     /// GitHub を読む要約ジョブが埋める（DB からは作れない）
     pub awaiting_rereview: Vec<String>,
@@ -1246,7 +1281,7 @@ impl SummarySnapshot {
     ///
     /// 集計 API と同じ規則（レビューが 1 件も無い PR を可にしない）に加えて、
     /// レビュー後にコミットが積まれていないことを確かめる。確かめられないときも可にしない。
-    /// task が承認を取り消した人の再レビュー待ちが残っていても可にしない。
+    /// task が変更を求めた人の再レビュー待ちが残っていても可にしない。
     #[must_use]
     pub fn merge_ready(&self) -> bool {
         self.clean_and_fresh() && self.awaiting_rereview.is_empty()
@@ -1327,7 +1362,7 @@ pub fn render_summary_comment(
             .collect();
         let _ = writeln!(
             out,
-            "**再レビュー待ち** — High / Medium の未解決はありませんが、task が承認を取り消した \
+            "**再レビュー待ち** — High / Medium の未解決はありませんが、task が変更を求めた \
              {} の変更要求が残っています。今の HEAD（{}）をレビューしてください。",
             names.join("、"),
             short_sha(snapshot.latest_head_sha.as_deref())
@@ -1761,7 +1796,7 @@ mod tests {
         assert!(unknown.contains("鮮度不明"));
     }
 
-    /// task が承認を取り消した人の再レビュー待ちが残っていれば「マージ可」と書かない。
+    /// task が変更を求めた人の再レビュー待ちが残っていれば「マージ可」と書かない。
     #[test]
     fn summary_comment_waits_for_the_revoked_reviewer() {
         let waiting = SummarySnapshot {
@@ -1772,6 +1807,7 @@ mod tests {
         let body = render_summary_comment(&waiting, MARKER, "2026-08-26 10:00");
         assert!(!body.contains("マージ可"), "{body}");
         assert!(body.contains("再レビュー待ち"), "{body}");
+        assert!(body.contains("変更を求めた"), "{body}");
         assert!(body.contains("`alice`"), "{body}");
 
         // 指摘が残っていれば、再レビュー待ちより先にマージ不可を出す

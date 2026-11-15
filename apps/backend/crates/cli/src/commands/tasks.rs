@@ -43,6 +43,7 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             status,
             label,
             assignee,
+            unassigned,
             milestone,
             sprint,
             parent,
@@ -85,6 +86,9 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             if let Some(name) = &assignee {
                 let id = resolve_user_id(api, project.id, name).await?;
                 query.push(("assignee_id", id.to_string()));
+            }
+            if unassigned {
+                query.push(("unassigned", "true".to_string()));
             }
             if let Some(name) = &milestone {
                 let id = resolve_milestone_id(api, project.id, name).await?;
@@ -1010,7 +1014,7 @@ fn parse_sort(raw: &str) -> Result<&'static str> {
 
 /// サーバーは上限を超えた要求を黙って丸めるので、頼んだ件数と返る件数がずれる。
 /// 気付けないままページを送ると行が飛ぶので、手前で断る。
-fn check_limit(limit: u64, max: u64) -> Result<u64> {
+pub(crate) fn check_limit(limit: u64, max: u64) -> Result<u64> {
     if limit == 0 || limit > max {
         return Err(CliError::validation(format!(
             "--limit must be between 1 and {max} (got {limit})"
@@ -1019,7 +1023,7 @@ fn check_limit(limit: u64, max: u64) -> Result<u64> {
     Ok(limit)
 }
 
-fn offset_for(page: u64, limit: u64) -> Result<u64> {
+pub(crate) fn offset_for(page: u64, limit: u64) -> Result<u64> {
     if page == 0 {
         return Err(CliError::validation("--page starts at 1"));
     }
@@ -1098,7 +1102,7 @@ fn listing_summary(tasks: &TaskListResponse, page: u64) -> String {
     )
 }
 
-fn page_summary(shown: usize, total: u64, page: u64, has_next: bool) -> String {
+pub(crate) fn page_summary(shown: usize, total: u64, page: u64, has_next: bool) -> String {
     if has_next {
         format!(
             "{shown} 件表示 / 全 {total} 件（--page {} で続き）",

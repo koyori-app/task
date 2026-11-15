@@ -17306,6 +17306,15 @@
             }
           },
           {
+            "name": "unassigned",
+            "in": "query",
+            "description": "`true` で担当者が 1 人もいないタスクだけを返す。役割は問わない。\n\n`assignee_id` と同時には指定できない（400）",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "created_by",
             "in": "query",
             "description": "作成者のユーザー ID。指定するとその人が作ったタスクだけを返す",
@@ -25272,6 +25281,15 @@
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "name": "done",
+            "in": "query",
+            "description": "完了ステータス（`is_done_state`）かどうかで絞る。`false` で未完了だけ、`true` で完了済みだけ。\n未指定なら絞らない。`today` / `week` / `overdue` は元から未完了だけを返すので、\n`done=true` と組み合わせると 0 件になる",
+            "required": false,
+            "schema": {
+              "type": "boolean"
             }
           },
           {
