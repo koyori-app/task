@@ -4,6 +4,8 @@ import { activeTaskListSort, taskListApiSort } from '@/components/tasks/task-lis
 
 describe('taskListApiSort', () => {
   it.each([
+    ['key', false, 'key_asc'],
+    ['status', true, 'status_desc'],
     ['title', false, 'title_asc'],
     ['title', true, 'title_desc'],
     ['assignee', false, 'assignee_asc'],
@@ -18,8 +20,8 @@ describe('taskListApiSort', () => {
 
   it('解除時と未対応列では既定順へ戻す', () => {
     expect(taskListApiSort([])).toBe('created_at_desc');
-    expect(taskListApiSort([{ id: 'status', desc: false }])).toBe('created_at_desc');
-    expect(activeTaskListSort([{ id: 'status', desc: false }])).toBeNull();
+    expect(taskListApiSort([{ id: 'unknown', desc: false }])).toBe('created_at_desc');
+    expect(activeTaskListSort([{ id: 'unknown', desc: false }])).toBeNull();
   });
 
   it('複数列が渡されても List で操作する先頭の列だけを使う', () => {

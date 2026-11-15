@@ -1,4 +1,4 @@
-import type { SortingState } from '@tanstack/vue-table';
+import { setSort, qualifierValues } from '@/lib/task-query/edit';
 import { computed, watch, type Ref } from 'vue';
 
 /**
@@ -21,53 +21,13 @@ export type TaskListUrlState = {
   page: number;
   /** 確定済みの検索語（デバウンス後に投げているもの） */
   q: string;
-  labelId: string | null;
-  sorting: SortingState;
 };
 
 export const DEFAULT_TASK_LIST_URL_STATE: TaskListUrlState = {
   view: 'list',
   page: 1,
   q: '',
-  labelId: null,
-  sorting: [],
 };
-
-/**
- * 並び替えを受け付ける列 id。`+Page.vue` の `columns` のうち
- * `enableSorting: false` でないもの（`select` と `labels` は対象外）。
- *
- * **拒否リストではなく許可リストにする。** TanStack の `getColumn` は
- * `flatColumns.reduce((acc, c) => { acc[c.id] = c }, {})` という素のオブジェクトを引くため、
- * `Object.prototype` のメンバー名（`__proto__` / `constructor` / `toString` /
- * `valueOf` / `hasOwnProperty` …）を渡すと prototype 側の値が返り、
- * 「存在しない列」として弾かれない。`getSortedRowModel` は
- * `table.getColumn(sort.id)?.getCanSort()` を呼ぶので `?.` をすり抜けて
- * `getCanSort is not a function` で throw し、一覧の描画が止まる。
- * 一覧は `getSortedRowModel()` を渡し `manualSorting` を付けていないので、
- * URL の値がそのままクライアント側のソートに入る。
- */
-const SORTABLE_COLUMN_IDS = new Set(['key', 'title', 'status', 'priority', 'assignee', 'due_date']);
-
-/** `title:asc,priority:desc` 形式。TanStack の SortingState と 1:1。 */
-function parseSorting(raw: string | undefined): SortingState {
-  if (!raw) return [];
-  return raw
-    .split(',')
-    .map((entry) => {
-      const [id, direction] = entry.split(':');
-      // 並び替えできない列・向きが asc/desc 以外は捨てる。細工されたクエリで
-      // TanStack へ不正な state を渡さない
-      if (!id || !SORTABLE_COLUMN_IDS.has(id)) return null;
-      if (direction !== 'asc' && direction !== 'desc') return null;
-      return { id, desc: direction === 'desc' };
-    })
-    .filter((entry): entry is { id: string; desc: boolean } => entry !== null);
-}
-
-function serializeSorting(sorting: SortingState): string {
-  return sorting.map((sort) => `${sort.id}:${sort.desc ? 'desc' : 'asc'}`).join(',');
-}
 
 function parsePage(raw: string | undefined): number {
   if (!raw) return DEFAULT_TASK_LIST_URL_STATE.page;
@@ -79,14 +39,13 @@ function parsePage(raw: string | undefined): number {
 
 export function parseTaskListUrlState(
   search: Record<string, string | undefined> | undefined,
-): TaskListUrlState {
+): TaskListUrlState & { legacyLabelId: string | null } {
   return {
     // 未知の値は既定の List へ倒す（表示形式が消えるより安全）
     view: search?.view === 'table' ? 'table' : DEFAULT_TASK_LIST_URL_STATE.view,
     page: parsePage(search?.page),
-    q: search?.q?.trim() ?? '',
-    labelId: search?.label || null,
-    sorting: parseSorting(search?.sort),
+    q: legacyQuery(search),
+    legacyLabelId: search?.label || null,
   };
 }
 
@@ -101,8 +60,8 @@ export function applyTaskListUrlState(url: URL, state: TaskListUrlState): URL {
     ['view', state.view === DEFAULT_TASK_LIST_URL_STATE.view ? '' : state.view],
     ['page', state.page > 1 ? String(state.page) : ''],
     ['q', state.q],
-    ['label', state.labelId ?? ''],
-    ['sort', serializeSorting(state.sorting)],
+    ['label', ''],
+    ['sort', ''],
   ];
   for (const [key, value] of entries) {
     if (value) next.searchParams.set(key, value);
@@ -133,9 +92,7 @@ export function useTaskListUrlSync(params: {
   selectedTaskId: Ref<string | null>;
   view: Ref<TaskListView>;
   pagination: Ref<{ pageIndex: number; pageSize: number }>;
-  submittedSearchQuery: Ref<string>;
-  selectedLabelId: Ref<string | null>;
-  sorting: Ref<SortingState>;
+  query: Ref<string>;
   /**
    * 取得済みの総件数。**未取得は `null`**。
    *
@@ -153,15 +110,12 @@ export function useTaskListUrlSync(params: {
    */
   isPagerActive: Readonly<Ref<boolean>>;
 }) {
-  const { selectedTaskId, view, pagination, submittedSearchQuery, selectedLabelId, sorting } =
-    params;
+  const { selectedTaskId, view, pagination, query } = params;
 
   const listState = computed<TaskListUrlState>(() => ({
     view: view.value,
     page: pagination.value.pageIndex + 1,
-    q: submittedSearchQuery.value,
-    labelId: selectedLabelId.value,
-    sorting: sorting.value,
+    q: query.value,
   }));
 
   watch([selectedTaskId, listState], ([selected, state]) => {
@@ -191,4 +145,18 @@ export function useTaskListUrlSync(params: {
   );
 
   return { listState };
+}
+
+function legacyQuery(search: Record<string, string | undefined> | undefined): string {
+  const q = search?.q?.trim() ?? '';
+  if (qualifierValues(q, 'sort').length) return q;
+  const entry = search?.sort?.split(',')[0];
+  if (!entry) return q;
+  const [id, direction] = entry.split(':');
+  if (
+    !['key', 'status', 'title', 'priority', 'assignee', 'due_date'].includes(id ?? '') ||
+    !['asc', 'desc'].includes(direction ?? '')
+  )
+    return q;
+  return setSort(q, [{ id: id!, desc: direction === 'desc' }]);
 }

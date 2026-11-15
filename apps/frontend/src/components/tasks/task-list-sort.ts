@@ -1,4 +1,4 @@
-export type TaskListSortColumn = 'title' | 'assignee' | 'due_date' | 'priority';
+export type TaskListSortColumn = 'key' | 'status' | 'title' | 'assignee' | 'due_date' | 'priority';
 
 export type TaskListSortEntry = {
   id: string;
@@ -15,6 +15,13 @@ export type TaskListSortColumnOption = {
 };
 
 export const TASK_LIST_SORT_COLUMNS: readonly TaskListSortColumnOption[] = [
+  { id: 'key', label: 'ID', ascendingLabel: 'ID の昇順', descendingLabel: 'ID の降順' },
+  {
+    id: 'status',
+    label: 'ステータス',
+    ascendingLabel: 'ステータスの昇順',
+    descendingLabel: 'ステータスの降順',
+  },
   {
     id: 'title',
     label: 'タスク',
@@ -42,6 +49,8 @@ export const TASK_LIST_SORT_COLUMNS: readonly TaskListSortColumnOption[] = [
 ] as const;
 
 const API_SORT_BY_COLUMN: Record<TaskListSortColumn, string> = {
+  key: 'key',
+  status: 'status',
   title: 'title',
   assignee: 'assignee',
   due_date: 'deadline',

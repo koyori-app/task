@@ -9,7 +9,7 @@ enableAutoUnmount(afterEach);
 function mountHeader(sorting: { id: string; desc: boolean }[] = []) {
   return mount(TaskListSortHeader, {
     props: {
-      column: TASK_LIST_SORT_COLUMNS[0],
+      column: TASK_LIST_SORT_COLUMNS.find((c) => c.id === 'title')!,
       sorting,
     },
   });

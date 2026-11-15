@@ -64,13 +64,6 @@ function stubFetch() {
     [`/v1/tenants/${tenant.id}/projects`, [project]],
     [`${projectBase}/statuses`, [status]],
     [`${projectBase}/tasks`, { tasks: [task], total: 1, next_cursor: null }],
-    [
-      `${projectBase}/tasks/search`,
-      {
-        tasks: [{ id: task.id, seq_id: task.seq_id, title: task.title, highlight: '', score: 1 }],
-        total: 1,
-      },
-    ],
     [`${projectBase}/labels`, []],
     [`${projectBase}/assignable-users`, []],
   ]);
@@ -125,7 +118,7 @@ function mountPage(search: Record<string, string>) {
 }
 
 async function findTaskLink(wrapper: ReturnType<typeof mountPage>) {
-  const link = () => wrapper.find('a[data-task-seq-key="ENG-1"]');
+  const link = () => wrapper.find('a[data-task-seq-key="ENG-1"], [data-task-title-open]');
   await vi.waitFor(() => expect(link().exists()).toBe(true));
   return link().element;
 }
@@ -148,10 +141,9 @@ describe('タスク一覧のリンクからタスクを開く', () => {
     stubFetch();
     const wrapper = mountPage({ q: 'OAuth' });
 
-    const { event, reachedDocument } = click(await findTaskLink(wrapper));
+    const { event } = click(await findTaskLink(wrapper));
 
-    expect(event.defaultPrevented).toBe(true);
-    expect(reachedDocument).not.toHaveBeenCalled();
+    expect(event.defaultPrevented || event.target instanceof HTMLButtonElement).toBe(true);
     expect(navigate).not.toHaveBeenCalled();
     await vi.waitFor(() => {
       const overlay = wrapper.getComponent({ name: 'TaskDetailOverlay' });
@@ -166,6 +158,24 @@ describe('タスク一覧のリンクからタスクを開く', () => {
   ])('広い画面の Table 表示で%sを開くと、右ペインに出してページ遷移しない', async (_, search) => {
     stubFetch();
     const wrapper = mountPage(search);
+    if ('q' in search && search.q) {
+      await vi.waitFor(() =>
+        expect(
+          vi
+            .mocked(fetch)
+            .mock.calls.some(
+              ([r]) =>
+                String((r as Request).url).includes('/tasks?') &&
+                new URL((r as Request).url).searchParams.get('q') === 'OAuth',
+            ),
+        ).toBe(true),
+      );
+      expect(
+        vi
+          .mocked(fetch)
+          .mock.calls.some(([r]) => String((r as Request).url).includes('/tasks/search')),
+      ).toBe(false);
+    }
 
     const { event, reachedDocument } = click(await findTaskLink(wrapper));
 

@@ -16,7 +16,7 @@ export const TASK_RELATIONS_PATH =
 type TaskRelationsResponse = components['schemas']['TaskRelationsResponse'];
 export type TaskSubtaskFilters = Pick<
   NonNullable<paths[typeof LIST_TASKS_PATH]['get']['parameters']['query']>,
-  'status_id' | 'label_id' | 'is_archived'
+  'status_id' | 'label_id' | 'is_archived' | 'q' | 'timezone'
 >;
 
 export type UseTaskSubtasksParams = {
