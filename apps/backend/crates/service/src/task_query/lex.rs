@@ -1,5 +1,6 @@
 //! Project-independent, infallible lexer for task list expressions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Key {
     Status,
     Assignee,
@@ -29,7 +30,8 @@ impl Key {
         })
     }
 }
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
 pub enum Token {
     Word {
         text: String,
@@ -43,6 +45,7 @@ pub enum Token {
         key: Key,
         values: Vec<String>,
         negated: bool,
+        #[serde(skip)]
         raw: String,
     },
 }
@@ -149,6 +152,19 @@ pub fn lex(input: &str) -> Vec<Token> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn shared_token_fixtures() {
+        let cases: serde_json::Value =
+            serde_json::from_str(include_str!("fixtures/tokens.json")).unwrap();
+        for case in cases.as_array().unwrap() {
+            assert_eq!(
+                serde_json::to_value(lex(case["input"].as_str().unwrap())).unwrap(),
+                case["tokens"],
+                "{}",
+                case["input"]
+            );
+        }
+    }
     #[test]
     fn conditions_phrases_and_unknown_keys() {
         assert_eq!(

@@ -1255,3 +1255,18 @@ mod tests {
         ));
     }
 }
+
+#[axum::debug_handler]
+#[utoipa::path(get, path = "/facets", tag = "Tasks", summary = "条件式の候補件数", params(("tenant_id" = Uuid, Path), ("project_id" = Uuid, Path)), responses((status = 200, body = payload::task_query::TaskFacetsResponse), CrudErrors))]
+pub async fn list_task_facets(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<payload::task_query::TaskFacetsResponse>, AppError> {
+    auth.require_scope(entity::scopes::Scope::ReadTask)?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
+    Ok(Json(
+        service::task_query::facets::facets(&state.db, project_id).await?,
+    ))
+}
