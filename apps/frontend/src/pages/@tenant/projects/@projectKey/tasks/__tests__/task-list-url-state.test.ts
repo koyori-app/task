@@ -42,6 +42,17 @@ describe('condition expression URL state', () => {
     expect(url.searchParams.has('sort')).toBe(false);
     expect(url.searchParams.get('selected')).toBe('ENG-1');
   });
+  it('retains legacy label and page until migration completes', () => {
+    const url = new URL('http://localhost/tasks?label=x&page=3');
+    const pending = applyTaskListUrlState(url, { q: '', page: 3, view: 'list' }, true);
+    expect(pending.searchParams.get('label')).toBe('x');
+    expect(pending.searchParams.get('page')).toBe('3');
+    expect(
+      applyTaskListUrlState(pending, { q: 'label:bug', page: 3, view: 'list' }).searchParams.has(
+        'label',
+      ),
+    ).toBe(false);
+  });
   it.each(['0', '-1', '1.2', 'x'])('rounds invalid page %s', (page) =>
     expect(parseTaskListUrlState({ page }).page).toBe(1),
   );

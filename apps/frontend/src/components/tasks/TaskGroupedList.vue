@@ -499,7 +499,7 @@ async function commitAdding(statusId: string) {
           <div :inert="collapsed[group.status.id] || undefined">
             <div :class="[TASK_HEADER_GRID, 'border-b text-xs text-muted-foreground']">
               <TaskListSortHeader
-                v-for="column in TASK_LIST_SORT_COLUMNS"
+                v-for="column in TASK_LIST_SORT_COLUMNS.filter((c) => c.id !== 'status')"
                 :key="column.id"
                 :column="column"
                 :sorting="sorting"

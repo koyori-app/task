@@ -21,9 +21,20 @@ const names = {
   due: '期限',
   is: 'その他',
 };
+function normalize(key: TaskQueryKey, value: string) {
+  return (['assignee', 'author'].includes(key) ? value.replace(/^@/, '') : value).toLowerCase();
+}
 function selected(key: TaskQueryKey, value: string) {
+  if (key === 'due' && value === '')
+    return !tokenizeTaskQuery(props.modelValue).some(
+      (t) => t.kind === 'qualifier' && t.key === 'due',
+    );
   return tokenizeTaskQuery(props.modelValue).some(
-    (t) => t.kind === 'qualifier' && t.key === key && !t.negated && t.values.includes(value),
+    (t) =>
+      t.kind === 'qualifier' &&
+      t.key === key &&
+      !t.negated &&
+      t.values.some((v) => normalize(key, v) === normalize(key, value)),
   );
 }
 function relatedActive(key: (typeof keys)[number]) {
@@ -31,7 +42,9 @@ function relatedActive(key: (typeof keys)[number]) {
     (t) =>
       t.kind === 'qualifier' &&
       (t.key === key ||
-        ((key === 'label' || key === 'assignee') && t.key === 'no' && t.values.includes(key)) ||
+        ((key === 'label' || key === 'assignee') &&
+          t.key === 'no' &&
+          t.values.some((v) => v.toLowerCase() === key)) ||
         (key === 'is' && ['author', 'in'].includes(t.key))),
   );
 }
@@ -42,7 +55,7 @@ function caption(key: (typeof keys)[number]) {
   const excluded = qualifierValues(props.modelValue, key, true);
   const values = positive.length ? positive : excluded;
   return values.length
-    ? `${names[key]}: ${values.length > 1 ? `${values.length} 件` : values[0]}${!positive.length ? '以外' : ''}`
+    ? `${names[key]}: ${values.length > 1 ? `${values.length} 件` : (options(key).find((o) => normalize(key, JSON.parse(String(o.value))[1]) === normalize(key, values[0]!))?.label ?? values[0])}${!positive.length ? '以外' : ''}`
     : names[key];
 }
 function toggle(key: TaskQueryKey, value: string) {
@@ -52,7 +65,9 @@ function toggle(key: TaskQueryKey, value: string) {
     setQualifierValues(
       props.modelValue,
       key,
-      values.includes(value) ? values.filter((v) => v !== value) : [...values, value],
+      selected(key, value)
+        ? values.filter((v) => normalize(key, v) !== normalize(key, value))
+        : [...values, value],
     ),
   );
 }

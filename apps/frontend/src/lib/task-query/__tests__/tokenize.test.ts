@@ -20,13 +20,16 @@ describe('shared task query grammar', () => {
         input += chars[seed % chars.length];
       }
       const serialized = serializeTaskQuery(tokenizeTaskQuery(input));
-      expect(serializeTaskQuery(tokenizeTaskQuery(serialized))).toBe(serialized);
+      const contents = (value: string) =>
+        tokenizeTaskQuery(value).map(({ start: _s, end: _e, ...t }) => t);
+      expect(contents(serialized)).toEqual(contents(input));
     }
   });
   it('edits conditions and sort without other state', () => {
     let expr = setQualifierValues('通知', 'status', ['In Progress', 'Done']);
     expect(qualifierValues(expr, 'status')).toEqual(['In Progress', 'Done']);
     expr = setSort(expr, [{ id: 'priority', desc: true }]);
+    expect(sortOf('sort:Title')).toEqual([{ id: 'title', desc: false }]);
     expect(sortOf(expr)).toEqual([{ id: 'priority', desc: true }]);
     expect(hasFilter(expr)).toBe(true);
     expect(hasFilter('sort:title')).toBe(false);

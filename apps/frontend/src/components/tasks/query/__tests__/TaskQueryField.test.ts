@@ -25,8 +25,41 @@ describe('Enter confirms the task query', () => {
     await input.trigger('keydown', { key: 'Enter' });
     expect(w.emitted('update:modelValue')?.at(-1)).toEqual(['la']);
     await input.setValue('label:b');
+    await input.trigger('keydown', { key: 'ArrowDown' });
     await input.trigger('keydown', { key: 'Enter' });
     expect(w.emitted('update:modelValue')?.at(-1)).toEqual(['label:bug']);
+    w.unmount();
+  });
+  it.each(['priority:critical', 'label:wontfix', 'assignee:@alice', 'label:x'])(
+    'preserves %s on Enter',
+    async (value) => {
+      const w = mount(TaskQueryField, { props: { modelValue: '' } });
+      await w.get('input').setValue(value);
+      await w.get('input').trigger('keydown', { key: 'Enter' });
+      expect(w.emitted('update:modelValue')?.at(-1)).toEqual([value]);
+      w.unmount();
+    },
+  );
+  it('ignores button Enter and prevents Escape defaults', async () => {
+    const w = mount(TaskQueryField, { props: { modelValue: '' } });
+    await w.get('button').trigger('keydown', { key: 'Enter' });
+    expect(w.emitted('update:modelValue')).toBeUndefined();
+    await w.get('input').setValue('label:x');
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    w.get('input').element.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(w.get('input').element.value).toBe('label:x');
+    w.unmount();
+  });
+  it('removes chips by button and leading Backspace', async () => {
+    const w = mount(TaskQueryField, { props: { modelValue: 'status:Todo label:bug' } });
+    await w.get('button[aria-label="label:bug を外す"]').trigger('click');
+    expect(w.emitted('update:modelValue')?.at(-1)).toEqual(['status:Todo']);
+    await w.setProps({ modelValue: 'status:Todo' });
+    await w.setProps({ modelValue: 'status:Todo label:bug' });
+    w.get('input').element.setSelectionRange(0, 0);
+    await w.get('input').trigger('keydown', { key: 'Backspace' });
+    expect(w.emitted('update:modelValue')?.at(-1)).toEqual(['status:Todo']);
     w.unmount();
   });
   it('restores external expressions and shows syntax help', async () => {

@@ -14,7 +14,7 @@ import {
 } from '@/lib/task-query/suggest';
 import TaskQuerySuggestList from './TaskQuerySuggestList.vue';
 import TaskQuerySyntaxCard from './TaskQuerySyntaxCard.vue';
-const props = defineProps<{ modelValue: string; suggestData?: SuggestData; loading?: boolean }>();
+const props = defineProps<{ modelValue: string; suggestData?: SuggestData }>();
 const emit = defineEmits<{ 'update:modelValue': [value: string]; focus: [] }>();
 const root = ref<HTMLElement>();
 const input = ref<InstanceType<typeof Input>>();
@@ -24,6 +24,7 @@ const open = ref(false);
 const syntax = ref(false);
 const caret = ref(0);
 const active = ref(-1);
+const explicitSelection = ref(false);
 const listId = useId();
 const chips = computed(() =>
   tokenizeTaskQuery(committed.value).filter((t) => t.kind === 'qualifier'),
@@ -47,7 +48,19 @@ const candidates = computed(() => {
       : [];
 });
 watch([context, candidates], () => {
-  active.value = context.value?.kind === 'values' && candidates.value.length ? 0 : -1;
+  explicitSelection.value = false;
+  const c = context.value;
+  const normalize = (v: string) =>
+    (c?.kind === 'values' && ['assignee', 'author'].includes(c.key)
+      ? v.replace(/^@/, '')
+      : v
+    ).toLowerCase();
+  active.value =
+    c?.kind === 'values'
+      ? candidates.value.findIndex(
+          (v) => v.key !== 'no' && normalize(v.value) === normalize(c.prefix),
+        )
+      : -1;
 });
 const visible = computed(() => open.value && !syntax.value && candidates.value.length > 0);
 function nativeInput() {
@@ -83,8 +96,10 @@ function select(candidate: Candidate) {
   }
 }
 function keydown(event: KeyboardEvent) {
+  if (event.target !== nativeInput()) return;
   if (event.isComposing || event.keyCode === 229) return;
   if (event.key === 'Escape') {
+    if (open.value || syntax.value) event.preventDefault();
     open.value = false;
     syntax.value = false;
     return;
@@ -93,12 +108,30 @@ function keydown(event: KeyboardEvent) {
     if (!candidates.value.length) return;
     event.preventDefault();
     open.value = true;
+    explicitSelection.value = true;
     active.value =
-      (active.value + (event.key === 'ArrowDown' ? 1 : -1) + candidates.value.length) %
-      candidates.value.length;
+      active.value < 0
+        ? event.key === 'ArrowDown'
+          ? 0
+          : candidates.value.length - 1
+        : (active.value + (event.key === 'ArrowDown' ? 1 : -1) + candidates.value.length) %
+          candidates.value.length;
   } else if (event.key === 'Enter') {
     event.preventDefault();
-    if (visible.value && active.value >= 0) select(candidates.value[active.value]!);
+    const candidate = candidates.value[active.value];
+    const c = context.value;
+    const normalize = (v: string) =>
+      (c?.kind === 'values' && ['assignee', 'author'].includes(c.key)
+        ? v.replace(/^@/, '')
+        : v
+      ).toLowerCase();
+    if (
+      visible.value &&
+      candidate &&
+      (explicitSelection.value ||
+        (candidate.key !== 'no' && normalize(candidate.value) === normalize(c?.prefix ?? '')))
+    )
+      select(candidate);
     else commit();
   } else if (
     event.key === 'Backspace' &&

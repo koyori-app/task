@@ -478,6 +478,7 @@ function onOverlayOpenChange(open: boolean) {
 }
 
 let legacyLabelId = initialListState.legacyLabelId;
+const legacyLabelPending = ref(!!legacyLabelId);
 watch(
   fetchedProjectLabels,
   (labels) => {
@@ -485,6 +486,7 @@ watch(
     const label = labels.find((l) => l.id === legacyLabelId);
     legacyLabelId = null;
     if (label) query.value = setQualifierValues(query.value, 'label', [label.name]);
+    legacyLabelPending.value = false;
   },
   { immediate: true },
 );
@@ -812,15 +814,21 @@ function onListSortingChange(next: TaskListSortingState) {
 const columnFilters = ref<ColumnFiltersState>([]);
 const columnVisibility = ref<ColumnVisibilityState>({});
 const rowSelection = ref({});
-watch(query, () => {
-  pagination.value = { ...pagination.value, pageIndex: 0 };
-  rowSelection.value = {};
-});
+watch(
+  query,
+  () => {
+    if (legacyLabelPending.value) return;
+    pagination.value = { ...pagination.value, pageIndex: 0 };
+    rowSelection.value = {};
+  },
+  { flush: 'sync' },
+);
 
 // ---- URL 同期 ----
 // 選択・ページ・検索語・ラベル・並び替えを URL へ書き戻し、件数が分かったら
 // 範囲外のページを丸める（配線ごと task-list-url-state に寄せてテストしている）。
 useTaskListUrlSync({
+  legacyLabelPending,
   selectedTaskId,
   view,
   pagination,
@@ -1032,7 +1040,12 @@ const columnItems = computed<DropdownItem[]>(() =>
 
           <div v-if="filtering" class="flex items-center gap-2 text-xs text-muted-foreground">
             <span v-if="filteredTotal !== null">{{ filteredTotal }} 件</span
-            ><Button variant="ghost" label="条件をすべて消す" @click="query = ''" />
+            ><Button
+              v-if="!queryErrors"
+              variant="ghost"
+              label="条件をすべて消す"
+              @click="query = ''"
+            />
           </div>
           <CreateTaskDialog
             v-if="tenantId && projectId"

@@ -57,12 +57,15 @@ const task = {
 };
 const projectBase = `/v1/tenants/${tenant.id}/projects/${project.id}`;
 
-function stubFetch(queryFailure?: { status: number; body: unknown }) {
+function stubFetch(queryFailure?: { status: number; body: unknown }, multiStatus = false) {
   const replies = new Map<string, unknown>([
     ['/v1/auth/me', { id: 'user-1', email: 'a@example.com', username: 'a', email_verified: true }],
     ['/v1/tenants', [tenant]],
     [`/v1/tenants/${tenant.id}/projects`, [project]],
-    [`${projectBase}/statuses`, [status]],
+    [
+      `${projectBase}/statuses`,
+      multiStatus ? [status, { ...status, id: 'status-2', name: 'Done', position: 1 }] : [status],
+    ],
     [`${projectBase}/tasks`, { tasks: [task], total: 1, next_cursor: null }],
     [`${projectBase}/labels`, []],
     [`${projectBase}/assignable-users`, []],
@@ -74,6 +77,12 @@ function stubFetch(queryFailure?: { status: number; body: unknown }) {
       const pathname = requestUrl.pathname.replace(/^\/api/, '');
       if (queryFailure && pathname === `${projectBase}/tasks` && requestUrl.searchParams.has('q'))
         return Response.json(queryFailure.body, { status: queryFailure.status });
+      if (multiStatus && pathname === `${projectBase}/tasks`)
+        return Response.json({
+          tasks: [],
+          total: requestUrl.searchParams.get('status_id') === 'status-2' ? 3 : 2,
+          next_cursor: null,
+        });
       return Response.json(replies.get(pathname) ?? { message: 'Forbidden' }, {
         status: replies.has(pathname) ? 200 : 403,
       });
@@ -230,4 +239,11 @@ describe('条件式のエラーと消去', () => {
     );
     expect(wrapper.text()).not.toContain('というステータスはありません');
   });
+});
+
+it('sums counts across all status groups', async () => {
+  stubNarrowScreen();
+  stubFetch(undefined, true);
+  const wrapper = mountPage({ q: '通知' });
+  await vi.waitFor(() => expect(wrapper.text()).toContain('5 件'));
 });

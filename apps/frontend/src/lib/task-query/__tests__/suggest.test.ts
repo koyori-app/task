@@ -53,3 +53,13 @@ describe('query completion', () => {
     expect(describeTaskQueryError(error)).toBe('「無い」というステータスはありません');
   });
 });
+
+it('prioritizes exact values and matches usernames with @', () => {
+  expect(valueCandidates('priority', 'CRITICAL', {})[0]?.value).toBe('critical');
+  expect(
+    valueCandidates('assignee', '@ALICE', { members: [{ id: '1', username: 'alice' }] })[0]?.value,
+  ).toBe('alice');
+  expect(
+    valueCandidates('author', '@ALICE', { members: [{ id: '1', username: 'alice' }] })[0]?.value,
+  ).toBe('alice');
+});

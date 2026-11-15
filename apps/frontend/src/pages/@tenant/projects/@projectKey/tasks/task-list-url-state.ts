@@ -54,13 +54,17 @@ export function parseTaskListUrlState(
  *
  * `selected` など、この関数が扱わないクエリは触らない（選択タスクは別の関心）。
  */
-export function applyTaskListUrlState(url: URL, state: TaskListUrlState): URL {
+export function applyTaskListUrlState(
+  url: URL,
+  state: TaskListUrlState,
+  legacyLabelPending = false,
+): URL {
   const next = new URL(url.href);
   const entries: [string, string][] = [
     ['view', state.view === DEFAULT_TASK_LIST_URL_STATE.view ? '' : state.view],
     ['page', state.page > 1 ? String(state.page) : ''],
     ['q', state.q],
-    ['label', ''],
+    ...(legacyLabelPending ? [] : ([['label', '']] as [string, string][])),
     ['sort', ''],
   ];
   for (const [key, value] of entries) {
@@ -89,6 +93,7 @@ export function clampPage(page: number, total: number, pageSize: number): number
  * （型検査も lint も通る）。同期の配線ごとここへ寄せてテストで固定する。
  */
 export function useTaskListUrlSync(params: {
+  legacyLabelPending?: Readonly<Ref<boolean>>;
   selectedTaskId: Ref<string | null>;
   view: Ref<TaskListView>;
   pagination: Ref<{ pageIndex: number; pageSize: number }>;
@@ -119,13 +124,13 @@ export function useTaskListUrlSync(params: {
   }));
 
   watch(
-    [selectedTaskId, listState],
+    [selectedTaskId, listState, () => params.legacyLabelPending?.value],
     ([selected, state]) => {
       if (typeof window === 'undefined') return;
       let url = new URL(window.location.href);
       if (selected) url.searchParams.set('selected', selected);
       else url.searchParams.delete('selected');
-      url = applyTaskListUrlState(url, state);
+      url = applyTaskListUrlState(url, state, params.legacyLabelPending?.value);
       // history を汚さない: 戻るで一覧より前へ抜けられなくなるのを避ける
       window.history.replaceState(window.history.state, '', url);
     },
@@ -137,7 +142,7 @@ export function useTaskListUrlSync(params: {
   watch(
     [params.taskTotal, params.isPagerActive],
     ([total, pagerActive]) => {
-      if (!pagerActive) return;
+      if (!pagerActive || params.legacyLabelPending?.value) return;
       // 未取得のあいだは待つ（0 件と区別する）
       if (total === null) return;
       const clamped = clampPage(pagination.value.pageIndex + 1, total, pagination.value.pageSize);

@@ -1,6 +1,6 @@
 import { tokenizeTaskQuery } from '@/lib/task-query/tokenize';
 import { sortOf } from '@/lib/task-query/edit';
-import { taskListApiSort } from '@/components/tasks/task-list-sort';
+import { activeTaskListSort, type TaskListSortingState } from '@/components/tasks/task-list-sort';
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test';
 import { provide, reactive, nextTick } from 'vue';
@@ -1987,3 +1987,11 @@ export const SplitPaneResize: Story = {
     await expect(localStorage.getItem('tasks-split-view')).toBe(String(start - 10));
   },
 };
+
+// Storybook の旧 API モックに合わせる変換。
+function taskListApiSort(sorting: TaskListSortingState): string {
+  const active = activeTaskListSort(sorting);
+  return active
+    ? `${active.id === 'due_date' ? 'deadline' : active.id}_${active.desc ? 'desc' : 'asc'}`
+    : 'created_at_desc';
+}

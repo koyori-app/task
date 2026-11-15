@@ -33,7 +33,7 @@ const caption = computed(() => {
 });
 
 const sections = computed<DropdownSection[]>(() => [
-  ...TASK_LIST_SORT_COLUMNS.map((column) => ({
+  ...TASK_LIST_SORT_COLUMNS.filter((c) => c.id !== 'status').map((column) => ({
     label: column.label,
     items: [
       {

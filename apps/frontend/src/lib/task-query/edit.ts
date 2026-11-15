@@ -31,7 +31,13 @@ export function setQualifierValues(
 export function toggleFlag(expr: string, key: TaskQueryKey, value: string, on: boolean): string {
   if (key === 'no' || key === 'is') {
     const tokens = tokenizeTaskQuery(expr).filter(
-      (t) => !(t.kind === 'qualifier' && t.key === key && !t.negated && t.values.includes(value)),
+      (t) =>
+        !(
+          t.kind === 'qualifier' &&
+          t.key === key &&
+          !t.negated &&
+          t.values.some((v) => v.toLowerCase() === value.toLowerCase())
+        ),
     );
     if (on)
       tokens.push({ kind: 'qualifier', key, values: [value], negated: false, start: 0, end: 0 });
@@ -61,7 +67,7 @@ const fields = new Set([
   'updated',
 ]);
 export function sortOf(expr: string): TaskListSortingState {
-  const value = qualifierValues(expr, 'sort')[0];
+  const value = qualifierValues(expr, 'sort')[0]?.toLowerCase();
   if (!value) return [];
   const match = /^(.+?)(?:-(asc|desc))?$/.exec(value);
   if (!match || !fields.has(match[1]!)) return [];

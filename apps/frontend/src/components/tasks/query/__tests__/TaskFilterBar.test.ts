@@ -48,3 +48,21 @@ describe('filter buttons edit the expression', () => {
     w.unmount();
   });
 });
+
+it('matches names without case and displays priority labels', async () => {
+  const w = setup('status:done priority:HIGH');
+  expect(w.text()).toContain('ステータス: Done');
+  expect(w.text()).toContain('優先度: 高');
+  await w
+    .findAll('[role="menuitemcheckbox"]')
+    .find((e) => e.text() === 'Done')!
+    .trigger('click');
+  expect(w.emitted('update:modelValue')!.at(-1)).toEqual(['priority:HIGH']);
+  expect(
+    w
+      .findAll('[role="menuitemradio"]')
+      .find((e) => e.text() === '指定なし')!
+      .attributes('aria-checked'),
+  ).toBe('true');
+  w.unmount();
+});

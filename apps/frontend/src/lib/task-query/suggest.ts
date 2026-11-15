@@ -142,12 +142,15 @@ export function valueCandidates(key: TaskQueryKey, prefix: string, data: Suggest
           ? data.facets?.priorities.find((p) => p.priority === priorityApiNames[value])?.count
           : undefined,
     }));
-  const p = prefix.toLowerCase();
+  const normalize = (v: string) =>
+    (key === 'assignee' || key === 'author' ? v.replace(/^@/, '') : v).toLowerCase();
+  const p = normalize(prefix);
   choices = choices
-    .filter((c) => c.value.toLowerCase().includes(p))
+    .filter((c) => normalize(c.value).includes(p))
     .sort(
       (a, b) =>
-        Number(!a.value.toLowerCase().startsWith(p)) - Number(!b.value.toLowerCase().startsWith(p)),
+        Number(normalize(a.value) !== p) - Number(normalize(b.value) !== p) ||
+        Number(!normalize(a.value).startsWith(p)) - Number(!normalize(b.value).startsWith(p)),
     );
   if (key === 'label' || key === 'assignee')
     choices.push({
