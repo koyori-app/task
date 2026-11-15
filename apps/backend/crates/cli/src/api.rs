@@ -104,6 +104,52 @@ impl ApiClient {
         Ok(self)
     }
 
+    /// 画面の URL。`api_url` が `<画面の URL>/api` の形のときだけ分かる（API は画面の URL を返さない）。
+    pub(crate) fn web_base(&self) -> Option<Url> {
+        let mut url = self.base.clone();
+        url.set_query(None);
+        url.set_fragment(None);
+        {
+            let mut path = url.path_segments_mut().ok()?;
+            path.pop_if_empty();
+        }
+        if url.path_segments()?.next_back()? != "api" {
+            return None;
+        }
+        url.path_segments_mut().ok()?.pop();
+        Some(url)
+    }
+
+    /// タスクの画面の URL を組み立てるのに要るもの。作る前に引いておく
+    /// （作ったあとで失敗すると、呼び出し側が再実行して二重に起票する）。
+    ///
+    /// - `api_url` が `<画面の URL>/api` の形でなければ `None`（何も叩かない）。
+    /// - テナントの slug が分からなければ `GET /v1/tenants` で引く。`read:tenant` が無い（403）
+    ///   ときは `None`。ほかの失敗は返す。
+    pub(crate) async fn web_location(&self) -> Result<Option<WebLocation>> {
+        let Some(base) = self.web_base() else {
+            return Ok(None);
+        };
+        let tenant_slug = match &self.tenant_slug {
+            Some(slug) => slug.clone(),
+            None => {
+                let tenants = match self.list_tenants().await {
+                    Ok(tenants) => tenants,
+                    Err(err) if err.exit_code == 4 => return Ok(None),
+                    Err(err) => return Err(err),
+                };
+                match tenants
+                    .into_iter()
+                    .find(|tenant| tenant.id.to_string() == self.tenant_id)
+                {
+                    Some(tenant) => tenant.display_id,
+                    None => return Ok(None),
+                }
+            }
+        };
+        Ok(Some(WebLocation { base, tenant_slug }))
+    }
+
     /// このトークンで使えるテナント（`GET /v1/tenants`）。scope `read:tenant` が要る。
     pub(crate) async fn list_tenants(&self) -> Result<Vec<TenantRef>> {
         self.get(&["v1", "tenants"], &[]).await
@@ -230,6 +276,30 @@ impl ApiClient {
     }
 }
 
+/// 画面の URL の組み立て元。
+pub(crate) struct WebLocation {
+    base: Url,
+    tenant_slug: String,
+}
+
+impl WebLocation {
+    /// `{画面の URL}/{テナントの slug}/projects/{KEY}/tasks/{KEY}-{seq_id}`
+    /// （メールの URL・frontend の `task-display` と同じ形）。
+    pub(crate) fn task_url(&self, project_key: &str, seq_id: i32) -> String {
+        let mut url = self.base.clone();
+        if let Ok(mut path) = url.path_segments_mut() {
+            path.pop_if_empty().extend([
+                self.tenant_slug.as_str(),
+                "projects",
+                project_key,
+                "tasks",
+                &format!("{project_key}-{seq_id}"),
+            ]);
+        }
+        url.to_string()
+    }
+}
+
 /// 名前（slug）に合うテナント。完全一致を優先し、無ければ大文字小文字を無視して照合する
 /// （プロジェクトや状態の名前解決と同じ優先）。
 fn pick_tenant<'a>(tenants: &'a [TenantRef], name: &str) -> Result<&'a TenantRef> {
@@ -342,5 +412,32 @@ mod tests {
         assert!(err.message.contains("dmm ("), "{}", err.message);
         let err = pick_tenant(&[], "nope").unwrap_err();
         assert!(err.message.contains("none"), "{}", err.message);
+    }
+
+    #[test]
+    fn the_web_base_is_the_api_url_without_the_api_segment() {
+        let base = |url: &str| client(url).web_base().map(|url| url.to_string());
+        assert_eq!(base("https://h/api").as_deref(), Some("https://h/"));
+        assert_eq!(base("https://h/x/api/").as_deref(), Some("https://h/x"));
+        assert_eq!(base("https://h"), None);
+        assert_eq!(base("https://h/v2"), None);
+        assert_eq!(base("https://h/api/v2"), None);
+    }
+
+    #[test]
+    fn builds_the_task_url_from_the_web_base() {
+        for (api_url, expected) in [
+            ("https://h/api", "https://h/acme/projects/APP/tasks/APP-7"),
+            (
+                "https://h/x/api/",
+                "https://h/x/acme/projects/APP/tasks/APP-7",
+            ),
+        ] {
+            let location = WebLocation {
+                base: client(api_url).web_base().unwrap(),
+                tenant_slug: "acme".into(),
+            };
+            assert_eq!(location.task_url("APP", 7), expected);
+        }
     }
 }

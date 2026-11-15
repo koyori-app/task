@@ -247,8 +247,14 @@ async fn my_list_sends_the_default_page() {
 /// 実バイナリを走らせて標準出力を取る。表示は `println!` に出るので、
 /// 行と要約を確かめるにはプロセスを分けるしかない。
 async fn run_binary(server: &MockServer, args: &[&str]) -> (bool, String) {
+    run_binary_at(server, "", args).await
+}
+
+/// `api_url` を `{server}{prefix}` にして走らせる。`<画面の URL>/api` の形を作るのに使う。
+/// モックは `{prefix}/v1/...` に置く。
+async fn run_binary_at(server: &MockServer, prefix: &str, args: &[&str]) -> (bool, String) {
     let home = tempfile::tempdir().unwrap();
-    let uri = server.uri();
+    let uri = format!("{}{prefix}", server.uri());
     let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
     let output = tokio::task::spawn_blocking(move || {
         std::process::Command::new(env!("CARGO_BIN_EXE_task"))
@@ -841,6 +847,236 @@ async fn tasks_comments_reports_a_missing_task() {
         .await
         .unwrap_err();
     assert_eq!(err.exit_code, 5);
+}
+
+/// 作成の応答の `url` を引くために、`<画面の URL>/api` の形で走らせる足場。
+/// プロジェクト・状態・作成のモックを `/api/v1/...` に置き、`/api/v1/tenants` は呼び側が決める。
+async fn mount_create_under_api(server: &MockServer, bulk: bool) {
+    let base = format!("/api/v1/tenants/{TENANT}/projects");
+    Mock::given(method("GET"))
+        .and(path(base.clone()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([project_json()])))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{base}/{PROJECT_ID}/statuses")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([status_json(
+            TODO_STATUS,
+            "Todo",
+            true,
+            false,
+            false,
+            0
+        )])))
+        .mount(server)
+        .await;
+    let (post_path, response) = if bulk {
+        (
+            format!("{base}/{PROJECT_ID}/tasks/bulk-create"),
+            json!({ "tasks": [task_detail_json()] }),
+        )
+    } else {
+        (format!("{base}/{PROJECT_ID}/tasks"), task_detail_json())
+    };
+    Mock::given(method("POST"))
+        .and(path(post_path))
+        .respond_with(ResponseTemplate::new(201).set_body_json(response))
+        .mount(server)
+        .await;
+}
+
+async fn mount_api_tenants(server: &MockServer, response: ResponseTemplate) {
+    Mock::given(method("GET"))
+        .and(path("/api/v1/tenants"))
+        .respond_with(response)
+        .mount(server)
+        .await;
+}
+
+fn tenants_ok() -> ResponseTemplate {
+    ResponseTemplate::new(200).set_body_json(json!([
+        { "id": TENANT, "display_id": "acme", "name": "Acme" }
+    ]))
+}
+
+async fn posts_to(server: &MockServer) -> usize {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|request| request.method.as_str() == "POST")
+        .count()
+}
+
+/// 起票した番号を知るのに `list` を取り直さずに済むよう、作成の応答に `key` と画面の URL を入れる。
+#[tokio::test]
+async fn tasks_create_prints_the_key_and_url() {
+    let harness = harness().await;
+    let server = &harness.server;
+    mount_create_under_api(server, false).await;
+    mount_api_tenants(server, tenants_ok()).await;
+    let create = [
+        "task",
+        "tasks",
+        "create",
+        "--project",
+        "APP",
+        "--title",
+        "T",
+    ];
+
+    let (ok, stdout) = run_binary_at(server, "/api", &create).await;
+    assert!(ok, "{stdout}");
+    assert_eq!(
+        stdout,
+        format!("APP-7\t{}/acme/projects/APP/tasks/APP-7\n", server.uri())
+    );
+
+    let mut json_args = create.to_vec();
+    json_args.insert(1, "--json");
+    let (ok, stdout) = run_binary_at(server, "/api", &json_args).await;
+    assert!(ok, "{stdout}");
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(value["key"], "APP-7");
+    assert_eq!(
+        value["url"],
+        format!("{}/acme/projects/APP/tasks/APP-7", server.uri())
+    );
+    // 今までの項目はそのまま残る
+    assert_eq!(value["seq_id"], 7);
+    assert_eq!(value["title"], "Golden task");
+}
+
+/// `read:tenant` が無いトークンでも作成はできる。URL だけが付かない。
+#[tokio::test]
+async fn tasks_create_omits_the_url_when_the_token_cannot_list_tenants() {
+    let harness = harness().await;
+    let server = &harness.server;
+    mount_create_under_api(server, false).await;
+    mount_api_tenants(server, ResponseTemplate::new(403)).await;
+    let create = [
+        "task",
+        "tasks",
+        "create",
+        "--project",
+        "APP",
+        "--title",
+        "T",
+    ];
+
+    let (ok, stdout) = run_binary_at(server, "/api", &create).await;
+    assert!(ok, "{stdout}");
+    assert_eq!(stdout, "APP-7\n");
+
+    let mut json_args = create.to_vec();
+    json_args.insert(1, "--json");
+    let (ok, stdout) = run_binary_at(server, "/api", &json_args).await;
+    assert!(ok, "{stdout}");
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(value["key"], "APP-7");
+    assert!(value["url"].is_null());
+}
+
+/// 作ったあとで URL の取得に失敗すると、呼び出し側が再実行して二重に起票する。
+/// 取得は POST の前に済ませ、失敗ならタスクを作らない。
+#[tokio::test]
+async fn tasks_create_does_not_post_when_the_tenant_lookup_fails() {
+    let harness = harness().await;
+    let server = &harness.server;
+    mount_create_under_api(server, false).await;
+    mount_api_tenants(server, ResponseTemplate::new(500)).await;
+
+    let (ok, stdout) = run_binary_at(
+        server,
+        "/api",
+        &[
+            "task",
+            "tasks",
+            "create",
+            "--project",
+            "APP",
+            "--title",
+            "T",
+        ],
+    )
+    .await;
+
+    assert!(!ok, "{stdout}");
+    assert_eq!(posts_to(server).await, 0);
+}
+
+#[tokio::test]
+async fn tasks_bulk_create_prints_the_key_and_url_of_each_task() {
+    let harness = harness().await;
+    let server = &harness.server;
+    mount_create_under_api(server, true).await;
+    mount_api_tenants(server, tenants_ok()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("tasks.json");
+    std::fs::write(&file, r#"[{"title": "Golden task"}]"#).unwrap();
+    let file = file.to_str().unwrap();
+    let url = format!("{}/acme/projects/APP/tasks/APP-7", server.uri());
+
+    let (ok, stdout) = run_binary_at(
+        server,
+        "/api",
+        &["task", "tasks", "bulk-create", "--project", "APP", file],
+    )
+    .await;
+    assert!(ok, "{stdout}");
+    assert_eq!(stdout, format!("APP-7\t{url}\tGolden task\n"));
+
+    let (ok, stdout) = run_binary_at(
+        server,
+        "/api",
+        &[
+            "task",
+            "--json",
+            "tasks",
+            "bulk-create",
+            "--project",
+            "APP",
+            file,
+        ],
+    )
+    .await;
+    assert!(ok, "{stdout}");
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(value["tasks"][0]["key"], "APP-7");
+    assert_eq!(value["tasks"][0]["url"], url);
+    assert_eq!(value["tasks"][0]["seq_id"], 7);
+}
+
+/// 対照: `api_url` が `<画面の URL>/api` の形でなければ、URL を作れないので何も引かない。
+#[tokio::test]
+async fn tasks_create_does_not_look_up_tenants_when_the_url_cannot_be_built() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    mount_statuses(&harness).await;
+    Mock::given(method("POST"))
+        .and(path(project_path("tasks")))
+        .respond_with(ResponseTemplate::new(201).set_body_json(task_detail_json()))
+        .mount(&harness.server)
+        .await;
+
+    let (ok, stdout) = run_binary(
+        &harness.server,
+        &[
+            "task",
+            "tasks",
+            "create",
+            "--project",
+            "APP",
+            "--title",
+            "T",
+        ],
+    )
+    .await;
+
+    assert!(ok, "{stdout}");
+    assert_eq!(stdout, "APP-7\n");
+    assert_eq!(harness.calls_to("/v1/tenants").await, 0);
 }
 
 #[tokio::test]

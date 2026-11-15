@@ -151,6 +151,11 @@ task tasks update TASK-181 --progress 40 --sprint week-40 --add-label bug
 task tasks update TASK-181 --clear-sprint --archive
 ```
 
+`tasks create` は作ったタスクのキーと画面の URL を、`--json` なしなら `TASK-532<TAB>https://…/tasks/TASK-532` の
+1 行で出す。`--json` は今までの項目の前に `key` と `url` を足した形で出す。`url` は `api_url` が
+`<画面の URL>/api` の形で、かつトークンに `read:tenant` があるときだけ入る（無ければ `null`、1 行は
+キーだけ）。URL の取得は作る前に済ませるので、取得に失敗したらタスクは作らない。
+
 ### 一括作成
 
 ```bash
@@ -175,7 +180,8 @@ UUID でなく名前で書ける。`description_file` は無く、未知のキ�
   を出して終了コード 2 で終わる。解決の途中の認証・権限・通信の失敗は、位置を添えたうえで元の終了コード
   （3 / 4 / 1）のまま返す。ラベル等の一覧はプロジェクト単位で 1 回だけ取る
 - API は全件作るか 1 件も作らないか。途中で落ちたときは入力を直して丸ごと再送する
-- 出力は入力順の `KEY-N  title`。`--json` は API の応答（`tasks` 配列）をそのまま出す
+- 出力は入力順の `KEY-N<TAB>URL<TAB>title`（URL が無いときは空の列）。`--json` は API の応答の形（`tasks` 配列）で、
+  各要素に `tasks create` と同じ `key` と `url` が付く
 - 作成は件数分の通知・`task.created` Webhook を出す（`tasks create` を件数分叩いたのと同じ）
 
 - 期限は RFC 3339（`2026-09-30T12:00:00Z`）か日付だけ（`2026-09-30` = その日の始まり `00:00:00Z`）。

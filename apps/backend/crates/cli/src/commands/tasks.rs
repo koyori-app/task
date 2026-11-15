@@ -11,11 +11,12 @@ use payload::tasks::{
     TaskDetailResponse, TaskListResponse, UpdateTaskRequest,
 };
 use sea_orm::ActiveEnum;
+use serde::Serialize;
 use serde_json::json;
 use uuid::Uuid;
 
 use crate::Context;
-use crate::api::ApiClient;
+use crate::api::{ApiClient, WebLocation};
 use crate::cli::{TaskClearArgs, TaskFieldArgs, TaskPrCommand, TasksCommand};
 use crate::error::{CliError, Result};
 use crate::output::{OutputOptions, print};
@@ -205,10 +206,18 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
                 custom_field_values: vec![],
             };
             check_deadline_order(body.soft_deadline, body.hard_deadline)?;
+            // 画面の URL の取得は作る前に済ませる。作ったあとで失敗すると、呼び出し側が
+            // 再実行して二重に起票する
+            let web = api.web_location().await?;
             let created: TaskDetailResponse = api
                 .post(&borrow(&tasks_path(api, project.id)), &body)
                 .await?;
-            print(&task_for_display(created), output);
+            let created = CreatedTask::new(&project, web.as_ref(), task_for_display(created));
+            if output.json {
+                print(&created, output);
+            } else {
+                println!("{}", created.line());
+            }
         }
         TasksCommand::BulkCreate {
             project,
@@ -225,13 +234,22 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let body = resolve_bulk_request(api, &project, prepared).await?;
+            // 作る前に済ませる（`tasks create` と同じ理由）
+            let web = api.web_location().await?;
             let created: BulkCreateTasksResponse = api
                 .post(&borrow(&bulk_create_path(api, project.id)), &body)
                 .await?;
+            let created = CreatedTasks {
+                tasks: created
+                    .tasks
+                    .into_iter()
+                    .map(|detail| CreatedTask::new(&project, web.as_ref(), detail))
+                    .collect(),
+            };
             if output.json {
                 print(&created, output);
             } else {
-                for line in bulk_created_lines(&project, &created) {
+                for line in bulk_created_lines(&created) {
                     println!("{line}");
                 }
             }
@@ -796,15 +814,59 @@ fn bulk_create_path(api: &ApiClient, project_id: Uuid) -> Vec<String> {
     segments
 }
 
-/// `KEY-N  title` を入力順に。
-fn bulk_created_lines(project: &ProjectResponse, created: &BulkCreateTasksResponse) -> Vec<String> {
+/// 作成の応答。起票した番号と画面の URL を、`list` を取り直さずに知れるよう、
+/// 今までの項目（`TaskDetailResponse`）の前に足す。
+#[derive(Serialize)]
+struct CreatedTask {
+    /// `TASK-532` の形
+    key: String,
+    /// 画面の URL。`api_url` が `<画面の URL>/api` の形でない、またはトークンに `read:tenant` が
+    /// 無いと `null`
+    url: Option<String>,
+    #[serde(flatten)]
+    task: TaskDetailResponse,
+}
+
+impl CreatedTask {
+    fn new(project: &ProjectResponse, web: Option<&WebLocation>, task: TaskDetailResponse) -> Self {
+        let seq_id = task.task.seq_id;
+        Self {
+            key: task_key(project, seq_id),
+            url: web.map(|web| web.task_url(&project.key, seq_id)),
+            task,
+        }
+    }
+
+    /// `{key}\t{url}`。URL が無ければ `{key}` だけ。
+    fn line(&self) -> String {
+        match &self.url {
+            Some(url) => format!("{}\t{url}", self.key),
+            None => self.key.clone(),
+        }
+    }
+}
+
+/// `BulkCreateTasksResponse` と同じ包み。
+#[derive(Serialize)]
+struct CreatedTasks {
+    tasks: Vec<CreatedTask>,
+}
+
+fn task_key(project: &ProjectResponse, seq_id: i32) -> String {
+    format!("{}-{seq_id}", project.key)
+}
+
+/// `{key}\t{url}\t{title}` を入力順に。URL が無ければ空の列。
+fn bulk_created_lines(created: &CreatedTasks) -> Vec<String> {
     created
         .tasks
         .iter()
-        .map(|detail| {
+        .map(|task| {
             format!(
-                "{}-{}  {}",
-                project.key, detail.task.seq_id, detail.task.title
+                "{}\t{}\t{}",
+                task.key,
+                task.url.as_deref().unwrap_or(""),
+                task.task.task.title
             )
         })
         .collect()
@@ -1775,6 +1837,71 @@ mod tests {
             "mentions": mentions,
         }))
         .unwrap()
+    }
+
+    fn project_for(key: &str) -> ProjectResponse {
+        serde_json::from_value(json!({
+            "id": "11111111-1111-4111-8111-111111111111",
+            "name": "App",
+            "description": "",
+            "tenant_id": "99999999-9999-4999-8999-999999999999",
+            "icon_emoji": null,
+            "icon_url": null,
+            "key": key,
+            "is_personal": false,
+            "personal_owner_id": null,
+            "inherit_tenant_members": true,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_created_task_starts_with_the_key_and_url_and_keeps_every_other_field() {
+        let project = project_for("APP");
+        let detail = task_detail_with("説明", json!({}));
+        let plain = serde_json::to_value(&detail).unwrap();
+
+        let created = CreatedTask::new(&project, None, detail);
+        let value = serde_json::to_value(&created).unwrap();
+        let object = value.as_object().unwrap();
+
+        assert_eq!(object["key"], "APP-7");
+        assert!(object["url"].is_null());
+        // 今までの項目は 1 つも欠けず、値も同じ
+        for (name, field) in plain.as_object().unwrap() {
+            assert_eq!(&object[name], field, "{name}");
+        }
+        assert_eq!(object.len(), plain.as_object().unwrap().len() + 2);
+        // 並びは key・url が先
+        let text = serde_json::to_string(&created).unwrap();
+        assert!(text.starts_with(r#"{"key":"APP-7","url":null,"#), "{text}");
+        assert_eq!(created.line(), "APP-7");
+    }
+
+    #[test]
+    fn bulk_created_lines_have_the_key_url_and_title_with_an_empty_url_column_when_unknown() {
+        let project = project_for("APP");
+        let with_url = CreatedTask {
+            url: Some("https://h/acme/projects/APP/tasks/APP-7".into()),
+            ..CreatedTask::new(&project, None, task_detail_with("", json!({})))
+        };
+        let without_url = CreatedTask::new(&project, None, task_detail_with("", json!({})));
+        assert_eq!(
+            with_url.line(),
+            "APP-7\thttps://h/acme/projects/APP/tasks/APP-7"
+        );
+
+        let lines = bulk_created_lines(&CreatedTasks {
+            tasks: vec![with_url, without_url],
+        });
+
+        assert_eq!(
+            lines,
+            vec![
+                "APP-7\thttps://h/acme/projects/APP/tasks/APP-7\tGolden task",
+                "APP-7\t\tGolden task",
+            ]
+        );
     }
 
     #[test]
