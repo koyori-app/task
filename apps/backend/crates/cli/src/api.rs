@@ -3,7 +3,7 @@
 //! 手書きの型を挟まないのは、フィールド名の食い違いを実行時ではなくコンパイル時に
 //! 出したいため（#647 で手書き `paths.ts` が実際の応答とずれていた）。
 
-use payload::personal_tokens::PersonalTokenIdentityResponse;
+use payload::personal_tokens::PersonalTokenTenants;
 use reqwest::{Method, StatusCode, Url};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -17,8 +17,6 @@ pub struct ApiClient {
     tenant_id: String,
     /// 明示した tenant の由来。自動解決・tenant 無しの口では `None`
     tenant_source: Option<TenantSource>,
-    /// 自動解決で取った `/me` の応答。明示 tenant のときは取らない
-    token_identity: Option<PersonalTokenIdentityResponse>,
 }
 
 impl ApiClient {
@@ -44,7 +42,6 @@ impl ApiClient {
             base,
             tenant_id: tenant_id.unwrap_or_default(),
             tenant_source,
-            token_identity: None,
         })
     }
 
@@ -58,7 +55,7 @@ impl ApiClient {
         if self.tenant_source.is_some() {
             return Ok(self);
         }
-        let identity: PersonalTokenIdentityResponse =
+        let identity: PersonalTokenTenants =
             self.get(&["v1", "personal_tokens", "me"], &[]).await?;
         self.tenant_id = match identity.bound_tenant_ids().as_slice() {
             [only] => only.to_string(),
@@ -75,16 +72,11 @@ impl ApiClient {
                 )));
             }
         };
-        self.token_identity = Some(identity);
         Ok(self)
     }
 
     pub fn tenant_id(&self) -> &str {
         &self.tenant_id
-    }
-
-    pub fn token_identity(&self) -> Option<&PersonalTokenIdentityResponse> {
-        self.token_identity.as_ref()
     }
 
     pub async fn get<T: DeserializeOwned>(

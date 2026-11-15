@@ -217,6 +217,22 @@ async fn resolves_the_tenant_from_a_server_that_only_reports_tenant_id() {
     assert_eq!(harness.calls_to(&projects_path()).await, 1);
 }
 
+/// 版がずれて、CLI が使わない項目（`name` / `user_id` など）が応答に無くても、
+/// テナントの解決は止まらない。止まるのはその項目を読む `auth whoami` だけ。
+#[tokio::test]
+async fn resolves_the_tenant_when_the_token_response_lacks_fields_the_cli_does_not_use() {
+    let harness = harness_with(None, &[]).await;
+    mount_identity(
+        &harness,
+        ResponseTemplate::new(200).set_body_json(json!({ "tenant_ids": [TENANT] })),
+    )
+    .await;
+    mount_projects(&harness, project_list()).await;
+
+    assert_eq!(harness.run(&["task", "projects", "list"]).await.unwrap(), 0);
+    assert_eq!(harness.calls_to(&projects_path()).await, 1);
+}
+
 /// 束縛が空のトークンは、行き先が無いことを伝えて止まる。
 #[tokio::test]
 async fn a_token_without_any_tenant_stops_with_an_explanation() {
