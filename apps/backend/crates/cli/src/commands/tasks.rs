@@ -4,11 +4,12 @@ use chrono::{DateTime, NaiveDate, NaiveTime, TimeZone, Utc};
 use entity::tasks::TaskPriority;
 use payload::forge::{LinkTaskPullRequestRequest, TaskForgePullRequest, TaskForgeResponse};
 use payload::projects::ProjectResponse;
+use payload::statuses::ProjectStatusResponse;
 use payload::task_comments::{CommentListResponse, CreateCommentRequest, TaskCommentResponse};
 use payload::task_extensions::SearchTasksResponse;
 use payload::tasks::{
     AssigneeInput, BulkCreateTasksRequest, BulkCreateTasksResponse, CreateTaskRequest,
-    TaskDetailResponse, TaskListResponse, UpdateTaskRequest,
+    TaskDetailResponse, TaskListResponse, TaskResponse, UpdateTaskRequest,
 };
 use sea_orm::ActiveEnum;
 use serde::Serialize;
@@ -18,6 +19,7 @@ use uuid::Uuid;
 use crate::Context;
 use crate::api::{ApiClient, WebLocation};
 use crate::cli::{TaskClearArgs, TaskFieldArgs, TaskPrCommand, TasksCommand};
+use crate::commands::projects::single_line;
 use crate::error::{CliError, Result};
 use crate::output::{OutputOptions, print};
 use crate::resolve::{
@@ -36,7 +38,44 @@ const MAX_LIST_LIMIT: u64 = 200;
 const MAX_SEARCH_LIMIT: u64 = 100;
 use crate::text_input::{read_stdin, resolve_body};
 
-pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions) -> Result<i32> {
+/// `--json <項目>` で選べる、一覧の項目の名前。CLI が足す 3 つ（`key`・`url`・`status`）に、
+/// `TaskResponse` の直列化の順を続ける。型が増減したら下のテストが落ちる。
+const TASK_LIST_FIELDS: [&str; 27] = [
+    "key",
+    "url",
+    "status",
+    "id",
+    "project_id",
+    "seq_id",
+    "title",
+    "description",
+    "status_id",
+    "priority",
+    "progress_pct",
+    "parent_task_id",
+    "milestone_id",
+    "sprint_id",
+    "soft_deadline",
+    "hard_deadline",
+    "planned_start_on",
+    "require_all_assignees_done",
+    "estimated_minutes",
+    "is_archived",
+    "created_by",
+    "assignees",
+    "labels",
+    "created_at",
+    "updated_at",
+    "completed_at",
+    "deleted_at",
+];
+
+pub async fn run(
+    context: &Context,
+    command: TasksCommand,
+    output: OutputOptions,
+    json_fields: Option<Vec<String>>,
+) -> Result<i32> {
     match command {
         TasksCommand::List {
             project,
@@ -61,9 +100,21 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             let sort = sort.as_deref().map(parse_sort).transpose()?;
             let limit = check_limit(limit, MAX_LIST_LIMIT)?;
             let offset = offset_for(page, limit)?;
+            if let Some(fields) = &json_fields {
+                check_list_fields(fields)?;
+            }
 
             let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
+            // 状態の一覧は 1 回だけ取る。`--status` の名前の解決と、表と `status` 項目の表示に使う
+            let wants_status = json_fields
+                .as_ref()
+                .is_some_and(|fields| fields.iter().any(|field| field == "status"));
+            let statuses = if status.is_some() || !output.json || wants_status {
+                Some(list_statuses(api, project.id).await?)
+            } else {
+                None
+            };
 
             let mut query: Vec<(&str, String)> = vec![
                 ("limit", limit.to_string()),
@@ -76,8 +127,8 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             if let Some(sort) = sort {
                 query.push(("sort", sort.to_string()));
             }
-            if let Some(name) = &status {
-                let id = resolve_status_id(api, project.id, name).await?;
+            if let (Some(name), Some(statuses)) = (&status, &statuses) {
+                let id = pick_status_by_name(statuses, name)?;
                 query.push(("status_id", id.to_string()));
             }
             if let Some(name) = &label {
@@ -116,10 +167,22 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
                 .get(&borrow(&tasks_path(api, project.id)), &query)
                 .await?;
             let tasks = tasks_for_display(tasks);
-            if output.json {
-                print(&tasks, output);
-            } else {
-                print_listing(&tasks, output, page);
+            let statuses = statuses.unwrap_or_default();
+            match (&json_fields, output.json) {
+                (_, false) => print_listing(&project, &tasks, &statuses, page),
+                // 項目なしの `--json` は今の出力に `key` を足すだけ（スキルが読む項目は変えない）
+                (None, true) => print(&listing_with_keys(&project, &tasks), output),
+                (Some(fields), true) => {
+                    let web = if fields.iter().any(|field| field == "url") {
+                        api.web_location().await?
+                    } else {
+                        None
+                    };
+                    print(
+                        &picked_listing(&project, &tasks, fields, &statuses, web.as_ref()),
+                        output,
+                    );
+                }
             }
         }
         TasksCommand::Search {
@@ -1114,11 +1177,167 @@ pub(crate) fn offset_for(page: u64, limit: u64) -> Result<u64> {
 }
 
 /// 人間向けの一覧。総件数を出さないと、既定の 50 件で切れていることに気付けない。
-fn print_listing(tasks: &TaskListResponse, output: OutputOptions, page: u64) {
-    if !tasks.tasks.is_empty() {
-        print(tasks, output);
+/// 本文は出さない（長い本文が一覧の読み取りを埋める）。要るときは `--json` か `tasks show`。
+fn print_listing(
+    project: &ProjectResponse,
+    tasks: &TaskListResponse,
+    statuses: &[ProjectStatusResponse],
+    page: u64,
+) {
+    for task in &tasks.tasks {
+        println!("{}", task_row(project, task, statuses));
     }
     println!("{}", listing_summary(tasks, page));
+}
+
+/// `{key}\t{状態}\t{title}\t{ラベル}\t{更新日時}`。状態が一覧に無ければ `status_id`。
+/// タイトルとラベル名は改行・タブを空白に畳む（1 件 1 行・タブ区切りを崩さない）。
+fn task_row(
+    project: &ProjectResponse,
+    task: &TaskResponse,
+    statuses: &[ProjectStatusResponse],
+) -> String {
+    let status =
+        status_name(statuses, task.status_id).unwrap_or_else(|| task.status_id.to_string());
+    let labels = task
+        .labels
+        .iter()
+        .map(|label| single_line(&label.name))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{}\t{}\t{}\t{}\t{}",
+        task_key(project, task.seq_id),
+        single_line(&status),
+        single_line(&task.title),
+        labels,
+        task.updated_at
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    )
+}
+
+fn status_name(statuses: &[ProjectStatusResponse], id: Uuid) -> Option<String> {
+    statuses
+        .iter()
+        .find(|status| status.id == id)
+        .map(|status| status.name.clone())
+}
+
+/// 項目なしの `--json`。`TaskListResponse` の形のまま、各行に `key` だけを足す。
+#[derive(Serialize)]
+struct ListedTask<'a> {
+    key: String,
+    #[serde(flatten)]
+    task: &'a TaskResponse,
+}
+
+#[derive(Serialize)]
+struct TaskListing<'a> {
+    tasks: Vec<ListedTask<'a>>,
+    total: u64,
+    next_cursor: &'a Option<String>,
+}
+
+fn listing_with_keys<'a>(project: &ProjectResponse, list: &'a TaskListResponse) -> TaskListing<'a> {
+    TaskListing {
+        tasks: list
+            .tasks
+            .iter()
+            .map(|task| ListedTask {
+                key: task_key(project, task.seq_id),
+                task,
+            })
+            .collect(),
+        total: list.total,
+        next_cursor: &list.next_cursor,
+    }
+}
+
+/// 選んだ項目だけの 1 行。serde_json の `Map` は順を保たないので、指定の順を自分で持つ。
+struct Picked(Vec<(String, serde_json::Value)>);
+
+impl Serialize for Picked {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        serializer.collect_map(self.0.iter().map(|(name, value)| (name, value)))
+    }
+}
+
+#[derive(Serialize)]
+struct PickedListing<'a> {
+    tasks: Vec<Picked>,
+    total: u64,
+    next_cursor: &'a Option<String>,
+}
+
+/// `--json key,title`。包み（`tasks` / `total` / `next_cursor`）は項目なしと同じにして、
+/// jq の道筋を揃える。各行は指定した項目だけを、指定した順で出す。
+fn picked_listing<'a>(
+    project: &ProjectResponse,
+    list: &'a TaskListResponse,
+    fields: &[String],
+    statuses: &[ProjectStatusResponse],
+    web: Option<&WebLocation>,
+) -> PickedListing<'a> {
+    // 同じ項目を 2 回書いても、JSON の同じキーを 2 つ出さない
+    let mut names: Vec<&String> = Vec::new();
+    for field in fields {
+        if !names.contains(&field) {
+            names.push(field);
+        }
+    }
+    let tasks = list
+        .tasks
+        .iter()
+        .map(|task| {
+            let serde_json::Value::Object(mut all) =
+                serde_json::to_value(task).unwrap_or(serde_json::Value::Null)
+            else {
+                return Picked(Vec::new());
+            };
+            all.insert("key".into(), json!(task_key(project, task.seq_id)));
+            all.insert(
+                "status".into(),
+                status_name(statuses, task.status_id).map_or(serde_json::Value::Null, Into::into),
+            );
+            all.insert(
+                "url".into(),
+                web.map_or(serde_json::Value::Null, |web| {
+                    web.task_url(&project.key, task.seq_id).into()
+                }),
+            );
+            Picked(
+                names
+                    .iter()
+                    .map(|name| {
+                        let value = all.get(*name).cloned().unwrap_or(serde_json::Value::Null);
+                        ((*name).clone(), value)
+                    })
+                    .collect(),
+            )
+        })
+        .collect();
+    PickedListing {
+        tasks,
+        total: list.total,
+        next_cursor: &list.next_cursor,
+    }
+}
+
+/// 選べない名前は、選べる項目を並べて断る（送信前）。
+fn check_list_fields(fields: &[String]) -> Result<()> {
+    match fields
+        .iter()
+        .find(|field| !TASK_LIST_FIELDS.contains(&field.as_str()))
+    {
+        Some(unknown) => Err(CliError::validation(format!(
+            "Unknown JSON field: {unknown}. Available fields: {}",
+            TASK_LIST_FIELDS.join(", ")
+        ))),
+        None => Ok(()),
+    }
 }
 
 fn print_hits(project: &ProjectResponse, hits: &SearchTasksResponse, page: u64, limit: u64) {
@@ -1902,6 +2121,102 @@ mod tests {
                 "APP-7\t\tGolden task",
             ]
         );
+    }
+
+    #[test]
+    fn task_list_fields_match_the_response_type() {
+        // CLI が足す項目
+        const COMPUTED: [&str; 3] = ["key", "url", "status"];
+        let detail = task_detail_with("", json!({}));
+        let serialized = serde_json::to_value(&detail.task).unwrap();
+        let mut expected: Vec<String> = COMPUTED.iter().map(|name| name.to_string()).collect();
+        expected.extend(serialized.as_object().unwrap().keys().cloned());
+        expected.sort();
+        let mut actual: Vec<String> = TASK_LIST_FIELDS
+            .iter()
+            .map(|name| name.to_string())
+            .collect();
+        actual.sort();
+        assert_eq!(
+            actual, expected,
+            "TaskResponse の項目が増減したら TASK_LIST_FIELDS を直す"
+        );
+    }
+
+    #[test]
+    fn an_unknown_list_field_is_refused_with_the_available_ones() {
+        let err = check_list_fields(&["key".into(), "titel".into()]).unwrap_err();
+        assert_eq!(err.exit_code, 2);
+        assert!(
+            err.message.contains("Unknown JSON field: titel"),
+            "{}",
+            err.message
+        );
+        assert!(err.message.contains("Available fields:"), "{}", err.message);
+        assert!(err.message.contains("key"), "{}", err.message);
+        assert!(check_list_fields(&["key".into(), "title".into(), "status".into()]).is_ok());
+    }
+
+    fn listed(tasks: Vec<serde_json::Value>) -> TaskListResponse {
+        serde_json::from_value(json!({ "tasks": tasks, "total": 1, "next_cursor": null })).unwrap()
+    }
+
+    fn task_json(title: &str) -> serde_json::Value {
+        let mut task = serde_json::to_value(task_detail_with("本文", json!({})).task).unwrap();
+        task["title"] = json!(title);
+        task
+    }
+
+    #[test]
+    fn picked_fields_come_out_in_the_requested_order_and_only_those() {
+        let project = project_for("APP");
+        let list = listed(vec![task_json("題")]);
+        let fields: Vec<String> = ["title", "key", "status", "url", "title"]
+            .iter()
+            .map(|name| name.to_string())
+            .collect();
+
+        let out = picked_listing(&project, &list, &fields, &[], None);
+        let text = serde_json::to_string(&out).unwrap();
+
+        // 状態が一覧に無ければ null。URL が引けなければ null。重複は 1 回だけ
+        assert_eq!(
+            text,
+            r#"{"tasks":[{"title":"題","key":"APP-7","status":null,"url":null}],"total":1,"next_cursor":null}"#
+        );
+    }
+
+    #[test]
+    fn the_listing_with_keys_is_the_plain_listing_plus_a_key() {
+        let project = project_for("APP");
+        let list = listed(vec![task_json("題")]);
+
+        let mut with_keys = serde_json::to_value(listing_with_keys(&project, &list)).unwrap();
+        for task in with_keys["tasks"].as_array_mut().unwrap() {
+            assert_eq!(task["key"], "APP-7");
+            task.as_object_mut().unwrap().remove("key");
+        }
+
+        assert_eq!(with_keys, serde_json::to_value(&list).unwrap());
+    }
+
+    #[test]
+    fn a_table_row_has_no_description_and_stays_on_one_line() {
+        let project = project_for("APP");
+        let mut task = task_json("1 行目\n2 行目\tタブ");
+        task["labels"] = json!([{
+            "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd", "name": "a\nb", "description": "",
+            "color": "#112233", "icon_url": null, "project_id": null,
+        }]);
+        let list = listed(vec![task]);
+
+        let row = task_row(&project, &list.tasks[0], &[]);
+
+        assert!(!row.contains("本文"), "{row}");
+        assert_eq!(row.lines().count(), 1, "{row:?}");
+        assert_eq!(row.split('\t').count(), 5, "{row:?}");
+        assert!(row.starts_with("APP-7\t"), "{row}");
+        assert!(row.contains("\t1 行目 2 行目 タブ\ta b\t"), "{row:?}");
     }
 
     #[test]

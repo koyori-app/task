@@ -1,11 +1,9 @@
-use clap::Parser;
-
 use task_cli::Context;
 use task_cli::cli::Cli;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> std::process::ExitCode {
-    let cli = Cli::parse();
+    let cli = Cli::parse_args(std::env::args()).unwrap_or_else(|err| err.exit());
     let context = match Context::from_process() {
         Ok(context) => context,
         Err(err) => return fail(err),

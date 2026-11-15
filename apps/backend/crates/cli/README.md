@@ -119,6 +119,7 @@ task tasks list --project TASK --page 2 --limit 100
 task tasks list --project TASK --status Todo --label bug --sort deadline_asc
 task tasks list --project TASK --archived
 task tasks list --project TASK --unassigned  # 担当者がいないタスクだけ
+task tasks list --project TASK --json key,title,status  # 項目を選ぶ（本文などは出ない）
 task tasks search --project TASK ページング
 task tasks search --project TASK @alice      # alice を印でメンションした説明文にも当たる
 task tasks show TASK-181                     # 説明文のメンションは @今の名 で出る
@@ -127,6 +128,14 @@ task tasks comments TASK-181                 # コメントを古い順に読む
 task my list --open                          # 自分の担当のうち未完了だけ
 task my list --open --page 2 --limit 100     # ページングは tasks list と同じ
 ```
+
+`tasks list` は既定で 1 件 1 行の表（`キー<TAB>状態<TAB>タイトル<TAB>ラベル<TAB>更新日時`）を出し、本文は出さない。
+`--json` は全項目（本文を含む）に `key` を足した形で出す。項目を選ぶときは `--json key,title,status`
+（`--json=key,title,status` も同じ）と並べる。出力は `{ "tasks": [...], "total", "next_cursor" }` のままで、
+各行が指定した項目だけを指定した順で持つ。選べる項目は `TaskResponse` の項目と、CLI が足す `key`・`url`・
+`status`（状態の名前。`url` は `tasks create` と同じ条件で、引けなければ `null`）。誤った名前は選べる項目を
+並べて終了コード 2 で止まる。項目を選べるのは `tasks list` だけで、ほかのコマンドに付けると終了コード 2 で
+止まる（値なしの `--json` はどのコマンドでも今までどおり全部を出す）。
 
 `tasks show` は説明文のメンションの印を `@今の名` に戻して出す。それを `tasks update --description` へ
 そのまま戻すとメンションが素の文字になるので、書き換えて戻すときは `--raw` で印のまま取る（`--json` でも同じ）。

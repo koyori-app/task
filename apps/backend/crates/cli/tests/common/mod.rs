@@ -6,7 +6,6 @@
 // テストバイナリごとに使う足場が違うので、片方では未使用になるものがある。
 #![allow(dead_code)]
 
-use clap::Parser;
 use task_cli::cli::Cli;
 use task_cli::config::{ConfigStore, TaskConfig};
 use task_cli::error::Result;
@@ -63,13 +62,14 @@ pub fn harness_without_config() -> (tempfile::TempDir, task_cli::Context) {
 }
 
 pub fn parse(args: &[&str]) -> Cli {
-    Cli::try_parse_from(args).expect("the test invoked the CLI with invalid arguments")
+    Cli::parse_args(args.iter().map(|arg| arg.to_string()))
+        .expect("the test invoked the CLI with invalid arguments")
 }
 
 impl Harness {
     pub async fn run(&self, args: &[&str]) -> Result<i32> {
-        let cli =
-            Cli::try_parse_from(args).expect("the test invoked the CLI with invalid arguments");
+        let cli = Cli::parse_args(args.iter().map(|arg| arg.to_string()))
+            .expect("the test invoked the CLI with invalid arguments");
         task_cli::run(cli, &self.context).await
     }
 

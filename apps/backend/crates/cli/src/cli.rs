@@ -21,12 +21,108 @@ macro_rules! sprint_status_hint {
 // 版はビルド時に決まる（`build.rs`。タグからのリリースではタグの版になる）
 #[command(name = "task", version = env!("TASK_CLI_VERSION"), about = "Task management CLI")]
 pub struct Cli {
-    /// Output JSON
-    #[arg(long, global = true)]
-    pub json: bool,
+    /// Output JSON. `tasks list` also takes fields: --json key,title,status
+    #[arg(
+        long,
+        global = true,
+        value_name = "FIELDS",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = ""
+    )]
+    pub json: Option<String>,
 
     #[command(subcommand)]
     pub command: Command,
+}
+
+/// `--json` の指定。項目なしの `--json` は今までどおり全部を出す。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JsonRequest {
+    pub enabled: bool,
+    /// `--json key,title` の項目。`tasks list` だけが受ける
+    pub fields: Option<Vec<String>>,
+}
+
+/// 項目を選べるコマンド。位置引数を持たないものだけを入れる（`--json` の次の語を項目と決められる）。
+/// 位置引数を持つコマンドで `--json key` と書くと、`key` が位置引数か項目か決められない。
+const FIELD_COMMANDS: [[&str; 2]; 1] = [["tasks", "list"]];
+
+/// `tasks list --json key,title` を `--json=key,title` に直す。
+///
+/// `--json` の値は `=` 付きだけを clap に渡す（`require_equals`）。値なしの `--json` が後ろの
+/// 位置引数やサブコマンドを食わないようにするため（`task --json projects list`、
+/// `task tasks show --json TASK-1` は今までどおり）。空白区切りは、位置引数の無い
+/// `FIELD_COMMANDS` に限り、ここで `=` 付きにまとめる。ほかは一切変えない。
+pub fn normalize_json_fields(args: Vec<String>) -> Vec<String> {
+    // `-` で始まらない最初の 2 語がコマンドの道筋（`task tasks list`）
+    let path: Vec<(usize, &String)> = args
+        .iter()
+        .enumerate()
+        .skip(1)
+        .filter(|(_, arg)| !arg.starts_with('-'))
+        .take(2)
+        .collect();
+    let [(_, first), (end, second)] = path[..] else {
+        return args;
+    };
+    if !FIELD_COMMANDS
+        .iter()
+        .any(|[a, b]| a == first && b == second)
+    {
+        return args;
+    }
+    // コマンドの道筋より後ろの `--json` だけを見る
+    let mut out = Vec::with_capacity(args.len());
+    let mut index = 0;
+    while index < args.len() {
+        if index > end
+            && args[index] == "--json"
+            && let Some(next) = args.get(index + 1).filter(|next| !next.starts_with('-'))
+        {
+            out.push(format!("--json={next}"));
+            index += 2;
+            continue;
+        }
+        out.push(args[index].clone());
+        index += 1;
+    }
+    out
+}
+
+impl Cli {
+    /// コマンドラインを解析する。`--json` の空白区切りの項目を、clap に渡す前に直す。
+    pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Self, clap::Error> {
+        Self::try_parse_from(normalize_json_fields(args.into_iter().collect()))
+    }
+
+    pub fn json_request(&self) -> crate::error::Result<JsonRequest> {
+        let Some(value) = &self.json else {
+            return Ok(JsonRequest {
+                enabled: false,
+                fields: None,
+            });
+        };
+        if value.is_empty() {
+            return Ok(JsonRequest {
+                enabled: true,
+                fields: None,
+            });
+        }
+        let fields: Vec<String> = value
+            .split(',')
+            .map(|field| field.trim().to_string())
+            .collect();
+        if fields.iter().any(String::is_empty) {
+            return Err(crate::error::CliError::validation(
+                "--json: empty field name",
+            ));
+        }
+        Ok(JsonRequest {
+            enabled: true,
+            fields: Some(fields),
+        })
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -655,8 +751,140 @@ mod tests {
             vec!["task", "projects", "list", "--json"],
         ] {
             let cli = Cli::try_parse_from(argv).unwrap();
-            assert!(cli.json);
+            assert!(cli.json.is_some());
         }
+    }
+
+    fn args(words: &[&str]) -> Vec<String> {
+        words.iter().map(|word| word.to_string()).collect()
+    }
+
+    #[test]
+    fn json_fields_are_joined_to_the_flag_only_for_commands_that_take_them() {
+        for (input, expected) in [
+            (
+                &[
+                    "task",
+                    "tasks",
+                    "list",
+                    "--project",
+                    "APP",
+                    "--json",
+                    "key,title",
+                ][..],
+                &[
+                    "task",
+                    "tasks",
+                    "list",
+                    "--project",
+                    "APP",
+                    "--json=key,title",
+                ][..],
+            ),
+            (
+                &[
+                    "task",
+                    "tasks",
+                    "list",
+                    "--json",
+                    "key,title",
+                    "--project",
+                    "APP",
+                ][..],
+                &[
+                    "task",
+                    "tasks",
+                    "list",
+                    "--json=key,title",
+                    "--project",
+                    "APP",
+                ][..],
+            ),
+            // 行末、または次がフラグなら項目なし
+            (
+                &["task", "tasks", "list", "--json"][..],
+                &["task", "tasks", "list", "--json"][..],
+            ),
+            (
+                &["task", "tasks", "list", "--json", "--project", "APP"][..],
+                &["task", "tasks", "list", "--json", "--project", "APP"][..],
+            ),
+            // コマンドの前の `--json` と、位置引数を持つコマンドは変えない
+            (
+                &["task", "--json", "tasks", "list"][..],
+                &["task", "--json", "tasks", "list"][..],
+            ),
+            (
+                &["task", "tasks", "show", "--json", "APP-1"][..],
+                &["task", "tasks", "show", "--json", "APP-1"][..],
+            ),
+            (
+                &["task", "tasks", "comment", "APP-1", "--json", "body"][..],
+                &["task", "tasks", "comment", "APP-1", "--json", "body"][..],
+            ),
+            (
+                &["task", "projects", "list", "--json", "x"][..],
+                &["task", "projects", "list", "--json", "x"][..],
+            ),
+        ] {
+            assert_eq!(
+                normalize_json_fields(args(input)),
+                args(expected),
+                "{input:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_json_request_separates_a_bare_flag_from_fields() {
+        let request = |words: &[&str]| Cli::parse_args(args(words)).unwrap().json_request();
+        let fields = request(&[
+            "task",
+            "tasks",
+            "list",
+            "--project",
+            "APP",
+            "--json",
+            "key,title",
+        ])
+        .unwrap();
+        assert!(fields.enabled);
+        assert_eq!(
+            fields.fields,
+            Some(vec!["key".to_string(), "title".to_string()])
+        );
+
+        let bare = request(&["task", "tasks", "list", "--project", "APP", "--json"]).unwrap();
+        assert!(bare.enabled);
+        assert_eq!(bare.fields, None);
+
+        let none = request(&["task", "tasks", "list", "--project", "APP"]).unwrap();
+        assert!(!none.enabled);
+
+        let err = request(&[
+            "task",
+            "tasks",
+            "list",
+            "--project",
+            "APP",
+            "--json=key,,title",
+        ])
+        .unwrap_err();
+        assert_eq!(err.exit_code, 2);
+    }
+
+    /// 値なしの `--json` は、後ろのサブコマンドや位置引数を食わない。
+    #[test]
+    fn a_bare_json_flag_does_not_swallow_the_next_word() {
+        let cli = Cli::parse_args(args(&["task", "--json", "projects", "list"])).unwrap();
+        assert_eq!(cli.json.as_deref(), Some(""));
+        assert!(matches!(cli.command, Command::Projects { .. }));
+        let cli = Cli::parse_args(args(&["task", "tasks", "show", "--json", "APP-1"])).unwrap();
+        assert_eq!(cli.json.as_deref(), Some(""));
+        let Command::Tasks { command } = cli.command else {
+            panic!("expected tasks");
+        };
+        assert!(matches!(*command, TasksCommand::Show { ref task_ref, .. } if task_ref == "APP-1"));
     }
 
     #[test]

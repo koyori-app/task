@@ -1197,6 +1197,7 @@ async fn ambiguous_assignee_names_fail_before_updating() {
 async fn tasks_list_resolves_the_assignee_name_without_listing_candidates() {
     let harness = harness().await;
     mount_project_lookup(&harness).await;
+    mount_statuses(&harness).await;
     Mock::given(method("GET"))
         .and(path(project_path("assignable-users")))
         .and(query_param("username", "alice"))
@@ -1235,6 +1236,7 @@ async fn tasks_list_resolves_the_assignee_name_without_listing_candidates() {
 async fn tasks_list_sends_the_unassigned_filter() {
     let harness = harness().await;
     mount_project_lookup(&harness).await;
+    mount_statuses(&harness).await;
     Mock::given(method("GET"))
         .and(path(project_path("tasks")))
         .and(query_param("unassigned", "true"))
@@ -1255,6 +1257,7 @@ async fn tasks_list_sends_the_unassigned_filter() {
 async fn tasks_list_sends_the_priority_filter_in_the_query_form() {
     let harness = harness().await;
     mount_project_lookup(&harness).await;
+    mount_statuses(&harness).await;
     Mock::given(method("GET"))
         .and(path(project_path("tasks")))
         .and(query_param("priority", "critical_fire"))
@@ -1277,6 +1280,200 @@ async fn tasks_list_sends_the_priority_filter_in_the_query_form() {
         .await
         .unwrap();
     assert_eq!(code, 0);
+}
+
+const LIST_DESCRIPTION: &str = "長い本文の印がここに入る";
+
+fn listed_task(seq_id: i64, title: &str) -> serde_json::Value {
+    let mut task = task_detail_json();
+    task["seq_id"] = json!(seq_id);
+    task["title"] = json!(title);
+    task["description"] = json!(LIST_DESCRIPTION);
+    task["labels"] = json!([label_json(BUG_LABEL, "bug")]);
+    task["updated_at"] = json!("2026-01-02T03:04:05Z");
+    task
+}
+
+async fn mount_two_listed_tasks(harness: &Harness) {
+    Mock::given(method("GET"))
+        .and(path(project_path("tasks")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "tasks": [listed_task(1, "最初"), listed_task(2, "次")],
+            "total": 2,
+            "next_cursor": null,
+        })))
+        .mount(&harness.server)
+        .await;
+}
+
+/// タイトルで 1 件を探すだけで本文まで読ませない。`--json` に項目を並べて選べる。
+#[tokio::test]
+async fn tasks_list_json_fields_print_only_those_fields() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    mount_statuses(&harness).await;
+    mount_two_listed_tasks(&harness).await;
+
+    for args in [
+        // `=` なしでも、`tasks list` では次の語を項目として読む
+        &[
+            "task",
+            "tasks",
+            "list",
+            "--project",
+            "APP",
+            "--json",
+            "key,title",
+        ][..],
+        &[
+            "task",
+            "tasks",
+            "list",
+            "--json=key,title",
+            "--project",
+            "APP",
+        ][..],
+    ] {
+        let (ok, stdout) = run_binary(&harness.server, args).await;
+        assert!(ok, "{args:?}: {stdout}");
+        let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+        assert_eq!(value["total"], 2, "{stdout}");
+        let rows = value["tasks"].as_array().unwrap();
+        assert_eq!(rows.len(), 2);
+        for row in rows {
+            let keys: Vec<&String> = row.as_object().unwrap().keys().collect();
+            assert_eq!(keys, ["key", "title"], "{stdout}");
+        }
+        assert_eq!(rows[0]["key"], "APP-1");
+        assert_eq!(rows[1]["title"], "次");
+        assert!(!stdout.contains(LIST_DESCRIPTION), "{stdout}");
+    }
+}
+
+/// 項目の順は指定どおり。状態は名前で出す。
+#[tokio::test]
+async fn tasks_list_json_fields_keep_the_requested_order_and_name_the_status() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    mount_statuses(&harness).await;
+    mount_two_listed_tasks(&harness).await;
+
+    let (ok, stdout) = run_binary(
+        &harness.server,
+        &[
+            "task",
+            "tasks",
+            "list",
+            "--project",
+            "APP",
+            "--json=status,key,seq_id",
+        ],
+    )
+    .await;
+
+    assert!(ok, "{stdout}");
+    // 順は出力の文字列で見る（`serde_json::Value` は順を保たない）
+    let position = |name: &str| stdout.find(&format!("\"{name}\":")).unwrap();
+    assert!(position("status") < position("key"), "{stdout}");
+    assert!(position("key") < position("seq_id"), "{stdout}");
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let row = value["tasks"][0].as_object().unwrap();
+    assert_eq!(row.len(), 3);
+    assert_eq!(row["status"], "Todo");
+    assert_eq!(row["seq_id"], 1);
+}
+
+/// 既定の表では本文を出さない（長い本文が一覧の読み取りを埋めるため）。
+#[tokio::test]
+async fn tasks_list_does_not_print_descriptions_by_default() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    mount_statuses(&harness).await;
+    mount_two_listed_tasks(&harness).await;
+
+    let (ok, stdout) = run_binary(
+        &harness.server,
+        &["task", "tasks", "list", "--project", "APP"],
+    )
+    .await;
+
+    assert!(ok, "{stdout}");
+    assert!(!stdout.contains(LIST_DESCRIPTION), "{stdout}");
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(lines.len(), 3, "{stdout}");
+    assert_eq!(lines[0], "APP-1\tTodo\t最初\tbug\t2026-01-02T03:04:05Z");
+    assert_eq!(lines[1], "APP-2\tTodo\t次\tbug\t2026-01-02T03:04:05Z");
+    assert_eq!(lines[2], "2 件表示 / 全 2 件");
+}
+
+/// 項目なしの `--json` は今までどおり全項目を出す（スキルが `.tasks[] | .seq_id` で読む）。
+/// 足すのは `key` だけで、状態の一覧とテナントの一覧は引かない。
+#[tokio::test]
+async fn tasks_list_bare_json_keeps_every_field() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    mount_two_listed_tasks(&harness).await;
+
+    for args in [
+        &["task", "tasks", "list", "--project", "APP", "--json"][..],
+        &["task", "--json", "tasks", "list", "--project", "APP"][..],
+    ] {
+        let (ok, stdout) = run_binary(&harness.server, args).await;
+        assert!(ok, "{args:?}: {stdout}");
+        let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+        assert_eq!(value["total"], 2);
+        let row = &value["tasks"][0];
+        assert_eq!(row["key"], "APP-1");
+        assert_eq!(row["seq_id"], 1);
+        assert_eq!(row["description"], LIST_DESCRIPTION);
+        assert!(row["status_id"].is_string());
+        assert!(row.get("status").is_none());
+        assert!(row.get("url").is_none());
+    }
+    assert_eq!(harness.calls_to(&project_path("statuses")).await, 0);
+    assert_eq!(harness.calls_to("/v1/tenants").await, 0);
+}
+
+#[tokio::test]
+async fn tasks_list_rejects_an_unknown_json_field_before_any_request() {
+    let harness = harness().await;
+
+    let err = harness
+        .run(&[
+            "task",
+            "tasks",
+            "list",
+            "--project",
+            "APP",
+            "--json=key,titel",
+        ])
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.exit_code, 2);
+    assert!(
+        err.message.contains("Unknown JSON field: titel"),
+        "{}",
+        err.message
+    );
+    assert!(err.message.contains("Available fields:"), "{}", err.message);
+    assert!(err.message.contains("title"), "{}", err.message);
+    assert!(harness.sent_nothing().await);
+}
+
+/// 項目を選べるのは `tasks list` だけ。ほかで黙って無視すると、絞れたつもりで全部読んでしまう。
+#[tokio::test]
+async fn json_fields_are_refused_outside_tasks_list() {
+    let harness = harness().await;
+
+    let err = harness
+        .run(&["task", "projects", "list", "--json=key"])
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.exit_code, 2);
+    assert!(err.message.contains("tasks list"), "{}", err.message);
+    assert!(harness.sent_nothing().await);
 }
 
 #[tokio::test]

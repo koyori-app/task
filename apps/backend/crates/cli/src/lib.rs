@@ -69,7 +69,19 @@ impl Context {
 
 /// プロセスの終了コードを返す。0 以外はゲート不成立か失敗。
 pub async fn run(cli: Cli, context: &Context) -> Result<i32> {
-    let output = OutputOptions::new(cli.json);
+    let json = cli.json_request()?;
+    let output = OutputOptions::new(json.enabled);
+    let fields = json.fields;
+    // 項目を選べるのは `tasks list` だけ。ほかで黙って無視すると、絞れたつもりで全部を読んでしまう
+    let is_task_list = matches!(
+        &cli.command,
+        Command::Tasks { command } if matches!(**command, cli::TasksCommand::List { .. })
+    );
+    if fields.is_some() && !is_task_list {
+        return Err(error::CliError::validation(
+            "--json <fields> is supported only by `tasks list`; use --json without fields here",
+        ));
+    }
 
     // 設定を要らないコマンド（`config` と手元のトークン操作）を、設定不足で落とさない。
     // 落とすと、トークンを保存する前に何もできなくなる
@@ -77,7 +89,7 @@ pub async fn run(cli: Cli, context: &Context) -> Result<i32> {
         Command::Config { command } => commands::config::run(command, context.store(), output),
         Command::Auth { command } => commands::auth::run(command, context, output).await,
         Command::Projects { command } => commands::projects::run(context, command, output).await,
-        Command::Tasks { command } => commands::tasks::run(context, *command, output).await,
+        Command::Tasks { command } => commands::tasks::run(context, *command, output, fields).await,
         Command::My { command } => commands::my::run(context, command, output).await,
         Command::Sprints { command } => commands::sprints::run(context, command, output).await,
         Command::Review { command } => commands::reviews::run(context, command, output).await,
