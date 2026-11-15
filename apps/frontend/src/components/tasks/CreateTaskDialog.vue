@@ -751,7 +751,11 @@ async function submit(event: SubmitEvent) {
           <p v-if="requestError" role="alert" class="text-sm text-destructive">
             {{ requestError }}
           </p>
-          <p v-if="successMessage" role="status" class="text-sm text-emerald-600">
+          <p
+            v-if="successMessage"
+            role="status"
+            class="text-sm text-emerald-700 dark:text-emerald-400"
+          >
             {{ successMessage }}
           </p>
         </div>

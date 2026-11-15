@@ -36,6 +36,18 @@ describe('AccountSettingsNav の環境設定と実験的機能', () => {
     expect(link?.attributes('href')).toBe('/settings/preferences');
   });
 
+  it('「テーマ」は「環境設定」のすぐ下に並び、/settings/theme への link になる', async () => {
+    const { wrapper } = mountNav('/settings/theme');
+    await flushPromises();
+
+    const titles = linkTitles(wrapper);
+    expect(titles.indexOf('テーマ')).toBe(titles.indexOf('環境設定') + 1);
+    const link = wrapper.get('a[href="/settings/theme"]');
+    expect(link.text()).toBe('テーマ');
+    expect(link.find('svg').exists()).toBe(true);
+    expect(link.attributes('aria-current')).toBe('page');
+  });
+
   it('表示が無効（既定）なら「実験的機能」の項目も区切り線も無い', async () => {
     const { wrapper } = mountNav();
     await flushPromises();

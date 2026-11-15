@@ -25,7 +25,7 @@
  * - mermaid のフォールバック表示は消費側で
  *   `@/lib/remark-kfm-mermaid/style.css` を明示 import する。
  * - コードブロック着色の見た目も同方式: 消費側で `@/lib/rehype-starry-night/style.css` を
- *   明示 import する (実体は @wooorm/starry-night の light シート固定 ＋ .dark ブリッジ。
+ *   明示 import する (実体は @wooorm/starry-night の light シート固定 ＋ ダークブリッジ（html の data-theme が light 以外）。
  *   選定理由は同 CSS のコメントを参照)。
  * - コードブロックの枠 (帯・行番号・横スクロール) も同方式: 消費側で
  *   `@/lib/rehype-kfm-code/style.css` を starry-night の style.css と同じ場所で

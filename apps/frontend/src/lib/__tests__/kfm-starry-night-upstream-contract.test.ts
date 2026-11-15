@@ -53,7 +53,7 @@ describe('@wooorm/starry-night upstream 契約', () => {
     ).toEqual([]);
   });
 
-  it('style.css の .dark 30 変数は upstream dark.css と完全一致する', () => {
+  it('style.css のダークブリッジの 30 変数は upstream dark.css と完全一致する', () => {
     const upstreamDark = extractVariables(readUpstream('style/dark.css'));
     const localDark = extractVariables(fs.readFileSync(LOCAL_STYLE_PATH, 'utf8'));
     expect(upstreamDark.size).toBe(30);
