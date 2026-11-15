@@ -152,13 +152,18 @@ export function valueCandidates(key: TaskQueryKey, prefix: string, data: Suggest
           : undefined,
     }));
   const normalize = (v: string) => normalizeQueryValue(key, v);
+  // 絞り込みは `@` を外して比べる（`@me` と打った瞬間に `meg` などの候補を消さない）。完全一致の判定だけ
+  // normalize で `@me` と `me` を分ける
+  const loose = (v: string) =>
+    key === 'assignee' || key === 'author' ? v.toLowerCase().replace(/^@/, '') : normalize(v);
   const p = normalize(prefix);
+  const lp = loose(prefix);
   choices = choices
-    .filter((c) => normalize(c.value).includes(p))
+    .filter((c) => loose(c.value).includes(lp))
     .sort(
       (a, b) =>
         Number(normalize(a.value) !== p) - Number(normalize(b.value) !== p) ||
-        Number(!normalize(a.value).startsWith(p)) - Number(!normalize(b.value).startsWith(p)),
+        Number(!loose(a.value).startsWith(lp)) - Number(!loose(b.value).startsWith(lp)),
     );
   if (key === 'label' || key === 'assignee')
     choices.push({

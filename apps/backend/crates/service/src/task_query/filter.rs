@@ -21,17 +21,20 @@ pub fn ilike_pattern(text: &str) -> String {
 pub fn text_condition(text: &ResolvedText, scope: SearchScope) -> Condition {
     let mut any = Condition::any();
     let pattern = ilike_pattern(&text.text);
+    // 印の置き換えに使う U+0001 を含む語は、説明とコメントでは印の位置にしか当たらないので当てない
+    // （`?q=%01` がメンションを含む行すべてに当たり、`-%01` がそれらを落とすのを防ぐ）
+    let masked = !text.text.contains('\u{1}');
     for (enabled, sql) in [
         (scope.title, "tasks.title ILIKE $1 ESCAPE '\\'".to_string()),
         (
-            scope.description,
+            scope.description && masked,
             format!(
                 "{} ILIKE $1 ESCAPE '\\'",
                 mask_mentions("COALESCE(tasks.description, '')")
             ),
         ),
         (
-            scope.comment,
+            scope.comment && masked,
             format!(
                 "EXISTS (SELECT 1 FROM task_comments c WHERE c.task_id = tasks.id AND c.deleted_at IS NULL AND {} ILIKE $1 ESCAPE '\\')",
                 mask_mentions("c.body")

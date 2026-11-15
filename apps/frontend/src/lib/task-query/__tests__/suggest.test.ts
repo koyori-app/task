@@ -78,3 +78,9 @@ it('prioritizes exact values and matches usernames with @', () => {
     valueCandidates('author', '@ALICE', { members: [{ id: '1', username: 'alice' }] })[0]?.value,
   ).toBe('alice');
 });
+it('keeps members starting with "me" while @me is typed, with @me first', () => {
+  const values = valueCandidates('assignee', '@me', {
+    members: [{ id: '1', username: 'meg' }],
+  }).map((c) => c.value);
+  expect(values.slice(0, 2)).toEqual(['@me', 'meg']);
+});

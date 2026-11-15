@@ -758,6 +758,15 @@ async fn task_query_words_do_not_match_across_mention_markers() {
     let mut found = ids(&body);
     found.sort();
     assert_eq!(found, both, "除外が印をまたいで当たらない");
+    // 印の置き換えに使う U+0001 を語に含めても、印の位置には当たらない（除外でも落ちない）
+    for word in ["\u{1}", "確認\u{1}お願い"] {
+        let body = query(&app, &tp, word).await;
+        assert!(ids(&body).is_empty(), "{word:?} は印に当たらない: {body}");
+    }
+    let body = query(&app, &tp, "-\u{1}").await;
+    let mut found = ids(&body);
+    found.sort();
+    assert_eq!(found, both, "U+0001 の除外で印のある行が落ちない");
     // 対照: 印の片側の語には当たり、抜粋も出る
     for word in ["確認", "お願い"] {
         let body = query(&app, &tp, word).await;
