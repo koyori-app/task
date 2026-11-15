@@ -567,6 +567,34 @@ pub async fn unbind_tenant_from_tokens<C: ConnectionTrait>(
     Ok(orphaned)
 }
 
+/// 利用者の PAT をまだ取り消していないものすべて取り消す。
+///
+/// `unbind_tenant_from_tokens` はトークン行を id 昇順でロックするので、こちらも同じ順で取る。
+/// 走査順で行を更新すると、同じ利用者の PAT 2 本が 2 つのテナントに結び付いた状態で
+/// 「テナントの削除」と重なったとき、取る順が食い違ってデッドロック（`40P01`）になる。
+/// 副問い合わせの `ORDER BY id FOR NO KEY UPDATE` が id 昇順にロックしてから更新するので、
+/// トランザクションの外からでも 1 文でこの順を守れる。
+/// 利用者単位の取り消し（パスワード変更・利用者の停止・BOT の停止）はこれを使う。
+pub async fn revoke_user_personal_tokens<C: ConnectionTrait>(
+    conn: &C,
+    user_id: Uuid,
+) -> Result<(), DbErr> {
+    let locked_in_id_order = Query::select()
+        .column(personal_tokens::Column::Id)
+        .from(personal_tokens::Entity)
+        .and_where(personal_tokens::Column::UserId.eq(user_id))
+        .and_where(personal_tokens::Column::Revoked.eq(false))
+        .order_by(personal_tokens::Column::Id, sea_orm::Order::Asc)
+        .lock(LockType::NoKeyUpdate)
+        .to_owned();
+    PersonalTokenEntity::update_many()
+        .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
+        .filter(personal_tokens::Column::Id.in_subquery(locked_in_id_order))
+        .exec(conn)
+        .await?;
+    Ok(())
+}
+
 /// PAT の `last_used_at` を書き直す間隔。CLI や BOT は短い間隔で連続して叩くので、毎回は書かない。
 const PERSONAL_TOKEN_LAST_USED_WRITE_INTERVAL_SECS: i64 = 300;
 

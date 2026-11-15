@@ -261,3 +261,94 @@ async fn concurrent_unbinds_of_two_tenants_revoke_the_shared_token() {
         .expect("count bindings");
     assert_eq!(bindings, 0);
 }
+
+fn spawn_password_change(client: Client, app: &TestApp, user: &TestUser) -> JoinHandle<StatusCode> {
+    let url = format!("{}/v1/auth/password/change", app.base_url());
+    let body = json!({
+        "current_password": user.password,
+        "new_password": "ChangedPass999!"
+    });
+    tokio::spawn(async move {
+        client
+            .post(url)
+            .json(&body)
+            .send()
+            .await
+            .expect("password change")
+            .status()
+    })
+}
+
+/// テナントの削除は束縛されたトークン行を id 昇順にロックする。利用者単位の取り消し（パスワード変更）も
+/// 同じ順で取らないと、同じ利用者の PAT 2 本が両方のテナントに結び付いた状態で逆順に待ち合い、
+/// どちらかが `40P01`（デッドロック）で 500 になる。
+///
+/// 手順: id の大きい PAT の行を握る。パスワード変更を先に待たせ、そのあとテナントの削除を走らせる。
+/// 走査順（物理順）を「大きい id が先」に入れ替えておくと、修正前のパスワード変更は大きい id から
+/// 取って待ち、削除は小さい id を取ってから大きい id を待つ。握りを外すとパスワード変更が大きい id を
+/// 取り、小さい id を持つ削除と互いを待つ。
+#[tokio::test]
+async fn deleting_a_tenant_during_password_change_does_not_deadlock() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user_default().await;
+    let t1 = insert_tenant(&app.state.db, owner.id).await;
+    let t2 = app.insert_tenant_project(owner.id).await.tenant_id;
+    for _ in 0..2 {
+        app.insert_pat_in_tenants(owner.id, &[t1, t2], vec![Scope::Api], None)
+            .await;
+    }
+    let mut ids: Vec<Uuid> = personal_tokens::Entity::find()
+        .filter(personal_tokens::Column::UserId.eq(owner.id))
+        .all(&app.state.db)
+        .await
+        .expect("list tokens")
+        .into_iter()
+        .map(|token| token.id)
+        .collect();
+    ids.sort();
+    let (low, high) = (ids[0], ids[1]);
+    // 小さい id の行を書き直して、物理順（走査順）で大きい id の後ろへ送る。
+    app.state
+        .db
+        .execute_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "UPDATE personal_tokens SET revoked = revoked WHERE id = $1",
+            [low.into()],
+        ))
+        .await
+        .expect("move the lower id behind the higher one");
+
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    let delete_client = app.session_client();
+    app.reset_session_client();
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    let change_client = app.session_client();
+
+    let (holder, pid) = hold(
+        &app,
+        "SELECT id FROM personal_tokens WHERE id = $1 FOR UPDATE",
+        high,
+    )
+    .await;
+    let change = spawn_password_change(change_client, &app, &owner);
+    wait_until_blocked(&app, pid, 1).await;
+    let delete = spawn_delete(delete_client, format!("{}/v1/tenants/{t1}", app.base_url()));
+    wait_until_blocked(&app, pid, 2).await;
+
+    holder.rollback().await.expect("release the holder");
+    assert_eq!(finish(change).await, StatusCode::OK);
+    assert_eq!(finish(delete).await, StatusCode::NO_CONTENT);
+
+    let tokens = personal_tokens::Entity::find()
+        .filter(personal_tokens::Column::UserId.eq(owner.id))
+        .all(&app.state.db)
+        .await
+        .expect("list tokens");
+    assert_eq!(tokens.len(), 2);
+    assert!(
+        tokens.iter().all(|token| token.revoked),
+        "the password change revokes every token of the user"
+    );
+}

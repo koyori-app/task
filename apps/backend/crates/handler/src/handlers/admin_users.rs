@@ -13,7 +13,7 @@ use axum::{
 use axum_valid::Valid;
 use chrono::Utc;
 use common::db::{column_exists, execute_bound, table_exists};
-use entity::{oauth_connections, passkeys, personal_tokens, tasks, tenant_members, users};
+use entity::{oauth_connections, passkeys, tasks, tenant_members, users};
 use payload::admin_users::*;
 use payload::users::UserResponse;
 use sea_orm::prelude::Uuid;
@@ -52,12 +52,7 @@ async fn revoke_personal_tokens_for_user(
     db: &DatabaseConnection,
     user_id: Uuid,
 ) -> Result<(), AppError> {
-    personal_tokens::Entity::update_many()
-        .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
-        .filter(personal_tokens::Column::UserId.eq(user_id))
-        .filter(personal_tokens::Column::Revoked.eq(false))
-        .exec(db)
-        .await?;
+    service::auth::revoke_user_personal_tokens(db, user_id).await?;
     Ok(())
 }
 
@@ -154,11 +149,7 @@ async fn delete_user_cascade(db: &DatabaseConnection, user_id: Uuid) -> Result<(
     if table_exists(db, "personal_tokens").await?
         && column_exists(db, "personal_tokens", "revoked").await?
     {
-        personal_tokens::Entity::update_many()
-            .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
-            .filter(personal_tokens::Column::UserId.eq(user_id))
-            .exec(db)
-            .await?;
+        service::auth::revoke_user_personal_tokens(db, user_id).await?;
     }
 
     if column_exists(db, "users", "sessions_revoked_at").await? {
