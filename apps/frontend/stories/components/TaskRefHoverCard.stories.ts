@@ -4,9 +4,19 @@ import { provide } from 'vue';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
 import { createPinia, setActivePinia } from 'pinia';
 import CommentBody from '@/components/tasks/CommentBody.vue';
+/** 開くまで通信せず、成功は共有キャッシュ、403・404は閲覧不可として表示する。 */
 const TENANT = '11111111-1111-4111-8111-111111111111';
 const USER = '22222222-2222-4222-8222-222222222222';
-type Mode = 'ready' | 'minimal' | 'overdue' | 'loading' | '404' | 'forbidden' | 'failed' | 'other';
+type Mode =
+  | 'ready'
+  | 'minimal'
+  | 'overdue'
+  | 'loading'
+  | '404'
+  | '403'
+  | 'forbidden'
+  | 'failed'
+  | 'other';
 let taskCalls = 0;
 function mock(mode: Mode) {
   return () => {
@@ -41,9 +51,12 @@ function mock(mode: Mode) {
       if (url.pathname.includes('/users/')) return json({ username: 'taro', membership: 'Member' });
       taskCalls++;
       if (mode === 'loading') return new Promise<Response>(() => {});
-      if (mode === '404' || mode === 'failed')
-        return json({ message: 'failure' }, mode === '404' ? 404 : 500);
+      if (mode === '404' || mode === '403' || mode === 'failed')
+        return json({ message: 'failure' }, mode === '404' ? 404 : mode === '403' ? 403 : 500);
       return json({
+        seq_id: 58,
+        completed_at: null,
+        hard_deadline: null,
         title: 'タスクの参照リンクに情報のカードを表示する',
         status_id: mode === 'minimal' ? null : 'status',
         priority: 'High',
@@ -109,7 +122,7 @@ function story(mode: Mode, light = false): Story {
         mode === 'other' ? 'ENG-58' : undefined,
       );
       const card = within(dialog);
-      if (mode === '404' || mode === 'forbidden') {
+      if (mode === '404' || mode === '403' || mode === 'forbidden') {
         await expect(
           await card.findByText('タスクが見つからないか、閲覧する権限がありません。'),
         ).toBeVisible();
@@ -119,6 +132,10 @@ function story(mode: Mode, light = false): Story {
       }
       if (mode === 'loading') {
         await expect(card.getByText('読み込み中…')).toBeVisible();
+        await expect(card.getByRole('link', { name: 'タスクを開く' })).toHaveAttribute(
+          'href',
+          link.getAttribute('href'),
+        );
         return;
       }
       if (mode === 'failed') {
@@ -129,7 +146,15 @@ function story(mode: Mode, light = false): Story {
         ).toBeVisible();
         await expect(card.getByText('高')).toBeVisible();
         await expect(card.getByText(mode === 'minimal' ? '担当者なし' : '+1')).toBeVisible();
-        if (mode === 'overdue') await expect(card.getByText('アーカイブ済み')).toBeVisible();
+        if (mode === 'overdue') {
+          await expect(card.getByText('アーカイブ済み')).toBeVisible();
+          const overdue = card.getByText(/日超過/);
+          const probe = document.createElement('span');
+          probe.style.color = 'var(--koyori-color-danger)';
+          dialog.append(probe);
+          await expect(getComputedStyle(overdue).color).toBe(getComputedStyle(probe).color);
+          probe.remove();
+        }
         if (mode === 'other') await expect(card.getByText(/別のプロジェクト/)).toBeVisible();
       }
       await expect(card.getByRole('link', { name: 'タスクを開く' }).getAttribute('href')).toBe(
@@ -150,6 +175,7 @@ export const OverdueArchived = story('overdue');
 export const Loading = story('loading');
 export const LoadingLight = story('loading', true);
 export const NotFound = story('404');
+export const ForbiddenResponse = story('403');
 export const Forbidden = story('forbidden');
 export const Failed = story('failed');
 export const OtherProject = story('other');

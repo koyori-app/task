@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { Info } from '@lucide/vue';
 import UserAvatar from '@/components/UserAvatar.vue';
 import { PRIORITY_CONFIG, type ApiPriority } from '@/lib/task-display';
+/** 取得は親に委ね、ready のときだけタスクの属性を表示する。 */
 const props = defineProps<{
   state: 'loading' | 'ready' | 'unavailable' | 'error';
   seqKey: string;
@@ -23,7 +24,7 @@ const priorityInfo = computed(() => (props.priority ? PRIORITY_CONFIG[props.prio
       <div class="head">
         <span class="seq">{{ seqKey }}</span
         ><span v-if="projectName"> · {{ projectName }}</span
-        ><span v-if="archived" class="badge">アーカイブ済み</span>
+        ><span v-if="state === 'ready' && archived" class="badge">アーカイブ済み</span>
       </div>
       <template v-if="state === 'ready'">
         <div class="title">{{ title }}</div>
@@ -40,6 +41,7 @@ const priorityInfo = computed(() => (props.priority ? PRIORITY_CONFIG[props.prio
         </div>
         <div
           v-if="assignees?.length"
+          role="group"
           class="attribute"
           :aria-label="`担当者: ${assignees.map((a) => a.username).join(', ')}`"
         >

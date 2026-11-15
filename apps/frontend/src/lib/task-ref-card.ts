@@ -1,4 +1,5 @@
-/** v-html の容れ物の中だけをカードの起点にする。 */
+/** 取得せずリンクの対象だけを解決する。開いてからの取得は useTaskRefCard が担う。
+ * v-html の容れ物の中だけをカードの起点にする。 */
 export const TASK_REF_CARD_SELECTOR = 'a.kfm-task-ref';
 export type TaskRefCardTarget = { projectKey: string; seqKey: string; href: string };
 export function taskRefCardTarget(

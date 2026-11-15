@@ -43,3 +43,17 @@ it.each(['loading', 'unavailable', 'error'] as const)('%s の文言とリンク'
   );
   expect(wrapper.find('.attribute').exists()).toBe(false);
 });
+
+it('担当者の名前をグループの読み上げに出す', () => {
+  const wrapper = mount(TaskRefCard, {
+    props: { ...base, assignees: [{ id: '1', username: 'alice' }] },
+  });
+  expect(wrapper.get('[role="group"]').attributes('aria-label')).toBe('担当者: alice');
+});
+it.each(['loading', 'unavailable', 'error'] as const)(
+  '%s で古いアーカイブの印を出さない',
+  (state) => {
+    const wrapper = mount(TaskRefCard, { props: { ...base, state, archived: true } });
+    expect(wrapper.text()).not.toContain('アーカイブ済み');
+  },
+);

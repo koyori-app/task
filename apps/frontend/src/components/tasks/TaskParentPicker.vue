@@ -5,8 +5,9 @@ import { refDebounced } from '@vueuse/core';
 import { computed, nextTick, onMounted, ref } from 'vue';
 
 import { Button, Input } from '@koyori-app/ui-vue';
-import { GET_TASK_PATH } from '@/composables/useTaskDetail';
-import { fetchClient, taskSearchQueryOptions } from '@/lib/api-vue-query';
+import { GET_TASK_PATH, fetchTask } from '@/lib/task-query';
+import type { TenantUuid, ProjectUuid } from '@/lib/api-ids';
+import { taskSearchQueryOptions } from '@/lib/api-vue-query';
 import { taskSeqKey } from '@/lib/task-display';
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -59,21 +60,13 @@ const typedSeqKey = computed(() => {
 const keyQuery = useQuery(
   computed(() => {
     const path = {
-      tenant_id: props.tenantId ?? '',
-      project_id: props.projectId ?? '',
+      tenant_id: (props.tenantId ?? '') as TenantUuid,
+      project_id: (props.projectId ?? '') as ProjectUuid,
       id: typedSeqKey.value ?? '',
     };
     return {
       queryKey: ['get', GET_TASK_PATH, { params: { path } }],
-      queryFn: async ({ signal }: { signal: AbortSignal }) => {
-        const { data, error, response } = await fetchClient.GET(GET_TASK_PATH, {
-          params: { path },
-          signal,
-        });
-        if (response.status === 404) return null;
-        if (error) throw error;
-        return data;
-      },
+      queryFn: () => fetchTask({ path }),
       enabled: canFetch.value && !!typedSeqKey.value,
       retry: false,
     };

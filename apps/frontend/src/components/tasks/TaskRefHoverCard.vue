@@ -10,6 +10,7 @@ import {
   type TaskRefCardTarget,
 } from '@/lib/task-ref-card';
 import { formatDeadline, PRIORITY_CONFIG, type ApiPriority } from '@/lib/task-display';
+/** 本文のリンクを委譲で受ける。開くまで一覧も取得せず、閉じた後の取得は完了させる。 */
 const props = defineProps<{
   container: HTMLElement | null;
   tenantId: string;
@@ -19,7 +20,7 @@ const target = ref<TaskRefCardTarget | null>(null);
 function onOpenChange(open: boolean, trigger: HTMLElement) {
   target.value = open ? taskRefCardTarget(trigger, props.tenantDisplayId) : null;
 }
-const card = useTaskRefCard(() => props.tenantId as TenantUuid, target);
+const card = useTaskRefCard(() => (target.value ? (props.tenantId as TenantUuid) : null), target);
 const label = computed(() => (target.value ? `${target.value.seqKey} のタスク` : 'タスクの情報'));
 const cardProps = computed(() => {
   if (!target.value) return null;
@@ -36,7 +37,7 @@ const cardProps = computed(() => {
     assignees: task?.assignees.map((a) => a.user),
     archived: task?.is_archived,
     deadline: formatDeadline(task?.soft_deadline ?? task?.hard_deadline, {
-      done: card.status.value?.done,
+      done: card.status.value?.done ?? !!task?.completed_at,
       completedAt: task?.completed_at,
     }),
   };

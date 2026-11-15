@@ -1,18 +1,26 @@
 import { computed, toValue, type MaybeRefOrGetter } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
-import { GET_TASK_PATH, LIST_STATUSES_PATH } from '@/composables/useTaskDetail';
+import { LIST_STATUSES_PATH } from '@/composables/useTaskDetail';
 import { fetchClient } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
 import type { TenantUuid } from '@/lib/api-ids';
 import type { TaskRefCardTarget } from '@/lib/task-ref-card';
 
+import { GET_TASK_PATH, fetchTask } from '@/lib/task-query';
+
+/** 開いている対象だけを取得する。成功は60秒共有し、404はnullとして保持する。
+ * 取得は中断せず、403・404では以前のタスク情報も隠す。失敗は次に開くと再取得する。
+ */
 export const TASK_REF_CARD_STALE_TIME_MS = 60_000;
 export function useTaskRefCard(
   tenantId: MaybeRefOrGetter<TenantUuid | null | undefined>,
   target: MaybeRefOrGetter<TaskRefCardTarget | null>,
 ) {
-  const resolved = useResolvedProjectId(tenantId, () => toValue(target)?.projectKey ?? '');
+  const resolved = useResolvedProjectId(
+    () => (toValue(target) ? toValue(tenantId) : null),
+    () => toValue(target)?.projectKey ?? '',
+  );
   const path = computed(() => ({
     tenant_id: toValue(tenantId)!,
     project_id: resolved.projectId.value!,
@@ -23,14 +31,7 @@ export function useTaskRefCard(
   );
   const taskQuery = useQuery({
     queryKey: computed(() => ['get', GET_TASK_PATH, { params: params.value }]),
-    queryFn: async () => {
-      const { data, error, response } = await fetchClient.GET(GET_TASK_PATH, {
-        params: params.value,
-      });
-      if (response.status === 404) return null;
-      if (error) throw Object.assign(new Error(error.message), { status: response.status });
-      return data;
-    },
+    queryFn: () => fetchTask(params.value),
     enabled,
     retry: false,
     staleTime: TASK_REF_CARD_STALE_TIME_MS,
@@ -65,8 +66,9 @@ export function useTaskRefCard(
           (p: components['schemas']['ProjectResponse']) => p.id === resolved.projectId.value,
         )?.name ?? null,
     ),
-    task: computed(() => taskQuery.data.value ?? null),
+    task: computed(() => (state.value === 'ready' ? (taskQuery.data.value ?? null) : null)),
     status: computed(() => {
+      if (state.value !== 'ready') return null;
       const value = statusesQuery.data.value?.find((s) => s.id === taskQuery.data.value?.status_id);
       return value ? { name: value.name, color: value.color, done: value.is_done_state } : null;
     }),

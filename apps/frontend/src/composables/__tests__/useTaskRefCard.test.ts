@@ -4,7 +4,7 @@ import { mount, enableAutoUnmount } from '@vue/test-utils';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import { useTaskRefCard } from '../useTaskRefCard';
 import { fetchClient } from '@/lib/api-vue-query';
-import { GET_TASK_PATH } from '../useTaskDetail';
+import { useTaskDetail, GET_TASK_PATH } from '../useTaskDetail';
 import type { TenantUuid } from '@/lib/api-ids';
 import type { TaskRefCardTarget } from '@/lib/task-ref-card';
 enableAutoUnmount(afterEach);
@@ -99,3 +99,68 @@ it('閉じても取得を中断しない', async () => {
   const taskOptions = calls.find(([path]) => path === GET_TASK_PATH)![1];
   expect(taskOptions).not.toHaveProperty('signal');
 });
+
+// 詳細が先に取得する場合も、同じ QueryClient でエラーの分類を共有する。
+it.each([403, 404])('詳細とカードの同時取得 %i を unavailable にする', async (code) => {
+  const { card, fetch } = setupShared(code);
+  await vi.waitFor(() => expect(card.state.value).toBe('unavailable'));
+  expect(fetch.mock.calls.filter(([r]) => r.url.includes('/tasks/'))).toHaveLength(1);
+});
+it('詳細の再取得が403なら古い題とステータスを返さない', async () => {
+  const shared = setupShared(200);
+  await vi.waitFor(() => expect(shared.card.state.value).toBe('ready'));
+  shared.setCode(403);
+  await shared.client.invalidateQueries({ queryKey: ['get', GET_TASK_PATH] });
+  await vi.waitFor(() => expect(shared.card.state.value).toBe('unavailable'));
+  expect(shared.card.task.value).toBeNull();
+  expect(shared.card.status.value).toBeNull();
+});
+function setupShared(initialCode: number) {
+  let code = initialCode;
+  const fetch = vi.fn(async (req: Request) => {
+    const body = req.url.endsWith('/tenants')
+      ? [{ id: tenantId, display_id: 'acme', membership: 'Owner' }]
+      : req.url.endsWith('/projects')
+        ? [{ id: 'project', key: 'TASK', name: '開発' }]
+        : req.url.includes('/tasks/')
+          ? code === 200
+            ? task
+            : { message: 'failure' }
+          : [];
+    return new Response(JSON.stringify(body), {
+      status: req.url.includes('/tasks/') ? code : 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+  vi.stubGlobal('fetch', fetch);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: 60_000 } },
+  });
+  client.setQueryData(
+    ['get', '/v1/tenants'],
+    [{ id: tenantId, display_id: 'acme', membership: 'Owner' }],
+  );
+  client.setQueryData(
+    ['get', '/v1/tenants/{tenant_id}/projects', { params: { path: { tenant_id: tenantId } } }],
+    [{ id: 'project', key: 'TASK', name: '開発' }],
+  );
+  let card!: ReturnType<typeof useTaskRefCard>;
+  mount(
+    defineComponent({
+      setup() {
+        useTaskDetail({ tenantDisplayId: 'acme', projectKey: 'TASK', taskId: 'TASK-58' });
+        card = useTaskRefCard(tenantId, ref(target));
+        return () => null;
+      },
+    }),
+    { global: { plugins: [[VueQueryPlugin, { queryClient: client }]] } },
+  );
+  return {
+    card,
+    client,
+    fetch,
+    setCode: (next: number) => {
+      code = next;
+    },
+  };
+}
