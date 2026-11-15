@@ -22,6 +22,7 @@ use crate::middlewares::sentry_context;
 use crate::{AppState, error::AppError};
 use service::auth::{
     AuthError, DEVICE_TOKEN_PREFIX, authenticate_device_token, authenticate_personal_token,
+    personal_token_tenant_ids,
 };
 use service::login_session::user_satisfies_2fa;
 
@@ -77,7 +78,8 @@ pub enum AuthMethod {
     PersonalToken {
         token_id: Uuid,
         token_name: String,
-        tenant_id: Uuid,
+        /// トークンを結び付けたテナント（昇順、1 件以上）。所属の証明ではなく、触れる範囲の上限
+        tenant_ids: Vec<Uuid>,
         allowed_project_ids: Option<Vec<Uuid>>,
         scopes: entity::scopes::ScopeList,
         expires_at: Option<DateTimeWithTimeZone>,
@@ -153,14 +155,14 @@ impl AuthUser {
         state: &AppState,
         tenant_id: Uuid,
     ) -> Result<tenants::Model, AppError> {
-        // PAT は自テナント以外への操作を禁止
+        // PAT は結び付けたテナント以外への操作を禁止
         if let AuthMethod::PersonalToken {
-            tenant_id: pat_tenant,
+            tenant_ids,
             allowed_project_ids,
             ..
         } = &self.method
         {
-            if tenant_id != *pat_tenant {
+            if !tenant_ids.contains(&tenant_id) {
                 return Err(AppError::Forbidden);
             }
             // プロジェクト制限付き PAT はテナント全体操作不可
@@ -208,7 +210,7 @@ impl AuthUser {
         has_tenant_access(state, self.user_id, tenant_id, project_id).await
     }
 
-    /// PAT の束縛（`tenant_id` / `allowed_project_ids`）だけを突き合わせる。所属判定はしない。
+    /// PAT の束縛（`tenant_ids` / `allowed_project_ids`）だけを突き合わせる。所属判定はしない。
     /// セッションと Device Token は束縛を持たないので常に通る。
     pub fn ensure_token_binding(
         &self,
@@ -216,12 +218,12 @@ impl AuthUser {
         project_id: Option<Uuid>,
     ) -> Result<(), AppError> {
         if let AuthMethod::PersonalToken {
-            tenant_id: pat_tenant,
+            tenant_ids,
             allowed_project_ids,
             ..
         } = &self.method
         {
-            if tenant_id != *pat_tenant {
+            if !tenant_ids.contains(&tenant_id) {
                 return Err(AppError::Forbidden);
             }
             match project_id {
@@ -424,8 +426,11 @@ impl FromRequestParts<AppState> for AuthUser {
     ) -> Result<Self, Self::Rejection> {
         let auth = authenticate(parts, state).await?;
         sentry_context::set_user(auth.user_id);
-        // 他の認証方式のテナントは、アクセスを確かめる時点（`has_tenant_access` など）で載せる
-        if let AuthMethod::PersonalToken { tenant_id, .. } = &auth.method {
+        // 束縛が 1 件の PAT だけは、ここで載せられる。複数のときと他の認証方式は、
+        // アクセスを確かめる時点（`has_tenant_access` など）で要求のテナントを載せる
+        if let AuthMethod::PersonalToken { tenant_ids, .. } = &auth.method
+            && let [tenant_id] = tenant_ids.as_slice()
+        {
             sentry_context::set_tenant(*tenant_id);
         }
         Ok(auth)
@@ -441,6 +446,11 @@ async fn authenticate(parts: &mut Parts, state: &AppState) -> Result<AuthUser, A
         let record =
             authenticate_personal_token(&state.db, &state.settings.personal_token_secret, &token)
                 .await?;
+        // テナントの削除や一括失効で束縛が尽きたトークンは、行が残っていても使えない
+        let tenant_ids = personal_token_tenant_ids(&state.db, record.id).await?;
+        if tenant_ids.is_empty() {
+            return Err(AuthError::Unauthorized);
+        }
         let user = users::Entity::find_by_id(record.user_id)
             .one(&state.db)
             .await?
@@ -448,7 +458,8 @@ async fn authenticate(parts: &mut Parts, state: &AppState) -> Result<AuthUser, A
         if user.is_suspended {
             return Err(AuthError::Suspended);
         }
-        if user.is_bot() && user.bot_tenant_id != Some(record.tenant_id) {
+        // BOT のトークンは、BOT の所属テナント 1 件だけに結び付く
+        if user.is_bot() && user.bot_tenant_id.map(|id| vec![id]).as_ref() != Some(&tenant_ids) {
             return Err(AuthError::Forbidden);
         }
         let allowed_project_ids = match record.allowed_project_ids.as_ref() {
@@ -465,7 +476,7 @@ async fn authenticate(parts: &mut Parts, state: &AppState) -> Result<AuthUser, A
             method: AuthMethod::PersonalToken {
                 token_id: record.id,
                 token_name: record.name,
-                tenant_id: record.tenant_id,
+                tenant_ids,
                 allowed_project_ids,
                 scopes: record.scopes,
                 expires_at: record.expires_at,

@@ -6,8 +6,8 @@ use axum::{
 use axum_valid::Valid;
 use sea_orm::prelude::Uuid;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
+    QuerySelect, TransactionTrait,
 };
 
 use crate::AppState;
@@ -29,9 +29,12 @@ fn token_last_four(token: &str) -> String {
     token[token.len().saturating_sub(4)..].to_string()
 }
 
+/// プロジェクト制限は、選んだテナントのどれかに属するプロジェクトだけを指せる。
+/// 各テナントに 1 つ以上要る（制限付きの PAT はテナント全体の操作ができないので、
+/// 指すプロジェクトを持たないテナントでは何もできない束縛になる）。
 async fn validate_project_ids(
     state: &AppState,
-    tenant_id: Uuid,
+    tenant_ids: &[Uuid],
     project_ids: &[Uuid],
 ) -> Result<(), AppError> {
     if project_ids.is_empty() {
@@ -40,14 +43,23 @@ async fn validate_project_ids(
 
     let unique_ids: std::collections::HashSet<Uuid> = project_ids.iter().copied().collect();
 
-    let count = projects::Entity::find()
-        .filter(projects::Column::TenantId.eq(tenant_id))
+    let found: Vec<(Uuid, Uuid)> = projects::Entity::find()
+        .select_only()
+        .column(projects::Column::Id)
+        .column(projects::Column::TenantId)
+        .filter(projects::Column::TenantId.is_in(tenant_ids.iter().copied()))
         .filter(projects::Column::Id.is_in(unique_ids.iter().copied().collect::<Vec<_>>()))
-        .count(&state.db)
+        .into_tuple()
+        .all(&state.db)
         .await?;
 
-    if count != unique_ids.len() as u64 {
+    if found.len() != unique_ids.len() {
         return Err(AppError::Forbidden);
+    }
+    let covered: std::collections::HashSet<Uuid> =
+        found.into_iter().map(|(_, tenant_id)| tenant_id).collect();
+    if tenant_ids.iter().any(|id| !covered.contains(id)) {
+        return Err(AppError::BadRequest);
     }
     Ok(())
 }
@@ -98,7 +110,7 @@ async fn personal_token_identity(
     let AuthMethod::PersonalToken {
         token_id,
         token_name,
-        tenant_id,
+        tenant_ids,
         allowed_project_ids,
         scopes,
         expires_at,
@@ -113,7 +125,12 @@ async fn personal_token_identity(
         user_id: auth.user_id,
         username: auth.username,
         account_kind,
-        tenant_id,
+        // 旧 CLI 向け。複数のときに返すと、旧 CLI がその 1 つへ黙って書き込む
+        tenant_id: match tenant_ids.as_slice() {
+            [only] => Some(*only),
+            _ => None,
+        },
+        tenant_ids,
         scopes: scopes.0.into_iter().map(Into::into).collect(),
         allowed_project_ids,
         expires_at: expires_at.map(|value| value.with_timezone(&chrono::Utc)),
@@ -128,7 +145,7 @@ mod identity_tests {
     use super::*;
 
     fn personal_token_auth_in(
-        tenant_id: Uuid,
+        tenant_ids: Vec<Uuid>,
         scopes: ScopeList,
         project_ids: Option<Vec<Uuid>>,
     ) -> AuthUser {
@@ -138,7 +155,7 @@ mod identity_tests {
             method: AuthMethod::PersonalToken {
                 token_id: Uuid::new_v4(),
                 token_name: "review-bot".into(),
-                tenant_id,
+                tenant_ids,
                 allowed_project_ids: project_ids,
                 scopes,
                 expires_at: Some((Utc::now() + Duration::days(30)).into()),
@@ -147,7 +164,7 @@ mod identity_tests {
     }
 
     fn personal_token_auth(scopes: ScopeList, project_ids: Option<Vec<Uuid>>) -> AuthUser {
-        personal_token_auth_in(Uuid::new_v4(), scopes, project_ids)
+        personal_token_auth_in(vec![Uuid::new_v4()], scopes, project_ids)
     }
 
     #[tokio::test]
@@ -169,14 +186,28 @@ mod identity_tests {
     #[tokio::test]
     async fn identity_reports_the_bound_tenant() {
         let tenant_id = Uuid::new_v4();
-        let auth = personal_token_auth_in(tenant_id, ScopeList(vec![]), None);
+        let auth = personal_token_auth_in(vec![tenant_id], ScopeList(vec![]), None);
 
         let Json(identity) = personal_token_identity(auth, "human".into())
             .await
             .expect("PAT identity");
 
-        // 鍵だけ渡された者が行き先を知れるように、バインド先の陣を返す
-        assert_eq!(identity.tenant_id, tenant_id);
+        // 鍵だけ渡された者が行き先を知れるように、結び付いたテナントを返す
+        assert_eq!(identity.tenant_ids, vec![tenant_id]);
+        assert_eq!(identity.tenant_id, Some(tenant_id));
+    }
+
+    #[tokio::test]
+    async fn identity_omits_the_legacy_tenant_id_for_several_tenants() {
+        let tenants = vec![Uuid::new_v4(), Uuid::new_v4()];
+        let auth = personal_token_auth_in(tenants.clone(), ScopeList(vec![]), None);
+
+        let Json(identity) = personal_token_identity(auth, "human".into())
+            .await
+            .expect("PAT identity");
+
+        assert_eq!(identity.tenant_ids, tenants);
+        assert_eq!(identity.tenant_id, None);
     }
 
     #[tokio::test]
@@ -236,9 +267,16 @@ pub async fn list_personal_tokens(
         .all(&state.db)
         .await?;
 
+    let token_ids: Vec<Uuid> = tokens.iter().map(|token| token.id).collect();
+    let mut bindings = auth::personal_token_tenant_ids_by_token(&state.db, &token_ids).await?;
+
+    // 束縛が尽きたトークン（テナントの削除・一括失効のあと）は認証でも通らないので出さない
     let resp = tokens
         .into_iter()
-        .map(PersonalTokenResponse::try_from)
+        .filter_map(|token| {
+            let tenant_ids = bindings.remove(&token.id)?;
+            Some(PersonalTokenResponse::from_parts(token, tenant_ids))
+        })
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| AppError::Internal(e.into()))?;
     Ok(Json(resp))
@@ -266,17 +304,26 @@ pub async fn create_personal_token(
     Valid(Json(payload)): Valid<Json<CreatePersonalTokenRequest>>,
 ) -> Result<(StatusCode, Json<CreatePersonalTokenResponse>), AppError> {
     auth.require_session()?;
-    // tenant_members と同じく、PAT を結び付けるテナントの所属と 2FA の強制を先に確かめる。
-    // 強制の前に取った本認証のセッションでも、2FA を満たさなければ発行できない
-    auth.ensure_tenant_access(&state, payload.tenant_id, None)
-        .await?;
-    // 発行はオーナーとテナント Admin に許す。PAT は発行者本人として動き
-    // （user_id は発行者に固定）、得られる力は発行者の持つ力を超えぬため、
-    // 主に閉じても守れる物が増えない（docs/personal-access-tokens-authz.md）。
-    require_tenant_admin(&state.db, payload.tenant_id, auth.user_id).await?;
+    // 重複は落とす（順序は保つ）。1 件でも通らなければ全体を拒否する
+    let mut seen = std::collections::HashSet::new();
+    let tenant_ids: Vec<Uuid> = payload
+        .tenant_ids
+        .iter()
+        .copied()
+        .filter(|id| seen.insert(*id))
+        .collect();
+    for &tenant_id in &tenant_ids {
+        // tenant_members と同じく、PAT を結び付けるテナントの所属と 2FA の強制を先に確かめる。
+        // 強制の前に取った本認証のセッションでも、2FA を満たさなければ発行できない
+        auth.ensure_tenant_access(&state, tenant_id, None).await?;
+        // 発行はオーナーとテナント Admin に許す。PAT は発行者本人として動き
+        // （user_id は発行者に固定）、得られる力は発行者の持つ力を超えぬため、
+        // 主に閉じても守れる物が増えない（docs/personal-access-tokens-authz.md）。
+        require_tenant_admin(&state.db, tenant_id, auth.user_id).await?;
+    }
 
     if let Some(ref project_ids) = payload.project_ids {
-        validate_project_ids(&state, payload.tenant_id, project_ids).await?;
+        validate_project_ids(&state, &tenant_ids, project_ids).await?;
     }
 
     let secret = &state.settings.personal_token_secret;
@@ -285,6 +332,7 @@ pub async fn create_personal_token(
 
     let allowed_project_ids = payload.project_ids.map(|ids| serde_json::json!(ids));
 
+    let txn = state.db.begin().await?;
     let model = personal_tokens::ActiveModel {
         id: Set(Uuid::new_v4()),
         name: Set(payload.name),
@@ -295,13 +343,16 @@ pub async fn create_personal_token(
         revoked: Set(false),
         user_id: Set(auth.user_id),
         scopes: Set(ScopeList(payload.scopes)),
-        tenant_id: Set(payload.tenant_id),
         allowed_project_ids: Set(allowed_project_ids),
     }
-    .insert(&state.db)
+    .insert(&txn)
     .await?;
+    auth::bind_personal_token_tenants(&txn, model.id, &tenant_ids).await?;
+    txn.commit().await?;
 
-    let resp = CreatePersonalTokenResponse::new(token_value, model)
+    let mut tenant_ids = tenant_ids;
+    tenant_ids.sort_unstable();
+    let resp = CreatePersonalTokenResponse::new(token_value, model, tenant_ids)
         .map_err(|e| AppError::Internal(e.into()))?;
     Ok((StatusCode::CREATED, Json(resp)))
 }
@@ -329,7 +380,13 @@ pub async fn get_personal_token(
 ) -> Result<Json<PersonalTokenResponse>, AppError> {
     auth.require_session()?;
     let token = get_owned_token(&state, id, auth.user_id).await?;
-    let resp = PersonalTokenResponse::try_from(token).map_err(|e| AppError::Internal(e.into()))?;
+    let tenant_ids = auth::personal_token_tenant_ids(&state.db, token.id).await?;
+    // 束縛が尽きたトークンは一覧にも出さず認証でも通らないので、単体取得も 404 にそろえる
+    if tenant_ids.is_empty() {
+        return Err(AppError::NotFound);
+    }
+    let resp = PersonalTokenResponse::from_parts(token, tenant_ids)
+        .map_err(|e| AppError::Internal(e.into()))?;
     Ok(Json(resp))
 }
 
@@ -369,7 +426,7 @@ pub async fn revoke_personal_token(
     delete,
     path = "/revoke-all",
     tag = "Personal Tokens",
-    summary = "テナント配下のすべての個人用トークンを取り消し",
+    summary = "テナントの束縛をすべてのトークンから外す（束縛が無くなったトークンは取り消す）",
     request_body = RevokeAllPersonalTokensRequest,
     responses(
         (status = 204, description = "取り消しました"),

@@ -36,7 +36,7 @@ async fn try_create_token(app: &mut TestApp, user: &TestUser, tenant_id: Uuid) -
             "/v1/personal_tokens",
             serde_json::json!({
                 "name": "boundary-check",
-                "tenant_id": tenant_id,
+                "tenant_ids": [tenant_id],
                 "scopes": ["read:task"],
             }),
         )
@@ -59,7 +59,7 @@ async fn enforce_2fa(db: &DatabaseConnection, tenant_id: Uuid) {
 fn token_body(tenant_id: Uuid) -> serde_json::Value {
     serde_json::json!({
         "name": "boundary-check",
-        "tenant_id": tenant_id,
+        "tenant_ids": [tenant_id],
         "scopes": ["read:task"],
     })
 }

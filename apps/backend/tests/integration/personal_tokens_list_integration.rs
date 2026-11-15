@@ -12,7 +12,7 @@ async fn create_token(app: &TestApp, tenant_id: uuid::Uuid, name: &str) -> uuid:
             "/v1/personal_tokens",
             serde_json::json!({
                 "name": name,
-                "tenant_id": tenant_id,
+                "tenant_ids": [tenant_id],
                 "scopes": ["read:task"],
             }),
         )
@@ -63,7 +63,10 @@ async fn lists_only_own_active_tokens() {
 
     for token in &tokens {
         assert_eq!(token["user_id"], user.id.to_string());
-        assert_eq!(token["tenant_id"], tenant_id.to_string());
+        assert_eq!(
+            token["tenant_ids"],
+            serde_json::json!([tenant_id.to_string()])
+        );
         assert_eq!(token["revoked"], false);
         assert_eq!(token["scopes"], serde_json::json!(["read:task"]));
         assert_eq!(
@@ -153,7 +156,7 @@ async fn create_returns_400_for_empty_scopes() {
             "/v1/personal_tokens",
             serde_json::json!({
                 "name": "no-scope",
-                "tenant_id": tenant_id,
+                "tenant_ids": [tenant_id],
                 "scopes": [],
             }),
         )

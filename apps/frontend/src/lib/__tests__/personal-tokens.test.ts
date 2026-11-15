@@ -9,6 +9,7 @@ import {
   expiresAtFromPreset,
   formatExpiry,
   formatLastUsed,
+  formatTenantNames,
   maskedToken,
 } from '../personal-tokens';
 
@@ -37,6 +38,20 @@ describe('expiresAtFromPreset', () => {
 describe('maskedToken', () => {
   it('末尾 4 文字だけを見せる', () => {
     expect(maskedToken('7f3a')).toBe('pat_••••••7f3a');
+  });
+});
+
+describe('formatTenantNames', () => {
+  it('1 件はそのまま、2 件は「、」で繋ぐ', () => {
+    expect(formatTenantNames(['Acme Inc'])).toBe('Acme Inc');
+    expect(formatTenantNames(['Acme Inc', 'Beta LLC'])).toBe('Acme Inc、Beta LLC');
+  });
+
+  it('3 件以上（境界を越える）は先頭 2 件と残りの件数に畳む', () => {
+    expect(formatTenantNames(['Acme Inc', 'Beta LLC', 'Gamma Co'])).toBe(
+      'Acme Inc、Beta LLC ほか 1 件',
+    );
+    expect(formatTenantNames(['A', 'B', 'C', 'D', 'E'])).toBe('A、B ほか 3 件');
   });
 });
 

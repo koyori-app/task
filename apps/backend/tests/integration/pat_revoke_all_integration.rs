@@ -34,7 +34,10 @@ async fn insert_admin_member(db: &DatabaseConnection, tenant_id: Uuid, user_id: 
 async fn live_token_count(db: &DatabaseConnection, tenant_id: Uuid) -> u64 {
     use sea_orm::PaginatorTrait;
     entity::personal_tokens::Entity::find()
-        .filter(entity::personal_tokens::Column::TenantId.eq(tenant_id))
+        .filter(
+            entity::personal_tokens::Column::Id
+                .in_subquery(backend::utils::auth::token_ids_bound_to(tenant_id)),
+        )
         .filter(entity::personal_tokens::Column::Revoked.eq(false))
         .count(db)
         .await
@@ -96,4 +99,63 @@ async fn revoke_all_allows_owner_and_rejects_admin() {
 
     app.cleanup_user(owner.id).await;
     app.cleanup_user(admin.id).await;
+}
+
+/// revoke-all は、そのテナントの束縛だけを外す。ほかのテナントにも結び付いたトークンは
+/// そちらで使い続けられ、束縛が無くなったトークンだけが使えなくなる。
+#[tokio::test]
+async fn revoke_all_unbinds_only_that_tenant() {
+    let mut app = TestApp::new().await;
+
+    let owner = app.insert_user(false, false).await;
+    let stranger = app.insert_user(false, false).await;
+    let a = app.insert_tenant_project(owner.id).await.tenant_id;
+    let b = app.insert_tenant_project(owner.id).await.tenant_id;
+    let both = app
+        .insert_pat_in_tenants(owner.id, &[a, b], vec![Scope::Api], None)
+        .await;
+    let only_a = app.insert_pat(owner.id, a, vec![Scope::Api], None).await;
+    let projects = |t: Uuid| format!("/v1/tenants/{t}/projects");
+    let body = serde_json::json!({ "confirm_tenant_id": a });
+
+    // A のオーナーでない利用者は 403。束縛は変わらない
+    app.reset_session_client();
+    app.login_session(&stranger.email, &stranger.password).await;
+    let res = app
+        .delete_json_with_session("/v1/personal_tokens/revoke-all", body.clone())
+        .await;
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    assert_eq!(live_token_count(&app.state.db, a).await, 2);
+    assert_eq!(
+        app.get_with_bearer(&projects(a), &only_a).await.status(),
+        StatusCode::OK
+    );
+
+    app.reset_session_client();
+    app.login_session(&owner.email, &owner.password).await;
+    let res = app
+        .delete_json_with_session("/v1/personal_tokens/revoke-all", body)
+        .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    assert_eq!(
+        app.get_with_bearer(&projects(b), &both).await.status(),
+        StatusCode::OK,
+        "もう 1 つのテナントでは使い続けられる"
+    );
+    assert_eq!(
+        app.get_with_bearer(&projects(a), &both).await.status(),
+        StatusCode::FORBIDDEN,
+        "外したテナントでは使えない"
+    );
+    assert_eq!(
+        app.get_with_bearer(&projects(a), &only_a).await.status(),
+        StatusCode::UNAUTHORIZED,
+        "束縛が無くなったトークンは取り消される"
+    );
+    assert_eq!(live_token_count(&app.state.db, a).await, 0);
+    assert_eq!(live_token_count(&app.state.db, b).await, 1);
+
+    app.cleanup_user(owner.id).await;
+    app.cleanup_user(stranger.id).await;
 }

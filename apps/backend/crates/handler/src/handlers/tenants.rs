@@ -7,7 +7,7 @@ use axum_valid::Valid;
 use sea_orm::prelude::Uuid;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, EntityTrait, QueryFilter,
-    QuerySelect,
+    QuerySelect, TransactionTrait,
 };
 
 use crate::AppState;
@@ -20,6 +20,7 @@ use crate::extractors::AuthUser;
 use crate::openapi::{CrudErrors, TenantCreateErrors};
 use entity::{scopes::Scope, tenant_members, tenant_members::TenantRole, tenants};
 use payload::tenants::*;
+use service::auth;
 
 #[axum::debug_handler]
 #[utoipa::path(
@@ -80,95 +81,63 @@ pub async fn list_tenants(
     //          + project-only の客分として関わるテナント（membership=Guest の印付き）。
     //          has_tenant_access が許可する経路と同じ条件で抽出する
     //          （ここが owner/member だけだと、客分は入れるプロジェクトがあるのに一覧に出ない）。
-    // PAT: バインドされた tenant_id のうち、所属（客分を含む）しているものだけ返す。
+    // PAT: 結び付けた tenant_ids のうち、所属（客分を含む）しているものだけ返す。
     // フィルタ自体が認可を兼ねているため追加チェックは不要。
     // 客分に開く tenant-wide の口はプロジェクト一覧・My Tasks（己の分に絞る）だけの
     // ため、クライアントは membership の印で開ける口を見分ける
     // （docs/dev/design/tenant-project-authz.md）。
     auth.require_scope(Scope::ReadTenant)?;
-    let items = match &auth.method {
-        AuthMethod::Session | AuthMethod::DeviceToken { .. } => {
-            // tenant_id → 自分の role。membership の判定と member_role の欄の両方に使う。
-            let joined_roles: HashMap<Uuid, TenantRole> = tenant_members::Entity::find()
-                .filter(tenant_members::Column::UserId.eq(auth.user_id))
-                .select_only()
-                .column(tenant_members::Column::TenantId)
-                .column(tenant_members::Column::Role)
-                .into_tuple::<(Uuid, TenantRole)>()
-                .all(&state.db)
-                .await?
-                .into_iter()
-                .collect();
-            let guest_ids = guest_tenant_ids(&state.db, auth.user_id).await?;
+    // 所属の判定は認証方式によらず同じ（束縛の数だけクエリを回さない）。
+    // tenant_id → 自分の role。membership の判定と member_role の欄の両方に使う。
+    let joined_roles: HashMap<Uuid, TenantRole> = tenant_members::Entity::find()
+        .filter(tenant_members::Column::UserId.eq(auth.user_id))
+        .select_only()
+        .column(tenant_members::Column::TenantId)
+        .column(tenant_members::Column::Role)
+        .into_tuple::<(Uuid, TenantRole)>()
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .collect();
+    let guest_ids = guest_tenant_ids(&state.db, auth.user_id).await?;
 
-            tenants::Entity::find()
-                .filter(
-                    Condition::any()
-                        .add(tenants::Column::OwnerId.eq(auth.user_id))
-                        .add(
-                            tenants::Column::Id.is_in(
-                                joined_roles
-                                    .keys()
-                                    .chain(guest_ids.iter())
-                                    .copied()
-                                    .collect::<Vec<_>>(),
-                            ),
-                        ),
-                )
-                .all(&state.db)
-                .await?
-                .into_iter()
-                .map(|tenant| {
-                    let membership = if tenant.owner_id == auth.user_id {
-                        TenantMembershipKind::Owner
-                    } else if joined_roles.contains_key(&tenant.id) {
-                        TenantMembershipKind::Member
-                    } else {
-                        TenantMembershipKind::Guest
-                    };
-                    let member_role = joined_roles.get(&tenant.id).cloned();
-                    TenantListItemResponse::from_parts(tenant, membership, member_role)
-                })
-                .collect()
-        }
-        AuthMethod::PersonalToken { tenant_id, .. } => {
-            // PAT はバインドされた単一テナントのみ返す。
-            // バインドは「どのテナントを触れるか」の制限であって所属の証明ではないので、
-            // テナントから外した利用者のトークンでは一覧にも出さない（`get_tenant` と同じ判定）。
-            // ただし project-only の客分は、名指しのプロジェクトに入れる分だけ印付きで出す
-            let mut visible = Vec::new();
-            if let Some(tenant) = tenants::Entity::find_by_id(*tenant_id)
-                .one(&state.db)
-                .await?
-            {
-                let member_role = tenant_members::Entity::find()
-                    .filter(tenant_members::Column::TenantId.eq(*tenant_id))
-                    .filter(tenant_members::Column::UserId.eq(auth.user_id))
-                    .one(&state.db)
-                    .await?
-                    .map(|m| m.role);
-                let membership = if tenant.owner_id == auth.user_id {
-                    Some(TenantMembershipKind::Owner)
-                } else if member_role.is_some() {
-                    Some(TenantMembershipKind::Member)
-                } else if guest_tenant_ids(&state.db, auth.user_id)
-                    .await?
-                    .contains(tenant_id)
-                {
-                    Some(TenantMembershipKind::Guest)
-                } else {
-                    None
-                };
-                if let Some(membership) = membership {
-                    visible.push(TenantListItemResponse::from_parts(
-                        tenant,
-                        membership,
-                        member_role,
-                    ));
-                }
-            }
-            visible
-        }
+    let items: Vec<TenantListItemResponse> = tenants::Entity::find()
+        .filter(
+            Condition::any()
+                .add(tenants::Column::OwnerId.eq(auth.user_id))
+                .add(
+                    tenants::Column::Id.is_in(
+                        joined_roles
+                            .keys()
+                            .chain(guest_ids.iter())
+                            .copied()
+                            .collect::<Vec<_>>(),
+                    ),
+                ),
+        )
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(|tenant| {
+            let membership = if tenant.owner_id == auth.user_id {
+                TenantMembershipKind::Owner
+            } else if joined_roles.contains_key(&tenant.id) {
+                TenantMembershipKind::Member
+            } else {
+                TenantMembershipKind::Guest
+            };
+            let member_role = joined_roles.get(&tenant.id).cloned();
+            TenantListItemResponse::from_parts(tenant, membership, member_role)
+        })
+        .collect();
+    // PAT は、さらに結び付けたテナントに絞る。束縛は「どのテナントを触れるか」の制限であって
+    // 所属の証明ではないので、所属を外した利用者のトークンでは一覧にも出ない（`get_tenant` と同じ判定）
+    let items = match &auth.method {
+        AuthMethod::PersonalToken { tenant_ids, .. } => items
+            .into_iter()
+            .filter(|item| tenant_ids.contains(&item.id))
+            .collect(),
+        AuthMethod::Session | AuthMethod::DeviceToken { .. } => items,
     };
     Ok(Json(items))
 }
@@ -267,6 +236,11 @@ pub async fn delete_tenant(
     auth.require_session()?;
     auth.require_scope(Scope::WriteTenant)?;
     auth.ensure_tenant_owner(&state, id).await?;
-    tenants::Entity::delete_by_id(id).exec(&state.db).await?;
+    // 束縛が尽きた PAT を、テナントの削除（束縛の Cascade）より先に同じトランザクションで取り消す。
+    // しないと、行が `revoked = false` で残って単体取得だけが空の束縛で返る
+    let txn = state.db.begin().await?;
+    auth::unbind_tenant_from_tokens(&txn, id).await?;
+    tenants::Entity::delete_by_id(id).exec(&txn).await?;
+    txn.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }

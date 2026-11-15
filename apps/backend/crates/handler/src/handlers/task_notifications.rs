@@ -131,7 +131,7 @@ const PAT_REVIEW_NOTIFICATION_TYPES: [&str; 2] =
 ///
 /// セッションと Device Token は本人が入れるプロジェクトすべて（Device Token はテナントに
 /// 束縛しない。docs/dev/design/personal-access-tokens-authz.md の Desktop 認証）。
-/// PAT は「PAT のテナントのプロジェクト ∩ `allowed_project_ids`」まで絞る（バインドは
+/// PAT は「PAT が束縛されたテナントのプロジェクト ∩ `allowed_project_ids`」まで絞る（バインドは
 /// 所属の証明ではないので、所属判定込みの `accessible_project_ids` との積を取る）。
 async fn notification_scope_for(
     db: &sea_orm::DatabaseConnection,
@@ -145,7 +145,7 @@ async fn notification_scope_for(
         return Err(AppError::Forbidden);
     }
     let mut project_ids = accessible_project_ids(db, auth.user_id).await?;
-    let (tenant_id, allowed_project_ids) = match &auth.method {
+    let (tenant_ids, allowed_project_ids) = match &auth.method {
         AuthMethod::Session | AuthMethod::DeviceToken { .. } => {
             return Ok(NotificationScope {
                 project_ids,
@@ -154,14 +154,14 @@ async fn notification_scope_for(
             });
         }
         AuthMethod::PersonalToken {
-            tenant_id,
+            tenant_ids,
             allowed_project_ids,
             ..
-        } => (tenant_id, allowed_project_ids),
+        } => (tenant_ids, allowed_project_ids),
     };
 
     let tenant_project_ids: HashSet<Uuid> = projects::Entity::find()
-        .filter(projects::Column::TenantId.eq(*tenant_id))
+        .filter(projects::Column::TenantId.is_in(tenant_ids.iter().copied()))
         .all(db)
         .await?
         .into_iter()

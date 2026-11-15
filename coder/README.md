@@ -1,6 +1,7 @@
 # Coder テンプレート
 
-task の開発用ワークスペース（Docker）。Coder のホストで Docker が動いていれば使える。
+task を開発できる最低限のワークスペース（Docker）。Coder のホストで Docker が動いていれば使える。
+個人の道具（Tailscale・T3 Code・Paradev など）は入れていないので、要るなら各自でホームに入れる。
 
 ```bash
 coder templates push task -d coder
@@ -10,8 +11,8 @@ coder templates push task -d coder
 
 | 場所 | 中身 |
 |---|---|
-| イメージ（`build/Dockerfile`） | Rust（rustfmt / clippy）、cargo-nextest、cargo-hakari、mold、Node、pnpm（corepack）、ripgrep、gh、jq、psql、Docker（compose / buildx）、Tailscale、Python 3 と uv、Noto CJK フォント、Playwright の Chromium が要る OS のライブラリ |
-| ホーム（初回起動時に `main.tf` の `startup_script` が入れる） | Claude Code、Codex、Cursor CLI（`cursor-agent`）、T3 Code（`t3`）、Paradev（`superset` / `paradev`） |
+| イメージ（`build/Dockerfile`） | Rust（rustfmt / clippy）、cargo-nextest、cargo-hakari、mold、Node、pnpm（corepack）、ripgrep、gh、jq、psql、Docker（compose / buildx）、Noto CJK フォント、Playwright の Chromium が要る OS のライブラリ |
+| ホーム（初回起動時に `main.tf` の `startup_script` が入れる） | Claude Code、Codex、Cursor CLI（`cursor-agent`） |
 | ホーム（`git-clone` モジュールが入れる） | リポジトリ（`~/works/task`）。既にあれば何もしない |
 
 ホーム（`/home/coder`）と Docker のデータはボリュームに残り、ワークスペースを止めても消えない。
@@ -27,18 +28,9 @@ Rust と Node の版は `build/Dockerfile` の `ARG` で決めている。`rust-
    ```bash
    echo -n "<トークン>" | coder secret create claude-token --env CLAUDE_CODE_OAUTH_TOKEN
    ```
-3. Paradev は `superset auth login` のあと `superset start --daemon --auto-update` を実行する。次回の起動からは自動でホストとして立ち上がる。Paradev の API キー（`sk_live_…`）をユーザーシークレットで渡しておけば、ログインなしで最初から自動起動する
-   ```bash
-   echo -n "<API キー>" | coder secret create paradev-key --env SUPERSET_API_KEY
-   ```
-4. Tailscale は `sudo tailscale up` でログインする。状態はホームに残り、次回の起動から自動でつながる。認証キーをユーザーシークレットで渡しておけば、最初から自動でログインする
-   ```bash
-   echo -n "<tskey-auth-…>" | coder secret create tailscale-key --env TS_AUTHKEY
-   ```
-5. コミットに署名するなら GPG 鍵を取り込む
+3. コミットに署名するなら GPG 鍵を取り込む
 
 ## 注意
 
 - コンテナは `privileged` で動く。統合テストのハーネス（testcontainers）と `docker compose` のために、コンテナの中で dockerd を動かしているため。信頼できる利用者だけに使わせること
-- T3 Code は nightly を入れている（安定版には CLI の配布物がまだ無い）。起動時に `t3 serve --lan` が 3773 で立ち上がる（ログは `/tmp/t3-serve.log`）。Tailscale にログイン済みなら tailnet から `http://<ワークスペースの Tailscale 名>:3773` で開ける。守りはペアリングコードだけなので、コードは `t3 pair` で出して他のデバイスに入れる。`t3 connect` の「Service not installed」は systemd が無いためで、問題ない
 - 開発サーバー（3000 / 3400）は `coder port-forward <workspace> --tcp 3000:3000` か、ダッシュボードのポート転送で開く
