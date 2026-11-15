@@ -150,6 +150,7 @@ pub async fn notice(
     if let Some(state) = std::fs::read_to_string(state_path)
         .ok()
         .and_then(|text| serde_json::from_str::<CheckState>(&text).ok())
+        && now >= state.checked_at
         && now.signed_duration_since(state.checked_at)
             < chrono::Duration::hours(CHECK_INTERVAL_HOURS)
     {

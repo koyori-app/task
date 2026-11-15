@@ -10,8 +10,8 @@ fn main() {
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
 
-    // 手元のビルドは版を名乗れない（クレートの版 0.1.0）ので、新しい版の通知の対象にしない。
-    // タグからのリリースだけが `TASK_CLI_VERSION` を渡す
+    // 空でない TASK_CLI_VERSION が渡されたビルドだけをリリースとして扱う。
+    // CI はタグの push のときだけ渡し、PR・手動実行・手元ではクレートの版を使う。
     let from_release = std::env::var("TASK_CLI_VERSION")
         .ok()
         .is_some_and(|value| !value.trim().is_empty());

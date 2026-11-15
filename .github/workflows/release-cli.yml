@@ -101,24 +101,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+          release_version=""
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             version="${GITHUB_REF_NAME#v}"
             if [ -z "$version" ] || [ "$version" = "${GITHUB_REF_NAME}" ]; then
               echo "::error::タグ ${GITHUB_REF_NAME} から版を取り出せません（v<version> の形にしてください）"
               exit 1
             fi
+            release_version="$version"
           else
             version=$(awk -F'"' '/^\[package\]/ { in_package = 1 }
                                  in_package && /^version = / { print $2; exit }' \
                       apps/backend/crates/cli/Cargo.toml)
           fi
           echo "value=$version" >> "$GITHUB_OUTPUT"
+          echo "release_value=$release_version" >> "$GITHUB_OUTPUT"
           echo "version: $version"
 
       - name: Build
         shell: bash
         env:
-          TASK_CLI_VERSION: ${{ steps.version.outputs.value }}
+          TASK_CLI_VERSION: ${{ steps.version.outputs.release_value }}
         run: cargo build --release --locked -p task-cli --bin task --target ${{ matrix.target }}
         working-directory: apps/backend
 

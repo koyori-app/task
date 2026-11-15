@@ -1718,3 +1718,42 @@ async fn a_response_that_no_longer_matches_the_shared_type_is_reported_not_swall
         err.message
     );
 }
+
+#[tokio::test]
+async fn tasks_list_keeps_results_when_the_url_lookup_fails() {
+    let harness = harness().await;
+    // Reuse the /api project fixture; list data is independent of creation.
+    mount_create_under_api(&harness.server, false).await;
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/api/v1/tenants/{TENANT}/projects/{PROJECT_ID}/tasks"
+        )))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "tasks": [task_detail_json()], "total": 1, "next_cursor": null
+        })))
+        .mount(&harness.server)
+        .await;
+    mount_api_tenants(&harness.server, ResponseTemplate::new(500)).await;
+    let (ok, stdout, stderr) = run_binary_full(
+        &harness.server,
+        "/api",
+        &[
+            "task",
+            "tasks",
+            "list",
+            "--project",
+            "APP",
+            "--json=key,url",
+        ],
+        None,
+    )
+    .await;
+    assert!(ok, "{stdout}{stderr}");
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(value["tasks"][0]["key"], "APP-7");
+    assert!(value["tasks"][0]["url"].is_null());
+    assert!(
+        stderr.contains("warning: cannot look up the web URL"),
+        "{stderr}"
+    );
+}

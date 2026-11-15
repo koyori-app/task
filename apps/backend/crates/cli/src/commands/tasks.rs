@@ -174,7 +174,7 @@ pub async fn run(
                 (None, true) => print(&listing_with_keys(&project, &tasks), output),
                 (Some(fields), true) => {
                     let web = if fields.iter().any(|field| field == "url") {
-                        api.web_location().await?
+                        web_location_for_output(api).await
                     } else {
                         None
                     };
@@ -271,7 +271,7 @@ pub async fn run(
             check_deadline_order(body.soft_deadline, body.hard_deadline)?;
             // 画面の URL の取得は作る前に済ませる（作ったあとに叩くと、失敗したときに
             // 呼び出し側が再実行して二重に起票する）。失敗しても作成は止めず、URL だけ付けない
-            let web = web_location_for_create(api).await;
+            let web = web_location_for_output(api).await;
             let created: TaskDetailResponse = api
                 .post(&borrow(&tasks_path(api, project.id)), &body)
                 .await?;
@@ -298,7 +298,7 @@ pub async fn run(
             let project = resolve_project(api, &project).await?;
             let body = resolve_bulk_request(api, &project, prepared).await?;
             // 作る前に済ませ、失敗しても作成は止めない（`tasks create` と同じ理由）
-            let web = web_location_for_create(api).await;
+            let web = web_location_for_output(api).await;
             let created: BulkCreateTasksResponse = api
                 .post(&borrow(&bulk_create_path(api, project.id)), &body)
                 .await?;
@@ -929,7 +929,7 @@ fn bulk_created_lines(created: &CreatedTasks) -> Vec<String> {
                 "{}\t{}\t{}",
                 task.key,
                 task.url.as_deref().unwrap_or(""),
-                task.task.task.title
+                single_line(&task.task.task.title)
             )
         })
         .collect()
@@ -1415,11 +1415,11 @@ pub(crate) fn page_summary(shown: usize, total: u64, page: u64, has_next: bool) 
     }
 }
 
-/// 作成の応答に入れる画面の URL の元。参照は POST の前に済ませる。
+/// 一覧・作成の応答に入れる画面の URL の元。作成時の参照は POST の前に済ませる。
 ///
-/// URL は付加情報なので、403 以外の失敗（テナント一覧の 5xx・通信）でもタスクの作成は止めない。
+/// URL は付加情報なので、403 以外の失敗（テナント一覧の 5xx・通信）でも一覧・作成は止めない。
 /// 止めると、作れるはずのタスクが作れず、再実行を促すだけになる。注意を標準エラーに 1 行出して `url: null` で続ける。
-async fn web_location_for_create(api: &ApiClient) -> Option<WebLocation> {
+async fn web_location_for_output(api: &ApiClient) -> Option<WebLocation> {
     match api.web_location().await {
         Ok(web) => web,
         Err(err) => {
@@ -2160,6 +2160,16 @@ mod tests {
                 "APP-7\t\tGolden task",
             ]
         );
+    }
+
+    #[test]
+    fn bulk_created_titles_are_single_line() {
+        let mut task = task_detail_with("", json!({}));
+        task.task.title = "first\tsecond\nthird\rfourth".into();
+        let lines = bulk_created_lines(&CreatedTasks {
+            tasks: vec![CreatedTask::new(&project_for("APP"), None, task)],
+        });
+        assert_eq!(lines, ["APP-7\t\tfirst second third fourth"]);
     }
 
     #[test]

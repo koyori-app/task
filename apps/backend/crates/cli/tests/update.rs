@@ -506,3 +506,22 @@ async fn a_failing_check_does_not_stop_the_command() {
     assert_eq!(harness.run(&["task", "projects", "list"]).await.unwrap(), 0);
     assert!(harness.update_notice().await.is_none());
 }
+
+#[tokio::test]
+async fn a_future_check_time_is_checked_again() {
+    let server = MockServer::start().await;
+    mount_latest(&server, latest("v0.2.0")).await;
+    let dir = tempfile::tempdir().unwrap();
+    let updater = updater(&server.uri(), dir.path(), "0.1.51", true);
+    let state = state_in(dir.path());
+    std::fs::create_dir_all(state.parent().unwrap()).unwrap();
+    std::fs::write(
+        &state,
+        json!({"checked_at": now() + Duration::hours(48)}).to_string(),
+    )
+    .unwrap();
+    assert!(notice(&updater, &state, now(), &no_env).await.is_some());
+    assert_eq!(requests_to(&server).await, 1);
+    assert!(notice(&updater, &state, now(), &no_env).await.is_none());
+    assert_eq!(requests_to(&server).await, 1);
+}
