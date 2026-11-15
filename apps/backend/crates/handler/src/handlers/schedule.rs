@@ -9,8 +9,8 @@ use chrono::NaiveDate;
 use common::cursor::{decode_cursor, encode_cursor};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, FromQueryResult, Order,
-    QueryFilter, QueryOrder, QuerySelect, QueryTrait, Statement, Value, prelude::Uuid,
-    sea_query::Expr,
+    PaginatorTrait, QueryFilter, QueryOrder, QueryResult, QuerySelect, QueryTrait, Statement,
+    Value, prelude::Uuid, sea_query::Expr,
 };
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +28,7 @@ use entity::{
 use payload::{
     my_tasks::{MyTaskProjectInfo, MyTaskStatusInfo},
     schedule::*,
+    users::UserSummary,
 };
 
 const MAX_RANGE_DAYS: i64 = 92;
@@ -141,6 +142,132 @@ pub async fn get_schedule(
     } else {
         None
     };
+    let (items, members) = schedule_tasks(&state, &rows, &project_map).await?;
+
+    let sprints = sprints::Entity::find()
+        .filter(sprints::Column::ProjectId.is_in(project_ids.clone()))
+        .filter(sprints::Column::StartDate.lte(q.to))
+        .filter(sprints::Column::EndDate.gte(q.from))
+        .order_by_asc(sprints::Column::StartDate)
+        .order_by_asc(sprints::Column::Id)
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(Into::into)
+        .collect();
+    let milestones = milestones::Entity::find()
+        .filter(milestones::Column::ProjectId.is_in(project_ids))
+        .filter(milestones::Column::DueDate.between(q.from, q.to))
+        .order_by_asc(milestones::Column::DueDate)
+        .order_by_asc(milestones::Column::Id)
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(Into::into)
+        .collect();
+
+    Ok(Json(ScheduleResponse {
+        range: ScheduleRange {
+            from: q.from,
+            to: q.to,
+            timezone: timezone.to_owned(),
+        },
+        tasks: items,
+        sprints,
+        milestones,
+        members,
+        next_cursor,
+    }))
+}
+
+#[derive(Serialize, Deserialize)]
+struct UnscheduledCursor {
+    id: Uuid,
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
+    get, path = "/{tenant_id}/schedule/unscheduled", tag = "Schedule",
+    summary = "開始予定日も締切も持たないタスク",
+    params(("tenant_id" = Uuid, Path, description = "テナントID"), UnscheduledQuery),
+    responses((status = 200, description = "期間の無いタスク", body = UnscheduledResponse), CrudErrors)
+)]
+pub async fn get_unscheduled(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(tenant_id): Path<Uuid>,
+    Query(q): Query<UnscheduledQuery>,
+) -> Result<Json<UnscheduledResponse>, AppError> {
+    auth.require_scope(Scope::ReadTask)?;
+    let guest_ids = auth
+        .ensure_tenant_access_or_guest_scope(&state, tenant_id)
+        .await?;
+    let limit = q.limit.unwrap_or(DEFAULT_LIMIT);
+    if !(1..=MAX_LIMIT).contains(&limit) {
+        return Err(AppError::BadRequest);
+    }
+    let cursor = q
+        .cursor
+        .as_deref()
+        .map(decode_cursor::<UnscheduledCursor>)
+        .transpose()?;
+
+    // 見えるプロジェクトの決め方は予定と同じ口を通す。ガントの棒と期間なしの数で範囲がずれないようにする
+    let project_map = schedule_projects(&state, &auth, tenant_id, guest_ids, &q.project_id).await?;
+    let project_ids: Vec<Uuid> = project_map.keys().copied().collect();
+
+    let mut query = tasks::Entity::find()
+        .filter(tasks::Column::ProjectId.is_in(project_ids))
+        .filter(tasks::Column::DeletedAt.is_null())
+        .filter(tasks::Column::IsArchived.eq(false))
+        .filter(tasks::Column::PlannedStartOn.is_null())
+        .filter(tasks::Column::SoftDeadline.is_null())
+        .filter(tasks::Column::HardDeadline.is_null());
+    if !q.user_id.is_empty() {
+        query = query.filter(Expr::cust_with_values(
+            "EXISTS (SELECT 1 FROM task_assignees a WHERE a.task_id = tasks.id AND a.user_id = ANY($1))",
+            [Value::from(q.user_id.clone())],
+        ));
+    }
+    // 予定と違い既定で完了を除く。済んだ課題に日付を入れる手間は要らないため
+    if q.include_done != Some(true) {
+        query = query.filter(Expr::cust(NOT_DONE));
+    }
+    let total = query.clone().count(&state.db).await?;
+    if let Some(c) = &cursor {
+        query = query.filter(tasks::Column::Id.gt(c.id));
+    }
+    let statement = query
+        .column_as(Expr::cust(LOGGED_MINUTES), "logged_minutes")
+        .order_by_asc(tasks::Column::Id)
+        .limit(limit + 1)
+        .build(DatabaseBackend::Postgres);
+    let mut rows = state.db.query_all_raw(statement).await?;
+    let next_cursor = if rows.len() as u64 > limit {
+        rows.truncate(limit as usize);
+        let last = rows.last().ok_or(AppError::NotFound)?;
+        Some(encode_cursor(&UnscheduledCursor {
+            id: last.try_get("", "id")?,
+        }))
+    } else {
+        None
+    };
+    let (items, members) = schedule_tasks(&state, &rows, &project_map).await?;
+
+    Ok(Json(UnscheduledResponse {
+        total,
+        tasks: items,
+        members,
+        next_cursor,
+    }))
+}
+
+/// 引いた行を予定のタスクと、その担当者に写す
+async fn schedule_tasks(
+    state: &AppState,
+    rows: &[QueryResult],
+    project_map: &HashMap<Uuid, projects::Model>,
+) -> Result<(Vec<ScheduleTask>, Vec<UserSummary>), AppError> {
     let page = rows
         .iter()
         .map(|row| {
@@ -222,41 +349,7 @@ pub async fn get_schedule(
             milestone_id: task.milestone_id,
         });
     }
-
-    let sprints = sprints::Entity::find()
-        .filter(sprints::Column::ProjectId.is_in(project_ids.clone()))
-        .filter(sprints::Column::StartDate.lte(q.to))
-        .filter(sprints::Column::EndDate.gte(q.from))
-        .order_by_asc(sprints::Column::StartDate)
-        .order_by_asc(sprints::Column::Id)
-        .all(&state.db)
-        .await?
-        .into_iter()
-        .map(Into::into)
-        .collect();
-    let milestones = milestones::Entity::find()
-        .filter(milestones::Column::ProjectId.is_in(project_ids))
-        .filter(milestones::Column::DueDate.between(q.from, q.to))
-        .order_by_asc(milestones::Column::DueDate)
-        .order_by_asc(milestones::Column::Id)
-        .all(&state.db)
-        .await?
-        .into_iter()
-        .map(Into::into)
-        .collect();
-
-    Ok(Json(ScheduleResponse {
-        range: ScheduleRange {
-            from: q.from,
-            to: q.to,
-            timezone: timezone.to_owned(),
-        },
-        tasks: items,
-        sprints,
-        milestones,
-        members,
-        next_cursor,
-    }))
+    Ok((items, members))
 }
 
 #[axum::debug_handler]
