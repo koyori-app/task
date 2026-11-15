@@ -287,7 +287,7 @@ pub enum TasksCommand {
         #[arg(long)]
         project: Option<String>,
     },
-    /// Add a comment to a task
+    /// Add a comment to a task (posting only; to read comments use `tasks comments`)
     Comment {
         /// Task ref (KEY-N or UUID)
         task_ref: String,
@@ -296,6 +296,14 @@ pub enum TasksCommand {
         /// Read the comment body from a file (`-` for stdin)
         #[arg(long, conflicts_with = "body")]
         body_file: Option<String>,
+        /// Project key when using UUID
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// List the comments of a task, oldest first (replies are indented under their parent)
+    Comments {
+        /// Task ref (KEY-N or UUID)
+        task_ref: String,
         /// Project key when using UUID
         #[arg(long)]
         project: Option<String>,
@@ -638,6 +646,12 @@ mod tests {
             let cli = Cli::try_parse_from(argv).unwrap();
             assert!(cli.json);
         }
+    }
+
+    #[test]
+    fn tasks_comments_takes_a_task_ref() {
+        assert!(Cli::try_parse_from(["task", "tasks", "comments", "APP-1"]).is_ok());
+        assert!(Cli::try_parse_from(["task", "tasks", "comments"]).is_err());
     }
 
     #[test]

@@ -785,6 +785,64 @@ async fn tasks_create_refuses_an_empty_description_file_before_any_request() {
     assert!(harness.sent_nothing().await);
 }
 
+fn comment_list_json() -> serde_json::Value {
+    json!({
+        "comments": [{
+            "id": "c0000000-0000-4000-8000-000000000001",
+            "user": { "id": ALICE_ID, "name": "alice", "account_kind": "human", "avatar_url": null },
+            "body": "確認お願いします",
+            "replies": [],
+            "created_at": "2026-01-02T03:04:05Z",
+            "updated_at": "2026-01-02T03:04:05Z",
+            "is_deleted": false,
+        }],
+        "mentions": {},
+    })
+}
+
+#[tokio::test]
+async fn tasks_comments_reads_the_thread_endpoint() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    Mock::given(method("GET"))
+        .and(path(project_path("tasks/APP-7/comments")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(comment_list_json()))
+        .mount(&harness.server)
+        .await;
+
+    for args in [
+        &["task", "tasks", "comments", "APP-7"][..],
+        &["task", "--json", "tasks", "comments", "APP-7"][..],
+    ] {
+        assert_eq!(harness.run(args).await.unwrap(), 0);
+    }
+    assert_eq!(
+        harness
+            .calls_to(&project_path("tasks/APP-7/comments"))
+            .await,
+        2
+    );
+    let requests = harness.server.received_requests().await.unwrap();
+    assert!(requests.iter().all(|r| r.method.as_str() == "GET"));
+}
+
+#[tokio::test]
+async fn tasks_comments_reports_a_missing_task() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    Mock::given(method("GET"))
+        .and(path(project_path("tasks/APP-9/comments")))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({ "message": "not found" })))
+        .mount(&harness.server)
+        .await;
+
+    let err = harness
+        .run(&["task", "tasks", "comments", "APP-9"])
+        .await
+        .unwrap_err();
+    assert_eq!(err.exit_code, 5);
+}
+
 #[tokio::test]
 async fn tasks_update_propagates_rejection_and_failure_without_further_writes() {
     let harness = harness().await;

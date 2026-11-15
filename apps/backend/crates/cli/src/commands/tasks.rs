@@ -4,7 +4,7 @@ use chrono::{DateTime, NaiveDate, NaiveTime, TimeZone, Utc};
 use entity::tasks::TaskPriority;
 use payload::forge::{LinkTaskPullRequestRequest, TaskForgePullRequest, TaskForgeResponse};
 use payload::projects::ProjectResponse;
-use payload::task_comments::{CreateCommentRequest, TaskCommentResponse};
+use payload::task_comments::{CommentListResponse, CreateCommentRequest, TaskCommentResponse};
 use payload::task_extensions::SearchTasksResponse;
 use payload::tasks::{
     AssigneeInput, BulkCreateTasksRequest, BulkCreateTasksResponse, CreateTaskRequest,
@@ -341,6 +341,19 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
                 )
                 .await?;
             print(&comment_for_display(comment), output);
+        }
+        TasksCommand::Comments { task_ref, project } => {
+            let target = check_task_target(&task_ref, project.as_deref())?;
+            let api = &context.connect().await?;
+            let (project, task_id) = resolve_task_target(api, target).await?;
+            let list = comments_for_display(fetch_comments(api, project.id, &task_id).await?);
+            if output.json {
+                print(&list, output);
+            } else {
+                for line in comment_lines(&list) {
+                    println!("{line}");
+                }
+            }
         }
         TasksCommand::Delete { task_ref, project } => {
             let target = check_task_target(&task_ref, project.as_deref())?;
@@ -1196,6 +1209,87 @@ fn comment_for_display(mut comment: TaskCommentResponse) -> TaskCommentResponse 
     comment
 }
 
+/// タスクのコメントをスレッドごと取る。`tasks show --full`（TASK-327）が同じ取得を使えるよう、
+/// コマンドから切り離しておく。
+async fn fetch_comments(
+    api: &ApiClient,
+    project_id: Uuid,
+    task_id: &str,
+) -> Result<CommentListResponse> {
+    let mut segments = task_path(api, project_id, task_id);
+    segments.push("comments".into());
+    api.get(&borrow(&segments), &[]).await
+}
+
+/// コメント一覧を人に見せる形にする。親と返信の本文のメンション印は `@今の名` に戻す
+/// （`comment_for_display` と同じ規則）。順序と形は変えない。
+fn comments_for_display(mut list: CommentListResponse) -> CommentListResponse {
+    let mentions = &list.mentions;
+    for thread in &mut list.comments {
+        if let Some(body) = &thread.body {
+            thread.body = Some(payload::mentions::to_plain(body, mentions));
+        }
+        for reply in &mut thread.replies {
+            if let Some(body) = &reply.body {
+                reply.body = Some(payload::mentions::to_plain(body, mentions));
+            }
+        }
+    }
+    list
+}
+
+/// コメントを古い順の文章にする。返信は親の下に 4 字深く出す。
+/// 本文は改行で分けて字下げするだけで、Markdown は解釈しない。
+fn comment_lines(list: &CommentListResponse) -> Vec<String> {
+    if list.comments.is_empty() {
+        return vec!["No comments".to_string()];
+    }
+    // API は親が新しい順で来る。読むときは古い順にする
+    let mut threads: Vec<_> = list.comments.iter().collect();
+    threads.sort_by_key(|thread| thread.created_at);
+    let mut lines = Vec::new();
+    for (index, thread) in threads.into_iter().enumerate() {
+        if index > 0 {
+            lines.push(String::new());
+        }
+        push_comment(
+            &mut lines,
+            0,
+            &thread.user.name,
+            thread.created_at,
+            thread.body.as_deref(),
+        );
+        for reply in &thread.replies {
+            push_comment(
+                &mut lines,
+                4,
+                &reply.user.name,
+                reply.created_at,
+                reply.body.as_deref(),
+            );
+        }
+    }
+    lines
+}
+
+fn push_comment(
+    lines: &mut Vec<String>,
+    depth: usize,
+    author: &str,
+    created_at: DateTime<Utc>,
+    body: Option<&str>,
+) {
+    let pad = " ".repeat(depth);
+    lines.push(format!(
+        "{pad}{author}\t{}",
+        created_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    ));
+    // 削除済みは本文が無い
+    for line in body.unwrap_or("(deleted)").split('\n') {
+        lines.push(format!("{pad}  {line}"));
+    }
+}
+
 /// 作成・取得・更新したタスクを人に見せる形にする。説明文のメンション印は `@今の名` に戻す
 /// （コメントと同じ `payload::mentions::to_plain`）。
 fn task_for_display(mut detail: TaskDetailResponse) -> TaskDetailResponse {
@@ -1880,5 +1974,125 @@ mod tests {
             format_pull_request(&pull_request),
             "acme/app#87\topen\tcloses\tbody,manual\tt"
         );
+    }
+
+    const ALICE: &str = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+
+    fn comment_user(name: &str) -> serde_json::Value {
+        json!({ "id": ALICE, "name": name, "account_kind": "human", "avatar_url": null })
+    }
+
+    fn comment_node(
+        name: &str,
+        body: Option<&str>,
+        at: &str,
+        replies: serde_json::Value,
+    ) -> serde_json::Value {
+        json!({
+            "id": Uuid::new_v4(),
+            "user": comment_user(name),
+            "body": body,
+            "replies": replies,
+            "created_at": at,
+            "updated_at": at,
+            "is_deleted": body.is_none(),
+        })
+    }
+
+    fn comment_list(
+        comments: Vec<serde_json::Value>,
+        mentions: serde_json::Value,
+    ) -> CommentListResponse {
+        serde_json::from_value(json!({ "comments": comments, "mentions": mentions })).unwrap()
+    }
+
+    #[test]
+    fn comments_are_listed_oldest_first_with_replies_indented() {
+        // API は親が新しい順で来る
+        let list = comment_list(
+            vec![
+                comment_node("bob", Some("新しい"), "2026-01-03T00:00:00Z", json!([])),
+                comment_node(
+                    "alice",
+                    Some("1 行目\n2 行目"),
+                    "2026-01-02T03:04:05Z",
+                    json!([{
+                        "id": Uuid::new_v4(),
+                        "user": comment_user("carol"),
+                        "body": "返信",
+                        "created_at": "2026-01-02T04:00:00Z",
+                        "updated_at": "2026-01-02T04:00:00Z",
+                        "is_deleted": false,
+                    }]),
+                ),
+            ],
+            json!({}),
+        );
+
+        assert_eq!(
+            comment_lines(&list),
+            vec![
+                "alice\t2026-01-02T03:04:05Z",
+                "  1 行目",
+                "  2 行目",
+                "    carol\t2026-01-02T04:00:00Z",
+                "      返信",
+                "",
+                "bob\t2026-01-03T00:00:00Z",
+                "  新しい",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_deleted_comment_shows_a_placeholder_and_an_empty_list_says_so() {
+        let list = comment_list(
+            vec![comment_node(
+                "alice",
+                None,
+                "2026-01-02T00:00:00Z",
+                json!([]),
+            )],
+            json!({}),
+        );
+        assert_eq!(
+            comment_lines(&list),
+            vec!["alice\t2026-01-02T00:00:00Z", "  (deleted)"]
+        );
+        assert_eq!(
+            comment_lines(&comment_list(vec![], json!({}))),
+            vec!["No comments"]
+        );
+    }
+
+    #[test]
+    fn comment_list_output_has_names_instead_of_mention_markers() {
+        let ghost = Uuid::new_v4();
+        let list = comment_list(
+            vec![comment_node(
+                "bob",
+                Some(&format!("<@{ALICE}> へ")),
+                "2026-01-02T00:00:00Z",
+                json!([{
+                    "id": Uuid::new_v4(),
+                    "user": comment_user("carol"),
+                    "body": format!("<@{ghost}> も"),
+                    "created_at": "2026-01-02T01:00:00Z",
+                    "updated_at": "2026-01-02T01:00:00Z",
+                    "is_deleted": false,
+                }]),
+            )],
+            json!({ ALICE: { "status": "member", "name": "alice", "avatar_url": null } }),
+        );
+
+        let shown = comments_for_display(list);
+
+        assert_eq!(shown.comments[0].body.as_deref(), Some("@alice へ"));
+        assert_eq!(
+            shown.comments[0].replies[0].body.as_deref(),
+            Some("@（不明な利用者） も")
+        );
+        let out = crate::output::render(&shown, crate::output::OutputOptions::new(true));
+        assert!(!out.contains("<@"), "{out}");
     }
 }

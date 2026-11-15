@@ -123,12 +123,15 @@ task tasks search --project TASK ページング
 task tasks search --project TASK @alice      # alice を印でメンションした説明文にも当たる
 task tasks show TASK-181                     # 説明文のメンションは @今の名 で出る
 task tasks show TASK-181 --raw               # 保存されたまま（<@利用者ID> の印）で出す
+task tasks comments TASK-181                 # コメントを古い順に読む（返信は親の下に字下げ）。`--json` は API の形のまま
 task my list --open                          # 自分の担当のうち未完了だけ
 task my list --open --page 2 --limit 100     # ページングは tasks list と同じ
 ```
 
 `tasks show` は説明文のメンションの印を `@今の名` に戻して出す。それを `tasks update --description` へ
 そのまま戻すとメンションが素の文字になるので、書き換えて戻すときは `--raw` で印のまま取る（`--json` でも同じ）。
+`tasks comment` は投稿用で、読むのは `tasks comments`。出力は作成者・日時・本文で、本文のメンションは
+`@今の名` に戻す（`--json` も同じ。形と順は API のまま）。
 `tasks show` は添付ファイル（`attachments`。名前・MIME・サイズ・コンテンツ URL）も出す。本体の取得コマンドはまだ無い。
 
 `--status` / `--label` / `--assignee` / `--milestone` / `--sprint` は名前または UUID で指せる。
