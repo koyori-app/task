@@ -7,6 +7,12 @@ use entity::tasks;
 use sea_orm::sea_query::{Expr, ExprTrait};
 use sea_orm::{ColumnTrait, Condition, Value};
 
+/// 本文の `<@利用者ID>` の印を取り除いた式。語の ILIKE は印の中の UUID に当てない（`42`・`add` のような
+/// 16 進の文字だけの語が、メンションの UUID に当たって塗りも抜粋もない行を出さないため）。
+/// `@名` の検索は別経路（下の `mention_ids`）で印そのものに当てる。
+pub fn strip_mentions(column: &str) -> String {
+    format!("regexp_replace({column}, '<@[0-9a-fA-F-]{{36}}>', '', 'g')")
+}
 pub fn ilike_pattern(text: &str) -> String {
     format!("%{}%", common::db::escape_like(text))
 }
@@ -14,14 +20,20 @@ pub fn text_condition(text: &ResolvedText, scope: SearchScope) -> Condition {
     let mut any = Condition::any();
     let pattern = ilike_pattern(&text.text);
     for (enabled, sql) in [
-        (scope.title, "tasks.title ILIKE $1 ESCAPE '\\'"),
+        (scope.title, "tasks.title ILIKE $1 ESCAPE '\\'".to_string()),
         (
             scope.description,
-            "COALESCE(tasks.description, '') ILIKE $1 ESCAPE '\\'",
+            format!(
+                "{} ILIKE $1 ESCAPE '\\'",
+                strip_mentions("COALESCE(tasks.description, '')")
+            ),
         ),
         (
             scope.comment,
-            "EXISTS (SELECT 1 FROM task_comments c WHERE c.task_id = tasks.id AND c.deleted_at IS NULL AND c.body ILIKE $1 ESCAPE '\\')",
+            format!(
+                "EXISTS (SELECT 1 FROM task_comments c WHERE c.task_id = tasks.id AND c.deleted_at IS NULL AND {} ILIKE $1 ESCAPE '\\')",
+                strip_mentions("c.body")
+            ),
         ),
     ] {
         if enabled {

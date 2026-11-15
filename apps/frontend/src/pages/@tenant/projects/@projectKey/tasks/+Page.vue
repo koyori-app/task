@@ -66,6 +66,7 @@ import { popOverlayParent, pushOverlayParent } from '@/components/tasks/overlay-
 import {
   parseTaskListUrlState,
   useTaskListUrlSync,
+  useLegacyLabelMigration,
   type TaskListView,
 } from './task-list-url-state';
 import TaskGroupedList from '@/components/tasks/TaskGroupedList.vue';
@@ -79,7 +80,8 @@ import { type TaskListSortingState } from '@/components/tasks/task-list-sort';
 import TaskQueryField from '@/components/tasks/query/TaskQueryField.vue';
 import TaskFilterBar from '@/components/tasks/query/TaskFilterBar.vue';
 import TaskMatchSnippets from '@/components/tasks/query/TaskMatchSnippets.vue';
-import { sortOf, setSort, hasFilter, setQualifierValues } from '@/lib/task-query/edit';
+import { sortOf, setSort, hasFilter } from '@/lib/task-query/edit';
+import type { SuggestData } from '@/lib/task-query/suggest';
 import { taskQueryErrorsOf, describeTaskQueryError } from '@/lib/task-query/errors';
 // ---- 定数 ----
 const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
@@ -477,19 +479,12 @@ function onOverlayOpenChange(open: boolean) {
   selectedTaskId.value = next;
 }
 
-let legacyLabelId = initialListState.legacyLabelId;
-const legacyLabelPending = ref(!!legacyLabelId);
-watch(
-  fetchedProjectLabels,
-  (labels) => {
-    if (labels === null || !legacyLabelId) return;
-    const label = labels.find((l) => l.id === legacyLabelId);
-    legacyLabelId = null;
-    if (label) query.value = setQualifierValues(query.value, 'label', [label.name]);
-    legacyLabelPending.value = false;
-  },
-  { immediate: true },
-);
+const legacyLabelPending = useLegacyLabelMigration({
+  legacyLabelId: initialListState.legacyLabelId,
+  labels: fetchedProjectLabels,
+  isError: labelsQuery.isError,
+  query,
+});
 const facetsQuery = useQuery({
   queryKey: computed(() => [
     'get',
@@ -508,6 +503,14 @@ const facetsQuery = useQuery({
   staleTime: 30_000,
   retry: false,
 });
+// 補完の元データ。テンプレートにオブジェクトリテラルで書くと再描画のたびに作り直され、
+// 補完欄が選択中の候補を見失う。元が変わったときだけ作り直す。
+const suggestData = computed<SuggestData>(() => ({
+  statuses: workflowStatuses.value,
+  labels: projectLabels.value,
+  members: projectMembers.value,
+  facets: facetsQuery.data.value,
+}));
 const matches = computed(() => tasksQuery.data.value?.matches ?? {});
 const queryErrors = computed(() =>
   isListView.value
@@ -979,12 +982,7 @@ const columnItems = computed<DropdownItem[]>(() =>
           <div class="flex items-center gap-2">
             <TaskQueryField
               v-model="query"
-              :suggest-data="{
-                statuses: workflowStatuses,
-                labels: projectLabels,
-                members: projectMembers,
-                facets: facetsQuery.data.value,
-              }"
+              :suggest-data="suggestData"
               @focus="queryOpened = true"
             />
             <Button label="新規タスク" @click="isCreateDialogOpen = true" />

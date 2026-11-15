@@ -2,7 +2,12 @@
 import { computed } from 'vue';
 import { PRIORITY_QUERY_LABELS, normalizeQueryValue as normalize } from '@/lib/task-query/suggest';
 import { Dropdown, type DropdownItem } from '@koyori-app/ui-vue';
-import { qualifierValues, setQualifierValues, toggleFlag } from '@/lib/task-query/edit';
+import {
+  qualifierValues,
+  removeQualifierValue,
+  setQualifierValues,
+  toggleFlag,
+} from '@/lib/task-query/edit';
 import { tokenizeTaskQuery, type TaskQueryKey } from '@/lib/task-query/tokenize';
 const props = defineProps<{
   modelValue: string;
@@ -56,16 +61,14 @@ function caption(key: (typeof keys)[number]) {
     : names[key];
 }
 function toggle(key: TaskQueryKey, value: string) {
-  const values = qualifierValues(props.modelValue, key);
   emit(
     'update:modelValue',
-    setQualifierValues(
-      props.modelValue,
-      key,
-      selected(key, value)
-        ? values.filter((v) => normalize(key, v) !== normalize(key, value))
-        : [...values, value],
-    ),
+    selected(key, value)
+      ? removeQualifierValue(props.modelValue, key, value)
+      : setQualifierValues(props.modelValue, key, [
+          ...qualifierValues(props.modelValue, key),
+          value,
+        ]),
   );
 }
 function options(key: (typeof keys)[number]): DropdownItem[] {

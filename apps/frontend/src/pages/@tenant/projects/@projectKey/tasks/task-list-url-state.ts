@@ -1,5 +1,5 @@
-import { setSort, qualifierValues } from '@/lib/task-query/edit';
-import { computed, watch, type Ref } from 'vue';
+import { setSort, qualifierValues, setQualifierValues } from '@/lib/task-query/edit';
+import { computed, ref, watch, type Ref } from 'vue';
 
 /**
  * タスク一覧の「今どこを見ているか」を URL クエリで持つ。
@@ -47,6 +47,37 @@ export function parseTaskListUrlState(
     q: legacyQuery(search),
     legacyLabelId: search?.label || null,
   };
+}
+
+/**
+ * 旧 URL の `?label=<id>` を、ラベル名の条件（`label:名`）へ一度だけ移す。
+ *
+ * ラベル一覧が届くまでが「移行待ち」で、その間は URL の `label` を残し、式の変更によるページ先頭への戻りと
+ * 範囲外ページの丸めを止める。一覧の取得に失敗したときは移行を諦めて待ちを解く
+ * （解かないと、以後に式を変えてもページが先頭へ戻らず、丸めも止まったままになる）。
+ * このとき `label` は URL から落ちる。
+ */
+export function useLegacyLabelMigration(params: {
+  legacyLabelId: string | null;
+  labels: Readonly<Ref<{ id: string; name: string }[] | null>>;
+  isError: Readonly<Ref<boolean>>;
+  query: Ref<string>;
+}): Readonly<Ref<boolean>> {
+  let legacyLabelId = params.legacyLabelId;
+  const pending = ref(!!legacyLabelId);
+  watch(
+    [params.labels, params.isError],
+    ([labels, isError]) => {
+      if (!legacyLabelId) return;
+      if (labels === null && !isError) return;
+      const label = labels?.find((l) => l.id === legacyLabelId);
+      legacyLabelId = null;
+      if (label) params.query.value = setQualifierValues(params.query.value, 'label', [label.name]);
+      pending.value = false;
+    },
+    { immediate: true },
+  );
+  return pending;
 }
 
 /**
@@ -139,8 +170,9 @@ export function useTaskListUrlSync(params: {
 
   // ページャを使っていない表示（List・検索）は丸めの対象外。
   // immediate にするのは、キャッシュ由来の件数や 0 件の一覧でも初回に検査するため
+  // 旧ラベルの移行待ちが解けたときも検査する（取得に失敗して諦めた場合は件数が変わらないため）
   watch(
-    [params.taskTotal, params.isPagerActive],
+    [params.taskTotal, params.isPagerActive, () => params.legacyLabelPending?.value],
     ([total, pagerActive]) => {
       if (!pagerActive || params.legacyLabelPending?.value) return;
       // 未取得のあいだは待つ（0 件と区別する）

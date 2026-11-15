@@ -655,3 +655,72 @@ async fn task_query_assignee_me_and_facet_counts() {
     assert_eq!(b["unassigned"], 1);
     assert_eq!(b["unlabeled"], 2);
 }
+#[tokio::test]
+async fn task_query_words_do_not_match_inside_mention_markers() {
+    let (app, tp, status) = fixture().await;
+    let member = app.insert_user(false, false).await;
+    crate::common::ensure_tenant_member_for_project(&app.state.db, tp.project_id, member.id).await;
+    // 16 進の文字だけの語。メンションの印 `<@UUID>` の中の UUID の先頭 8 字と同じ字になる（ハイフンをまたがない）。
+    let fragment = member.id.simple().to_string()[..8].to_string();
+    let in_comment = task(&app, &tp, &status, "コメントに印").await;
+    let r = app
+        .post_json_with_session(
+            &format!("{}/{in_comment}/comments", base(&tp)),
+            json!({"body":format!("確認お願いします <@{}>", member.id)}),
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let r = app
+        .post_json_with_session(
+            &base(&tp),
+            json!({"title":"説明に印","status_id":status,"description":format!("担当は <@{}> です", member.id)}),
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::CREATED);
+    // 対照: 同じ語が本文に文字として入っていれば当たる
+    let word_in_comment = task(&app, &tp, &status, "コメントに語").await;
+    let r = app
+        .post_json_with_session(
+            &format!("{}/{word_in_comment}/comments", base(&tp)),
+            json!({"body":format!("メモ {fragment} を見る")}),
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let r = app
+        .post_json_with_session(
+            &base(&tp),
+            json!({"title":"説明に語","status_id":status,"description":format!("メモ {fragment} を見る")}),
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let word_in_description: Value = r.json().await.unwrap();
+    let body = query(&app, &tp, &fragment).await;
+    let mut found = ids(&body);
+    found.sort();
+    let mut expected = vec![
+        word_in_comment.clone(),
+        word_in_description["id"].as_str().unwrap().to_string(),
+    ];
+    expected.sort();
+    assert_eq!(found, expected, "印の中の UUID には当たらない");
+    for id in &found {
+        let snippets = &body["matches"][id]["snippets"];
+        assert!(
+            snippets.as_array().is_some_and(|s| !s.is_empty()),
+            "当たった行には抜粋がある"
+        );
+    }
+    // 印そのものに当てる `@名` の経路は残る
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
+    let name = format!("mina{}", &fragment[..8]);
+    let mut model: entity::users::ActiveModel = entity::users::Entity::find_by_id(member.id)
+        .one(&app.state.db)
+        .await
+        .unwrap()
+        .unwrap()
+        .into();
+    model.username = Set(name.clone());
+    model.update(&app.state.db).await.unwrap();
+    let body = query(&app, &tp, &format!("@{name}")).await;
+    assert!(ids(&body).contains(&in_comment));
+}

@@ -5,6 +5,7 @@ import {
   applyTaskListUrlState,
   clampPage,
   useTaskListUrlSync,
+  useLegacyLabelMigration,
 } from '../task-list-url-state';
 describe('condition expression URL state', () => {
   it('restores expressions and converts the first legacy sort', () => {
@@ -83,5 +84,69 @@ describe('condition expression URL state', () => {
     await nextTick();
     expect(pagination.value.pageIndex).toBe(0);
     scope.stop();
+  });
+});
+
+describe('legacy label migration', () => {
+  const labels = [{ id: 'x', name: 'bug' }];
+  function setup(initial: typeof labels | null, isError = false, query = 'sort:title') {
+    const data = ref<typeof labels | null>(initial);
+    const error = ref(isError);
+    const q = ref(query);
+    const pending = useLegacyLabelMigration({
+      legacyLabelId: 'x',
+      labels: data,
+      isError: error,
+      query: q,
+    });
+    return { data, error, q, pending };
+  }
+  it('converts the label id once the labels arrive', async () => {
+    const t = setup(null);
+    expect(t.pending.value).toBe(true);
+    t.data.value = labels;
+    await nextTick();
+    expect(t.q.value).toBe('sort:title label:bug');
+    expect(t.pending.value).toBe(false);
+  });
+  it('gives up and releases the wait when fetching labels fails', async () => {
+    const t = setup(null);
+    t.error.value = true;
+    await nextTick();
+    expect(t.pending.value).toBe(false);
+    expect(t.q.value).toBe('sort:title');
+    // 後から届いても変換しない
+    t.data.value = labels;
+    await nextTick();
+    expect(t.q.value).toBe('sort:title');
+  });
+  it('drops the label from the URL and clamps the page after a failure', async () => {
+    window.history.replaceState(null, '', '/tasks?label=x&page=3');
+    const t = setup(null);
+    const pagination = ref({ pageIndex: 2, pageSize: 20 });
+    const scope = effectScope();
+    scope.run(() =>
+      useTaskListUrlSync({
+        legacyLabelPending: t.pending,
+        selectedTaskId: ref(null),
+        view: ref('table'),
+        pagination,
+        query: t.q,
+        taskTotal: ref(10),
+        isPagerActive: ref(true),
+      }),
+    );
+    expect(new URL(window.location.href).searchParams.get('label')).toBe('x');
+    expect(pagination.value.pageIndex).toBe(2);
+    t.error.value = true;
+    await nextTick();
+    expect(new URL(window.location.href).searchParams.has('label')).toBe(false);
+    expect(pagination.value.pageIndex).toBe(0);
+    scope.stop();
+  });
+  it('leaves the wait in place while labels are still loading', async () => {
+    const t = setup(null);
+    await nextTick();
+    expect(t.pending.value).toBe(true);
   });
 });

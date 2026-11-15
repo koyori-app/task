@@ -66,3 +66,34 @@ it('matches names without case and displays priority labels', async () => {
   ).toBe('true');
   w.unmount();
 });
+
+describe('buttons unselect what they show as selected', () => {
+  const click = (w: ReturnType<typeof setup>, text: string) =>
+    w
+      .findAll('[role="menuitemcheckbox"]')
+      .find((e) => e.text() === text)!
+      .trigger('click');
+  it.each([
+    ['author:ME', '自分が作成', ''],
+    ['author:@ME', '自分が作成', ''],
+    ['in:COMMENT', 'コメントだけを探す', ''],
+    ['is:ARCHIVED', 'アーカイブ済み', ''],
+  ])('removes %s via the %s button', async (expr, text, expected) => {
+    const w = setup(expr);
+    await click(w, text);
+    expect(w.emitted('update:modelValue')!.at(-1)).toEqual([expected]);
+    w.unmount();
+  });
+  it('removes the value from the second term of a repeated key', async () => {
+    const w = setup('status:Todo status:Done');
+    await click(w, 'Done');
+    expect(w.emitted('update:modelValue')!.at(-1)).toEqual(['status:Todo']);
+    w.unmount();
+  });
+  it('keeps the other values of a shared flag term', async () => {
+    const w = setup('no:assignee,label');
+    await click(w, 'ラベルなし');
+    expect(w.emitted('update:modelValue')!.at(-1)).toEqual(['no:assignee']);
+    w.unmount();
+  });
+});

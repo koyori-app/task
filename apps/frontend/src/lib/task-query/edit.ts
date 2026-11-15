@@ -4,6 +4,7 @@ import {
   type TaskQueryKey,
   type QueryToken,
 } from './tokenize';
+import { normalizeQueryValue } from './suggest';
 import type { TaskListSortingState } from '@/components/tasks/task-list-sort';
 export function qualifierValues(expr: string, key: TaskQueryKey, negated = false): string[] {
   const t = tokenizeTaskQuery(expr).find(
@@ -28,27 +29,29 @@ export function setQualifierValues(
   else tokens.splice(at, 1);
   return serializeTaskQuery(tokens);
 }
+/**
+ * 除外でない同じキーの項すべてから、値を大小・`@` をそろえて外す。
+ * 値が空になった項は消す。同じキーの項が複数あっても、最初の項だけでなく持っている項を直す。
+ */
+export function removeQualifierValue(expr: string, key: TaskQueryKey, value: string): string {
+  const target = normalizeQueryValue(key, value);
+  return serializeTaskQuery(
+    tokenizeTaskQuery(expr).flatMap((t): QueryToken[] => {
+      if (t.kind !== 'qualifier' || t.key !== key || t.negated) return [t];
+      const values = t.values.filter((v) => normalizeQueryValue(key, v) !== target);
+      return values.length ? [{ ...t, values }] : [];
+    }),
+  );
+}
 export function toggleFlag(expr: string, key: TaskQueryKey, value: string, on: boolean): string {
+  const removed = removeQualifierValue(expr, key, value);
+  if (!on) return removed;
   if (key === 'no' || key === 'is') {
-    const tokens = tokenizeTaskQuery(expr).filter(
-      (t) =>
-        !(
-          t.kind === 'qualifier' &&
-          t.key === key &&
-          !t.negated &&
-          t.values.some((v) => v.toLowerCase() === value.toLowerCase())
-        ),
-    );
-    if (on)
-      tokens.push({ kind: 'qualifier', key, values: [value], negated: false, start: 0, end: 0 });
+    const tokens = tokenizeTaskQuery(removed);
+    tokens.push({ kind: 'qualifier', key, values: [value], negated: false, start: 0, end: 0 });
     return serializeTaskQuery(tokens);
   }
-  const old = qualifierValues(expr, key);
-  return setQualifierValues(
-    expr,
-    key,
-    on ? [...new Set([...old, value])] : old.filter((v) => v !== value),
-  );
+  return setQualifierValues(removed, key, [...qualifierValues(removed, key), value]);
 }
 export function removeTokenAt(expr: string, index: number): string {
   return serializeTaskQuery(tokenizeTaskQuery(expr).filter((_, i) => i !== index));

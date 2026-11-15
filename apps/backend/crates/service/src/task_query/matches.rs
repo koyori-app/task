@@ -104,7 +104,11 @@ pub async fn for_tasks<C: ConnectionTrait>(
         let mut predicates = Vec::new();
         for term in resolved.texts.iter().filter(|t| !t.negated) {
             values.push(ilike_pattern(&term.text).into());
-            predicates.push(format!("c.body ILIKE ${} ESCAPE '\\'", values.len()));
+            predicates.push(format!(
+                "{} ILIKE ${} ESCAPE '\\'",
+                super::filter::strip_mentions("c.body"),
+                values.len()
+            ));
             for id in &term.mention_ids {
                 values.push(format!("%<@{id}>%").into());
                 predicates.push(format!("c.body LIKE ${}", values.len()));
