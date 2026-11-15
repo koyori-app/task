@@ -19,7 +19,7 @@ KFM (Koyori Flavored Markdown) は、task の本文を描画するレンダラ�
 | タスク詳細（`tasks/@taskId/+data.ts` から `TaskDetailHub`） | サーバー | github | `task-<uuid>` | あり | あり | 100,000 |
 | 分割ビューとオーバーレイ（`TaskDetailPane`） | サーバー（内部エンドポイント） | github | `task-<uuid>` | あり | あり | 65,536 |
 | ドキュメント詳細（`docs/@fileId/+data.ts`、編集プレビューは内部エンドポイント） | サーバー | github | `doc-<file_id>` | あり | なし | 65,536 |
-| コメント（`CommentBody`。[コメントとアクティビティ](/dev/features/tasks/collaboration)） | ブラウザ | comment | `comment-<id>` | なし | あり | 65,536 |
+| コメント（`CommentBody`。[コメントとアクティビティ](/dev/features/tasks/collaboration)） | ブラウザ | comment | `comment-<id>` | あり | あり | 65,536 |
 | レビュー指摘（`ReviewFindingBody`） | ブラウザ | comment | `finding-<id>` | あり | なし | なし |
 
 `comment` profile は github profile に `remark-breaks` を足したもので、空行を挟まない単一の改行を `<br>` として出す（GitHub のコメント欄の流儀）。
@@ -152,6 +152,8 @@ GitHub 互換の境界仕様をテストで固定している。
 
 ### クリックの扱い
 
+コメントのリンクとカードの「タスクを開く」も、説明のリンクと同じ扱いにする。
+
 分割ビューとオーバーレイ（`TaskDetailPane`）の中では、修飾キーなしの左クリックを横取りし、ページ遷移せず同じ領域の中で開く（`open-task-ref`）。規則は次のとおりである。
 
 - オーバーレイは子タスクと同じく戻り先を積む
@@ -167,7 +169,7 @@ GitHub 互換の境界仕様をテストで固定している。
 - 表（id から状態と名前を引く。API の表には `avatar_url` もあるが、チップの描画には使わない）は `renderDescription` の `mentions` で渡し、vfile の `data.kfm.mentions` から読む。`mentions` を渡さない描画では何もせず、マーカーは素の文字のまま残る。空の表を渡すと、マーカーは「不明な利用者」のチップになる
 - text ノードはチップへ分割する。code、inlineCode、link、linkReference の内側ではチップにせず `@今の名` の文字へ戻す。画像の alt、リンクと画像と定義の title、code の meta も同じである。URL と生の HTML は意味を変えない
 - 状態は koyori の固定 class（`koyori-mention-member` / `-outside` / `-gone` / `-unknown`。`mentionClassNames` が決める）で表す。`currentUserId` と同じ member には `koyori-mention-self` も付ける
-- `mentionTenant` を渡すと、今も参加しており名前の引けるチップを `/{tenant}/users/{利用者ID}` への link にする。`taskRef` とは別の引数なのは、コメントでは KEY-N をリンクにせずチップだけを link にするためである。`kfm-mention-tenant-routes.test.ts` が、表を渡す描画は必ずテナントも渡すことを固定している
+- `mentionTenant` を渡すと、今も参加しており名前の引けるチップを `/{tenant}/users/{利用者ID}` への link にする。コメントでは `mentionTenant` を `taskRef` にも渡し、KEY-N もリンクにする。`kfm-mention-tenant-routes.test.ts` が、表を渡す描画は必ずテナントも渡すことを固定している
 - 表の内容で出力が変わるので、表、`currentUserId`、`mentionTenant` はキャッシュキーに含まれる
 
 ## コードブロックの枠（rehype-kfm-code）

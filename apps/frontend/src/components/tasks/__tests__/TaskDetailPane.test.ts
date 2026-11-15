@@ -271,6 +271,16 @@ describe('TaskDetailPane', () => {
       ]);
     });
 
+    it('本文の容れ物の外のカードリンクも開く', async () => {
+      const { wrapper } = await mountWithTaskRef('/acme/projects/ENG/tasks/ENG-7');
+      const link = document.createElement('a');
+      link.className = 'kfm-task-ref';
+      link.href = '/acme/projects/ENG/tasks/ENG-7';
+      wrapper.element.appendChild(link);
+      click(link);
+      expect(wrapper.emitted('open-task-ref')?.[0]?.[0]).toMatchObject({ seqKey: 'ENG-7' });
+    });
+
     it('別プロジェクトの KEY-N もプロジェクトを添えて渡す（扱いは器が決める）', async () => {
       const { wrapper, link } = await mountWithTaskRef('/acme/projects/OPS/tasks/OPS-3');
       click(link);

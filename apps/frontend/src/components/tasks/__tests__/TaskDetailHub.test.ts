@@ -1824,3 +1824,26 @@ describe('TaskDetailHub の説明のチェックボックスの切り替え', ()
     expect(wrapper.find('[data-task-description-html] input').exists()).toBe(false);
   });
 });
+
+it.each([true, false])('説明のタスクリンクの有無 %s に応じてカードを置く', async (linked) => {
+  globalThis.ResizeObserver ??= class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+  const wrapper = mount(TaskDetailHub, {
+    props: {
+      task: { ...task, description: 'TASK-58' },
+      descriptionSource: 'TASK-58',
+      descriptionHtml: linked
+        ? '<a class="kfm-task-ref" href="/acme/projects/TASK/tasks/TASK-58">TASK-58</a>'
+        : '<p>TASK-58</p>',
+      projectKey: 'TASK',
+      statuses: [],
+      statusId: task.status_id,
+      tenantId: 'tenant',
+      mentionTenant: 'acme',
+    },
+  });
+  await vi.waitFor(() => expect(wrapper.findAll('[role="dialog"]')).toHaveLength(linked ? 1 : 0));
+});
