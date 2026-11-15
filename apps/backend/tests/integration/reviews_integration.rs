@@ -2574,3 +2574,204 @@ async fn carry_over_reads_the_source_from_a_past_repository() {
     fx.app.cleanup_user(fx.reviewer.id).await;
     fx.app.cleanup_user(fx.developer.id).await;
 }
+
+/// 写しの鎖と分岐は大元ごとに一件で、元 PR への帰還でも増えない。
+#[tokio::test]
+async fn carry_over_roots_do_not_duplicate_across_paths() {
+    let mut fx = setup().await;
+    link_repo(&fx, "acme", "app").await;
+    fx.login(&fx.reviewer.clone()).await;
+    submit_round_with(&fx, 790, OLD_HEAD, &[("high", "root")]).await;
+    for (from, to, expected) in [
+        (790, 791, StatusCode::CREATED),
+        (791, 792, StatusCode::CREATED),
+        (792, 790, StatusCode::CONFLICT),
+        (790, 792, StatusCode::CONFLICT),
+        (790, 793, StatusCode::CREATED),
+        (791, 793, StatusCode::CONFLICT),
+    ] {
+        assert_eq!(
+            carry_over(&fx, from, to, None).await.status(),
+            expected,
+            "{from} -> {to}"
+        );
+    }
+    let listed = json(
+        fx.app
+            .get_with_session(&format!("{}/pull-requests", fx.reviews_path()))
+            .await,
+    )
+    .await;
+    let prs = listed.as_array().expect("PR list");
+    for pr in prs {
+        if pr["pr_number"] != 790 {
+            assert_eq!(pr["rounds"], 0);
+            assert!(pr["last_reviewed_at"].is_null());
+        }
+    }
+    for pr in [790, 791, 792, 793] {
+        assert_eq!(findings_of(&fx, pr).await.len(), 1);
+    }
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+/// 遷移がプロジェクト FK を待つ間も、引き継ぎは先に元の指摘を待つ。
+/// 時間ではなく pg_blocking_pids で順序を確認する。繰り延べのタスク作成も含む。
+#[tokio::test]
+async fn carry_over_waits_for_source_transition_before_numbering() {
+    use sea_orm::{ConnectionTrait, DatabaseBackend, Statement, TransactionTrait};
+    use std::time::Duration;
+    for state in ["fixed", "deferred"] {
+        let mut fx = setup().await;
+        link_repo(&fx, "acme", "app").await;
+        fx.login(&fx.reviewer.clone()).await;
+        let (_, finding) = submit_round(&fx, 790, "low", "concurrent").await;
+        fx.login(&fx.developer.clone()).await;
+        let db = &fx.app.state.db;
+        let holder = db.begin().await.unwrap();
+        let pid: i32 = holder
+            .query_one_raw(Statement::from_string(
+                DatabaseBackend::Postgres,
+                "SELECT pg_backend_pid() AS pid",
+            ))
+            .await
+            .unwrap()
+            .unwrap()
+            .try_get("", "pid")
+            .unwrap();
+        holder
+            .execute_raw(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                "SELECT id FROM projects WHERE id = $1 FOR UPDATE",
+                [fx.project_id.into()],
+            ))
+            .await
+            .unwrap();
+        let control = async {
+            let transition_pid = tokio::time::timeout(Duration::from_secs(10), async {
+                loop {
+                    let row = db.query_one_raw(Statement::from_sql_and_values(DatabaseBackend::Postgres,
+                        "SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)) LIMIT 1", [pid.into()])).await.unwrap();
+                    if let Some(row) = row { break row.try_get::<i32>("", "pid").unwrap(); }
+                    tokio::task::yield_now().await;
+                }
+            }).await.expect("transition holds finding and waits for project");
+            let observe = async {
+                let waited = tokio::time::timeout(Duration::from_secs(10), async {
+                    loop {
+                        let row = db.query_one_raw(Statement::from_sql_and_values(DatabaseBackend::Postgres,
+                            "SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)) AND query LIKE '%review_findings%' LIMIT 1", [transition_pid.into()])).await.unwrap();
+                        if row.is_some() { break; }
+                        tokio::task::yield_now().await;
+                    }
+                }).await;
+                holder.rollback().await.unwrap();
+                waited
+            };
+            let (response, waited) = tokio::join!(carry_over(&fx, 790, 791, None), observe);
+            waited.expect("carry-over must wait on the source finding before the project");
+            assert_eq!(
+                response.status(),
+                if state == "deferred" {
+                    StatusCode::CONFLICT
+                } else {
+                    StatusCode::CREATED
+                }
+            );
+        };
+        let (changed, ()) = tokio::join!(transition(&fx, &finding, state), control);
+        assert_eq!(changed.status(), StatusCode::OK);
+        if state == "fixed" {
+            assert_eq!(findings_of(&fx, 791).await[0]["state"], "fixed");
+        }
+        fx.app.cleanup_user(fx.reviewer.id).await;
+        fx.app.cleanup_user(fx.developer.id).await;
+    }
+}
+
+/// PR 一覧のレビュー時刻と番号は、後から写しを追加しても変わらない。
+#[tokio::test]
+async fn carried_rounds_do_not_change_pull_request_review_metadata() {
+    let mut fx = setup().await;
+    link_repo(&fx, "acme", "app").await;
+    fx.login(&fx.reviewer.clone()).await;
+    submit_round_with(&fx, 790, OLD_HEAD, &[("low", "source")]).await;
+    submit_round_with(&fx, 791, NEW_HEAD, &[]).await;
+    let before = json(
+        fx.app
+            .get_with_session(&format!("{}/pull-requests", fx.reviews_path()))
+            .await,
+    )
+    .await;
+    let original = before
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|pr| pr["pr_number"] == 791)
+        .unwrap();
+    for to in [791, 792] {
+        assert_eq!(
+            carry_over(&fx, 790, to, None).await.status(),
+            StatusCode::CREATED
+        );
+    }
+    let after = json(
+        fx.app
+            .get_with_session(&format!("{}/pull-requests", fx.reviews_path()))
+            .await,
+    )
+    .await;
+    for pr in after.as_array().unwrap() {
+        match pr["pr_number"].as_i64().unwrap() {
+            791 => {
+                assert_eq!(pr["rounds"], original["rounds"]);
+                assert_eq!(pr["last_reviewed_at"], original["last_reviewed_at"]);
+            }
+            792 => {
+                assert_eq!(pr["rounds"], 0);
+                assert!(pr["last_reviewed_at"].is_null());
+            }
+            _ => {}
+        }
+    }
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+/// 採番のロックは通知・タスクのプロジェクト FK 検査と競合しない。
+#[tokio::test]
+async fn round_numbering_does_not_block_project_foreign_keys() {
+    use sea_orm::{ConnectionTrait, DatabaseBackend, Statement, TransactionTrait};
+    let fx = setup().await;
+    let db = &fx.app.state.db;
+    let numbering = db.begin().await.unwrap();
+    let repo = service::reviews::RepoRef {
+        owner: String::new(),
+        name: String::new(),
+        integration_id: None,
+    };
+    assert_eq!(
+        service::reviews::next_round(&numbering, fx.project_id, &repo, 790)
+            .await
+            .unwrap(),
+        1
+    );
+    let foreign_key = db.begin().await.unwrap();
+    let compatible = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        foreign_key.execute_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "SELECT id FROM projects WHERE id = $1 FOR KEY SHARE",
+            [fx.project_id.into()],
+        )),
+    )
+    .await;
+    numbering.rollback().await.unwrap();
+    foreign_key.rollback().await.unwrap();
+    compatible
+        .expect("numbering must allow FK key-share locks")
+        .unwrap();
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}

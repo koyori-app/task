@@ -205,7 +205,8 @@ fn review_rounds(
 ///
 /// 同じ PR に同時にラウンドを作られると
 /// `UNIQUE (project_id, repo_owner, repo_name, pr_number, round)` にぶつかるため、
-/// プロジェクト行を掴んで採番から挿入までを直列化する。
+/// プロジェクト行を NO KEY UPDATE で掴んで採番から挿入までを直列化する。
+/// 互いには競合するが、通知やタスク挿入の FK 検査（KEY SHARE）は妨げない。
 /// レビューの起票は頻度が低く、この粒度で待たせても実害がない。
 pub async fn next_round<C: ConnectionTrait>(
     db: &C,
@@ -214,7 +215,7 @@ pub async fn next_round<C: ConnectionTrait>(
     pr_number: i32,
 ) -> Result<i32, sea_orm::DbErr> {
     projects::Entity::find_by_id(project_id)
-        .lock(LockType::Update)
+        .lock(LockType::NoKeyUpdate)
         .one(db)
         .await?;
 
@@ -320,10 +321,6 @@ pub async fn carry_over<C: ConnectionTrait>(
         return Err(ReviewError::CarryOverSamePullRequest);
     }
 
-    // 採番がプロジェクト行のロックを兼ねるので最初に呼ぶ。以降の読み取りと挿入は、
-    // 同じ引き継ぎや起票と直列になる。返り値が最初の写しの番号
-    let mut next = next_round(db, project_id, to_repo, to_pr).await?;
-
     let source_rounds = scoped_rounds(project_id, from_repo, from_pr)
         .order_by_asc(reviews::Column::Round)
         .all(db)
@@ -332,18 +329,21 @@ pub async fn carry_over<C: ConnectionTrait>(
         return Err(ReviewError::CarryOverSourceHasNoRounds(from_pr));
     }
 
-    // 未解決かどうかは Rust 側で見る（定義を SQL に写さない）。
-    // 元の指摘の行はロックしない（遷移は指摘行→プロジェクト行の順に掴みうるので、
-    // 逆順で掴むとデッドロックする）。読んだ時点の状態を写す
+    // 遷移と同じ指摘→プロジェクトの順にロックし、写す状態を確定する。
+    // 採番の NO KEY UPDATE は FK 検査の KEY SHARE と競合しないので、
+    // 遷移の通知・繰り延べタスク作成と循環せず、起票同士は直列になる。
     let mut unresolved: Vec<review_findings::Model> = review_findings::Entity::find()
         .filter(review_findings::Column::ReviewId.is_in(source_rounds.iter().map(|r| r.id)))
         .order_by_asc(review_findings::Column::CreatedAt)
         .order_by_asc(review_findings::Column::Id)
+        .lock(LockType::Share)
         .all(db)
         .await?
         .into_iter()
         .filter(|finding| finding.state.counts_as_unresolved())
         .collect();
+
+    let mut next = next_round(db, project_id, to_repo, to_pr).await?;
 
     // 引き継ぎ済みを除く。写しが今どの状態でも、引き継いだ事実は変わらない
     if !unresolved.is_empty() {
@@ -355,16 +355,14 @@ pub async fn carry_over<C: ConnectionTrait>(
             .await?;
         let already: std::collections::HashSet<Uuid> = review_findings::Entity::find()
             .filter(review_findings::Column::ReviewId.is_in(destination_ids))
-            .filter(
-                review_findings::Column::CarriedFromFindingId
-                    .is_in(unresolved.iter().map(|f| f.id)),
-            )
             .all(db)
             .await?
             .into_iter()
-            .filter_map(|finding| finding.carried_from_finding_id)
+            .map(|finding| finding.carried_root_finding_id.unwrap_or(finding.id))
             .collect();
-        unresolved.retain(|finding| !already.contains(&finding.id));
+        let mut seen = already;
+        unresolved
+            .retain(|finding| seen.insert(finding.carried_root_finding_id.unwrap_or(finding.id)));
     }
     if unresolved.is_empty() {
         return Err(ReviewError::NothingToCarryOver { from_pr, to_pr });
@@ -425,6 +423,9 @@ pub async fn carry_over<C: ConnectionTrait>(
                 deferred_task_id: Set(None),
                 fixed_by: Set(original.fixed_by),
                 carried_from_finding_id: Set(Some(original.id)),
+                carried_root_finding_id: Set(Some(
+                    original.carried_root_finding_id.unwrap_or(original.id),
+                )),
                 created_at: Set(now.into()),
                 updated_at: Set(now.into()),
             }
@@ -1304,15 +1305,17 @@ pub async fn reviewed_pull_requests<C: ConnectionTrait>(
                 unresolved: 0,
                 blocking: 0,
                 blocking_fixed: 0,
-                last_reviewed_at: round.created_at.with_timezone(&chrono::Utc),
+                last_reviewed_at: None,
                 state: "unknown".into(),
                 merged_at: None,
                 merge_effects_processed_at: None,
                 pull_request_id: None,
             });
         // ラウンドは round 昇順なので、最後に見たものが最新
-        entry.rounds = round.round;
-        entry.last_reviewed_at = round.created_at.with_timezone(&chrono::Utc);
+        if round.carried_by.is_none() {
+            entry.rounds = round.round;
+            entry.last_reviewed_at = Some(round.created_at.with_timezone(&chrono::Utc));
+        }
         if round.pr_title.is_some() {
             entry.pr_title = round.pr_title.clone();
         }

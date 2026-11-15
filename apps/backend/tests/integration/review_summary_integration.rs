@@ -1359,6 +1359,7 @@ async fn scenario(
                     deferred_task_id: Set(None),
                     fixed_by: Set(None),
                     carried_from_finding_id: Set(None),
+                    carried_root_finding_id: Set(None),
                     created_at: Set(now.into()),
                     updated_at: Set(now.into()),
                 }

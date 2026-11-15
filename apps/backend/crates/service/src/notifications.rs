@@ -738,3 +738,40 @@ pub async fn notify_pull_request_merged<C: ConnectionTrait>(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod carry_payload_tests {
+    use super::*;
+
+    #[test]
+    fn only_copies_include_carry_metadata() {
+        let source = reviews::Model {
+            id: Uuid::new_v4(),
+            project_id: Uuid::new_v4(),
+            integration_id: None,
+            repo_owner: "acme".into(),
+            repo_name: "app".into(),
+            pr_number: 790,
+            round: 3,
+            head_sha: "a".repeat(40),
+            reviewer_id: Uuid::new_v4(),
+            summary: String::new(),
+            pr_title: None,
+            pr_author: None,
+            pr_head_sha: None,
+            pr_head_checked_at: None,
+            summary_comment_id: None,
+            carried_from_review_id: None,
+            carried_by: None,
+            created_at: chrono::Utc::now().into(),
+        };
+        let normal = round_created_payload(&source, &[], "reviewer", None);
+        assert!(normal.get("carried_by").is_none());
+        assert!(normal.get("carried_from").is_none());
+        let copied = round_created_payload(&source, &[], "reviewer", Some(("dev", Some(&source))));
+        assert_eq!(copied["carried_by"], "dev");
+        assert_eq!(copied["carried_from"]["review_id"], source.id.to_string());
+        assert_eq!(copied["carried_from"]["pr_number"], 790);
+        assert_eq!(copied["carried_from"]["round"], 3);
+    }
+}

@@ -25,11 +25,19 @@ impl MigrationTrait for Migration {
             "CREATE INDEX IF NOT EXISTS idx_review_findings_carried_from ON review_findings(carried_from_finding_id)",
         )
         .await?;
+        db.execute_unprepared(
+            "ALTER TABLE review_findings ADD COLUMN IF NOT EXISTS carried_root_finding_id UUID",
+        )
+        .await?;
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let db = manager.get_connection();
+        db.execute_unprepared(
+            "ALTER TABLE review_findings DROP COLUMN IF EXISTS carried_root_finding_id",
+        )
+        .await?;
         db.execute_unprepared("DROP INDEX IF EXISTS idx_review_findings_carried_from")
             .await?;
         db.execute_unprepared(

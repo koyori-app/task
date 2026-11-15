@@ -375,9 +375,9 @@ pub struct ReviewedPullRequest {
     /// `blocking` のうち fixed の件数（`blocking` の内数）。修正済みでレビュー側の
     /// 確認（verified）を待っている分で、`blocking - blocking_fixed` が open / fixing の残り
     pub blocking_fixed: u64,
-    /// 最新ラウンドの作成時刻
-    #[schema(value_type = String, format = "date-time")]
-    pub last_reviewed_at: DateTime<Utc>,
+    /// 最新のレビューの作成時刻。写しだけの PR は null
+    #[schema(value_type = Option<String>, format = "date-time")]
+    pub last_reviewed_at: Option<DateTime<Utc>>,
     /// ホスト上の PR の状態（`open` / `closed` / `merged` / `unknown`）。
     /// PR 行（`forge_pull_requests`）が無い、または webhook をまだ受けていなければ `unknown`
     pub state: String,

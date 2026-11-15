@@ -3,7 +3,7 @@
 `task` コマンド。Rust の単一バイナリで、実行にランタイムの用意は要らない。
 
 主なユースケースは AI レビュワーと CI からの `task review submit` / `task review summary`
-（マージ前ゲート）。出し直した PR へ未解決の指摘を移すのは
+（マージ前ゲート）。出し直した PR へ未解決の指摘を写す（元は変えない）操作は
 `task review carry-over --project TASK --from-pr 790 --to-pr 1119`。
 コマンドの仕様は `docs/dev/features/review-findings/index.md` の「CLI」が正。
 

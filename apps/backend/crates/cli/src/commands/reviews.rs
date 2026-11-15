@@ -559,13 +559,27 @@ fn format_finding(finding: &FindingResponse) -> String {
 }
 
 fn format_round(round: &ReviewResponse) -> String {
-    format!(
+    let mut line = format!(
         "R{}\t{}\t{}\t{} findings",
         round.round,
         &round.head_sha[..round.head_sha.len().min(12)],
         round.reviewer.username,
-        round.finding_count,
-    )
+        round.finding_count
+    );
+    if let Some(actor) = &round.carried_by {
+        if let Some(from) = &round.carried_from {
+            line.push_str(&format!(
+                "\tcarried from PR #{} R{} by {}",
+                from.pr_number, from.round, actor.username
+            ));
+        } else {
+            line.push_str(&format!(
+                "\tcarried from deleted round by {}",
+                actor.username
+            ));
+        }
+    }
+    line
 }
 
 /// 照合する HEAD。`--head` があればそれ、無ければ実行ディレクトリの HEAD。
@@ -1194,5 +1208,26 @@ mod tests {
             join(&FindingState::iter().collect::<Vec<_>>()),
             "open, fixing, fixed, verified, deferred, rejected"
         );
+    }
+}
+
+#[cfg(test)]
+mod carried_round_tests {
+    use super::*;
+    #[test]
+    fn labels_carried_rounds() {
+        let mut round: ReviewResponse = serde_json::from_value(serde_json::json!({
+            "id": uuid::Uuid::nil(), "project_id": uuid::Uuid::nil(), "pr_number": 2,
+            "round": 1, "head_sha": "abc", "summary": "", "finding_count": 1,
+            "created_at": "2026-01-01T00:00:00Z", "reviewer_left_tenant": false,
+            "reviewer": {"id": uuid::Uuid::nil(), "username": "reviewer", "avatar_url": null},
+            "carried_by": {"id": uuid::Uuid::nil(), "username": "dev", "avatar_url": null},
+            "carried_from": {"review_id": uuid::Uuid::nil(), "pr_number": 790, "round": 3, "repository": null}
+        })).unwrap();
+        assert!(format_round(&round).contains("carried from PR #790 R3 by dev"));
+        round.carried_from = None;
+        assert!(format_round(&round).contains("carried from deleted round by dev"));
+        round.carried_by = None;
+        assert_eq!(format_round(&round), "R1\tabc\treviewer\t1 findings");
     }
 }

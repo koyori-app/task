@@ -20,7 +20,7 @@ PR レビューの指摘を task 自身のデータとして管理する機能�
 | 指摘 | ラウンドに属する 1 件の問題 |
 | レビュー側 | その指摘を含むラウンドの作成者、または同じ PR のより新しいラウンドの作成者 |
 | 代行 | 作成者がテナントの利用者でなくなった指摘を、テナントオーナーが取り下げること |
-| 引き継ぎ | 別の PR の未解決の指摘を、この PR の新しいラウンド（写し）へ移すこと |
+| 引き継ぎ | 別の PR の未解決の指摘を、この PR の新しいラウンド（写し）へ写すこと。元は変えない |
 | ゲート | マージしてよいかの判定 |
 
 ## 振る舞い
@@ -64,6 +64,8 @@ PR を指すキーにリポジトリを含める。採番・一覧・集計・�
 - 連携を解除しても指摘は消さない。`integration_id` は `NULL` になるだけである
 
 ### 引き継ぎ
+
+PR 一覧でも写しはレビューのラウンド数と最終レビュー時刻に含めない。写しだけの PR は `rounds = 0`、`last_reviewed_at = null` となる。重複は大元の指摘 ID で判定する。
 
 PR を出し直すと、元の PR に残したレビューの記録は新しい PR に移らない。マージ済みの PR を revert して出し直す、PR を閉じて別ブランチで作り直す、スタックを組み替えて PR を分ける・まとめる、といった場面である。元の PR の未解決の指摘を、新しい PR へ引き継げる。
 
@@ -289,9 +291,10 @@ task notifications settings --project TASK --email ""      # メールは受け�
 | `state` | `open` / `fixing` / `fixed` / `verified` / `deferred` / `rejected` |
 | `deferred_task_id` | 繰り延べ時に自動起票した通常タスクへのリンク（任意） |
 | `fixed_by` | 最後に `fixed` を宣言した利用者。差し戻し後も消さない。自分の修正の `verified` を止める判定に使う |
+| `carried_root_finding_id` | 写しの大元の指摘 ID。外部キーにせず削除後も保持する |
 | `carried_from_finding_id` | 引き継ぎの写しのとき、元の指摘。元の指摘が消えたら NULL |
 
-定義は [m20260826000000_review_findings.rs](https://github.com/koyori-app/task/blob/main/apps/backend/migration/src/m20260826000000_review_findings.rs) にある。引き継ぎの 3 列は [m20261115000000_review_carry_over.rs](https://github.com/koyori-app/task/blob/main/apps/backend/migration/src/m20261115000000_review_carry_over.rs) で足した。PR の実体表 `forge_pull_requests` は[Git ホスティング連携のデータ](/dev/features/tasks/github-tasks#データ)に書く。
+定義は [m20260826000000_review_findings.rs](https://github.com/koyori-app/task/blob/main/apps/backend/migration/src/m20260826000000_review_findings.rs) にある。引き継ぎの 4 列は [m20261115000000_review_carry_over.rs](https://github.com/koyori-app/task/blob/main/apps/backend/migration/src/m20261115000000_review_carry_over.rs) で足した。PR の実体表 `forge_pull_requests` は[Git ホスティング連携のデータ](/dev/features/tasks/github-tasks#データ)に書く。
 
 ## API
 
@@ -524,3 +527,4 @@ PR 単位の読み取りの規則は次のとおりである。
 | 2026-11-12 | URL の `page` が Open の一覧には無く「すべて」の一覧なら在るときは、開いた直後の「PR の状態」を「すべて」にする（TASK-503） | 状態の絞り込みは URL に載らないので、「すべて」でページを送った URL を開き直すと Open の一覧で数えることになり、在るページを「ありません」と言って最後のページへ寄せていた。状態を URL に載せずに、共有した側の一覧へ辿り着けるようにする |
 | 2026-11-14 | 未解決の High / Medium があり head が新しいとき、指摘を出した本人の名義で PR に変更要求（`REQUEST_CHANGES`）を出す（TASK-518）。承認していなくても出す。目印は承認の取り消しと共用する。画面・API・CLI には入口を足さず、Approve と同じく要約ジョブが自動で行う | Approve だけだと、指摘が残る PR は GitHub 上でレビュー待ちのままで、承認の有無でしか状態が変わらない。出す人を指摘を出した本人にすると、GitHub の表示と指摘の持ち主が合う。目印を共用すれば、承認し直しと再レビュー待ちの判定をそのまま使える。手で押す入口は API・権限・画面・CLI が増え、Approve と非対称になる |
 | 2026-11-15 | 出し直した PR への指摘の引き継ぎは、未解決の指摘を引き継ぎ先の新しいラウンドへ写し、元の PR の記録は変えない（TASK-495）。写しのラウンドの作成者と head は元のままにし、レビューには数えない。位置はそのまま写す。引き継ぎ元は同じプロジェクトの中に限る。入口は API と CLI だけにして、Web の操作は作らない | ラウンドは「どの head を見た判断か」の記録で、追記・削除しないのがモデルの根幹である。作成者を引き継いだ人にすると、PR の作者が自分で引き継いで High を棄却でき、マージ基準を迂回できる。写しをレビューに数えると、同じ commit で出し直した PR が誰もレビューしていないのに「可」になり、元の作成者の名義で Approve される。別プロジェクトは権限・PAT の束縛・作成者の在籍が別で、許さない。Web の操作は同時に進む画面の変更と衝突するので、API を用意して後から足す |
+| 2026-11-15 | 写しには大元の指摘 ID を外部キーとは別に保持し、引き継ぎ先の元の指摘とも重複を判定する。PR 一覧の最終レビュー時刻は写しを除き、写しだけなら null とする | 参照先の削除で引き継ぎの鎖が切れても、複数経路の引き継ぎで同じ指摘が増えない。写しの作成はレビューの実施時刻を更新しない |

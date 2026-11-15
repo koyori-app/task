@@ -30446,15 +30446,7 @@
       "ReviewedPullRequest": {
         "type": "object",
         "description": "レビューのある PR の一覧行。画面の PR 一覧が使う。",
-        "required": [
-          "pr_number",
-          "rounds",
-          "unresolved",
-          "blocking",
-          "blocking_fixed",
-          "last_reviewed_at",
-          "state"
-        ],
+        "required": ["pr_number", "rounds", "unresolved", "blocking", "blocking_fixed", "state"],
         "properties": {
           "blocking": {
             "type": "integer",
@@ -30469,9 +30461,9 @@
             "minimum": 0
           },
           "last_reviewed_at": {
-            "type": "string",
+            "type": ["string", "null"],
             "format": "date-time",
-            "description": "最新ラウンドの作成時刻"
+            "description": "最新のレビューの作成時刻。写しだけの PR は null"
           },
           "merge_effects_processed_at": {
             "type": ["string", "null"],
