@@ -1,7 +1,24 @@
 <script setup lang="ts">
 import type { Candidate } from '@/lib/task-query/suggest';
-defineProps<{ id: string; candidates: Candidate[]; active: number; heading: string }>();
+const props = defineProps<{
+  id: string;
+  candidates: Candidate[];
+  active: number;
+  heading: string;
+  prefix?: string;
+}>();
 defineEmits<{ select: [candidate: Candidate] }>();
+function labelParts(label: string) {
+  const prefix = props.prefix ?? '';
+  const index = prefix ? label.toLowerCase().indexOf(prefix.toLowerCase()) : -1;
+  return index < 0
+    ? [label, '', '']
+    : [
+        label.slice(0, index),
+        label.slice(index, index + prefix.length),
+        label.slice(index + prefix.length),
+      ];
+}
 </script>
 <template>
   <div class="rounded border bg-background p-2 shadow-lg">
@@ -21,7 +38,8 @@ defineEmits<{ select: [candidate: Candidate] }>();
         @click="$emit('select', candidate)"
       >
         <span
-          >{{ candidate.label }}
+          >{{ labelParts(candidate.label)[0] }}<strong>{{ labelParts(candidate.label)[1] }}</strong
+          >{{ labelParts(candidate.label)[2] }}
           <span class="text-xs text-muted-foreground">{{ candidate.hint }}</span></span
         ><span v-if="candidate.count !== undefined" class="text-xs text-muted-foreground"
           >{{ candidate.count }} 件</span

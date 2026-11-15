@@ -1,3 +1,4 @@
+import { TASK_LIST_SORT_COLUMNS } from '@/components/tasks/task-list-sort';
 import { TASK_QUERY_KEYS, tokenizeTaskQuery, quoteValue, type TaskQueryKey } from './tokenize';
 export type SuggestContext =
   | { kind: 'keys'; prefix: string; negated: boolean; range: [number, number] }
@@ -75,6 +76,22 @@ export function keyCandidates(prefix: string): Candidate[] {
     hint: `${KEY_HELP[k][0]}　${KEY_HELP[k][1]}`,
   }));
 }
+export const PRIORITY_QUERY_LABELS: Record<string, string> = {
+  critical_fire: '緊急',
+  critical: '重大',
+  high: '高',
+  medium: '中',
+  low: '低',
+  trivial: '些細',
+};
+const priorityApiNames: Record<string, string> = {
+  critical_fire: 'CriticalFire',
+  critical: 'Critical',
+  high: 'High',
+  medium: 'Medium',
+  low: 'Low',
+  trivial: 'Trivial',
+};
 const fixed: Partial<Record<TaskQueryKey, string[]>> = {
   priority: ['critical_fire', 'critical', 'high', 'medium', 'low', 'trivial'],
   due: ['overdue', '<1d', '<7d', '<30d'],
@@ -109,7 +126,22 @@ export function valueCandidates(key: TaskQueryKey, prefix: string, data: Suggest
         count: facet?.find((f) => f.id === v.id)?.count,
       })),
     ];
-  else choices = (fixed[key] ?? []).map((value) => ({ value, label: value }));
+  else
+    choices = (fixed[key] ?? []).map((value) => ({
+      value,
+      label:
+        key === 'priority'
+          ? (PRIORITY_QUERY_LABELS[value] ?? value)
+          : key === 'sort'
+            ? (TASK_LIST_SORT_COLUMNS.find((c) => c.id === (value === 'due' ? 'due_date' : value))
+                ?.label ?? value)
+            : value,
+      hint: value,
+      count:
+        key === 'priority'
+          ? data.facets?.priorities.find((p) => p.priority === priorityApiNames[value])?.count
+          : undefined,
+    }));
   const p = prefix.toLowerCase();
   choices = choices
     .filter((c) => c.value.toLowerCase().includes(p))

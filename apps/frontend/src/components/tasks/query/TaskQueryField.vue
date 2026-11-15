@@ -132,6 +132,7 @@ onClickOutside(root, () => {
     ref="root"
     class="relative min-w-0 flex-1"
     @keydown="keydown"
+    @keyup="caret = nativeInput()?.selectionStart ?? draft.length"
     @focusin="
       open = true;
       emit('focus');
@@ -173,6 +174,7 @@ onClickOutside(root, () => {
         :id="listId"
         :candidates="candidates"
         :active="active"
+        :prefix="context?.prefix ?? ''"
         :heading="context?.kind === 'values' ? `${context.key}: の候補` : '条件の一覧'"
         @select="select"
       />

@@ -118,15 +118,19 @@ export function useTaskListUrlSync(params: {
     q: query.value,
   }));
 
-  watch([selectedTaskId, listState], ([selected, state]) => {
-    if (typeof window === 'undefined') return;
-    let url = new URL(window.location.href);
-    if (selected) url.searchParams.set('selected', selected);
-    else url.searchParams.delete('selected');
-    url = applyTaskListUrlState(url, state);
-    // history を汚さない: 戻るで一覧より前へ抜けられなくなるのを避ける
-    window.history.replaceState(window.history.state, '', url);
-  });
+  watch(
+    [selectedTaskId, listState],
+    ([selected, state]) => {
+      if (typeof window === 'undefined') return;
+      let url = new URL(window.location.href);
+      if (selected) url.searchParams.set('selected', selected);
+      else url.searchParams.delete('selected');
+      url = applyTaskListUrlState(url, state);
+      // history を汚さない: 戻るで一覧より前へ抜けられなくなるのを避ける
+      window.history.replaceState(window.history.state, '', url);
+    },
+    { immediate: true },
+  );
 
   // ページャを使っていない表示（List・検索）は丸めの対象外。
   // immediate にするのは、キャッシュ由来の件数や 0 件の一覧でも初回に検査するため

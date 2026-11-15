@@ -57,7 +57,7 @@ const task = {
 };
 const projectBase = `/v1/tenants/${tenant.id}/projects/${project.id}`;
 
-function stubFetch() {
+function stubFetch(queryFailure?: { status: number; body: unknown }) {
   const replies = new Map<string, unknown>([
     ['/v1/auth/me', { id: 'user-1', email: 'a@example.com', username: 'a', email_verified: true }],
     ['/v1/tenants', [tenant]],
@@ -70,7 +70,10 @@ function stubFetch() {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (request: Request) => {
-      const pathname = new URL(request.url, 'http://localhost').pathname.replace(/^\/api/, '');
+      const requestUrl = new URL(request.url, 'http://localhost');
+      const pathname = requestUrl.pathname.replace(/^\/api/, '');
+      if (queryFailure && pathname === `${projectBase}/tasks` && requestUrl.searchParams.has('q'))
+        return Response.json(queryFailure.body, { status: queryFailure.status });
       return Response.json(replies.get(pathname) ?? { message: 'Forbidden' }, {
         status: replies.has(pathname) ? 200 : 403,
       });
@@ -196,5 +199,35 @@ describe('タスク一覧のリンクからタスクを開く', () => {
 
     expect(navigate).toHaveBeenCalledExactlyOnceWith('/acme/projects/ENG/tasks/ENG-1');
     expect(wrapper.findComponent({ name: 'TaskDetailOverlay' }).exists()).toBe(false);
+  });
+});
+
+describe('条件式のエラーと消去', () => {
+  it('400 は一度だけ説明し、再試行を出さず、条件を消して復帰する', async () => {
+    stubFetch({
+      status: 400,
+      body: {
+        message: 'invalid-task-query',
+        errors: [{ code: 'unknown-value', key: 'status', value: '無い', term: 'status:無い' }],
+      },
+    });
+    const wrapper = mountPage({ view: 'table', q: 'status:無い' });
+    await vi.waitFor(() =>
+      expect(wrapper.find('[role="alert"]').text()).toContain(
+        '「無い」というステータスはありません',
+      ),
+    );
+    expect(wrapper.findAll('button').some((b) => b.text() === '再試行')).toBe(false);
+    await wrapper.get('[role="alert"] button').trigger('click');
+    await findTaskLink(wrapper);
+    expect(new URL(window.location.href).searchParams.has('q')).toBe(false);
+  });
+  it('500 は通常の一覧の再試行を出す', async () => {
+    stubFetch({ status: 500, body: { message: 'server-error' } });
+    const wrapper = mountPage({ view: 'table', q: '通知' });
+    await vi.waitFor(() =>
+      expect(wrapper.findAll('button').some((b) => b.text() === '再試行')).toBe(true),
+    );
+    expect(wrapper.text()).not.toContain('というステータスはありません');
   });
 });

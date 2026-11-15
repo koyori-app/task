@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { PRIORITY_QUERY_LABELS } from '@/lib/task-query/suggest';
 import { Dropdown, type DropdownItem } from '@koyori-app/ui-vue';
 import { qualifierValues, setQualifierValues, toggleFlag } from '@/lib/task-query/edit';
 import { tokenizeTaskQuery, type TaskQueryKey } from '@/lib/task-query/tokenize';
@@ -64,7 +65,7 @@ function options(key: (typeof keys)[number]): DropdownItem[] {
         : key === 'assignee'
           ? [['@me', '自分'], ...props.members.map((v) => [v.username, v.username])]
           : key === 'priority'
-            ? ['critical_fire', 'critical', 'high', 'medium', 'low', 'trivial'].map((v) => [v, v])
+            ? Object.entries(PRIORITY_QUERY_LABELS)
             : key === 'due'
               ? [
                   ['', '指定なし'],
