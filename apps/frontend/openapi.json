@@ -14775,6 +14775,150 @@
         }
       }
     },
+    "/v1/tenants/{tenant_id}/projects/{project_id}/reviews/carry-over": {
+      "post": {
+        "tags": ["Reviews"],
+        "summary": "別の PR の未解決の指摘を引き継ぐ",
+        "description": "出し直した PR へ、元の PR の未解決（open / fixing / fixed）の指摘を写す。元の PR の記録は変えない。未解決の指摘を持つ元ラウンド 1 本につき、写しのラウンドを 1 本作る（作成者と head は元のまま。引き継いだ人は権限を得ない）。写しのラウンドはレビューに数えない。引き継ぎ済みの指摘は飛ばす。",
+        "operationId": "carry_over_review",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "プロジェクトID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CarryOverReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "作った写しのラウンドと指摘",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CarryOverReviewResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "引き継ぎ元と先が同じ PR、または入力の形式違い",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "元の PR にラウンドが無い、または引き継げる指摘が無い",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tenants/{tenant_id}/projects/{project_id}/reviews/pull-requests": {
       "get": {
         "tags": ["Reviews"],
@@ -27378,6 +27522,64 @@
           }
         }
       },
+      "CarriedFromRound": {
+        "type": "object",
+        "description": "引き継ぎの写しが指す、元のラウンド。",
+        "required": ["review_id", "pr_number", "round"],
+        "properties": {
+          "pr_number": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "repository": {
+            "type": ["string", "null"],
+            "description": "元のリポジトリ（`owner/name`）。連携前のラウンドなら `null`"
+          },
+          "review_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "round": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "CarryOverReviewRequest": {
+        "type": "object",
+        "description": "別の PR の未解決の指摘を、この PR の新しいラウンドへ引き継ぐ（TASK-495）。\n\n元 PR の記録は変えない。引き継ぎ先は現在の連携先に限る。",
+        "required": ["from_pr_number", "to_pr_number"],
+        "properties": {
+          "from_pr_number": {
+            "type": "integer",
+            "format": "int32",
+            "description": "引き継ぎ元の PR 番号"
+          },
+          "from_repo": {
+            "type": ["string", "null"],
+            "description": "引き継ぎ元のリポジトリ（`owner/name`。空文字は連携前のラウンド）。既定は現在の連携先"
+          },
+          "to_pr_number": {
+            "type": "integer",
+            "format": "int32",
+            "description": "引き継ぎ先の PR 番号（現在の連携先の PR）"
+          }
+        }
+      },
+      "CarryOverReviewResponse": {
+        "type": "object",
+        "description": "引き継ぎで作ったラウンドと、その指摘。",
+        "required": ["rounds"],
+        "properties": {
+          "rounds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReviewDetailResponse"
+            },
+            "description": "作った写しのラウンド（元のラウンド番号の昇順）"
+          }
+        }
+      },
       "CommentListResponse": {
         "type": "object",
         "required": ["comments", "mentions"],
@@ -28601,6 +28803,11 @@
           },
           "body": {
             "type": "string"
+          },
+          "carried_from_finding_id": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "引き継ぎの写しのとき、元の指摘"
           },
           "created_at": {
             "type": "string",
@@ -30088,6 +30295,28 @@
           "finding_count"
         ],
         "properties": {
+          "carried_by": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UserSummary",
+                "description": "引き継ぎの写しのとき、引き継いだ利用者（`reviewer` は元のラウンドの作成者のまま）。\n写しのラウンドはレビューに数えない"
+              }
+            ]
+          },
+          "carried_from": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CarriedFromRound",
+                "description": "引き継ぎの写しのとき、元のラウンド。元のラウンドが無くなっていれば `null`"
+              }
+            ]
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"

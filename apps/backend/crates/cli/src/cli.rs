@@ -673,6 +673,21 @@ pub enum ReviewCommand {
         #[arg(long)]
         pr: Option<String>,
     },
+    /// Carry unresolved findings over from another PR (e.g. after re-opening a merged PR)
+    CarryOver {
+        /// Project key or UUID
+        #[arg(long)]
+        project: String,
+        /// PR number to carry findings from
+        #[arg(long = "from-pr")]
+        from_pr: String,
+        /// PR number to carry findings to (a PR of the current integration)
+        #[arg(long = "to-pr")]
+        to_pr: String,
+        /// Repository of the source PR (default: the current integration; "" for rounds recorded before it)
+        #[arg(long = "from-repo", value_name = "owner/name")]
+        from_repo: Option<String>,
+    },
     /// List findings for a PR
     List {
         /// Project key or UUID

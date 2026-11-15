@@ -422,13 +422,33 @@ pub async fn review_round_payload<C: ConnectionTrait>(
     findings: &[review_findings::Model],
 ) -> Result<Json, AppError> {
     let reviewer = username(db, review.reviewer_id).await?;
-    Ok(round_created_payload(review, findings, &reviewer))
+    // 引き継ぎの写しのときだけ、引き継いだ人と元のラウンドを足す
+    let carried = match review.carried_by {
+        Some(carried_by) => {
+            let by = username(db, carried_by).await?;
+            let from = match review.carried_from_review_id {
+                Some(id) => reviews::Entity::find_by_id(id).one(db).await?,
+                None => None,
+            };
+            Some((by, from))
+        }
+        None => None,
+    };
+    Ok(round_created_payload(
+        review,
+        findings,
+        &reviewer,
+        carried
+            .as_ref()
+            .map(|(by, from)| (by.as_str(), from.as_ref())),
+    ))
 }
 
 fn round_created_payload(
     review: &reviews::Model,
     findings: &[review_findings::Model],
     reviewer: &str,
+    carried: Option<(&str, Option<&reviews::Model>)>,
 ) -> Json {
     let count = |severity: FindingSeverity| {
         findings
@@ -436,7 +456,7 @@ fn round_created_payload(
             .filter(|finding| finding.severity == severity)
             .count()
     };
-    serde_json::json!({
+    let mut payload = serde_json::json!({
         "project_id": review.project_id,
         "review_id": review.id,
         "repo": repo_label(review),
@@ -452,7 +472,19 @@ fn round_created_payload(
         },
         // 総評は長文になりうる。一覧に出すぶんだけ切る（char 境界で切って壊さない）
         "summary_excerpt": review.summary.chars().take(200).collect::<String>(),
-    })
+    });
+    if let Some((carried_by, from)) = carried {
+        payload["carried_by"] = serde_json::json!(carried_by);
+        // 元のラウンドが消えていれば null（`carried_from_review_id` は SET NULL）
+        payload["carried_from"] = from.map_or(Json::Null, |from| {
+            serde_json::json!({
+                "review_id": from.id,
+                "pr_number": from.pr_number,
+                "round": from.round,
+            })
+        });
+    }
+    payload
 }
 
 /// ラウンドの起票を関係者と購読者へ知らせる。

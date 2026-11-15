@@ -8,6 +8,7 @@
 // - 作者が本人: PR の作者がレビュワー本人のとき、GitHub が 422 で拒むので Approve・変更要求・承認の取り消しを試みない（作者が別人なら出す）。他のレビュワーには出す。1 人の投稿が 403 / 422 で失敗しても、残りのレビュワーへ進む
 // - 承認し直し: 目印付きの取り消しが最後の決定なら、マージ可に戻ったとき承認し直す。人が取り下げた承認・人の変更要求の後は承認し直さない
 // - マーカーの先取り: 第三者が同じマーカーを含むコメントを先に投稿していても、それを要約コメントと誤認せず、自分のコメントを新規に作成する
+// - 引き継ぎだけの PR: 引き継いだ指摘だけがある PR にも要約コメントが投稿され、本文は「未レビュー」。レビュワーが連携済みで head が今の head でも Approve は出ない
 // - 要約コメントの合流: 連続した状態遷移でも更新ジョブは 1 本に合流し、コメントは 1 本のまま最新の件数・マージ可否になる
 // - 要約コメントの直列化: 同じ PR の更新ジョブが走っている間、後続のジョブは投稿せずに積み直す（古い状態での上書きを起こさない）
 // - 持ち主が消えたときの復帰: フラグとロックに TTL が付く。古いジョブは別のジョブのロックを解放しない
@@ -1338,6 +1339,8 @@ async fn scenario(
                 pr_head_sha: Set(None),
                 pr_head_checked_at: Set(None),
                 summary_comment_id: Set(None),
+                carried_from_review_id: Set(None),
+                carried_by: Set(None),
                 created_at: Set(now.into()),
             }
             .insert(&app.state.db)
@@ -1355,6 +1358,7 @@ async fn scenario(
                     state: Set(entity::review_findings::FindingState::Open),
                     deferred_task_id: Set(None),
                     fixed_by: Set(None),
+                    carried_from_finding_id: Set(None),
                     created_at: Set(now.into()),
                     updated_at: Set(now.into()),
                 }
@@ -2583,4 +2587,86 @@ async fn a_review_list_cut_off_by_the_page_limit_is_not_revoked() {
     .await;
 
     assert!(approvals(&mock_server).await.is_empty());
+}
+
+/// 引き継いだ指摘だけがある PR は、要約コメントを書くが「未レビュー」とし、Approve しない。
+///
+/// 写しのラウンドの head と作成者を最新のレビューとして扱うと、同じ commit で出し直した PR が
+/// 誰にもレビューされないまま「マージ可」になり、元の作成者の名義で Approve される。
+#[serial_test::serial]
+#[tokio::test]
+async fn a_pull_request_with_only_carried_findings_is_unreviewed_and_not_approved() {
+    let mock_server = MockServer::start().await;
+    // SAFETY: serial アトリビュートにより他テストとの並列実行を防いでいる。
+    unsafe {
+        std::env::set_var("GITHUB_API_BASE_URL", mock_server.uri());
+        std::env::set_var("GITHUB_OAUTH_BASE_URL", mock_server.uri());
+    }
+    let mut app = TestApp::new_with_github().await;
+    let reviewer = app.insert_user_default().await;
+    let tp = app.insert_tenant_project(reviewer.id).await;
+    seed_statuses(&app, tp.project_id).await;
+    link_integration(&app, tp.project_id, reviewer.id).await;
+    link_reviewer(&app, reviewer.id, REVIEWER_GITHUB_ID, REVIEWER_TOKEN).await;
+    let marker = service::github::pr_comments::summary_marker(tp.project_id);
+    mount_mocks(&mock_server, false, &marker).await;
+
+    app.reset_session_client();
+    app.login_session_no_content(&reviewer.email, &reviewer.password)
+        .await;
+    let reviews_path = format!(
+        "/v1/tenants/{}/projects/{}/reviews",
+        tp.tenant_id, tp.project_id
+    );
+    // 元の PR（600）に Low の未解決を 1 件。今の head を見たラウンド
+    let res = app
+        .post_json_with_session(
+            &reviews_path,
+            serde_json::json!({
+                "pr_number": 600,
+                "head_sha": REVIEWED_HEAD,
+                "summary": "総評",
+                "findings": [{ "severity": "low", "title": "命名", "body": "本文" }],
+            }),
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let res = app
+        .post_json_with_session(
+            &format!("{reviews_path}/carry-over"),
+            serde_json::json!({ "from_pr_number": 600, "to_pr_number": PR_NUMBER }),
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+
+    job::review_summary::process(
+        job::ReviewSummaryJob {
+            project_id: tp.project_id,
+            pr_number: PR_NUMBER,
+            repo_owner: REPO_OWNER.into(),
+            repo_name: REPO_NAME.into(),
+        },
+        apalis::prelude::Data::new(job_state(&app)),
+    )
+    .await
+    .expect("post review summary");
+
+    let posted = bodies_of(&mock_server, wiremock::http::Method::POST).await;
+    let comments: Vec<&str> = posted
+        .iter()
+        .filter_map(|b| b.get("body").and_then(|b| b.as_str()))
+        .collect();
+    assert_eq!(
+        comments.len(),
+        1,
+        "引き継ぎだけの PR にも要約コメントを書く"
+    );
+    assert!(comments[0].contains("**未レビュー**"), "{}", comments[0]);
+    assert!(!comments[0].contains("マージ可"), "{}", comments[0]);
+    assert!(
+        approvals(&mock_server).await.is_empty(),
+        "写しの head と作成者で Approve しない"
+    );
+
+    app.cleanup_user(reviewer.id).await;
 }

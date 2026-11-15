@@ -2,7 +2,7 @@
 title: 要約コメントと Approve
 description: レビュー指摘の要約を GitHub の PR にコメント 1 本で出し、マージ可になったらレビュワー本人の名義で Approve し、未解決の High / Medium があれば指摘を出した本人の名義で変更要求を出す
 status: implemented
-updated: 2026-11-14
+updated: 2026-11-15
 slug: dev/features/review-findings/github-comment
 sidebar:
   order: 1
@@ -36,6 +36,8 @@ sidebar:
 ### 内容
 
 ラウンド数（R1, R2, …）と最新ラウンドの総評、重大度 × 状態の件数表、マージ可否、オーナー代行での棄却件数（あれば）、task の指摘一覧へのリンク、最終更新時刻を載せる。リンクの URL は既存の `email_verification_app_url`（アプリの公開 URL）を流用する。
+
+引き継いだ指摘だけがあり、レビューのラウンドが 1 件も無い PR には「未レビュー」と書く。マージ可でも Approve でもない。写しのラウンドは、ラウンド数・最新ラウンドの `head_sha`・Approve の名義に数えない（[引き継ぎ](/dev/features/review-findings#引き継ぎ)）。塞ぐ指摘があるときは、ふだんどおり「マージ不可」と書く。
 
 コメントは最終更新時刻の時点のスナップショットである。push だけでは更新されない。更新の契機は task 側のラウンド作成と状態遷移だけである。
 

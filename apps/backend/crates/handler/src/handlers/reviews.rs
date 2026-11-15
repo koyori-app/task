@@ -22,6 +22,9 @@ use crate::openapi::CrudErrors;
 use entity::review_findings::{FindingSeverity, FindingState};
 use entity::{review_finding_transitions, review_findings, reviews, scopes::Scope, users};
 use payload::reviews::*;
+use payload::users::UserSummary;
+use service::reviews::CarriedRound;
+
 #[derive(Debug, Deserialize, Validate, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct PrQuery {
@@ -174,6 +177,60 @@ async fn load_users<C: ConnectionTrait>(
     Ok(rows.into_iter().map(|user| (user.id, user)).collect())
 }
 
+/// 引き継ぎの写しの出どころ（元のラウンドと引き継いだ利用者）をまとめて引く。
+///
+/// 写しでないラウンドは含めない。元のラウンドが消えていれば `carried_from` は `None`
+/// （`carried_from_review_id` は SET NULL）。
+async fn load_carry_info<C: ConnectionTrait>(
+    db: &C,
+    rounds: &[reviews::Model],
+) -> Result<HashMap<Uuid, (Option<CarriedFromRound>, Option<UserSummary>)>, AppError> {
+    let copies: Vec<&reviews::Model> = rounds.iter().filter(|r| r.carried_by.is_some()).collect();
+    if copies.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let origin_ids: Vec<Uuid> = copies
+        .iter()
+        .filter_map(|r| r.carried_from_review_id)
+        .collect();
+    let origins: HashMap<Uuid, reviews::Model> = if origin_ids.is_empty() {
+        HashMap::new()
+    } else {
+        reviews::Entity::find()
+            .filter(reviews::Column::Id.is_in(origin_ids))
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|r| (r.id, r))
+            .collect()
+    };
+    let carrier_ids: Vec<Uuid> = copies.iter().filter_map(|r| r.carried_by).collect();
+    let carriers = load_users(db, &carrier_ids).await?;
+
+    Ok(copies
+        .into_iter()
+        .map(|copy| {
+            let from = copy
+                .carried_from_review_id
+                .and_then(|id| origins.get(&id))
+                .map(|origin| CarriedFromRound {
+                    review_id: origin.id,
+                    pr_number: origin.pr_number,
+                    round: origin.round,
+                    repository: service::reviews::RepoRef::of_round(origin)
+                        .is_linked()
+                        .then(|| format!("{}/{}", origin.repo_owner, origin.repo_name)),
+                });
+            let by = copy
+                .carried_by
+                .and_then(|id| carriers.get(&id))
+                .cloned()
+                .map(UserSummary::from);
+            (copy.id, (from, by))
+        })
+        .collect())
+}
+
 async fn find_review<C: ConnectionTrait>(
     db: &C,
     project_id: Uuid,
@@ -240,6 +297,8 @@ pub async fn create_review(
         pr_head_sha: Set(None),
         pr_head_checked_at: Set(None),
         summary_comment_id: Set(None),
+        carried_from_review_id: Set(None),
+        carried_by: Set(None),
         created_at: Set(now.into()),
     }
     .insert(&txn)
@@ -258,6 +317,7 @@ pub async fn create_review(
             state: Set(FindingState::Open),
             deferred_task_id: Set(None),
             fixed_by: Set(None),
+            carried_from_finding_id: Set(None),
             created_at: Set(now.into()),
             updated_at: Set(now.into()),
         }
@@ -341,6 +401,125 @@ pub async fn create_review(
 
 #[axum::debug_handler]
 #[utoipa::path(
+    post,
+    path = "/carry-over",
+    operation_id = "carry_over_review",
+    tag = "Reviews",
+    summary = "別の PR の未解決の指摘を引き継ぐ",
+    description = "出し直した PR へ、元の PR の未解決（open / fixing / fixed）の指摘を写す。元の PR の記録は変えない。未解決の指摘を持つ元ラウンド 1 本につき、写しのラウンドを 1 本作る（作成者と head は元のまま。引き継いだ人は権限を得ない）。写しのラウンドはレビューに数えない。引き継ぎ済みの指摘は飛ばす。",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("project_id" = Uuid, Path, description = "プロジェクトID"),
+    ),
+    request_body = CarryOverReviewRequest,
+    responses(
+        (status = 201, description = "作った写しのラウンドと指摘", body = CarryOverReviewResponse),
+        (status = 400, description = "引き継ぎ元と先が同じ PR、または入力の形式違い", body = ServerError),
+        (status = 409, description = "元の PR にラウンドが無い、または引き継げる指摘が無い", body = ServerError),
+        CrudErrors,
+    )
+)]
+pub async fn carry_over_review(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
+    Valid(Json(payload)): Valid<Json<CarryOverReviewRequest>>,
+) -> Result<(StatusCode, Json<CarryOverReviewResponse>), AppError> {
+    ensure_write_access(&state, &auth, tenant_id, project_id).await?;
+
+    let from_repo = resolve_repo_scope(&state, project_id, payload.from_repo.as_deref()).await?;
+
+    let txn = state.db.begin().await?;
+    // 引き継ぎ先は常に現在の連携先（起票と同じ）
+    let to_repo = service::reviews::current_repo(&txn, project_id).await?;
+    let carried = service::reviews::carry_over(
+        &txn,
+        project_id,
+        &from_repo,
+        payload.from_pr_number,
+        &to_repo,
+        payload.to_pr_number,
+        auth.user_id,
+    )
+    .await?;
+
+    // 通知も同じ txn で作る。引き継ぎが巻き戻ったのに通知だけ残る事態を避ける
+    for CarriedRound { review, findings } in &carried {
+        service::notifications::notify_review_round_created(&txn, review, findings, auth.user_id)
+            .await?;
+        service::webhooks::emit(
+            &txn,
+            project_id,
+            auth.user_id,
+            service::webhooks::EVENT_REVIEW_ROUND_CREATED,
+            service::notifications::review_round_payload(&txn, review, findings).await?,
+        )
+        .await?;
+    }
+    txn.commit().await?;
+
+    // 要約コメントの反映は非同期。投稿に失敗しても引き継ぎは巻き戻さない
+    job::review_summary::enqueue_best_effort(
+        &state.review_summary_storage,
+        &state.redis_client,
+        project_id,
+        &to_repo.owner,
+        &to_repo.name,
+        payload.to_pr_number,
+    )
+    .await;
+
+    let reviews_made: Vec<reviews::Model> = carried.iter().map(|c| c.review.clone()).collect();
+    let findings_made: Vec<review_findings::Model> = carried
+        .iter()
+        .flat_map(|c| c.findings.iter().cloned())
+        .collect();
+    let finding_ids: Vec<Uuid> = findings_made.iter().map(|f| f.id).collect();
+    let mut transitions = load_transitions(&state.db, &finding_ids).await?;
+    let mut actions = service::reviews::available_actions(
+        &state.db,
+        tenant_id,
+        &reviews_made,
+        &findings_made,
+        auth.user_id,
+    )
+    .await?;
+    let reviewer_ids: Vec<Uuid> = reviews_made.iter().map(|r| r.reviewer_id).collect();
+    let reviewers = load_users(&state.db, &reviewer_ids).await?;
+    let left = service::reviews::users_left_tenant(&state.db, tenant_id, &reviewer_ids).await?;
+    let mut carry = load_carry_info(&state.db, &reviews_made).await?;
+
+    let mut rounds = Vec::with_capacity(carried.len());
+    for CarriedRound { review, findings } in carried {
+        let reviewer = reviewers
+            .get(&review.reviewer_id)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("reviewer {} has no user row", review.reviewer_id))?;
+        let reviewer_left = left.contains(&review.reviewer_id);
+        let (carried_from, carried_by) = carry.remove(&review.id).unwrap_or_default();
+        let (pr_number, round, count) = (review.pr_number, review.round, findings.len() as u64);
+        rounds.push(ReviewDetailResponse {
+            review: ReviewResponse::from_parts(review, reviewer, reviewer_left, count)
+                .with_carry(carried_from, carried_by),
+            findings: findings
+                .into_iter()
+                .map(|finding| {
+                    let history = transitions.remove(&finding.id).unwrap_or_default();
+                    let available = actions.remove(&finding.id).unwrap_or_default();
+                    FindingResponse::from_parts(finding, pr_number, round, history, available)
+                })
+                .collect(),
+        });
+    }
+
+    Ok((
+        StatusCode::CREATED,
+        Json(CarryOverReviewResponse { rounds }),
+    ))
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
     get,
     path = "/",
     operation_id = "list_reviews",
@@ -381,9 +560,11 @@ pub async fn list_reviews(
     // 作成者が居なくなったラウンドは、オーナーが取り下げを代行できる（仕様 §3）。
     // 画面が代行ボタンを出す判定に使うので、ラウンドごとに不在を返す
     let left = service::reviews::users_left_tenant(&state.db, tenant_id, &reviewer_ids).await?;
+    let mut carry = load_carry_info(&state.db, &rounds).await?;
 
     let mut out = Vec::with_capacity(rounds.len());
     for round in rounds {
+        let (carried_from, carried_by) = carry.remove(&round.id).unwrap_or_default();
         let count = review_findings::Entity::find()
             .filter(review_findings::Column::ReviewId.eq(round.id))
             .count(&state.db)
@@ -393,12 +574,10 @@ pub async fn list_reviews(
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("reviewer {} has no user row", round.reviewer_id))?;
         let reviewer_left = left.contains(&round.reviewer_id);
-        out.push(ReviewResponse::from_parts(
-            round,
-            reviewer,
-            reviewer_left,
-            count,
-        ));
+        out.push(
+            ReviewResponse::from_parts(round, reviewer, reviewer_left, count)
+                .with_carry(carried_from, carried_by),
+        );
     }
     Ok(Json(out))
 }
@@ -565,8 +744,14 @@ pub async fn get_review(
             .await?
             .contains(&review.reviewer_id);
 
+    let (carried_from, carried_by) = load_carry_info(&state.db, std::slice::from_ref(&review))
+        .await?
+        .remove(&review.id)
+        .unwrap_or_default();
+
     Ok(Json(ReviewDetailResponse {
-        review: ReviewResponse::from_parts(review, reviewer, reviewer_left, count),
+        review: ReviewResponse::from_parts(review, reviewer, reviewer_left, count)
+            .with_carry(carried_from, carried_by),
         findings: findings
             .into_iter()
             .map(|finding| {

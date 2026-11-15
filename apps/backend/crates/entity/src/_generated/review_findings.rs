@@ -22,6 +22,8 @@ pub struct Model {
     pub deferred_task_id: Option<Uuid>,
     #[sea_orm(nullable)]
     pub fixed_by: Option<Uuid>,
+    #[sea_orm(nullable)]
+    pub carried_from_finding_id: Option<Uuid>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
     #[sea_orm(

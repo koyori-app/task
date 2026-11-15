@@ -62,7 +62,43 @@ pub struct UpdateFindingStateRequest {
     pub note: Option<String>,
 }
 
+/// 別の PR の未解決の指摘を、この PR の新しいラウンドへ引き継ぐ（TASK-495）。
+///
+/// 元 PR の記録は変えない。引き継ぎ先は現在の連携先に限る。
+#[derive(Validate, Debug, Serialize, Deserialize, ToSchema)]
+pub struct CarryOverReviewRequest {
+    /// 引き継ぎ元の PR 番号
+    #[validate(range(min = 1))]
+    pub from_pr_number: i32,
+    /// 引き継ぎ元のリポジトリ（`owner/name`。空文字は連携前のラウンド）。既定は現在の連携先
+    #[serde(default)]
+    #[schema(nullable)]
+    pub from_repo: Option<String>,
+    /// 引き継ぎ先の PR 番号（現在の連携先の PR）
+    #[validate(range(min = 1))]
+    pub to_pr_number: i32,
+}
+
 // ── レスポンス ──────────────────────────────────────────────────────────
+
+/// 引き継ぎで作ったラウンドと、その指摘。
+#[derive(Debug, Clone, Serialize, ToSchema, serde::Deserialize)]
+pub struct CarryOverReviewResponse {
+    /// 作った写しのラウンド（元のラウンド番号の昇順）
+    pub rounds: Vec<ReviewDetailResponse>,
+}
+
+/// 引き継ぎの写しが指す、元のラウンド。
+#[derive(Debug, Clone, Serialize, ToSchema, serde::Deserialize)]
+pub struct CarriedFromRound {
+    #[schema(value_type = String, format = "uuid")]
+    pub review_id: Uuid,
+    pub pr_number: i32,
+    pub round: i32,
+    /// 元のリポジトリ（`owner/name`）。連携前のラウンドなら `null`
+    #[schema(nullable)]
+    pub repository: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, ToSchema, serde::Deserialize)]
 pub struct ReviewResponse {
@@ -91,6 +127,15 @@ pub struct ReviewResponse {
     pub created_at: DateTime<Utc>,
     /// このラウンドで出した指摘の件数
     pub finding_count: u64,
+    /// 引き継ぎの写しのとき、元のラウンド。元のラウンドが無くなっていれば `null`
+    #[serde(default)]
+    #[schema(nullable)]
+    pub carried_from: Option<CarriedFromRound>,
+    /// 引き継ぎの写しのとき、引き継いだ利用者（`reviewer` は元のラウンドの作成者のまま）。
+    /// 写しのラウンドはレビューに数えない
+    #[serde(default)]
+    #[schema(nullable)]
+    pub carried_by: Option<UserSummary>,
 }
 
 impl ReviewResponse {
@@ -113,7 +158,21 @@ impl ReviewResponse {
             pr_author: model.pr_author,
             created_at: model.created_at.with_timezone(&Utc),
             finding_count: count,
+            carried_from: None,
+            carried_by: None,
         }
+    }
+
+    /// 引き継ぎの写しの出どころを足す。
+    #[must_use]
+    pub fn with_carry(
+        mut self,
+        carried_from: Option<CarriedFromRound>,
+        carried_by: Option<UserSummary>,
+    ) -> Self {
+        self.carried_from = carried_from;
+        self.carried_by = carried_by;
+        self
     }
 }
 
@@ -149,6 +208,10 @@ pub struct FindingResponse {
     /// `fixed` を宣言した利用者。`verified` に進めてよいかの判定に使う
     #[schema(value_type = Option<String>, format = "uuid", nullable)]
     pub fixed_by: Option<Uuid>,
+    /// 引き継ぎの写しのとき、元の指摘
+    #[serde(default)]
+    #[schema(value_type = Option<String>, format = "uuid", nullable)]
+    pub carried_from_finding_id: Option<Uuid>,
     #[schema(value_type = String, format = "date-time")]
     pub created_at: DateTime<Utc>,
     #[schema(value_type = String, format = "date-time")]
@@ -184,6 +247,7 @@ impl FindingResponse {
             state: model.state.into(),
             deferred_task_id: model.deferred_task_id,
             fixed_by: model.fixed_by,
+            carried_from_finding_id: model.carried_from_finding_id,
             created_at: model.created_at.with_timezone(&Utc),
             updated_at: model.updated_at.with_timezone(&Utc),
             transitions,
