@@ -1,154 +1,67 @@
 /**
- * markup-renderer — KFM (Koyori Flavored Markdown) コア。
- * Phase 1 実体は github profile (= 複製レンダラ):
- * GFM ＋ GitHub alerts ＋ コードブロック着色 (starry-night) ＋ 安全 core。
+ * rehype-kfm-task-offset — KFM 拡張: タスクリストの `input[type=checkbox]` に、原文での
+ * `[` の位置を `data-kfm-task-offset` として足す (TASK-539)。
  *
- * SSR / Hydration 契約:
- * - サーバ生成 HTML を唯一の入力とする。ページの +data.ts で
- *   `descriptionHtml: await renderDescription(text)` を実行して pageContext.data に載せ、
- *   コンポーネントは `<div v-html="descriptionHtml" />` で受けるだけにする。
- * - 同一ページに複数の KFM 断片 (タスク本文＋コメント等) を並べる場合は、断片ごとに
- *   決定的な scope を渡す: `renderDescription(text, { scope: `comment-${id}` })`。
- *   clobberPrefix が脚注の fn-* / fnref-* 系 id
- *   (user-content-<scope>-fn-* / -fnref-*) を scope 化し、続く core の rehype scope 層が
- *   clobberPrefix を経由しない footnote-label (id と aria-describedby) も scope 化する。
- *   これにより断片間で全脚注 id の衝突を防ぐ。random でなく
- *   決定的なのは同一入力→同一 HTML (L1 キャッシュ・SSR/CSR 同一性) を保つため。
- * - クライアントは再パース・再サニタイズしない (DOMPurify はサーバで一度だけ)。
- * - alert の見た目は消費側で `@/lib/remark-koyori-alerts/style.css` を明示 import する
- *   (サイドカー方式。alerts はレンダラが emit する .kfm-alert 等を CSS が直接指すため
- *   import だけで当たる)。GFM 要素 (リスト/blockquote/リンク) は
- *   `@/lib/remark-gfm/style.css` の明示 import に加え、v-html する器へ
- *   class="kfm-content" (@/lib/remark-gfm/content-class.ts) を付ける (Tailwind
- *   preflight 対策)。GFM 出力は素の ul/blockquote/a で掴む class が無いため、
- *   器 scope が無いと GFM CSS は一行も当たらない。
- * - mermaid のフォールバック表示は消費側で
- *   `@/lib/remark-kfm-mermaid/style.css` を明示 import する。
- * - コードブロック着色の見た目も同方式: 消費側で `@/lib/rehype-starry-night/style.css` を
- *   明示 import する (実体は @wooorm/starry-night の light シート固定 ＋ ダークブリッジ（html の data-theme が light 以外）。
- *   選定理由は同 CSS のコメントを参照)。
- * - コードブロックの枠 (帯・行番号・横スクロール) も同方式: 消費側で
- *   `@/lib/rehype-kfm-code/style.css` を starry-night の style.css と同じ場所で
- *   明示 import する (二枚組)。コピーボタンは client 専用 entry の custom element 登録
- *   (_client-registry) が担う。
- * - 外部リンクの favicon の見た目も同方式: 消費側で `@/lib/rehype-kfm-link-favicon/style.css`
- *   を明示 import する (画像は backend の `/api/v1/favicons/{host}` が配信する)。
+ * 目的: 閲覧表示のままチェックを切り替えるとき、原文のどの字を替えるかを構文木が持つ位置で
+ * 決める。行を走査して数える近似 (task-checklist.ts) は切り替えに使わない。
  *
- * renderDescription はモジュールトップレベル singleton = プロセス全体 (SSR では全
- * リクエスト・全 tenant) で共有される。L1 キャッシュが full-text キーであることが
- * この共有の安全条件 (_cache.ts 参照)。
- *
- * 本ファイルは composition root であり、プラグイン (remark 層 ＋ sanitize スキーマ) を
- * コアへ注入する。コア実装 (_renderer / _sanitize / _cache) はプラグインを import しない。
+ * 二段で行う:
+ * - remark 側 (`_remark.ts`): mdast でチェックボックスになる項目 (`listItem.checked` が真偽値) だけから
+ *   位置を求め、`data.hProperties.dataKfmTaskOffset` として li へ載せる。原文は探さない。
+ * - rehype 側 (このファイル): li の `dataKfmTaskOffset` を、その項目の先頭の `input[type=checkbox]` へ移す。
+ *   `input` は詰まったリストでは `li` の直下、空行で離したリストでは `li > p` の先頭にある。
+ *   見つからなければ捨てる (属性は li に残さない)。
+ * - 位置が決まらない項目には付けず、押せないまま残す。
+ * - 位置は、改行を LF に直した本文 (`_renderer.ts` の normalized) での JS の文字列添字。
+ * - `disabled` は外さない。外すのは消費側 (TaskDetailHub) が hydrate 後に行う。
+ * - 属性は `data-*` なので sanitize の宣言は要らない。生の HTML は字に escape されるため、
+ *   本文からこの属性を書き込むことはできない。
+ * - options は受け取らない。_renderer.ts の processor fingerprint はプラグインの関数名しか
+ *   見ないため、closure に閉じた options はキャッシュキーに現れない (rehype-kfm-link-favicon と同じ)。
  */
-import remarkBreaks from 'remark-breaks';
+import type { Element, ElementContent, Root } from 'hast';
+import { visit } from 'unist-util-visit';
 
-import { rehypeKfmCode } from '@/lib/rehype-kfm-code';
-import { rehypeKfmLinkFavicon } from '@/lib/rehype-kfm-link-favicon';
-import { rehypeKfmTaskOffset, remarkKfmTaskOffset } from '@/lib/rehype-kfm-task-offset';
-import { remarkGfm } from '@/lib/remark-gfm';
-import { remarkKfmMermaid } from '@/lib/remark-kfm-mermaid';
-import { remarkKfmRawHtml } from '@/lib/remark-kfm-raw-html';
-import { remarkKfmMention } from '@/lib/remark-kfm-mention';
-import { remarkKfmTaskRef } from '@/lib/remark-kfm-task-ref';
-import { remarkKoyoriAlerts } from '@/lib/remark-koyori-alerts';
-import { kfmSanitizeSchemas } from './_schemas';
-import { resolveContentConfig } from './_config';
-import { createRenderer } from './_renderer';
+export { KFM_TASK_OFFSET_ATTR } from './_attr';
+export { remarkKfmTaskOffset } from './_remark';
 
-export type { KfmContentConfig } from './_config';
-export { resolveContentConfig } from './_config';
-export type {
-  CreateRendererOptions,
-  KfmProfile,
-  ProfileDefinition,
-  RenderDescription,
-  RenderOptions,
-} from './_renderer';
-export { createRenderer } from './_renderer';
-// client registry (registerKfmCustomElements と関連型) は意図的に root から再エクスポート
-// しない。root は import しただけで下の createRenderer がモジュール副作用で走り、KFM 一式
-// が client バンドルへ載る (root 経由 import で +417.5 KB raw、_client-registry 直接 import
-// 化で 205.52 kB → 0.62 kB を実測)。client 専用 entry は
-// `@/lib/markup-renderer/_client-registry` から直接 import すること。再エクスポートを
-// 戻す変更は kfm-client-registry テスト (root 再エクスポート禁止) が機構として弾く。
-export type { SanitizeSchema } from './_sanitize';
+function asCheckbox(node: ElementContent | undefined): Element | undefined {
+  return node?.type === 'element' && node.tagName === 'input' && node.properties.type === 'checkbox'
+    ? node
+    : undefined;
+}
 
-/** Phase 1: system 層の上書きなし = コード既定 (github profile) */
-const contentConfig = resolveContentConfig();
+function hasClass(node: Element, name: string): boolean {
+  const className = node.properties.className;
+  return Array.isArray(className) && className.includes(name);
+}
 
-type StarryNightTransformer = ReturnType<
-  ReturnType<(typeof import('@/lib/rehype-starry-night'))['createRehypeStarryNight']>
->;
+function isBlankText(node: ElementContent): boolean {
+  return node.type === 'text' && node.value.trim() === '';
+}
 
-// 重量級 starry-night seam は最初の着色 transform まで読み込まない。composition root の
-// 静的 import に戻すと、root を参照するだけの入口へ +417.5 KB raw が再混入する。
-// Promise と seam の factory はこの composition root の singleton renderer と同じ
-// モジュール寿命で一つだけ保持するため、scope 付き描画が processor を都度構築しても
-// 文法初期化は走り直さない。import または factory が reject した Promise は保持せず、
-// 次の描画で seam の読み込みから再試行する。
-let starryNightTransformerPromise: Promise<StarryNightTransformer> | undefined;
-const rehypeStarryNight = () =>
-  async function rehypeStarryNightLazy(...args: Parameters<StarryNightTransformer>) {
-    const pending = (starryNightTransformerPromise ??= import('@/lib/rehype-starry-night').then(
-      ({ createRehypeStarryNight }) => createRehypeStarryNight()(),
-    ));
-    try {
-      const transformer = await pending;
-      return transformer(...args);
-    } catch (error) {
-      // 遅れて reject した旧 Promise が、別描画の据えた再試行 Promise を消さない。
-      if (starryNightTransformerPromise === pending) starryNightTransformerPromise = undefined;
-      throw error;
-    }
+/** 先頭の空白だけの text (ブロックの間の改行) を除いた最初の子 */
+function firstContent(children: ElementContent[]): ElementContent | undefined {
+  return children.find((child) => !isBlankText(child));
+}
+
+/** `li` の先頭にあるチェックボックス。`li` 直下か、先頭の `p` の先頭の子 */
+function findCheckbox(li: Element): Element | undefined {
+  const first = firstContent(li.children);
+  if (first?.type !== 'element') return undefined;
+  if (first.tagName === 'p') return asCheckbox(first.children[0]);
+  return asCheckbox(first);
+}
+
+export function rehypeKfmTaskOffset() {
+  return function rehypeKfmTaskOffsetTransform(tree: Root): void {
+    visit(tree, 'element', (node) => {
+      if (node.tagName !== 'li') return;
+      const offset = node.properties.dataKfmTaskOffset;
+      if (offset === undefined) return;
+      delete node.properties.dataKfmTaskOffset;
+      const checkbox = hasClass(node, 'task-list-item') ? findCheckbox(node) : undefined;
+      if (checkbox && typeof offset === 'string') checkbox.properties.dataKfmTaskOffset = offset;
+    });
   };
-
-export const renderDescription = createRenderer({
-  profiles: {
-    // github profile = 共有 core そのもの (GFM ＋ alerts ＋ 着色 ＋ sanitize ＋ cache ＋ SSR 契約)
-    github: {
-      // remarkKfmMermaid は remark 層で code(lang=mermaid) を捕まえて hName を据えるため、
-      // rehype 層 (starry-night / 将来の language-* 拡張) は mermaid フェンスを見ない。
-      // remarkKfmTaskRef は GFM の後ろ (autolink 済みの link の内側を触らない) かつ alerts の
-      // 後ろ (alerts は先頭 text の position で原文照合するため、先に分割すると alert 化しない)。
-      // remarkKfmTaskOffset は他の層が段落や text を触る前の構文木から位置を取るため先頭に置く。
-      // remarkKfmMention も同じ位置（印は text ノードの分割で札にする。表が渡されぬ描画では何もしない）。
-      remarkPlugins: [
-        remarkKfmTaskOffset,
-        remarkKfmRawHtml,
-        remarkGfm,
-        remarkKoyoriAlerts,
-        remarkKfmMermaid,
-        remarkKfmTaskRef,
-        remarkKfmMention,
-      ],
-      // GitHub 同様のコードブロック着色。rehype 層 (remark-rehype の後段) に挿す。
-      // rehypeKfmCode は着色済みの子を行分割して <kfm-code> で包むため、必ず
-      // starry-night の後ろ (行分割は着色より後でしか成立しない)。
-      // rehypeKfmLinkFavicon は `a` しか触らず他と干渉しない。最終 HTML に近い rehype 層の最後に置く。
-      rehypePlugins: [rehypeKfmTaskOffset, rehypeStarryNight, rehypeKfmCode, rehypeKfmLinkFavicon],
-    },
-    // comment profile = github ＋ remarkBreaks。GitHub の comment 欄の流儀
-    // (空行を挟まぬ単一改行を <br> として出す)。レビュー指摘の本文の消費側が使う。
-    // remarkBreaks は mdast の text 内改行を break へ割るだけで、他プラグインと干渉しない。
-    comment: {
-      remarkPlugins: [
-        remarkKfmTaskOffset,
-        remarkKfmRawHtml,
-        remarkGfm,
-        remarkKoyoriAlerts,
-        remarkKfmMermaid,
-        remarkKfmTaskRef,
-        remarkKfmMention,
-        remarkBreaks,
-      ],
-      rehypePlugins: [rehypeKfmTaskOffset, rehypeStarryNight, rehypeKfmCode, rehypeKfmLinkFavicon],
-    },
-    // Phase 2 seam: kfm profile はここへ remark / rehype 層を足す (コアは不変)。
-  },
-  sanitizeSchemas: kfmSanitizeSchemas,
-  contentConfig,
-  // config の既定 profile を描画既定へ実際に接続する (contentConfig はキャッシュキー用の
-  // 不透明値でしかないため、ここで渡さない限り defaultProfile は描画に効かない)
-  defaultProfile: contentConfig.defaultProfile,
-});
+}
