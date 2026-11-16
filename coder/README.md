@@ -18,8 +18,10 @@ coder templates push task -d coder
 ホーム（`/home/coder`）と Docker のデータはボリュームに残り、ワークスペースを止めても消えない。
 それ以外はイメージを作り直すと元に戻る。
 
-Rust と Node の版は `build/Dockerfile` の `ARG` で決めている。`rust-toolchain.toml` と
-`.node-version` を上げたら合わせる。
+Rust と Node の版は `build/Dockerfile` の `ARG` で決めている。Renovate が `rust-toolchain.toml` と
+`.node-version` を上げる PR に、この `ARG` も含める（`.github/renovate.json5` の `rust-toolchain` と
+`node-runtime` の群れ）。手で上げる時は、`rust-toolchain.toml`・`apps/backend/Dockerfile` の tag・`ARG RUST_VERSION` の
+三か所と、`.node-version`・`ARG NODE_VERSION` の二か所を、それぞれ揃える。
 
 ## 初回にやること
 

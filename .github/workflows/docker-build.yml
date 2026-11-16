@@ -53,6 +53,8 @@ jobs:
   # Dockerfile の版指定は参照元（rust-toolchain.toml / frontend-build.yml）を
   # 自動では追わない。rust-toolchain.toml は backend のビルドコンテキストにも
   # 含まれないため、ずれたままでもビルドは成功してしまう。突き合わせを先に行う。
+  # Renovate は Rust の三か所を同じ PR で上げるが、手で上げた時のずれと、
+  # Node の tag と frontend-build.yml が別々の PR で上がる時のずれは、ここで捕まえる。
   version-sync:
     runs-on: ubuntu-latest
     steps:

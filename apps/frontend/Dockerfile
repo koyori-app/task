@@ -7,6 +7,9 @@
 # backend 側の Dockerfile と target 名を揃えるためにステージ名だけ分けてある。
 #
 # Node のバージョンは .github/workflows/frontend-build.yml の node-version と合わせること。
+# この tag は major だけを書くので、.node-version の群れ（node-runtime）には入れていない。
+# Renovate はこの tag と frontend-build.yml の node-version を別々の PR で上げるので、
+# どちらかが先に入ると version-sync が落ちる。揃うまで待つか、手で揃えること。
 
 ########## builder ##########
 FROM node:24-bookworm-slim AS builder

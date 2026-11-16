@@ -5,9 +5,12 @@
 # main.tf の startup_script がホームへ入れる。
 FROM ubuntu:24.04
 
-# rust-toolchain.toml と合わせる。ずれても rustup がリポジトリの指定版を自動で取得する
+# rust-toolchain.toml と同じ版にする。Renovate が rust-toolchain.toml・apps/backend/Dockerfile と
+# 同じ PR で上げる（.github/renovate.json5 の rust-toolchain の群れ）。
+# ずれても rustup がリポジトリの指定版を自動で取得する
 ARG RUST_VERSION=1.95.0
-# .node-version と合わせる
+# .node-version と同じ版にする。Renovate が .node-version と同じ PR で上げる
+# （.github/renovate.json5 の node-runtime の群れ）
 ARG NODE_VERSION=24.22.0
 
 # mold は apps/backend/.cargo/config.toml が要求する。iproute2 / procps は scripts/restart_*_dev.sh、
