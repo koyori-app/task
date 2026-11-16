@@ -18,7 +18,7 @@ export type GanttSource = {
   status: { is_done_state: boolean };
 };
 
-export type GanttMember = { id: string; username: string };
+type GanttMember = { id: string; username: string };
 
 /** 一つの課題の日付の読み。日付はどれもタイムゾーンの暦の日（`YYYY-MM-DD`） */
 export type TaskDates = {
@@ -76,7 +76,7 @@ export type GanttListItem = {
   pastSoft: boolean;
 };
 
-export type GanttGroup = {
+type GanttGroup = {
   key: string;
   label: string;
   /** 畳んでも数は残す */

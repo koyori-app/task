@@ -217,5 +217,3 @@ export const KFM_STORY_INPUTS = {
     '<div class="kfm-alert kfm-alert--caution">偽 alert (生 HTML) — callout にならない</div>',
   ].join('\n'),
 } as const;
-
-export type KfmStoryFixtureName = keyof typeof KFM_STORY_INPUTS;

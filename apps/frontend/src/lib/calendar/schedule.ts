@@ -3,10 +3,8 @@ import { fetchClient } from '@/lib/api-vue-query';
 
 type ScheduleResponse = components['schemas']['ScheduleResponse'];
 type Member = components['schemas']['UserSummary'];
-export type ScheduleRelationsResponse = components['schemas']['ScheduleRelationsResponse'];
 
 export const SCHEDULE_PATH = '/v1/tenants/{tenant_id}/schedule' as const;
-export const SCHEDULE_RELATIONS_PATH = '/v1/tenants/{tenant_id}/schedule/relations' as const;
 /** API の上限。14 日なら実用上 1〜2 ページで済む */
 export const SCHEDULE_PAGE_LIMIT = 500;
 
@@ -54,17 +52,4 @@ export async function fetchAllSchedule(
     members: [...members.values()],
     next_cursor: null,
   };
-}
-
-export async function fetchScheduleRelations(
-  path: ScheduleParams['path'],
-  query: ScheduleParams['query'],
-  signal?: AbortSignal,
-): Promise<ScheduleRelationsResponse> {
-  const { data, error } = await fetchClient.GET(SCHEDULE_RELATIONS_PATH, {
-    params: { path, query },
-    signal,
-  });
-  if (error) throw error;
-  return data;
 }

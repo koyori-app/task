@@ -57,7 +57,7 @@ export type OAuthStartOptions = {
   instanceUrl?: string;
 };
 
-export function oauthStartUrl(provider: string, options: OAuthStartOptions): string {
+function oauthStartUrl(provider: string, options: OAuthStartOptions): string {
   const apiBase = import.meta.env.VITE_API_BASE ?? '/api';
   const params = new URLSearchParams();
   params.set('redirect_after', options.redirectAfter);

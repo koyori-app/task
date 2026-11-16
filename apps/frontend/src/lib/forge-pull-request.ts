@@ -13,7 +13,7 @@ export interface PullRequestStateDisplay {
 }
 
 /** ホスト上の PR の状態（`forge_pull_requests.state`）の表示。タスク詳細とレビュー画面で共有する。 */
-export const PR_STATES = {
+const PR_STATES = {
   open: { icon: GitPullRequest, label: 'Open', class: 'text-green-700 dark:text-green-400' },
   merged: { icon: GitMerge, label: 'Merged', class: 'text-violet-700 dark:text-violet-400' },
   closed: { icon: GitPullRequestClosed, label: 'Closed', class: 'text-destructive' },

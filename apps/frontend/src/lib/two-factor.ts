@@ -3,7 +3,7 @@
  * 規則は docs/features/auth-2fa.md §5。
  */
 
-export const TWO_FACTOR_PATH = '/auth/2fa';
+const TWO_FACTOR_PATH = '/auth/2fa';
 
 /**
  * `redirect_after` が同一オリジンの相対パスであるときだけ返し、それ以外は `/` にする。

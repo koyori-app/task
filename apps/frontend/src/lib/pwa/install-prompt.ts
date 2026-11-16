@@ -24,7 +24,7 @@ const installed = shallowRef(false);
 let captured = false;
 
 /** standalone の窓で開いておるか。iOS の Safari は navigator.standalone で示す。 */
-export function isRunningStandalone(win: Window): boolean {
+function isRunningStandalone(win: Window): boolean {
   const iosStandalone = (win.navigator as Navigator & { standalone?: boolean }).standalone;
   return win.matchMedia?.('(display-mode: standalone)').matches === true || iosStandalone === true;
 }

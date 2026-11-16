@@ -4,7 +4,6 @@ import type { components } from '@/generated/api';
 export type ReactionUser = components['schemas']['CommentUser'];
 /** `users` は先頭 5 人。全員は `ReactionUsersResponse` で別に取る */
 export type ReactionSummary = components['schemas']['ReactionSummary'];
-export type ReactionUsersResponse = components['schemas']['ReactionUsersResponse'];
 
 export type FetchReactionUsers = (emoji: string) => Promise<ReactionUser[]>;
 

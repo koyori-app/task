@@ -24,7 +24,7 @@ const TENANT_RE = /^[a-z0-9][a-z0-9-]{0,62}$/i;
 const SKIP_TYPES = new Set(['code', 'inlineCode', 'link', 'linkReference', 'definition', 'html']);
 
 /** vfile の data.kfm に載せる描画時コンテキスト (_renderer.ts が process 時に渡す) */
-export type KfmTaskRefData = { readonly taskRef?: { readonly tenant: string } };
+type KfmTaskRefData = { readonly taskRef?: { readonly tenant: string } };
 
 function readTenant(data: Readonly<Record<string, unknown>>): string | undefined {
   const tenant = (data.kfm as KfmTaskRefData | undefined)?.taskRef?.tenant;

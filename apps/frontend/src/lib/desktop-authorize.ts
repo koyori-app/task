@@ -15,7 +15,7 @@ export type DesktopAuthorizeRequest = {
 /** backend の `PKCE_CHALLENGE_REGEX` と同じ（S256 の base64url、43〜128 文字）。 */
 const CODE_CHALLENGE = /^[A-Za-z0-9_-]{43,128}$/;
 /** backend の端末名の上限。 */
-export const DEVICE_NAME_MAX = 100;
+const DEVICE_NAME_MAX = 100;
 
 /**
  * クエリを検証する。不正なら null。
@@ -51,9 +51,6 @@ export function desktopCallbackUrl(port: number, code: string, state: string): s
   url.searchParams.set('state', state);
   return url.toString();
 }
-
-/** サインイン後にこの画面へ戻すための印（`lib/one-time-notice.ts`）。値は戻り先のパス。 */
-export const DESKTOP_AUTHORIZE_RETURN = 'task:desktop-authorize-return';
 
 /** 印の値が承認画面のパスであるときだけ戻り先として使う。 */
 export function desktopAuthorizeReturnPath(value: string | null): string | null {

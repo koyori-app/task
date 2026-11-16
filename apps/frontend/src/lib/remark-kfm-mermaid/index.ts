@@ -18,8 +18,6 @@ import { visit } from 'unist-util-visit';
 import type { SanitizeSchema } from '../markup-renderer/_sanitize';
 import { KFM_MERMAID_TAG } from './_tag';
 
-export { KFM_MERMAID_TAG } from './_tag';
-
 // mdast-util-to-hast (remark-rehype 内部) と同一の Data 拡張 (remark-koyori-alerts と同型)。
 declare module 'mdast' {
   interface Data {

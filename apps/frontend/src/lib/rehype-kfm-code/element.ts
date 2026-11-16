@@ -29,7 +29,7 @@ import { KFM_CODE_TAG } from './_tag';
 
 export { KFM_CODE_TAG } from './_tag';
 
-export type KfmCodeCopyState = 'copied' | 'failed';
+type KfmCodeCopyState = 'copied' | 'failed';
 
 /** client が足すコピーボタンの class (SSR には現れず sanitize 許可も不要) */
 export const KFM_CODE_COPY_CLASS = 'kfm-code-copy';

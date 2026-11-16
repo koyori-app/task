@@ -33,11 +33,10 @@ import type { Element, ElementContent, Root } from 'hast';
 import { visit } from 'unist-util-visit';
 import { KFM_CODE_TAG } from './_tag';
 
-export { KFM_CODE_TAG } from './_tag';
 export { kfmCodeSanitizeSchema } from './schema';
 
 /** 行番号 1 行ぶんの器 (schema.ts の classTokens と同時に増減する) */
-export const KFM_CODE_LINE_CLASS = 'pl-line' as const;
+const KFM_CODE_LINE_CLASS = 'pl-line' as const;
 
 const LANGUAGE_CLASS_PREFIX = 'language-';
 /** 情報文字列 (code.data.meta) から title="…" だけを読む。他の語は無視する */

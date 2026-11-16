@@ -9,7 +9,7 @@ type SettingsContext = Universal.Context & {
   settings: AppSettings;
 };
 
-export const appSettings = {
+const appSettings = {
   env: appEnvSettings,
 } satisfies AppSettings;
 

@@ -4,7 +4,7 @@ export type OAuthConnection = components['schemas']['OAuthConnectionItem'];
 export type OAuthProvider = components['schemas']['OAuthProviderItem'];
 
 /** backend の `SetPasswordRequest` / `PasswordChangeBody` と同じ下限。 */
-export const PASSWORD_MIN_LENGTH = 8;
+const PASSWORD_MIN_LENGTH = 8;
 
 /**
  * 使える認証方法の数。

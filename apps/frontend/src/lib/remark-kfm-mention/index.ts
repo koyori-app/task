@@ -37,7 +37,7 @@ import {
 } from '@/lib/comment-mention';
 
 /** vfile の data.kfm に載せる描画時コンテキスト（_renderer.ts が process 時に渡す） */
-export type KfmMentionData = {
+type KfmMentionData = {
   readonly mentions?: MentionTable;
   readonly currentUserId?: string | null;
   /** 札をプロフィールへの link にする時のテナント（表示用 id）。無い・字種外なら link にせぬ */

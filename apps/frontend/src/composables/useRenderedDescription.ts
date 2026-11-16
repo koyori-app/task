@@ -71,7 +71,7 @@ export async function renderOnServer(input: {
   return { html: data.html ?? null, source: input.description };
 }
 
-export function renderedDescriptionQueryKey(
+function renderedDescriptionQueryKey(
   tenant: string,
   taskUuid: string,
   description: string,

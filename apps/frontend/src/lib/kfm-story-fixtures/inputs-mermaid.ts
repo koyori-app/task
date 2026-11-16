@@ -74,5 +74,3 @@ export const KFM_MERMAID_STORY_INPUTS = {
     '```',
   ].join('\n'),
 } as const;
-
-export type KfmMermaidStoryFixtureName = keyof typeof KFM_MERMAID_STORY_INPUTS;

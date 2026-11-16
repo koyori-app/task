@@ -10,7 +10,7 @@
 /** header（bg-sidebar の --sidebar: oklch(0.985 0 0)）に合わせた仮の色。 */
 export const PWA_THEME_COLOR = '#fafafa';
 /** 起動の間に出る地の色。--background: oklch(1 0 0) に合わせた仮の色。icon の地もこの白。 */
-export const PWA_BACKGROUND_COLOR = '#ffffff';
+const PWA_BACKGROUND_COLOR = '#ffffff';
 
 /** 元の絵（design/app-icon/source.png）を焼いた icon（TASK-299）。どれも不透明で、透けは白で埋めてある。 */
 export const PWA_ICONS = {

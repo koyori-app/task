@@ -23,14 +23,14 @@ export type HistoryEntry = {
   items: ActivityItem[];
 };
 
-export type CommentEntry = {
+type CommentEntry = {
   kind: 'comment';
   id: string;
   at: string;
   thread: CommentThread;
 };
 
-export type TimelineEntry = HistoryEntry | CommentEntry;
+type TimelineEntry = HistoryEntry | CommentEntry;
 
 export type TimelineSection = {
   key: string;

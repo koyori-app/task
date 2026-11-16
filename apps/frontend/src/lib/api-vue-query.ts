@@ -65,11 +65,11 @@ export function isSessionRejected(error: unknown): boolean {
 }
 
 /** /me の再試行。拒否は確定なので再試行せず、5xx・通信断だけ 2 回まで。 */
-export const ME_RETRY_COUNT = 2;
+const ME_RETRY_COUNT = 2;
 export function meRetry(failureCount: number, error: unknown): boolean {
   return !isSessionRejected(error) && failureCount < ME_RETRY_COUNT;
 }
-export const meRetryDelay = (attempt: number) => Math.min(1000 * 2 ** attempt, 10_000);
+const meRetryDelay = (attempt: number) => Math.min(1000 * 2 ** attempt, 10_000);
 
 /** Typed TanStack Vue Query helpers for task OpenAPI paths. */
 export const apiClient = createClient<paths>(fetchClient);
@@ -470,13 +470,13 @@ export function usePasswordChangeMutation() {
   return apiClient.useMutation('post', '/v1/auth/password/change');
 }
 
-export const DRIVE_FOLDERS_PATH = '/v1/tenants/{tenant_id}/drive/folders' as const;
+const DRIVE_FOLDERS_PATH = '/v1/tenants/{tenant_id}/drive/folders' as const;
 export const DRIVE_FILES_PATH = '/v1/tenants/{tenant_id}/drive/files' as const;
 export const DRIVE_FILE_PATH = '/v1/tenants/{tenant_id}/drive/files/{id}' as const;
 export const DRIVE_FILE_CONTENT_UPDATE_PATH =
   '/v1/tenants/{tenant_id}/drive/files/{id}/content' as const;
-export const DRIVE_FILE_TASKS_PATH = '/v1/tenants/{tenant_id}/drive/files/{id}/tasks' as const;
-export const DRIVE_FILE_CONTENT_PATH = '/v1/drive/files/{id}/content' as const;
+const DRIVE_FILE_TASKS_PATH = '/v1/tenants/{tenant_id}/drive/files/{id}/tasks' as const;
+const DRIVE_FILE_CONTENT_PATH = '/v1/drive/files/{id}/content' as const;
 
 /** ドキュメント一覧の取得件数（API の上限）。 */
 export const DOCUMENT_LIST_LIMIT = 200;

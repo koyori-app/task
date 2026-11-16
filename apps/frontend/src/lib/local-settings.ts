@@ -4,7 +4,7 @@
  * 読み込む時に表と突き合わせ、表に無い key は捨て、型に合わない値と欠けた key は既定値に戻す。
  * 項目は二種類ある。切り替え（真偽）と、選び肢から一つを選ぶ物（choices を持つ）。
  */
-export type ToggleSettingDefinition = {
+type ToggleSettingDefinition = {
   name: string;
   description: string;
   default: boolean;
@@ -23,7 +23,7 @@ export type SettingDefinition = ToggleSettingDefinition | ChoiceSettingDefinitio
 export type SettingTable = Record<string, SettingDefinition>;
 
 /** 項目の値の型。選び肢の項目は choices の value の和、切り替えは真偽。 */
-export type SettingValue<D extends SettingDefinition> = D extends {
+type SettingValue<D extends SettingDefinition> = D extends {
   choices: readonly { value: infer V }[];
 }
   ? V
