@@ -131,6 +131,11 @@ pub async fn create_task_in_txn<C: ConnectionTrait>(
             .await?
             .ok_or(AppError::NotFound)?;
     }
+    if let Some(tid) = payload.task_type_id {
+        // 確かめるだけで、ロックは取らない（`milestone_id` と同じ。service::task_types の方針）。確認のあとに
+        // 削除されたら FK が挿入を弾き、assignment_error が 404 にする
+        crate::task_types::find_in_project(txn, ctx.project_id, tid).await?;
+    }
     // 採番(カウンター行ロック)を sprint の FOR UPDATE より前に取る。ロック順を「カウンター → sprint」に
     // 固定し、一括作成と単体作成の同時実行でのデッドロックを避ける(ロールバックで番号も戻る)。
     let seq_id = next_seq_id(txn, ctx.project_id).await?;
@@ -164,6 +169,7 @@ pub async fn create_task_in_txn<C: ConnectionTrait>(
         progress_pct: Set(payload.progress_pct.unwrap_or(0)),
         parent_task_id: Set(payload.parent_task_id),
         milestone_id: Set(payload.milestone_id),
+        task_type_id: Set(payload.task_type_id),
         sprint_id: Set(payload.sprint_id),
         soft_deadline: Set(soft_deadline),
         hard_deadline: Set(hard_deadline),
@@ -178,7 +184,8 @@ pub async fn create_task_in_txn<C: ConnectionTrait>(
         deleted_at: Set(None),
     }
     .insert(txn)
-    .await?;
+    .await
+    .map_err(crate::task_types::assignment_error)?;
 
     for a in &payload.assignees {
         require_project_access(txn, ctx.tenant_id, ctx.project_id, a.user_id).await?;
@@ -355,6 +362,7 @@ mod tests {
             hard_deadline: hard.map(dt),
             planned_start_on: start.map(d),
             require_all_assignees_done: false,
+            task_type_id: None,
             estimated_minutes: None,
             is_archived: false,
             created_by: Uuid::nil(),

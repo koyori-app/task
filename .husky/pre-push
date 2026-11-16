@@ -1,0 +1,23 @@
+# push する範囲に apps/frontend の変更があれば、CI の Frontend Unit Test と Frontend Typecheck と同じものを回す。
+# 標準入力の各行は「<local ref> <local sha> <remote ref> <remote sha>」。
+zero=0000000000000000000000000000000000000000
+frontend_changed=0
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue # ブランチの削除
+  if [ "$remote_sha" = "$zero" ]; then
+    # 新しいブランチ: origin/main から分かれた後の変更を見る
+    base=$(git merge-base origin/main "$local_sha" 2>/dev/null) || base=""
+  else
+    base=$remote_sha
+  fi
+  if [ -z "$base" ] || ! git diff --quiet "$base" "$local_sha" -- apps/frontend 2>/dev/null; then
+    frontend_changed=1
+  fi
+done
+
+[ "$frontend_changed" = 1 ] || exit 0
+
+cd apps/frontend || exit 1
+pnpm test:unit || exit 1
+pnpm run openapi:generate >/dev/null || exit 1
+pnpm vue-tsc --noEmit

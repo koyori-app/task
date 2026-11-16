@@ -227,6 +227,7 @@ describe('PreferencesSection（環境設定の画面）', () => {
       showExperiments: true,
       emojiFont: 'os',
       expandSubtasksInList: false,
+      ganttProgressLine: false,
     });
     expect(wrapper.get<HTMLSelectElement>('[data-setting="emojiFont"] select').element.value).toBe(
       'os',

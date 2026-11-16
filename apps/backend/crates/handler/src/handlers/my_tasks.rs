@@ -73,6 +73,8 @@ async fn seed_personal_project_defaults<C: ConnectionTrait>(
     .insert(db)
     .await?;
 
+    service::task_types::seed_default_task_types(db, project_id).await?;
+
     Ok(())
 }
 

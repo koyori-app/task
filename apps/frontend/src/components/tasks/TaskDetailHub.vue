@@ -20,6 +20,7 @@ import {
   Loader2,
   Pencil,
   Percent,
+  Shapes,
   Plus,
   ListChecks,
   SquarePen,
@@ -51,6 +52,8 @@ import {
 import MarkdownEditor from '@/components/markdown/MarkdownEditor.vue';
 import { lookup, toPlainText } from '@/lib/comment-mention';
 import { countChecklist } from '@/lib/task-checklist';
+import { setChecklistHtmlChecked, toggleChecklistAt } from '@/lib/task-checklist-toggle';
+import { KFM_TASK_OFFSET_ATTR } from '@/lib/rehype-kfm-task-offset/_attr';
 import { hasMentionCards } from '@/lib/mention-card';
 import {
   PRIORITY_CONFIG,
@@ -75,6 +78,7 @@ import '@/lib/remark-kfm-mermaid/style.css';
 type TaskDetail = components['schemas']['TaskDetailResponse'];
 type StatusOption = components['schemas']['ProjectStatusResponse'];
 type LabelOption = components['schemas']['LabelResponse'];
+type TaskTypeOption = components['schemas']['TaskTypeResponse'];
 
 const props = defineProps<{
   task: TaskDetail | null;
@@ -85,6 +89,10 @@ const props = defineProps<{
   statusError?: string | null;
   priorityUpdating?: boolean;
   priorityError?: string | null;
+  /** 選べる種別（未指定なら種別は表示のみ。選べない間は渡さない） */
+  projectTaskTypes?: TaskTypeOption[];
+  taskTypeUpdating?: boolean;
+  taskTypeError?: string | null;
   /** 担当者に選べるメンバー（未指定なら担当者は表示のみ） */
   members?: { id: string; username: string; avatar_url?: string | null }[];
   /** 担当者の更新中。ピッカーを止める（止めないと 2 回目が無言で捨てられる） */
@@ -153,8 +161,12 @@ function retryFailed() {
 const emit = defineEmits<{
   'update:statusId': [value: string];
   'change:priority': [value: TaskDetail['priority']];
+  /** 種別を選ぶ。null は「種別なし」 */
+  'change:task_type': [taskTypeId: string | null];
   'save:title': [value: string];
-  'save:description': [value: string | null];
+  // preserveWhitespace: 保存で本文の前後の空白を削らない。チェックボックスの切り替えは 1 字だけを替える操作で、
+  // 先頭の字下げを削るとリストの入れ子が変わるため（編集器からの保存は従来どおり前後を削る）
+  'save:description': [value: string | null, options?: { preserveWhitespace?: boolean }];
   'save:progress_pct': [value: number];
   'save:planned_start_on': [value: string | null];
   'save:soft_deadline': [value: string | null];
@@ -200,6 +212,26 @@ const priorityItems = computed<DropdownItem[]>(() =>
   })),
 );
 
+/** 「種別なし」を選ぶ項目の値。種別の ID（UUID）とは重ならない */
+const NO_TASK_TYPE = 'none';
+
+const taskTypeItems = computed<DropdownItem[]>(() => [
+  {
+    value: NO_TASK_TYPE,
+    label: '種別なし',
+    kind: 'radio',
+    checked: !props.task?.task_type,
+    disabled: props.taskTypeUpdating,
+  },
+  ...(props.projectTaskTypes ?? []).map((taskType) => ({
+    value: taskType.id,
+    label: taskType.name,
+    kind: 'radio' as const,
+    checked: taskType.id === props.task?.task_type?.id,
+    disabled: props.taskTypeUpdating,
+  })),
+]);
+
 /**
  * 担当者全員の完了が必要なタスクで、未完了の担当者が残っている間は完了へ直接移せない
  * （backend が 409 で止める）。移せないボタンは出さず、メニューの項目は無効にする。
@@ -244,10 +276,22 @@ const plainDescription = computed(() => {
   return toPlainText(description, (id) => lookup(table, id));
 });
 
+/**
+ * チェックボックスを切り替えた直後の橋渡し。楽観更新で task.description が先に新しい本文になり、
+ * サーバが描いた新しい HTML が届くまでの間は descriptionSource と一致しない。その間にプレーン表示へ
+ * 落ちないよう、押した項目だけ書き換えた HTML を新しい本文の描画として持つ
+ * （サーバが描く HTML と同じ形になるので、届いても DOM は差し替わらない）。
+ */
+const toggleBridge = ref<{ source: string; html: string } | null>(null);
+
 const freshDescriptionHtml = computed(() => {
-  if (!props.descriptionHtml || !props.task?.description) return null;
-  if (props.descriptionSource !== props.task.description) return null;
-  return props.descriptionHtml;
+  const description = props.task?.description;
+  if (!description) return null;
+  if (props.descriptionHtml && props.descriptionSource === description) {
+    return props.descriptionHtml;
+  }
+  if (toggleBridge.value?.source === description) return toggleBridge.value.html;
+  return null;
 });
 /** 説明の KFM 表示の容れ物。札のカード（HoverCard）の委譲先。client で mount した後に入る */
 const descriptionHtmlEl = ref<HTMLElement | null>(null);
@@ -264,7 +308,10 @@ const failedDrafts = ref<Partial<Record<EditableField, string>>>({});
 // 分割ビューのペインは別のタスクへ移っても同じインスタンスなので、前のタスクの下書きを持ち越さない
 watch(
   () => props.task?.id,
-  () => (failedDrafts.value = {}),
+  () => {
+    failedDrafts.value = {};
+    toggleBridge.value = null;
+  },
 );
 
 /** 送る値を下書きとして控え、そのまま返す。null（空にする）は空文字で控える */
@@ -273,8 +320,142 @@ function keepDraft<T extends string | number | null>(field: EditableField, value
   return value;
 }
 
+/**
+ * 控えた下書きを捨てる。控えの持ち主はここ（keepDraft / startEditing の取り出し / discardDraft）だけ。
+ * 捨てるのは、取り出して編集を再開したとき・空にする操作・チェックボックスの切り替え（失う入力が
+ * 無いので、前に成功した下書きで「編集を再開」を出さない）
+ */
+function discardDraft(field: EditableField) {
+  delete failedDrafts.value[field];
+}
+
 function isFieldUpdating(field: EditableField) {
   return props.fieldUpdating?.[field] ?? false;
+}
+
+/**
+ * 閲覧表示のままチェックボックスを切り替えられる間。次の間は止める:
+ * - 編集中: 編集器がある
+ * - 保存中: 全部止めて要求を 1 本ずつにする（順不同で届いて古い本文が残るのを防ぐ）
+ * - 失敗した編集の下書きを「編集を再開」で取り戻せる間: 切り替えの保存が始まると失敗表示が消え、
+ *   書いた本文を戻す手段が無くなる。再開するか、編集を取り消して下書きを捨てれば押せる
+ */
+const checklistToggleable = computed(
+  () =>
+    editingField.value !== 'description' &&
+    !isFieldUpdating('description') &&
+    !canResume('description'),
+);
+
+const CHECKLIST_INPUT_SELECTOR = `input[type="checkbox"][${KFM_TASK_OFFSET_ATTR}]`;
+
+/** 項目自身の字（画像は alt）。入れ子のリストの字は含めない */
+function ownText(node: Node): string {
+  if (node.nodeType === 3) return node.textContent ?? '';
+  if (node.nodeType !== 1) return '';
+  const element = node as HTMLElement;
+  const tag = element.tagName;
+  if (tag === 'UL' || tag === 'OL') return '';
+  if (tag === 'IMG') return element.getAttribute('alt') ?? '';
+  if (tag === 'BR') return '\n';
+  return Array.from(element.childNodes).map(ownText).join('');
+}
+
+/** 項目の先頭行の字。スクリーンリーダー用の名前にする。字が無ければ空 */
+function checklistLabel(input: HTMLInputElement): string {
+  const li = input.closest('li');
+  if (!li) return '';
+  return (
+    Array.from(li.childNodes)
+      .map(ownText)
+      .join('')
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => line !== '') ?? ''
+  );
+}
+
+/**
+ * 描画 HTML の `disabled` は固定なので、hydrate 後にここで外す（SSR の HTML は押せない）。
+ * 位置の属性が無いチェックボックス（原文へ対応づけられない項目）は disabled のまま。
+ * 保存中は disabled にせず aria-disabled にする（disabled の input はフォーカスを持てず、
+ * キーボードで続けて操作している人の位置が失われるため）。押された変更は onChecklistChange が戻す
+ */
+function syncChecklistInputs() {
+  const root = descriptionHtmlEl.value;
+  if (!root) return;
+  const toggleable = checklistToggleable.value;
+  const inputs = root.querySelectorAll<HTMLInputElement>(CHECKLIST_INPUT_SELECTOR);
+  inputs.forEach((input, index) => {
+    input.disabled = false;
+    if (toggleable) input.removeAttribute('aria-disabled');
+    else input.setAttribute('aria-disabled', 'true');
+    input.setAttribute('aria-label', checklistLabel(input) || `チェック項目 ${index + 1}`);
+  });
+}
+
+watch([freshDescriptionHtml, descriptionHtmlEl, checklistToggleable], syncChecklistInputs, {
+  flush: 'post',
+  immediate: true,
+});
+
+/**
+ * 説明の HTML が差し替わると v-html が中身を作り直し、フォーカスを持つチェックボックスは消える
+ * （押した直後の楽観更新、失敗で本文が戻ったとき）。差し替えの直前にフォーカスの位置を控え、
+ * 描画が済んだ直後に同じ位置へ戻す。控えはこの 1 回の差し替えの間だけ（持ち越す状態を持たない）。
+ * 利用者が別の場所（別の項目・説明の外）へ移していれば、そこがフォーカスを持つので何もしない。
+ * タスクが替わったときの差し替えは対象外
+ */
+watch(
+  [freshDescriptionHtml, () => props.task?.id],
+  ([, id], [, previousId]) => {
+    const root = descriptionHtmlEl.value;
+    const active = document.activeElement;
+    if (!root || id !== previousId || !(active instanceof HTMLInputElement)) return;
+    if (!root.contains(active) || !active.matches(CHECKLIST_INPUT_SELECTOR)) return;
+    const offset = active.getAttribute(KFM_TASK_OFFSET_ATTR);
+    void nextTick(() => {
+      // 差し替えで押した要素が消えると body に落ちる。そうでなければ利用者が移した先を尊重する
+      if (document.activeElement !== document.body && document.activeElement !== null) return;
+      descriptionHtmlEl.value
+        ?.querySelector<HTMLInputElement>(`input[${KFM_TASK_OFFSET_ATTR}="${offset}"]`)
+        ?.focus({ preventScroll: true });
+    });
+  },
+  { flush: 'pre' },
+);
+
+// 橋渡しは役目が終わったら捨てる。本物の HTML が届いたら不要で、失敗したら本文が戻っているので
+// 後で同じ本文になったときに古い描画を出さない
+watch(
+  [
+    () => !!props.descriptionHtml && props.descriptionSource === props.task?.description,
+    () => props.fieldErrors?.description,
+  ],
+  ([fresh, error]) => {
+    if (fresh || error) toggleBridge.value = null;
+  },
+);
+
+function onChecklistChange(event: Event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement) || !target.matches(CHECKLIST_INPUT_SELECTOR)) return;
+  const revert = () => {
+    target.checked = !target.checked;
+  };
+  const description = props.task?.description;
+  const html = freshDescriptionHtml.value;
+  const offset = Number(target.getAttribute(KFM_TASK_OFFSET_ATTR));
+  if (!checklistToggleable.value || !description || !html) return revert();
+  const next = toggleChecklistAt(description, offset, target.checked);
+  // 本文が変わらない（画面の状態と原文の字が食い違う）ときは保存が始まらないので、画面だけ変えない
+  if (next === null || next === description) return revert();
+  const nextHtml = setChecklistHtmlChecked(html, offset, target.checked);
+  toggleBridge.value = nextHtml === null ? null : { source: next, html: nextHtml };
+  // 押せるのは取り戻せる下書きが無いときだけ（checklistToggleable）。前に成功した編集の控えが
+  // 残っていれば、切り替えの失敗表示に「編集を再開」を出さないよう捨てる
+  discardDraft('description');
+  emit('save:description', next, { preserveWhitespace: true });
 }
 
 function fieldError(field: EditableField) {
@@ -321,7 +502,7 @@ async function startEditing(field: EditableField) {
       break;
   }
   const failed = failedDrafts.value[field];
-  delete failedDrafts.value[field];
+  discardDraft(field);
   if (failed !== undefined && fieldError(field)) draftValue.value = failed;
   await nextTick();
   const control = editingControlRef.value;
@@ -506,7 +687,7 @@ const plannedStartAfterSoft = computed(() => {
 function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadline') {
   if (isFieldUpdating(field)) return;
   // 空にする操作は失う入力が無い。前に成功した下書きで「編集を再開」を出さないよう捨てる
-  delete failedDrafts.value[field];
+  discardDraft(field);
   if (field === 'planned_start_on') emit('save:planned_start_on', null);
   else if (field === 'soft_deadline') emit('save:soft_deadline', null);
   else emit('save:hard_deadline', null);
@@ -514,7 +695,7 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
 }
 
 function clearDescription() {
-  delete failedDrafts.value.description;
+  discardDraft('description');
   emit('save:description', null);
   cancelEditing();
 }
@@ -607,13 +788,56 @@ function clearDescription() {
               layout === 'pane' ? '' : 'lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:px-6 lg:py-5'
             "
           >
-            <!-- 種別。タスク種別の概念がまだ無いので固定表示（モックの Task チップ） -->
-            <span
-              class="inline-flex h-7 w-fit items-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground"
-            >
-              <CircleDashed class="size-3.5" aria-hidden="true" />
-              タスク
-            </span>
+            <!-- 種別。候補（1 件以上）を渡された消費側では選び直せる。渡されなければ名前だけを表示し、候補も種別も無ければ出さない -->
+            <div v-if="projectTaskTypes?.length || task.task_type" class="flex flex-col gap-1">
+              <Dropdown
+                v-if="projectTaskTypes?.length"
+                top-layer
+                variant="tertiary"
+                label="種別"
+                :icon="null"
+                :disabled="taskTypeUpdating"
+                :items="taskTypeItems"
+                :on-select="
+                  (value: string) => emit('change:task_type', value === NO_TASK_TYPE ? null : value)
+                "
+              >
+                <template #trigger>
+                  <span
+                    class="flex items-center gap-1.5 text-xs"
+                    :class="task.task_type ? '' : 'text-muted-foreground'"
+                  >
+                    <span
+                      v-if="task.task_type"
+                      class="size-2 shrink-0 rounded-full"
+                      :style="{ backgroundColor: task.task_type.color }"
+                      aria-hidden="true"
+                    />
+                    <Shapes v-else class="size-3.5" aria-hidden="true" />
+                    <span class="truncate">{{ task.task_type?.name ?? '種別' }}</span>
+                  </span>
+                </template>
+              </Dropdown>
+              <span
+                v-else-if="task.task_type"
+                class="inline-flex h-7 w-fit items-center gap-1.5 rounded-md border px-2 text-xs"
+              >
+                <span
+                  class="size-2 shrink-0 rounded-full"
+                  :style="{ backgroundColor: task.task_type.color }"
+                  aria-hidden="true"
+                />
+                {{ task.task_type.name }}
+              </span>
+              <p v-if="taskTypeError" class="text-xs text-destructive">{{ taskTypeError }}</p>
+              <p
+                v-else-if="savedField === 'task_type'"
+                role="status"
+                class="text-xs text-muted-foreground"
+              >
+                保存しました
+              </p>
+            </div>
 
             <div>
               <div v-if="editingField === 'title'" class="flex flex-col gap-1">
@@ -1205,6 +1429,7 @@ function clearDescription() {
                 class="text-sm leading-relaxed"
                 ref="descriptionHtmlEl"
                 data-task-description-html
+                @change="onChecklistChange"
                 v-html="freshDescriptionHtml"
               />
               <button

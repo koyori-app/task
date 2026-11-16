@@ -7,4 +7,10 @@ export type EditableField =
   | 'hard_deadline';
 
 /** useTaskDetail が 1 リクエストで更新する単位 */
-export type MutatingField = EditableField | 'status_id' | 'labels' | 'priority' | 'parent_task_id';
+export type MutatingField =
+  | EditableField
+  | 'status_id'
+  | 'labels'
+  | 'priority'
+  | 'task_type'
+  | 'parent_task_id';

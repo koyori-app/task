@@ -14,7 +14,7 @@ const SIDECAR_CSS_PATHS = fs.globSync(path.join(__dirname, '../*/style.css'));
 const CONTAINER_SCOPED_PLUGINS = new Set(['remark-gfm']);
 // 免除は無検査の別枠ではない: 「自身が emit する名前空間を直に指す」という分類根拠
 // そのものを機械照合する。各エントリは自 namespace のセレクタ形 (selectorToken) と、
-// theme ブリッジ (.dark 等) として自分の custom property だけを宣言するルールを許す
+// theme ブリッジ (ダークの条件付き :root 等) として自分の custom property だけを宣言するルールを許す
 // 変数接頭辞 (ownVariablePrefix・宣言のみで描画に触れない) を持つ。
 const EMITTED_NAMESPACE_SCOPED_PLUGINS = new Map<
   string,
@@ -24,7 +24,7 @@ const EMITTED_NAMESPACE_SCOPED_PLUGINS = new Map<
   // (.kfm-alert-like) は別クラスとして拒む
   ['remark-koyori-alerts', { selectorToken: /\.kfm-alert(?:__[\w-]+|--[\w-]+)?(?![\w-])/ }],
   [
-    // starry-night 自身のルールは theme ブリッジ (.dark に --color-prettylights-syntax-*
+    // starry-night 自身のルールは theme ブリッジ (ダークの html に --color-prettylights-syntax-*
     // を複写) のみ。@import する upstream シート (:root 変数固定) は vendored 上流であり
     // 本検査の対象外 (検査対象はサイドカー自身が書き足すルール)。
     'rehype-starry-night',
@@ -36,7 +36,7 @@ const EMITTED_NAMESPACE_SCOPED_PLUGINS = new Map<
   ['rehype-kfm-link-favicon', { selectorToken: /\.kfm-link-favicon(?![\w-])/ }],
   [
     // kfm-code のサイドカーも自身が emit する kfm-code 要素と行 span (.pl-line) を直に指す。
-    // theme ブリッジ (:root / .dark) は --kfm-code-* の宣言のみ許す
+    // theme ブリッジ (:root / ダークの条件付き :root) は --kfm-code-* の宣言のみ許す
     'rehype-kfm-code',
     {
       selectorToken: new RegExp(`(?:^|[\\s>])${KFM_CODE_TAG}(?![\\w-])|\\.pl-line(?![\\w-])`),

@@ -39,6 +39,7 @@ pub struct Model {
     pub search_vector: Option<String>,
     pub planned_start_on: Option<Date>,
     pub require_all_assignees_done: bool,
+    pub task_type_id: Option<Uuid>,
     #[sea_orm(has_many)]
     pub forge_branch_links: HasMany<super::forge_branch_links::Entity>,
     #[sea_orm(has_many)]
@@ -61,6 +62,14 @@ pub struct Model {
         on_delete = "NoAction"
     )]
     pub project_statuses: HasOne<super::project_statuses::Entity>,
+    #[sea_orm(
+        belongs_to,
+        from = "task_type_id",
+        to = "id",
+        on_update = "NoAction",
+        on_delete = "SetNull"
+    )]
+    pub project_task_types: HasOne<super::project_task_types::Entity>,
     #[sea_orm(
         belongs_to,
         from = "project_id",

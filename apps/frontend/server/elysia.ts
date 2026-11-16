@@ -29,6 +29,8 @@ function scoreToStrength(score: number): PasswordStrength {
 export function getApp() {
   const app = new Elysia();
 
+  vike(app, [prehydrationQueryGuard, settingInjector]);
+
   app.use(staticPlugin({ assets: 'server/public', prefix: '/static-assets' }));
 
   // PWA（TASK-297）: Web App Manifest。
@@ -52,8 +54,6 @@ export function getApp() {
   app.use(renderDescriptionPlugin);
 
   app.use(apiProxyPlugin);
-
-  vike(app, [prehydrationQueryGuard, settingInjector]);
 
   return app;
 }

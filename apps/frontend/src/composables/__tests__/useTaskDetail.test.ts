@@ -21,6 +21,7 @@ const {
   otherTask,
   putControl,
   labelsControl,
+  typesControl,
   fetchMock,
 } = vi.hoisted(() => {
   const TENANT_ID = 'tenant-1';
@@ -72,6 +73,9 @@ const {
     data: [],
   };
 
+  // 種別一覧 GET の応答。タスクの種別を選ぶ候補になる
+  const typesControl: { data: unknown[] } = { data: [] };
+
   const fetchMock = async (input: Request) => {
     const url = input.url;
     const method = input.method.toUpperCase();
@@ -89,6 +93,9 @@ const {
       if (labelsControl.mode === 'pending') return new Promise<Response>(() => {});
       if (labelsControl.mode === 'error') return jsonResponse({ message: 'boom' }, 500);
       return jsonResponse(labelsControl.data);
+    }
+    if (method === 'GET' && url.endsWith('/task-types')) {
+      return jsonResponse(typesControl.data);
     }
     if (
       method === 'PUT' &&
@@ -117,6 +124,7 @@ const {
     otherTask,
     putControl,
     labelsControl,
+    typesControl,
     fetchMock,
   };
 });
@@ -175,6 +183,12 @@ const scheduleQueryKey = [
   '/v1/tenants/{tenant_id}/schedule',
   { params: { path: { tenant_id: TENANT_ID }, query: { from: '2026-10-12', to: '2026-10-25' } } },
 ] as const;
+// ガントの期間なしの数。予定の key とは別なので、予定を落としても前方一致しない
+const unscheduledQueryKey = [
+  'get',
+  '/v1/tenants/{tenant_id}/schedule/unscheduled',
+  { params: { path: { tenant_id: TENANT_ID }, query: { limit: 200 } } },
+] as const;
 const searchQueryKey = [
   'get',
   TASK_SEARCH_PATH,
@@ -223,7 +237,9 @@ describe('useTaskDetail のキャッシュ同期', () => {
     putControl.body = undefined;
     labelsControl.mode = 'success';
     labelsControl.data = [];
+    typesControl.data = [];
     baseTask.labels = [];
+    delete (baseTask as Record<string, unknown>).task_type;
     baseTask.parent_task_id = null;
   });
 
@@ -852,6 +868,24 @@ describe('useTaskDetail のキャッシュ同期', () => {
       );
     });
 
+    it('説明の保存は前後の空白を削る。preserveWhitespace では 1 字も削らない（字下げでリストの入れ子が変わるため）', async () => {
+      mountHost();
+      await flushPromises();
+      const indented = '   - [x] a\n   - [ ] b\n';
+
+      detail.onSaveDescription(indented);
+      await flushPromises();
+      expect(await putControl.body).toEqual({ description: '- [x] a\n   - [ ] b' });
+
+      putControl.body = undefined;
+      putControl.resolve!({ ...baseTask, description: '- [x] a\n   - [ ] b' });
+      await flushPromises();
+
+      detail.onSaveDescription(indented, { preserveWhitespace: true });
+      await flushPromises();
+      expect(await putControl.body).toEqual({ description: indented });
+    });
+
     it('親以外の保存ではタスク本体を取り直さない', async () => {
       mountHost();
       await flushPromises();
@@ -1014,5 +1048,203 @@ describe('useTaskDetail のキャッシュ同期', () => {
     expect(queryClient.getQueryState(searchQueryKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(scheduleQueryKey)?.isInvalidated).toBe(true);
     expect(onAfterDelete).toHaveBeenCalledWith('/acme/projects/ENG/tasks');
+  });
+
+  describe('ガントの期間なしの数', () => {
+    function seedUnscheduled() {
+      queryClient.setQueryData(unscheduledQueryKey, { total: 0, tasks: [], members: [] });
+    }
+
+    it('日付を入れると期間なしの数を取り直す（期間なしから出る）', async () => {
+      mountHost();
+      await flushPromises();
+      seedUnscheduled();
+
+      detail.onSavePlannedStartOn('2026-11-20');
+      await flushPromises();
+      putControl.resolve!({ ...baseTask, planned_start_on: '2026-11-20' });
+      await flushPromises();
+
+      expect(queryClient.getQueryState(unscheduledQueryKey)?.isInvalidated).toBe(true);
+    });
+
+    it('最後の日付を消すと期間なしの数を取り直す（期間なしに入る）', async () => {
+      const dated = baseTask as { soft_deadline: string | null };
+      dated.soft_deadline = '2026-11-20T00:00:00Z';
+      try {
+        mountHost();
+        await flushPromises();
+        seedUnscheduled();
+
+        detail.onSaveSoftDeadline(null);
+        await flushPromises();
+        putControl.resolve!({ ...baseTask, soft_deadline: null });
+        await flushPromises();
+
+        expect(await putControl.body).toEqual({ clear_soft_deadline: true });
+        expect(queryClient.getQueryState(unscheduledQueryKey)?.isInvalidated).toBe(true);
+      } finally {
+        dated.soft_deadline = null;
+      }
+    });
+
+    it('削除すると期間なしの数を取り直す', async () => {
+      mountHost();
+      await flushPromises();
+      seedUnscheduled();
+
+      detail.confirmDelete();
+      await flushPromises();
+
+      expect(queryClient.getQueryState(unscheduledQueryKey)?.isInvalidated).toBe(true);
+    });
+  });
+});
+
+describe('useTaskDetail の種別', () => {
+  const bug = {
+    id: '00000000-0000-0000-0000-0000000000b1',
+    project_id: PROJECT_ID,
+    name: 'バグ',
+    color: '#ef4444',
+    position: 1,
+  };
+  const feature = { ...bug, id: '00000000-0000-0000-0000-0000000000b2', name: '機能', position: 2 };
+
+  let queryClient: QueryClient;
+  let detail: ReturnType<typeof useTaskDetail>;
+
+  function mountHost() {
+    const Host = defineComponent({
+      setup() {
+        detail = useTaskDetail({
+          tenantDisplayId: 'acme',
+          projectKey: 'ENG',
+          taskId: TASK_SEQ_KEY,
+        });
+        return () => null;
+      },
+    });
+    return mount(Host, { global: { plugins: [[VueQueryPlugin, { queryClient }]] } });
+  }
+
+  beforeEach(() => {
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    putControl.resolve = undefined;
+    putControl.body = undefined;
+    labelsControl.mode = 'success';
+    labelsControl.data = [];
+    typesControl.data = [bug, feature];
+    baseTask.labels = [];
+    baseTask.parent_task_id = null;
+    delete (baseTask as Record<string, unknown>).task_type;
+  });
+
+  it('種別の候補を projectTaskTypes に出す。取得前は undefined', async () => {
+    mountHost();
+    expect(detail.projectTaskTypes.value).toBeUndefined();
+    await flushPromises();
+
+    expect(detail.projectTaskTypes.value).toEqual([bug, feature]);
+  });
+
+  it('種別を選ぶと PUT に task_type_id を送り、楽観表示してから応答で確定する', async () => {
+    mountHost();
+    await flushPromises();
+
+    detail.onTaskTypeChange(bug.id);
+    await flushPromises();
+
+    await expect(putControl.body).resolves.toEqual({ task_type_id: bug.id });
+    expect(detail.displayTask.value?.task_type).toEqual(bug);
+    expect(detail.taskTypeUpdating.value).toBe(true);
+
+    putControl.resolve!({ ...baseTask, task_type: bug, updated_at: '2026-07-21T00:00:00Z' });
+    await flushPromises();
+
+    expect(detail.taskTypeUpdating.value).toBe(false);
+    expect(detail.taskTypeError.value).toBeNull();
+    expect(detail.savedField.value).toBe('task_type');
+    expect(queryClient.getQueryData(taskQueryKey)).toMatchObject({ task_type: bug });
+  });
+
+  it('null を選ぶと clear_task_type_id を送り、種別を外す', async () => {
+    (baseTask as Record<string, unknown>).task_type = bug;
+    mountHost();
+    await flushPromises();
+
+    detail.onTaskTypeChange(null);
+    await flushPromises();
+
+    await expect(putControl.body).resolves.toEqual({ clear_task_type_id: true });
+    expect(detail.displayTask.value?.task_type).toBeNull();
+
+    putControl.resolve!({ ...baseTask, task_type: null });
+    await flushPromises();
+    expect(queryClient.getQueryData(taskQueryKey)).toMatchObject({ task_type: null });
+  });
+
+  it('種別が無いタスクに「種別なし」を選んでも送らない', async () => {
+    mountHost();
+    await flushPromises();
+
+    detail.onTaskTypeChange(null);
+    await flushPromises();
+
+    expect(putControl.body).toBeUndefined();
+    expect(detail.taskTypeUpdating.value).toBe(false);
+  });
+
+  it('今と同じ種別を選んでも送らない', async () => {
+    (baseTask as Record<string, unknown>).task_type = bug;
+    mountHost();
+    await flushPromises();
+
+    detail.onTaskTypeChange(bug.id);
+    await flushPromises();
+
+    expect(putControl.body).toBeUndefined();
+    expect(detail.taskTypeUpdating.value).toBe(false);
+  });
+
+  it('保存に失敗したら元に戻し、理由を出して、タスクと候補を取り直す', async () => {
+    (baseTask as Record<string, unknown>).task_type = bug;
+    mountHost();
+    await flushPromises();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+
+    detail.onTaskTypeChange(feature.id);
+    await flushPromises();
+    expect(detail.displayTask.value?.task_type).toEqual(feature);
+
+    putControl.fail!(404, 'not-found');
+    await flushPromises();
+
+    expect(detail.displayTask.value?.task_type).toEqual(bug);
+    expect(detail.taskTypeError.value).toBe('種別の更新に失敗しました');
+    expect(detail.taskTypeUpdating.value).toBe(false);
+    expect(detail.savedField.value).toBeNull();
+    const keys = invalidate.mock.calls.map(([filter]) =>
+      JSON.stringify((filter as { queryKey?: unknown } | undefined)?.queryKey),
+    );
+    expect(keys.some((key) => key?.includes('/task-types'))).toBe(true);
+    expect(keys.some((key) => key?.includes(`/tasks/{id}`))).toBe(true);
+  });
+
+  it('次の保存を始めると前の失敗の表示を消す', async () => {
+    mountHost();
+    await flushPromises();
+
+    detail.onTaskTypeChange(bug.id);
+    await flushPromises();
+    putControl.fail!(500, 'boom');
+    await flushPromises();
+    expect(detail.taskTypeError.value).toBe('種別の更新に失敗しました');
+
+    detail.onTaskTypeChange(feature.id);
+    await flushPromises();
+    expect(detail.taskTypeError.value).toBeNull();
   });
 });

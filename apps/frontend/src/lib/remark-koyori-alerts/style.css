@@ -82,44 +82,44 @@
 }
 
 /*
- * ダークテーマ (.dark) 上書き。
+ * ダークテーマ (html の data-theme が light 以外) 上書き。
  * 方針は tailwind.css の CSS custom property から引くことを優先し、既定 border は上の
  * var(--border) でテーマ追従済み。しかし種別アクセント (青/緑/紫/黄/赤) に対応する意味
  * トークンが tailwind.css には存在しない (無彩色系トークンと --destructive のみ) ため、
- * 種別色に限り GitHub ダークパレット実色を .dark で直接上書きする。
+ * 種別色に限り GitHub ダークパレット実色をダークの html で直接上書きする。
  * アイコンは currentColor 塗り (mask) ゆえ title の color 上書きだけで追従する。
  */
-.dark .kfm-alert--note {
+:root:not([data-theme='light']) .kfm-alert--note {
   border-left-color: #4493f8;
 }
-.dark .kfm-alert--note .kfm-alert__title {
+:root:not([data-theme='light']) .kfm-alert--note .kfm-alert__title {
   color: #4493f8;
 }
 
-.dark .kfm-alert--tip {
+:root:not([data-theme='light']) .kfm-alert--tip {
   border-left-color: #3fb950;
 }
-.dark .kfm-alert--tip .kfm-alert__title {
+:root:not([data-theme='light']) .kfm-alert--tip .kfm-alert__title {
   color: #3fb950;
 }
 
-.dark .kfm-alert--important {
+:root:not([data-theme='light']) .kfm-alert--important {
   border-left-color: #ab7df8;
 }
-.dark .kfm-alert--important .kfm-alert__title {
+:root:not([data-theme='light']) .kfm-alert--important .kfm-alert__title {
   color: #ab7df8;
 }
 
-.dark .kfm-alert--warning {
+:root:not([data-theme='light']) .kfm-alert--warning {
   border-left-color: #d29922;
 }
-.dark .kfm-alert--warning .kfm-alert__title {
+:root:not([data-theme='light']) .kfm-alert--warning .kfm-alert__title {
   color: #d29922;
 }
 
-.dark .kfm-alert--caution {
+:root:not([data-theme='light']) .kfm-alert--caution {
   border-left-color: #f85149;
 }
-.dark .kfm-alert--caution .kfm-alert__title {
+:root:not([data-theme='light']) .kfm-alert--caution .kfm-alert__title {
   color: #f85149;
 }

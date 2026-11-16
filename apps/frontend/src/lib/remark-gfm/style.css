@@ -55,6 +55,11 @@
   list-style: none;
 }
 
+/* 位置の属性を持つ項目は hydrate 後に有効になり、押して切り替えられる（TASK-539）。disabled と保存中（aria-disabled）は既定のカーソル */
+.kfm-content .task-list-item input[type='checkbox']:enabled:not([aria-disabled='true']) {
+  cursor: pointer;
+}
+
 .kfm-content blockquote {
   margin: 0.5rem 0;
   padding: 0 1em;
@@ -85,7 +90,7 @@
  * 0.875 / 0.85em) に倣う。repo に活字の段のトークンは無い (tailwind.css の
  * @theme は色のみ・実測) ため、大きさは em (器の文字に相対)、余白は隣の
  * ルールと同じ rem で書く。h1・h2 の下線と h6 の淡色はテーマトークン
- * (--border / --muted-foreground) に寄せ、.dark はトークンの反転に任せる。
+ * (--border / --muted-foreground) に寄せ、ダークはトークンの反転に任せる。
  */
 .kfm-content h1,
 .kfm-content h2,
@@ -143,8 +148,8 @@
  * GitHub の markdown 表を目安に最小限を与える。
  * 値の出所: セル余白は kfm-code の帯 (0.375rem 0.75rem)、外余白は
  * kfm-code の器 (0.5rem 0 1rem) に揃える。構造色はテーマトークン
- * (--border / --muted) に寄せる — トークン自体が .dark で反転するため
- * ここに .dark ブリッジは要らない (rehype-kfm-code と同じ前例)。
+ * (--border / --muted) に寄せる — トークン自体が html の data-theme で反転するため
+ * ここにダークブリッジは要らない (rehype-kfm-code と同じ前例)。
  *
  * display: block ＋ width: max-content ＋ max-width: 100% ＋ overflow-x: auto
  * は GitHub の markdown 表と同じ手。横長の表は表の側だけが横に流れ、
@@ -174,12 +179,12 @@
   min-width: 6em;
 }
 
-/* ヘッダー行の区別: 薄い地と太字 (GitHub 同様、地はトークンで .dark に追従) */
+/* ヘッダー行の区別: 薄い地と太字 (GitHub 同様、地はトークンでダークに追従) */
 .kfm-content th {
   font-weight: 600;
   background: var(--muted);
 }
 
-.dark .kfm-content a:not(.koyori-mention) {
+:root:not([data-theme='light']) .kfm-content a:not(.koyori-mention) {
   color: #4493f8;
 }

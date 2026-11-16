@@ -6,6 +6,7 @@ import {
   PhGear,
   PhKanban,
   PhPlugsConnected,
+  PhShapes,
   PhTag,
   PhTextbox,
   PhUsers,
@@ -22,6 +23,7 @@ import EmojiIconPicker from '@/components/projects/EmojiIconPicker.vue';
 import IntegrationsSection from '@/components/projects/IntegrationsSection.vue';
 import LabelsSection from '@/components/projects/LabelsSection.vue';
 import MembersSection from '@/components/projects/MembersSection.vue';
+import TaskTypesSection from '@/components/projects/TaskTypesSection.vue';
 import WebhooksSection from '@/components/projects/WebhooksSection.vue';
 import WorkflowStatusesEditor from '@/components/projects/WorkflowStatusesEditor.vue';
 import { apiClient } from '@/lib/api-vue-query';
@@ -38,6 +40,7 @@ type SettingsSection =
   | 'members'
   | 'workflow'
   | 'labels'
+  | 'types'
   | 'fields'
   | 'integrations'
   | 'webhooks'
@@ -71,6 +74,7 @@ const sections: {
   { key: 'members', label: 'メンバー', icon: PhUsers },
   { key: 'workflow', label: 'ワークフロー', icon: PhKanban },
   { key: 'labels', label: 'ラベル', icon: PhTag },
+  { key: 'types', label: '種別', icon: PhShapes },
   { key: 'fields', label: 'カスタムフィールド', icon: PhTextbox },
   { key: 'integrations', label: '連携', icon: PhPlugsConnected },
   { key: 'webhooks', label: 'Webhook', icon: PhWebhooksLogo },
@@ -295,6 +299,13 @@ function onDeleted() {
         <!-- ラベル -->
         <LabelsSection
           v-else-if="activeSection === 'labels'"
+          :tenant-id="tenantId"
+          :project-id="project.id"
+        />
+
+        <!-- 種別 -->
+        <TaskTypesSection
+          v-else-if="activeSection === 'types'"
           :tenant-id="tenantId"
           :project-id="project.id"
         />

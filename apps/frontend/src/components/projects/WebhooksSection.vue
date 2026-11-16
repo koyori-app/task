@@ -242,12 +242,12 @@ async function confirmDelete() {
           <span class="text-xs" :class="webhook.is_active ? '' : 'text-muted-foreground'">
             {{ webhook.is_active ? '有効' : '無効' }}
           </span>
-          <span v-if="isStopped(webhook)" class="text-xs text-amber-600 dark:text-amber-500">
+          <span v-if="isStopped(webhook)" class="text-xs text-amber-700 dark:text-amber-500">
             連続失敗で停止
           </span>
           <span
             v-else-if="webhook.failure_streak > 0"
-            class="text-xs text-amber-600 dark:text-amber-500"
+            class="text-xs text-amber-700 dark:text-amber-500"
           >
             連続失敗 {{ webhook.failure_streak }} 回
           </span>

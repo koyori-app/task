@@ -159,11 +159,12 @@ export function createKfmMermaidElement(): CustomElementConstructor {
           return;
         }
         const { svg } = await enqueue(async () => {
-          // アプリ本体・story と同じ .dark ancestor 方式でテーマを引く。
-          // テーマは描画時スナップショット: 描画後に .dark が切り替わっても
-          // 再描画・追従はしない (Phase 1 の割り切り。追従させる場合は .dark の
+          // アプリ本体・story と同じく html の data-theme でテーマを引く
+          // （light 以外、属性なしを含めて dark。ui の既定と同じ）。
+          // テーマは描画時スナップショット: 描画後に data-theme が切り替わっても
+          // 再描画・追従はしない (Phase 1 の割り切り。追従させる場合は data-theme の
           // 変化を観測して再描画する口をここではなく consumer 側に足す)
-          const dark = this.closest('.dark') !== null;
+          const dark = this.ownerDocument.documentElement.dataset.theme !== 'light';
           mermaid.initialize({
             startOnLoad: false,
             securityLevel: 'strict',

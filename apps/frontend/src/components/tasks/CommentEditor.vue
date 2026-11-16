@@ -179,7 +179,7 @@ defineExpose({ focus, openMentionPicker });
     :class="[
       bare
         ? ''
-        : 'border-input focus-within:border-ring focus-within:ring-ring/50 dark:bg-input/30 rounded-md border shadow-xs transition-[color,box-shadow] focus-within:ring-[3px]',
+        : 'border-input focus-within:border-ring focus-within:ring-ring/50 rounded-md border shadow-xs transition-[color,box-shadow] focus-within:ring-[3px]',
       minHeightClass,
       disabled ? 'cursor-not-allowed opacity-50' : '',
     ]"

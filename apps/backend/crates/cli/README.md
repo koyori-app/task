@@ -137,6 +137,7 @@ cargo build --release -p task-cli   # apps/backend/target/release/task
 ```bash
 task tasks list --project TASK --page 2 --limit 100
 task tasks list --project TASK --status Todo --label bug --sort deadline_asc
+task tasks list --project TASK --type バグ     # 種別で絞る
 task tasks list --project TASK --archived
 task tasks list --project TASK --unassigned  # 担当者がいないタスクだけ
 task tasks list --project TASK --json key,title,status  # 項目を選ぶ（本文などは出ない）
@@ -163,7 +164,7 @@ task my list --open --page 2 --limit 100     # ページングは tasks list と
 `@今の名` に戻す（`--json` も同じ。形と順は API のまま）。
 `tasks show` は添付ファイル（`attachments`。名前・MIME・サイズ・コンテンツ URL）も出す。本体の取得コマンドはまだ無い。
 
-`--status` / `--label` / `--assignee` / `--milestone` / `--sprint` は名前または UUID で指せる。
+`--status` / `--label` / `--type` / `--assignee` / `--milestone` / `--sprint` は名前または UUID で指せる。
 名前は完全一致を優先し、それがなければ大文字小文字を無視して照合する。候補が複数あるときは
 候補 ID を含むエラーを返すので、UUID で指定する。
 綴りを外すと、そのプロジェクトで使える名前が並ぶ。担当者の候補一覧には `write:task`
@@ -178,6 +179,7 @@ task tasks create --project TASK --title 直す \
   --soft-deadline 2026-09-30 --estimate 90 --label bug --assignee yupix
 task tasks update TASK-181 --progress 40 --sprint week-40 --add-label bug
 task tasks update TASK-181 --clear-sprint --archive
+task tasks update TASK-181 --type バグ        # 種別は 1 つだけ。外すときは --clear-type
 ```
 
 `tasks create` は作ったタスクのキーと画面の URL を、`--json` なしなら `TASK-532<TAB>https://…/tasks/TASK-532` の
@@ -200,7 +202,7 @@ UUID でなく名前で書ける。`description_file` は無く、未知のキ�
   { "title": "起票", "description": "本文", "priority": "high", "status": "Todo",
     "labels": ["bug"], "assignees": ["yupix"], "parent": "TASK-480",
     "soft_deadline": "2026-09-30", "hard_deadline": "2026-10-31", "planned_start": "2026-09-01",
-    "estimate": 60, "progress": 0, "milestone": "v1", "sprint": "week-40" }
+    "estimate": 60, "progress": 0, "milestone": "v1", "sprint": "week-40", "type": "バグ" }
 ]
 ```
 
@@ -217,6 +219,7 @@ UUID でなく名前で書ける。`description_file` は無く、未知のキ�
   日付だけのときに何時になるかは Web UI と揃えている
 - ソフト期限はハード期限より**前**でなければならない。同時刻は API が 400 を返す
 - `--label` は今のラベルを**置き換える**。残したまま増減するなら `--add-label` / `--remove-label`
+- `--type` は種別を 1 つに決める（付け替えもこれ）。外すときは `--clear-type`。種別の定義はプロジェクトごとに違う
 - `--assignee` も今の担当者を**置き換える**。更新では足りない人を足し、外れた人を外す
   （既にいる人の役割は変えない）。全員外すときは `--clear-assignees`。作成・更新とも、
   同じユーザー ID に解決される指定は一人分にまとめる
@@ -313,6 +316,7 @@ UUID のときは何も叩かない。
 task projects list                        # --project に渡せるキー
 task projects statuses --project TASK     # --status に渡せる名前（プロジェクトごとに違う）
 task projects labels --project TASK       # --label に渡せる名前（色と説明も並ぶ）
+task projects types --project TASK        # --type に渡せる名前（並び順。色も並ぶ）
 ```
 
 固定の値は `--help` に列挙してある（`--priority`、`sprints list --status`、`review --state` / `--severity`、`my list --filter`）。

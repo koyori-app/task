@@ -13,6 +13,7 @@ import '@/lib/remark-koyori-alerts/style.css';
 import '@/lib/remark-gfm/style.css';
 // 器は本番と同じ .kfm-content (単一ソース = content-class.ts)
 import { KFM_CONTENT_CLASS } from '@/lib/remark-gfm/content-class';
+import { htmlTheme } from '../html-theme';
 
 /*
  * KFM サニタイズの story 群。「通すべきものが通り、通してはならぬものが通らない」の
@@ -39,6 +40,8 @@ const meta = {
   title: 'KFM/Sanitize',
   tags: ['autodocs'],
   render: kfmRender,
+  // KFM のストーリーは明るい配色を既定にし、暗い配色のものだけ上書きする
+  beforeEach: htmlTheme('light'),
 } satisfies Meta<KfmStoryArgs>;
 
 export default meta;

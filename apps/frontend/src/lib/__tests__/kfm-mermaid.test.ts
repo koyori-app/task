@@ -1,4 +1,4 @@
-// mermaid フェンスの変換（remark 層）と custom element（client 層、mermaid の mock）の契約の固定（strict 固定、.dark のテーマ切り替え、SVG 挿入前の検査、error のフォールバック）
+// mermaid フェンスの変換（remark 層）と custom element（client 層、mermaid の mock）の契約の固定（strict 固定、html の data-theme のテーマ切り替え、SVG 挿入前の検査、error のフォールバック）
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { renderDescription } from '../markup-renderer';
 import { createKfmMermaidElement, KFM_MERMAID_TAG } from '../remark-kfm-mermaid/element';
@@ -82,6 +82,7 @@ describe('KfmMermaidElement (client 層・mermaid は mock)', () => {
 
   afterEach(() => {
     document.body.innerHTML = '';
+    delete document.documentElement.dataset.theme;
     mermaidMock.initialize.mockClear();
     mermaidMock.render.mockClear();
     mermaidMock.render.mockImplementation(async () => ({
@@ -90,9 +91,12 @@ describe('KfmMermaidElement (client 層・mermaid は mock)', () => {
   });
 
   /** 接続して状態が立つまで待つ (時間待ちではなく data-kfm-mermaid の状態待ち) */
-  async function mount(source: string, options: { dark?: boolean } = {}): Promise<HTMLElement> {
+  async function mount(
+    source: string,
+    options: { theme?: 'light' | 'dark' } = {},
+  ): Promise<HTMLElement> {
     const container = document.createElement('div');
-    if (options.dark === true) container.className = 'dark';
+    if (options.theme !== undefined) document.documentElement.dataset.theme = options.theme;
     const element = document.createElement(KFM_MERMAID_TAG);
     element.textContent = source;
     container.append(element);
@@ -149,12 +153,17 @@ describe('KfmMermaidElement (client 層・mermaid は mock)', () => {
     );
   });
 
-  it('テーマは .dark ancestor で切り替わる (light=default / dark=dark)', async () => {
-    await mount('flowchart TD\n  A --> B');
+  it('テーマは html の data-theme で切り替わる (light=default / dark=dark / 属性なし=dark)', async () => {
+    await mount('flowchart TD\n  A --> B', { theme: 'light' });
     expect(mermaidMock.initialize).toHaveBeenLastCalledWith(
       expect.objectContaining({ theme: 'default' }),
     );
-    await mount('flowchart TD\n  A --> B', { dark: true });
+    await mount('flowchart TD\n  A --> B', { theme: 'dark' });
+    expect(mermaidMock.initialize).toHaveBeenLastCalledWith(
+      expect.objectContaining({ theme: 'dark' }),
+    );
+    delete document.documentElement.dataset.theme;
+    await mount('flowchart TD\n  A --> B');
     expect(mermaidMock.initialize).toHaveBeenLastCalledWith(
       expect.objectContaining({ theme: 'dark' }),
     );

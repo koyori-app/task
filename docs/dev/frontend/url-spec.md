@@ -49,6 +49,7 @@ sidebar:
 | `/settings/security` | 認証方法、2 段階認証、Koyori Desktop の端末（[アカウント設定](/dev/features/account-settings)） |
 | `/settings/tokens` | パーソナルアクセストークンの発行と取り消し（[アカウント設定](/dev/features/account-settings)） |
 | `/settings/preferences` | 環境設定 |
+| `/settings/theme` | テーマ（配色の切り替え） |
 | `/settings/experiments` | 実験的機能の設定 |
 
 ### 管理者画面（テナント外）
@@ -74,7 +75,7 @@ sidebar:
 | `/{tenant}` | テナントホーム（ダッシュボード） |
 | `/{tenant}/my-tasks` | 自分のタスク |
 | `/{tenant}/calendar` | テナントのタイムライン（[スケジュール](/dev/features/tasks/schedule)）。`?from=YYYY-MM-DD`（起点の月曜。省略時は今週）、`?member=` / `?project=`（ID。繰り返し指定可）で絞り込み、`?selected=KEY-N`（詳細のオーバーレイで開いているタスク）を持つ。URL は replaceState で書き、履歴を増やさない |
-| `/{tenant}/gantt` | ガントチャート。サイドバーの入口は実験的機能の「ガントチャート」（`koyoriArcIntegration`）を有効にしたときだけ出る。URL からページを開くこと自体は設定に関係なくできる |
+| `/{tenant}/gantt` | テナントのガントチャート（[スケジュール](/dev/features/tasks/schedule)）。サイドバーの入口は実験的機能の「ガントチャート」（`koyoriArcIntegration`）を有効にしたときだけ出る。URL からページを開くこと自体は設定に関係なくできる。クエリは `?from=YYYY-MM-DD`（範囲の起点。その週の月曜に丸める。省略時は今日の週の月曜から、目盛りに応じて前へ日を残した日）、`?member=`（担当者の ID。繰り返し指定可。`unassigned` で担当なし）、`?scale=day|week|month`（目盛り。既定 `day`）、`?group=project|assignee`（群れ。既定 `project`）、`?line=on|off`（稲妻線。省略時は環境設定 `ganttProgressLine` に従い、その既定は切れ。切り替えると明に書く）。既定値と同じ `scale` と `group` は書かない。URL は replaceState で書き、履歴を増やさない |
 | `/{tenant}/settings` | テナント設定 |
 | `/{tenant}/settings/members` | テナントメンバー管理 |
 | `/{tenant}/users/{user_id}` | 利用者のプロフィール（閲覧のみ） |
@@ -91,6 +92,7 @@ sidebar:
 | `/{tenant}/projects/{key}/docs` | ドキュメント一覧（[Drive](/dev/features/drive)のドキュメント画面）。`?q=` でタイトル検索 |
 | `/{tenant}/projects/{key}/docs/{file_id}` | ドキュメント詳細。`{file_id}` は Drive ファイルの UUID。`?edit=1` で編集モード |
 | `/{tenant}/projects/{key}/settings` | プロジェクト設定。メンバー管理もこの画面の節である |
+| `/{tenant}/projects/{key}/gantt` | プロジェクトのガントチャート。テナントのガントと同じ画面を、そのプロジェクトのタスクに絞って出す。サイドバーのプロジェクトの入口は、テナントのガントと同じ実験的機能を有効にしたときだけ出る。クエリはテナントのガントと同じ |
 | `/{tenant}/projects/{key}/reviews` | [レビュー指摘](/dev/features/review-findings)の画面。`?pr=618`、`?round=`、`?severity=`、`?state=`、`?finding=`、`?mine=1`、`?page=` を持つ |
 
 ## ページファイル
@@ -110,6 +112,7 @@ sidebar:
 | `/settings/security` | `settings/security/+Page.vue` |
 | `/settings/tokens` | `settings/tokens/+Page.vue` |
 | `/settings/preferences` | `settings/preferences/+Page.vue` |
+| `/settings/theme` | `settings/theme/+Page.vue` |
 | `/settings/experiments` | `settings/experiments/+Page.vue` |
 | `/admin/users` | `admin/users/+Page.vue` |
 | `/admin/users/{id}` | `admin/users/@userId/+Page.vue` |
@@ -127,6 +130,7 @@ sidebar:
 | `/{tenant}/projects/{key}/docs` | `@tenant/projects/@projectKey/docs/+Page.vue` |
 | `/{tenant}/projects/{key}/docs/{file_id}` | `@tenant/projects/@projectKey/docs/@fileId/+Page.vue` |
 | `/{tenant}/projects/{key}/settings` | `@tenant/projects/@projectKey/settings/+Page.vue` |
+| `/{tenant}/projects/{key}/gantt` | `@tenant/projects/@projectKey/gantt/+Page.vue` |
 | `/{tenant}/projects/{key}/reviews` | `@tenant/projects/@projectKey/reviews/+Page.vue` |
 | （エラー） | `_error/+Page.vue` |
 

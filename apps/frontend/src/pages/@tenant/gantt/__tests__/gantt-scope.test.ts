@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ref } from 'vue';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
+import { createPinia } from 'pinia';
 
 const { GET } = vi.hoisted(() => ({ GET: vi.fn() }));
 vi.mock('vike/client/router', () => ({ navigate: vi.fn() }));
@@ -34,7 +35,7 @@ vi.mock('@koyori-app/arc-vue', async () => {
   return {
     GanttChart: defineComponent({
       name: 'GanttChart',
-      props: ['tasks', 'today'],
+      props: ['tasks', 'today', 'deviceTier'],
       emits: ['task-click'],
       setup: () => () => h('div'),
     }),
@@ -75,14 +76,32 @@ const TASKS = [
   scheduleTask('t-ops', { id: 'p-ops', key: 'OPS' }),
 ];
 
-function mountPage() {
+/** 期間の無い課題（開始予定日も締切も無い）。プロジェクトの絞りが数にも効くかを見る */
+const UNSCHEDULED = [
+  { ...scheduleTask('u-eng', { id: 'p-eng', key: 'ENG' }), soft_deadline: null },
+  { ...scheduleTask('u-ops-1', { id: 'p-ops', key: 'OPS' }), soft_deadline: null },
+  { ...scheduleTask('u-ops-2', { id: 'p-ops', key: 'OPS' }), soft_deadline: null },
+];
+
+function mountPage({ unscheduledFailures = 0 } = {}) {
+  let failuresLeft = unscheduledFailures;
   // 本物の API と同じく、project_id があればそのプロジェクトの課題だけを返す
   GET.mockImplementation(
-    async (_path: string, { params }: { params: { query: { project_id?: string[] } } }) => {
+    async (path: string, { params }: { params: { query: { project_id?: string[] } } }) => {
       const wanted = params.query.project_id;
+      const scope = <T extends { project: { id: string } }>(list: T[]) =>
+        wanted ? list.filter((task) => wanted.includes(task.project.id)) : list;
+      if (path.endsWith('/schedule/unscheduled')) {
+        if (failuresLeft > 0) {
+          failuresLeft -= 1;
+          return { error: { message: 'internal-error' } };
+        }
+        const tasks = scope(UNSCHEDULED);
+        return { data: { total: tasks.length, tasks, members: [], next_cursor: null } };
+      }
       return {
         data: {
-          tasks: wanted ? TASKS.filter((task) => wanted.includes(task.project.id)) : TASKS,
+          tasks: scope(TASKS),
           members: [],
           sprints: [],
           milestones: [],
@@ -93,7 +112,9 @@ function mountPage() {
     },
   );
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return mount(Page, { global: { plugins: [[VueQueryPlugin, { queryClient }]] } });
+  return mount(Page, {
+    global: { plugins: [[VueQueryPlugin, { queryClient }], createPinia()] },
+  });
 }
 
 describe('テナントのガント', () => {
@@ -107,5 +128,31 @@ describe('テナントのガント', () => {
     }
     const bars = wrapper.getComponent({ name: 'GanttChart' }).props('tasks') as { id: string }[];
     expect(bars.map((bar) => bar.id).sort()).toEqual(['t-eng', 't-ops']);
+    expect(wrapper.get('[data-testid="gantt-unscheduled"]').text()).toBe('期間なし 3 件');
+  });
+
+  it('ガントの図は端末の格を high にして、一覧や重ね文字の外で図だけが縦に動く形を作らせない', async () => {
+    // arc-vue は deviceMemory の無い端末を low と判じ、図だけを内側のスクロール域に閉じ込める
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(wrapper.getComponent({ name: 'GanttChart' }).props('deviceTier')).toBe('high');
+  });
+
+  it('期間なしだけが読めない時は、図を出したまま期間なしの口で取り直せる', async () => {
+    const wrapper = mountPage({ unscheduledFailures: 1 });
+    await flushPromises();
+
+    expect(wrapper.findComponent({ name: 'GanttChart' }).exists()).toBe(true);
+    expect(wrapper.find('[data-testid="gantt-unscheduled"]').exists()).toBe(false);
+    const unscheduledCalls = () =>
+      GET.mock.calls.filter(([path]) => String(path).endsWith('/schedule/unscheduled')).length;
+    expect(unscheduledCalls()).toBe(1);
+
+    await wrapper.get('[data-testid="gantt-unscheduled-retry"]').trigger('click');
+    await flushPromises();
+
+    expect(unscheduledCalls()).toBe(2);
+    expect(wrapper.get('[data-testid="gantt-unscheduled"]').text()).toBe('期間なし 3 件');
   });
 });

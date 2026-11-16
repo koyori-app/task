@@ -20,6 +20,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(crate::handlers::auth_2fa::set_tenant_require_2fa))
         .routes(routes!(crate::handlers::tenant_members::get_user_profile))
         .routes(routes!(crate::handlers::schedule::get_schedule))
+        .routes(routes!(crate::handlers::schedule::get_unscheduled))
         .routes(routes!(crate::handlers::schedule::get_schedule_relations))
         .nest(
             "/{tenant_id}/drive/folders",
@@ -216,6 +217,15 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::labels::delete_label))
                         .routes(routes!(crate::handlers::labels::export_labels))
                         .routes(routes!(crate::handlers::labels::import_labels)),
+                )
+                .nest(
+                    "/{project_id}/task-types",
+                    OpenApiRouter::<AppState>::new()
+                        .routes(routes!(crate::handlers::task_types::list_task_types))
+                        .routes(routes!(crate::handlers::task_types::create_task_type))
+                        .routes(routes!(crate::handlers::task_types::update_task_type))
+                        .routes(routes!(crate::handlers::task_types::reorder_task_types))
+                        .routes(routes!(crate::handlers::task_types::delete_task_type)),
                 )
                 .nest(
                     "/{project_id}/github",

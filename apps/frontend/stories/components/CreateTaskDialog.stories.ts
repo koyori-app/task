@@ -49,6 +49,12 @@ const labels = [
   },
 ];
 
+const taskTypes = [
+  { id: 'type-task', project_id: 'project-1', name: 'タスク', color: '#64748b', position: 0 },
+  { id: 'type-bug', project_id: 'project-1', name: 'バグ', color: '#ef4444', position: 1 },
+  { id: 'type-feature', project_id: 'project-1', name: '機能', color: '#3b82f6', position: 2 },
+];
+
 const members = [
   { id: 'user-1', username: 'yupix', avatar_url: null },
   { id: 'user-2', username: 'sousuke', avatar_url: null },
@@ -198,6 +204,7 @@ const meta = {
     projectKey: 'ENG',
     statuses,
     labels,
+    taskTypes,
     members,
     onCreated: createdSpy,
     'onUpdate:open': openChangeSpy,
@@ -213,7 +220,8 @@ export const Default: Story = {
     await expect(canvas.findByRole('dialog', { name: '新規タスク' })).resolves.toBeInTheDocument();
     await expect(canvas.getByLabelText(/タイトル/)).toBeInTheDocument();
     await expect(canvas.getByRole('button', { name: /^ステータス/ })).toHaveTextContent('Backlog');
-    // チップ列は未設定を項目名で出す
+    // チップ列は未設定を項目名で出す。先頭は種別
+    await expect(canvas.getByRole('button', { name: /^種別/ })).toHaveTextContent('種別');
     await expect(canvas.getByRole('button', { name: /^担当者/ })).toHaveTextContent('担当者');
     await expect(canvas.getByRole('button', { name: /^ラベル/ })).toHaveTextContent('ラベル');
     await expect(canvas.getByRole('button', { name: /^日付/ })).toHaveTextContent('日付');
@@ -294,6 +302,44 @@ export const DateClearThenEscape: Story = {
     await expect(openChangeSpy).not.toHaveBeenCalled();
     // 日付チップへ戻る
     await expect(doc.activeElement).toBe(canvas.getByRole('button', { name: /^日付/ }));
+  },
+};
+
+/** 種別のメニューを開いたまま（「種別なし」が選択中。各行に色の点） */
+export const TaskTypeMenuOpen: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const user = userEvent.setup();
+    await user.click(await canvas.findByRole('button', { name: /^種別/ }));
+    await expect(await canvas.findByRole('option', { name: '種別なし' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    const bug = await canvas.findByRole('option', { name: 'バグ' });
+    await expect(bug.querySelector('[style*="background-color"]')).not.toBeNull();
+    await expect(canvas.getByRole('option', { name: '機能' })).toBeInTheDocument();
+  },
+};
+
+/** 種別を選んだ状態（引き金に色の点と名前）。作成の本文に task_type_id が入る */
+export const TaskTypeSelected: Story = {
+  beforeEach() {
+    const mock = mockCreate();
+    return mock.restore;
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const user = userEvent.setup();
+    await user.type(await canvas.findByLabelText(/タイトル/), '種別つきで作成');
+    await user.click(canvas.getByRole('button', { name: /^種別/ }));
+    await user.click(await canvas.findByRole('option', { name: 'バグ' }));
+    const trigger = canvas.getByRole('button', { name: /^種別/ });
+    await expect(trigger).toHaveTextContent('バグ');
+    await expect(trigger.querySelector('[style*="background-color"]')).not.toBeNull();
+
+    await user.click(canvas.getByRole('button', { name: '作成' }));
+    await waitFor(() => expect(postedRequest()).toBeTruthy());
+    await expect(await postedRequest().clone().json()).toMatchObject({ task_type_id: 'type-bug' });
   },
 };
 

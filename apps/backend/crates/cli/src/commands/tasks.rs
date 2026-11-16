@@ -24,9 +24,10 @@ use crate::error::{CliError, Result};
 use crate::output::{OutputOptions, print};
 use crate::resolve::{
     TaskRef, default_status_id, find_done_status_id, list_labels, list_milestones, list_sprints,
-    list_statuses, parse_task_ref, pick_default_status, pick_label_id, pick_milestone_id,
-    pick_sprint_id, pick_status_by_name, resolve_label_id, resolve_milestone_id, resolve_project,
-    resolve_sprint_id, resolve_status_id, resolve_user_id,
+    list_statuses, list_task_types, parse_task_ref, pick_default_status, pick_label_id,
+    pick_milestone_id, pick_sprint_id, pick_status_by_name, pick_task_type_id, resolve_label_id,
+    resolve_milestone_id, resolve_project, resolve_sprint_id, resolve_status_id,
+    resolve_task_type_id, resolve_user_id,
 };
 
 /// タスクの担当者に付く役割。API は自由文字列だが、画面と統合テストはこの綴りを使う。
@@ -40,7 +41,7 @@ use crate::text_input::{read_stdin, resolve_body};
 
 /// `--json <項目>` で選べる、一覧の項目の名前。CLI が足す 3 つ（`key`・`url`・`status`）に、
 /// `TaskResponse` の直列化の順を続ける。型が増減したら下のテストが落ちる。
-const TASK_LIST_FIELDS: [&str; 27] = [
+const TASK_LIST_FIELDS: [&str; 28] = [
     "key",
     "url",
     "status",
@@ -64,6 +65,7 @@ const TASK_LIST_FIELDS: [&str; 27] = [
     "created_by",
     "assignees",
     "labels",
+    "task_type",
     "created_at",
     "updated_at",
     "completed_at",
@@ -82,6 +84,7 @@ pub async fn run(
             priority,
             status,
             label,
+            task_type,
             assignee,
             unassigned,
             milestone,
@@ -134,6 +137,10 @@ pub async fn run(
             if let Some(name) = &label {
                 let id = resolve_label_id(api, project.id, name).await?;
                 query.push(("label_id", id.to_string()));
+            }
+            if let Some(name) = &task_type {
+                let id = resolve_task_type_id(api, project.id, name).await?;
+                query.push(("task_type_id", id.to_string()));
             }
             if let Some(name) = &assignee {
                 let id = resolve_user_id(api, project.id, name).await?;
@@ -258,6 +265,7 @@ pub async fn run(
                 progress_pct: resolved.progress_pct,
                 parent_task_id: resolved.parent_task_id,
                 milestone_id: resolved.milestone_id,
+                task_type_id: resolved.task_type_id,
                 sprint_id: resolved.sprint_id,
                 soft_deadline: resolved.soft_deadline,
                 hard_deadline: resolved.hard_deadline,
@@ -647,6 +655,8 @@ fn update_request(fields: UpdateFields) -> UpdateTaskRequest {
         clear_parent_task_id: clears.clear_parent,
         milestone_id: resolved.milestone_id,
         clear_milestone_id: clears.clear_milestone,
+        task_type_id: resolved.task_type_id,
+        clear_task_type_id: clears.clear_type,
         sprint_id: resolved.sprint_id,
         clear_sprint_id: clears.clear_sprint,
         soft_deadline: resolved.soft_deadline,
@@ -677,6 +687,7 @@ struct ResolvedFields {
     progress_pct: Option<i16>,
     parent_task_id: Option<Uuid>,
     milestone_id: Option<Uuid>,
+    task_type_id: Option<Uuid>,
     sprint_id: Option<Uuid>,
     /// `--label` による置き換え。未指定なら None（ラベルを触らない）
     set_label_ids: Option<Vec<Uuid>>,
@@ -702,6 +713,7 @@ impl TaskClearArgs {
             clear_estimate: false,
             clear_parent: false,
             clear_milestone: false,
+            clear_type: false,
             clear_sprint: false,
             clear_assignees: false,
         }
@@ -729,6 +741,8 @@ struct BulkItem {
     progress: Option<i16>,
     milestone: Option<String>,
     sprint: Option<String>,
+    #[serde(rename = "type")]
+    task_type: Option<String>,
 }
 
 /// 名前の解決より前にできる検査を終えた要素。
@@ -808,6 +822,7 @@ fn prepare_bulk_item(
             parent: item.parent,
             milestone: item.milestone,
             sprint: item.sprint,
+            task_type: item.task_type,
             labels: item.labels,
             add_labels: vec![],
             remove_labels: vec![],
@@ -859,6 +874,7 @@ async fn resolve_bulk_item(
         progress_pct: resolved.progress_pct,
         parent_task_id: resolved.parent_task_id,
         milestone_id: resolved.milestone_id,
+        task_type_id: resolved.task_type_id,
         sprint_id: resolved.sprint_id,
         soft_deadline: resolved.soft_deadline,
         hard_deadline: resolved.hard_deadline,
@@ -952,6 +968,7 @@ struct FieldResolver<'a> {
     labels: Option<Vec<payload::labels::LabelResponse>>,
     milestones: Option<Vec<payload::milestones::MilestoneResponse>>,
     sprints: Option<Vec<payload::sprints::SprintResponse>>,
+    task_types: Option<Vec<payload::task_types::TaskTypeResponse>>,
     users: std::collections::HashMap<String, Uuid>,
     parents: std::collections::HashMap<String, Uuid>,
 }
@@ -964,6 +981,7 @@ impl<'a> FieldResolver<'a> {
             labels: None,
             milestones: None,
             sprints: None,
+            task_types: None,
             users: Default::default(),
             parents: Default::default(),
         }
@@ -1000,6 +1018,17 @@ impl<'a> FieldResolver<'a> {
             self.sprints = Some(list_sprints(self.api, self.project.id).await?);
         }
         pick_sprint_id(self.sprints.as_deref().unwrap_or_default(), name)
+    }
+
+    async fn task_type(&mut self, name: &str) -> Result<Uuid> {
+        // UUID は一覧を取らずにそのまま使う（単体の解決と同じ）
+        if let Ok(uuid) = Uuid::parse_str(name) {
+            return Ok(uuid);
+        }
+        if self.task_types.is_none() {
+            self.task_types = Some(list_task_types(self.api, self.project.id).await?);
+        }
+        pick_task_type_id(self.task_types.as_deref().unwrap_or_default(), name)
     }
 
     async fn user(&mut self, name: &str) -> Result<Uuid> {
@@ -1073,6 +1102,9 @@ async fn resolve_fields_with(
     }
     if let Some(name) = &fields.sprint {
         resolved.sprint_id = Some(resolver.sprint(name).await?);
+    }
+    if let Some(name) = &fields.task_type {
+        resolved.task_type_id = Some(resolver.task_type(name).await?);
     }
     if !fields.labels.is_empty() {
         resolved.set_label_ids = Some(resolver.labels(&fields.labels).await?);
