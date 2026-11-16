@@ -51,6 +51,8 @@ import {
 import MarkdownEditor from '@/components/markdown/MarkdownEditor.vue';
 import { lookup, toPlainText } from '@/lib/comment-mention';
 import { countChecklist } from '@/lib/task-checklist';
+import { setChecklistHtmlChecked, toggleChecklistAt } from '@/lib/task-checklist-toggle';
+import { KFM_TASK_OFFSET_ATTR } from '@/lib/rehype-kfm-task-offset/_attr';
 import { hasMentionCards } from '@/lib/mention-card';
 import {
   PRIORITY_CONFIG,
@@ -244,10 +246,22 @@ const plainDescription = computed(() => {
   return toPlainText(description, (id) => lookup(table, id));
 });
 
+/**
+ * チェックボックスを切り替えた直後の橋渡し。楽観更新で task.description が先に新しい本文になり、
+ * サーバが描いた新しい HTML が届くまでの間は descriptionSource と一致しない。その間にプレーン表示へ
+ * 落ちないよう、押した項目だけ書き換えた HTML を新しい本文の描画として持つ
+ * （サーバが描く HTML と同じ形になるので、届いても DOM は差し替わらない）。
+ */
+const toggleBridge = ref<{ source: string; html: string } | null>(null);
+
 const freshDescriptionHtml = computed(() => {
-  if (!props.descriptionHtml || !props.task?.description) return null;
-  if (props.descriptionSource !== props.task.description) return null;
-  return props.descriptionHtml;
+  const description = props.task?.description;
+  if (!description) return null;
+  if (props.descriptionHtml && props.descriptionSource === description) {
+    return props.descriptionHtml;
+  }
+  if (toggleBridge.value?.source === description) return toggleBridge.value.html;
+  return null;
 });
 /** 説明の KFM 表示の容れ物。札のカード（HoverCard）の委譲先。client で mount した後に入る */
 const descriptionHtmlEl = ref<HTMLElement | null>(null);
@@ -264,7 +278,10 @@ const failedDrafts = ref<Partial<Record<EditableField, string>>>({});
 // 分割ビューのペインは別のタスクへ移っても同じインスタンスなので、前のタスクの下書きを持ち越さない
 watch(
   () => props.task?.id,
-  () => (failedDrafts.value = {}),
+  () => {
+    failedDrafts.value = {};
+    toggleBridge.value = null;
+  },
 );
 
 /** 送る値を下書きとして控え、そのまま返す。null（空にする）は空文字で控える */
@@ -275,6 +292,84 @@ function keepDraft<T extends string | number | null>(field: EditableField, value
 
 function isFieldUpdating(field: EditableField) {
   return props.fieldUpdating?.[field] ?? false;
+}
+
+/**
+ * 閲覧表示のままチェックボックスを切り替えられる間。編集中は編集器があり、保存中は
+ * 全部のチェックボックスを止めて要求を 1 本ずつにする（順不同で届いて古い本文が残るのを防ぐ）
+ */
+const checklistToggleable = computed(
+  () => editingField.value !== 'description' && !isFieldUpdating('description'),
+);
+
+const CHECKLIST_INPUT_SELECTOR = `input[type="checkbox"][${KFM_TASK_OFFSET_ATTR}]`;
+
+/** 保存が終わって押せるようになったらフォーカスを戻す、直前に押したチェックボックスの位置 */
+let pendingFocusOffset: string | null = null;
+
+/** 項目の先頭行の字（`li` の入れ子の子は含めない）。スクリーンリーダー用の名前にする */
+function checklistLabel(input: HTMLInputElement): string {
+  const text = input.closest('li')?.textContent ?? '';
+  return (
+    text
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => line !== '') ?? ''
+  );
+}
+
+/**
+ * 描画 HTML の `disabled` は固定なので、hydrate 後にここで外す（SSR の HTML は押せない）。
+ * 位置の属性が無いチェックボックス（原文へ対応づけられない項目）は disabled のまま
+ */
+function syncChecklistInputs() {
+  const root = descriptionHtmlEl.value;
+  if (!root) return;
+  const toggleable = checklistToggleable.value;
+  for (const input of root.querySelectorAll<HTMLInputElement>(CHECKLIST_INPUT_SELECTOR)) {
+    input.disabled = !toggleable;
+    const label = checklistLabel(input);
+    if (label) input.setAttribute('aria-label', label);
+  }
+  if (toggleable && pendingFocusOffset !== null) {
+    const offset = pendingFocusOffset;
+    pendingFocusOffset = null;
+    // 利用者が別の場所へ移していたらそのまま（body は押した要素が差し替えで消えたとき）
+    if (document.activeElement === document.body || document.activeElement === null) {
+      root.querySelector<HTMLInputElement>(`input[${KFM_TASK_OFFSET_ATTR}="${offset}"]`)?.focus();
+    }
+  }
+}
+
+watch([freshDescriptionHtml, descriptionHtmlEl, checklistToggleable], syncChecklistInputs, {
+  flush: 'post',
+  immediate: true,
+});
+
+function onChecklistChange(event: Event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement) || !target.matches(CHECKLIST_INPUT_SELECTOR)) return;
+  const revert = () => {
+    target.checked = !target.checked;
+  };
+  const description = props.task?.description;
+  const html = freshDescriptionHtml.value;
+  const offset = Number(target.getAttribute(KFM_TASK_OFFSET_ATTR));
+  if (!checklistToggleable.value || !description || !html) return revert();
+  const next = toggleChecklistAt(description, offset, target.checked);
+  if (next === null) return revert();
+  // 保存は trim した本文で行われる。trim で変わる本文は橋渡しの照合に合わないので持たない
+  const nextHtml =
+    next.trim() === next ? setChecklistHtmlChecked(html, offset, target.checked) : null;
+  toggleBridge.value = nextHtml === null ? null : { source: next, html: nextHtml };
+  // 失敗表示に「編集を再開」を出さない（切り替えは下書きを持たない）
+  delete failedDrafts.value.description;
+  pendingFocusOffset = String(offset);
+  emit('save:description', next);
+  // 保存が始まらなかったとき（同じ本文で何もしない等）は、後からフォーカスを動かさない
+  void nextTick(() => {
+    if (checklistToggleable.value) pendingFocusOffset = null;
+  });
 }
 
 function fieldError(field: EditableField) {
@@ -1205,6 +1300,7 @@ function clearDescription() {
                 class="text-sm leading-relaxed"
                 ref="descriptionHtmlEl"
                 data-task-description-html
+                @change="onChecklistChange"
                 v-html="freshDescriptionHtml"
               />
               <button

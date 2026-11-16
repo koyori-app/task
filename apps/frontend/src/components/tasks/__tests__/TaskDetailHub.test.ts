@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { config, enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { QueryClient, useQuery, VueQueryPlugin } from '@tanstack/vue-query';
 import { defineComponent, nextTick } from 'vue';
@@ -20,6 +20,7 @@ vi.mock('@/components/markdown/MarkdownEditor.vue', async () => ({
 import { ConfirmDialog } from '@koyori-app/ui-vue';
 import TaskDetailHub from '../TaskDetailHub.vue';
 import { PRIORITY_CONFIG } from '@/lib/task-display';
+import { renderDescription } from '@/lib/markup-renderer';
 
 enableAutoUnmount(afterEach);
 
@@ -1345,5 +1346,162 @@ describe('TaskDetailHub のチェックリスト達成率', () => {
 
     expect(wrapper.get('[data-checklist-progress]').text()).toContain('2 / 5');
     expect(wrapper.text()).toContain('30%');
+  });
+});
+
+describe('TaskDetailHub の説明のチェックボックスの切り替え', () => {
+  const SOURCE = '- [x] 済み\n- [ ] 未了\n- [ ] 最後';
+  const TOGGLED = '- [x] 済み\n- [x] 未了\n- [ ] 最後';
+  let html = '';
+
+  beforeAll(async () => {
+    html = await renderDescription(SOURCE);
+  });
+
+  function mountWith(extra: Record<string, unknown> = {}) {
+    return mount(TaskDetailHub, {
+      props: {
+        task: { ...task, description: SOURCE },
+        descriptionHtml: html,
+        descriptionSource: SOURCE,
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+        ...extra,
+      },
+    });
+  }
+
+  const boxes = (wrapper: ReturnType<typeof mountWith>) =>
+    wrapper.findAll<HTMLInputElement>('[data-task-description-html] input[type="checkbox"]');
+
+  it('マウント後、位置の属性付きのチェックボックスは有効で、項目の文字が名前になる', async () => {
+    const wrapper = mountWith();
+    await nextTick();
+
+    expect(boxes(wrapper).map((b) => b.element.disabled)).toEqual([false, false, false]);
+    expect(boxes(wrapper).map((b) => b.attributes('aria-label'))).toEqual(['済み', '未了', '最後']);
+  });
+
+  it('位置の属性が無いチェックボックスは disabled のまま', async () => {
+    const plain = '<ul><li><input type="checkbox" disabled=""> 属性なし</li></ul>';
+    const wrapper = mountWith({ descriptionHtml: plain });
+    await nextTick();
+
+    expect(boxes(wrapper)[0].element.disabled).toBe(true);
+  });
+
+  it('押すと save:description が、その項目だけ替えた本文で 1 回 emit される', async () => {
+    const wrapper = mountWith();
+    await nextTick();
+
+    await boxes(wrapper)[1].setValue(true);
+
+    expect(wrapper.emitted('save:description')).toEqual([[TOGGLED]]);
+  });
+
+  it('チェックを外す操作は [x] を空白へ戻した本文を emit する', async () => {
+    const wrapper = mountWith();
+    await nextTick();
+
+    await boxes(wrapper)[0].setValue(false);
+
+    expect(wrapper.emitted('save:description')).toEqual([['- [ ] 済み\n- [ ] 未了\n- [ ] 最後']]);
+  });
+
+  it('押した後に task.description が新しい本文になっても (HTML は古いまま) プレーン表示へ落ちない', async () => {
+    const wrapper = mountWith();
+    await nextTick();
+    await boxes(wrapper)[1].setValue(true);
+
+    await wrapper.setProps({ task: { ...task, description: TOGGLED } });
+
+    expect(wrapper.find('[data-task-description-html]').exists()).toBe(true);
+    expect(wrapper.find('p.whitespace-pre-wrap').exists()).toBe(false);
+    expect(boxes(wrapper).map((b) => b.element.checked)).toEqual([true, true, false]);
+    // 見出しの達成率は新しい本文に追従する
+    expect(wrapper.get('[data-checklist-progress]').text()).toContain('2 / 3');
+  });
+
+  it('サーバが描いた新しい HTML が届いても DOM は同じ (差し替わらない)', async () => {
+    const wrapper = mountWith();
+    await nextTick();
+    await boxes(wrapper)[1].setValue(true);
+    await wrapper.setProps({ task: { ...task, description: TOGGLED } });
+    const before = wrapper.get('[data-task-description-html]').element.innerHTML;
+
+    await wrapper.setProps({
+      descriptionHtml: await renderDescription(TOGGLED),
+      descriptionSource: TOGGLED,
+    });
+
+    expect(wrapper.get('[data-task-description-html]').element.innerHTML).toBe(before);
+  });
+
+  it('保存中 (fieldUpdating.description) は全部 disabled。終われば有効に戻る', async () => {
+    const wrapper = mountWith();
+    await nextTick();
+    await wrapper.setProps({ fieldUpdating: { description: true } });
+    expect(boxes(wrapper).map((b) => b.element.disabled)).toEqual([true, true, true]);
+
+    await wrapper.setProps({ fieldUpdating: { description: false } });
+    expect(boxes(wrapper).map((b) => b.element.disabled)).toEqual([false, false, false]);
+  });
+
+  it('失敗の戻し: description を元へ戻すとチェックも戻り、「更新に失敗しました」が出て「編集を再開」は出ない', async () => {
+    const wrapper = mountWith();
+    await nextTick();
+    await boxes(wrapper)[1].setValue(true);
+    await wrapper.setProps({
+      task: { ...task, description: TOGGLED },
+      fieldUpdating: { description: true },
+    });
+
+    await wrapper.setProps({
+      task: { ...task, description: SOURCE },
+      fieldUpdating: { description: false },
+      fieldErrors: { description: '更新に失敗しました' },
+    });
+
+    expect(boxes(wrapper).map((b) => b.element.checked)).toEqual([true, false, false]);
+    expect(wrapper.text()).toContain('更新に失敗しました');
+    expect(wrapper.text()).not.toContain('編集を再開');
+    expect(wrapper.get('[data-checklist-progress]').text()).toContain('1 / 3');
+  });
+
+  it('対照: descriptionSource が description と違う (他の人が更新した) と HTML を出さず、押せない', async () => {
+    const wrapper = mountWith({ descriptionSource: '- [ ] 古い本文' });
+    await nextTick();
+
+    expect(wrapper.find('[data-task-description-html]').exists()).toBe(false);
+    expect(wrapper.find('[data-task-description-html] input').exists()).toBe(false);
+    expect(wrapper.emitted('save:description')).toBeUndefined();
+  });
+
+  it('別のタスクへ移ったら、前のタスクの橋渡しの HTML を出さない', async () => {
+    const wrapper = mountWith();
+    await nextTick();
+    await boxes(wrapper)[1].setValue(true);
+    await wrapper.setProps({ task: { ...task, description: TOGGLED } });
+
+    // 別のタスクが同じ本文を持っていても、HTML はまだ届いていない
+    await wrapper.setProps({
+      task: { ...task, id: 'other-task', description: TOGGLED },
+      descriptionHtml: undefined,
+      descriptionSource: undefined,
+    });
+
+    expect(wrapper.find('[data-task-description-html]').exists()).toBe(false);
+  });
+
+  it('編集中は KFM 表示 (チェックボックス) を出さない', async () => {
+    const wrapper = mountWith();
+    await nextTick();
+
+    await wrapper.get('button[aria-label="説明を編集"]').trigger('click');
+    await nextTick();
+
+    expect(wrapper.find('[data-task-description-html]').exists()).toBe(false);
+    expect(wrapper.find('[data-task-description-html] input').exists()).toBe(false);
   });
 });

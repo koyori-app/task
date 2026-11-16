@@ -45,6 +45,7 @@ import remarkBreaks from 'remark-breaks';
 
 import { rehypeKfmCode } from '@/lib/rehype-kfm-code';
 import { rehypeKfmLinkFavicon } from '@/lib/rehype-kfm-link-favicon';
+import { rehypeKfmTaskOffset } from '@/lib/rehype-kfm-task-offset';
 import { remarkGfm } from '@/lib/remark-gfm';
 import { remarkKfmMermaid } from '@/lib/remark-kfm-mermaid';
 import { remarkKfmRawHtml } from '@/lib/remark-kfm-raw-html';
@@ -123,7 +124,7 @@ export const renderDescription = createRenderer({
       // rehypeKfmCode は着色済みの子を行分割して <kfm-code> で包むため、必ず
       // starry-night の後ろ (行分割は着色より後でしか成立しない)。
       // rehypeKfmLinkFavicon は `a` しか触らず他と干渉しない。最終 HTML に近い rehype 層の最後に置く。
-      rehypePlugins: [rehypeStarryNight, rehypeKfmCode, rehypeKfmLinkFavicon],
+      rehypePlugins: [rehypeKfmTaskOffset, rehypeStarryNight, rehypeKfmCode, rehypeKfmLinkFavicon],
     },
     // comment profile = github ＋ remarkBreaks。GitHub の comment 欄の流儀
     // (空行を挟まぬ単一改行を <br> として出す)。レビュー指摘の本文の消費側が使う。
@@ -138,7 +139,7 @@ export const renderDescription = createRenderer({
         remarkKfmMention,
         remarkBreaks,
       ],
-      rehypePlugins: [rehypeStarryNight, rehypeKfmCode, rehypeKfmLinkFavicon],
+      rehypePlugins: [rehypeKfmTaskOffset, rehypeStarryNight, rehypeKfmCode, rehypeKfmLinkFavicon],
     },
     // Phase 2 seam: kfm profile はここへ remark / rehype 層を足す (コアは不変)。
   },

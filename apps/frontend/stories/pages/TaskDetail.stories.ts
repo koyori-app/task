@@ -837,6 +837,8 @@ export const DescriptionKfmRendered: Story = {
 };
 
 const CHECKLIST_DESCRIPTION = KFM_STORY_INPUTS['gfm-task-list'];
+/** DescriptionChecklistToggle が PUT の本文を受け取る箱（beforeEach が差し替える） */
+let putBodies: Record<string, unknown>[] = [];
 
 export const DescriptionChecklistProgress: Story = {
   name: '説明のチェックリスト達成率',
@@ -856,6 +858,82 @@ export const DescriptionChecklistProgress: Story = {
     await expect(description?.querySelectorAll('input[type="checkbox"]')).toHaveLength(5);
     // 「進捗」行（progress_pct）は別の値のまま
     await expect(canvas.findByText('30%')).resolves.toBeInTheDocument();
+  },
+};
+
+export const DescriptionChecklistToggle: Story = {
+  name: '説明のチェックボックスを閲覧表示のまま切り替える',
+  decorators: [
+    storyDecorator(mockContext, {
+      descriptionHtml: kfmChecklistHtml,
+      descriptionSource: CHECKLIST_DESCRIPTION,
+    }),
+  ],
+  beforeEach: () => {
+    const puts: Record<string, unknown>[] = [];
+    const restore = createMockFetch({
+      task: { ...sampleTaskDetail, description: CHECKLIST_DESCRIPTION },
+      onPut: (body) => puts.push(body as Record<string, unknown>),
+    });
+    putBodies = puts;
+    return restore;
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await canvas.findByText('2 / 5');
+    const description = canvasElement.querySelector('[data-task-description-html]');
+    const checkbox = await canvas.findByRole('checkbox', { name: '未了タスク' });
+    await expect(checkbox).toBeEnabled();
+    await expect(checkbox).not.toBeChecked();
+
+    await user.click(checkbox);
+
+    await expect(canvas.findByText('3 / 5')).resolves.toBeInTheDocument();
+    // 保存が終わると、説明は KFM 表示のまま、チェックが残り、全項目が押せる
+    await waitFor(() => expect(putBodies).toHaveLength(1));
+    await expect(String(putBodies[0].description)).toContain('- [x] 未了タスク');
+    await expect(
+      canvasElement.querySelector('[data-task-description-html] input[type="checkbox"]'),
+    ).not.toBeNull();
+    await expect(canvas.findByRole('checkbox', { name: '未了タスク' })).resolves.toBeChecked();
+    await waitFor(() =>
+      expect(
+        [
+          ...(description?.querySelectorAll<HTMLInputElement>('input[type="checkbox"]') ?? []),
+        ].every((input) => !input.disabled),
+      ).toBe(true),
+    );
+    await expect(canvasElement.querySelector('p.whitespace-pre-wrap')).toBeNull();
+  },
+};
+
+export const DescriptionChecklistToggleFailure: Story = {
+  name: '説明のチェックボックスの切り替えに失敗',
+  decorators: [
+    storyDecorator(mockContext, {
+      descriptionHtml: kfmChecklistHtml,
+      descriptionSource: CHECKLIST_DESCRIPTION,
+    }),
+  ],
+  beforeEach: () =>
+    createMockFetch({
+      task: { ...sampleTaskDetail, description: CHECKLIST_DESCRIPTION },
+      rejectPut: 500,
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await canvas.findByText('2 / 5');
+    const checkbox = await canvas.findByRole('checkbox', { name: '未了タスク' });
+
+    await user.click(checkbox);
+
+    await expect(canvas.findByText('更新に失敗しました')).resolves.toBeInTheDocument();
+    // 失敗したらチェックも達成率も元へ戻る。書き直せる下書きは無いので「編集を再開」は出さない
+    await expect(canvas.findByRole('checkbox', { name: '未了タスク' })).resolves.not.toBeChecked();
+    await expect(canvas.findByText('2 / 5')).resolves.toBeInTheDocument();
+    await expect(canvas.queryByText('編集を再開')).toBeNull();
   },
 };
 
