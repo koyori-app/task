@@ -14,6 +14,7 @@ use sea_orm::{
 use serde::Serialize;
 use webauthn_rs::prelude::{
     CredentialID, DiscoverableKey, Passkey, PublicKeyCredential, RegisterPublicKeyCredential,
+    WebauthnError,
 };
 
 use crate::AppState;
@@ -25,9 +26,9 @@ use service::auth::AuthError;
 use service::email::normalize_email;
 use service::passkey_challenges;
 use service::passkeys::{
-    MAX_PASSKEYS_PER_USER, count_user_passkeys, find_by_credential_id,
-    insert_passkey_under_user_lock, is_last_auth_method, load_user_passkeys, model_to_passkey,
-    passkey_to_model_fields, update_passkey_after_authentication,
+    MAX_PASSKEYS_PER_USER, client_data_is_same_origin, count_user_passkeys, credential_id_len_ok,
+    find_by_credential_id, insert_passkey_under_user_lock, is_last_auth_method, load_user_passkeys,
+    model_to_passkey, passkey_to_model_fields, update_passkey_after_authentication,
 };
 
 type AppSession = Session<SessionRedisPool>;
@@ -213,6 +214,10 @@ pub async fn registration_finish(
             return Err(AuthError::BadRequest);
         }
     };
+    if !client_data_is_same_origin(&credential.response.client_data_json) {
+        release_lock().await;
+        return Err(WebauthnError::CredentialCrossOrigin.into());
+    }
     let passkey = match state
         .webauthn
         .finish_passkey_registration(&credential, &reg_state)
@@ -231,6 +236,11 @@ pub async fn registration_finish(
             return Err(AuthError::Internal(e));
         }
     };
+    // 仕様（WebAuthn Level 3 §7.1 の 25）は、1023 byte を超える credential ID を断るよう求める
+    if !credential_id_len_ok(&credential_id) {
+        release_lock().await;
+        return Err(AuthError::BadRequest);
+    }
     let now = Utc::now();
 
     let insert_result = insert_passkey_under_user_lock(
@@ -344,6 +354,11 @@ pub async fn authentication_finish(
 ) -> Result<StatusCode, AuthError> {
     let credential: PublicKeyCredential =
         serde_json::from_value(payload.credential).map_err(|_| AuthError::BadRequest)?;
+
+    // webauthn-rs 0.5.5 は認証で crossOrigin を見ない。frame の中から呼ばれた応答は断る
+    if !client_data_is_same_origin(&credential.response.client_data_json) {
+        return Err(WebauthnError::CredentialCrossOrigin.into());
+    }
 
     if let Some(auth_state) = passkey_challenges::take_discoverable_authentication(
         &state.redis_client,
