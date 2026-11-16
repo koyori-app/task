@@ -4,7 +4,7 @@ import { onMounted, onScopeDispose, toValue, watch, type MaybeRefOrGetter } from
 import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
 import type { ProjectUuid, TenantUuid } from '@/lib/api-ids';
 import { TASK_SEARCH_PATH } from '@/lib/api-vue-query';
-import { SCHEDULE_PATH } from '@/lib/calendar/schedule';
+import { SCHEDULE_PATH, SCHEDULE_RELATIONS_PATH } from '@/lib/calendar/schedule';
 import { UNSCHEDULED_PATH } from '@/lib/gantt/unscheduled';
 
 const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
@@ -26,6 +26,7 @@ const INVALIDATED_PATHS = [
   TASK_SEARCH_PATH,
   SCHEDULE_PATH,
   UNSCHEDULED_PATH,
+  SCHEDULE_RELATIONS_PATH,
   ACTIVITIES_PATH,
 ];
 

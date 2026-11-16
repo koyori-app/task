@@ -309,6 +309,28 @@ describe('useTaskRowMutations', () => {
   });
 
   // ガントの期間なしの数は予定と別の key なので、予定を落としても取り直されない
+  it('更新のあとにガントの依存の矢印（予定の関係）を取り直す', async () => {
+    const relationsFetch = vi.fn(async () => ({ relations: [], truncated: false }));
+    const Gantt = defineComponent({
+      setup() {
+        useQuery({
+          queryKey: ['get', '/v1/tenants/{tenant_id}/schedule/relations', { params: {} }],
+          queryFn: relationsFetch,
+        });
+        return () => null;
+      },
+    });
+    mount(Gantt, { global: { plugins: [[VueQueryPlugin, { queryClient }]] } });
+    mountHost();
+    await flushPromises();
+    expect(relationsFetch).toHaveBeenCalledTimes(1);
+
+    await mutations.setSoftDeadline({ id: 'task-1' } as never, '2026-10-20T00:00:00Z');
+    await flushPromises();
+
+    expect(relationsFetch).toHaveBeenCalledTimes(2);
+  });
+
   it('更新のあとにガントの期間なしの数を取り直す', async () => {
     const unscheduledFetch = vi.fn(async () => ({ total: 0, tasks: [], members: [] }));
     const Gantt = defineComponent({

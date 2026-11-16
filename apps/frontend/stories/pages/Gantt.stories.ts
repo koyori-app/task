@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
-import { expect, fn, waitFor, within } from 'storybook/test';
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test';
 import { provide } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
@@ -168,7 +168,12 @@ const jsonResponse = (data: unknown, status = 200) =>
 function createMockFetch({
   tasks = sampleTasks,
   unscheduled = unscheduledTasks,
-}: { tasks?: ScheduleTask[]; unscheduled?: ScheduleTask[] } = {}) {
+  relations = [],
+}: {
+  tasks?: ScheduleTask[];
+  unscheduled?: ScheduleTask[];
+  relations?: { from_task_id: string; to_task_id: string }[];
+} = {}) {
   const original = globalThis.fetch;
   const membersOf = (list: ScheduleTask[]) => {
     const ids = new Set(list.flatMap((t) => t.assignees.map((a) => a.user_id)));
@@ -190,6 +195,12 @@ function createMockFetch({
           require_2fa: false,
         },
       ]);
+    }
+    if (url.pathname.endsWith('/schedule/relations')) {
+      return jsonResponse({
+        relations: relations.map((r) => ({ ...r, type: 'blocks' })),
+        truncated: false,
+      });
     }
     if (url.pathname.endsWith('/schedule/unscheduled')) {
       return jsonResponse({
@@ -333,5 +344,28 @@ export const HighDeviceScroll: Story = {
   },
   play: async ({ canvasElement }) => {
     await expectOverlayAlignedAfterScroll(canvasElement);
+  },
+};
+
+// 依存の矢印の切り替えと凡例。関係の口を引き、切れば凡例の依存の項を消す。
+// 狭い画面の依存の印は、画面の幅を差し替える単体試験（gantt-dependencies.test.ts）で縛る
+export const DependencyToggle: Story = {
+  name: '依存の矢印の切り替え',
+  decorators: [withContext()],
+  beforeEach: () =>
+    createMockFetch({
+      relations: [
+        { from_task_id: 'task-4', to_task_id: 'task-1' },
+        { from_task_id: 'task-3', to_task_id: 'task-5' },
+      ],
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByText('認証フローの設計')).resolves.toBeInTheDocument();
+    // 既定は点け: 凡例に依存・待ちで遅れ・済みが出る
+    await expect(canvas.findByTestId('gantt-legend-dependency')).resolves.toBeInTheDocument();
+    await expect(canvas.getByText('待ちで遅れ')).toBeInTheDocument();
+    await userEvent.click(canvas.getByRole('switch', { name: '依存の矢印' }));
+    await waitFor(() => expect(canvas.queryByTestId('gantt-legend-dependency')).toBeNull());
   },
 };

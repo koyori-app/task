@@ -91,6 +91,9 @@ function mountPage({ unscheduledFailures = 0 } = {}) {
       const wanted = params.query.project_id;
       const scope = <T extends { project: { id: string } }>(list: T[]) =>
         wanted ? list.filter((task) => wanted.includes(task.project.id)) : list;
+      if (path.endsWith('/schedule/relations')) {
+        return { data: { relations: [], truncated: false } };
+      }
       if (path.endsWith('/schedule/unscheduled')) {
         if (failuresLeft > 0) {
           failuresLeft -= 1;

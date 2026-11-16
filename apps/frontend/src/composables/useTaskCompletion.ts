@@ -6,6 +6,7 @@ import type { components } from '@/generated/api';
 import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
 import { TASK_RELATIONS_PATH } from '@/composables/useTaskSubtasks';
 import { UNSCHEDULED_PATH } from '@/lib/gantt/unscheduled';
+import { SCHEDULE_RELATIONS_PATH } from '@/lib/calendar/schedule';
 
 const GET_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}' as const;
 const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
@@ -65,6 +66,7 @@ export function useTaskCompletion(params: TaskCompletionParams) {
       queryClient.invalidateQueries({ queryKey: ['get', ACTIVITIES_PATH] }),
       queryClient.invalidateQueries({ queryKey: ['get', SCHEDULE_PATH] }),
       queryClient.invalidateQueries({ queryKey: ['get', UNSCHEDULED_PATH] }),
+      queryClient.invalidateQueries({ queryKey: ['get', SCHEDULE_RELATIONS_PATH] }),
     ]);
   }
 

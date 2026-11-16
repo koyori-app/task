@@ -31,7 +31,14 @@ import {
   toggled,
   UNASSIGNED_MEMBER,
 } from '@/lib/calendar/filters';
-import { fetchAllSchedule, SCHEDULE_PAGE_LIMIT, SCHEDULE_PATH } from '@/lib/calendar/schedule';
+import {
+  fetchAllSchedule,
+  fetchScheduleRelations,
+  SCHEDULE_PAGE_LIMIT,
+  SCHEDULE_PATH,
+  SCHEDULE_RELATIONS_PATH,
+} from '@/lib/calendar/schedule';
+import { dependencyEdges } from '@/lib/gantt/dependencies';
 import { dateInZone } from '@/lib/calendar/timeline';
 import {
   layoutGantt,
@@ -119,6 +126,7 @@ const memberIds = ref<string[]>(initial.memberIds);
 const scale = ref<GanttScale>(initial.scale);
 const groupBy = ref<GanttGroupBy>(initial.groupBy);
 const urlProgressLine = ref<boolean | null>(initial.progressLine);
+const urlDependencies = ref<boolean | null>(initial.dependencies);
 const viewFrom = computed(() => from.value ?? defaultFrom(today, scale.value, compact.value));
 const to = computed(() => viewTo(viewFrom.value, scale.value, compact.value));
 
@@ -131,7 +139,15 @@ function setProgressLine(on: boolean) {
   preferences.set('ganttProgressLine', on);
 }
 
-watch([from, memberIds, scale, groupBy, urlProgressLine], () => {
+// 依存の矢印は既定で点け。覚え方は稲妻線と同じ（URL の `deps`、無ければ利用者が最後に選んだ値）
+const rememberedDependencies = usePreference('ganttDependencies');
+const dependenciesOn = computed(() => urlDependencies.value ?? rememberedDependencies.value);
+function setDependencies(on: boolean) {
+  urlDependencies.value = on;
+  preferences.set('ganttDependencies', on);
+}
+
+watch([from, memberIds, scale, groupBy, urlProgressLine, urlDependencies], () => {
   if (typeof window === 'undefined') return;
   const url = applyGanttUrlState(
     new URL(window.location.href),
@@ -141,6 +157,7 @@ watch([from, memberIds, scale, groupBy, urlProgressLine], () => {
       scale: scale.value,
       groupBy: groupBy.value,
       progressLine: urlProgressLine.value,
+      dependencies: urlDependencies.value,
     },
     today,
   );
@@ -192,6 +209,35 @@ const unscheduledQuery = useQuery({
   enabled: computed(() => !!tenantId.value && (!scoped.value || !!projectId.value)),
 });
 
+// ブロックの関係。依存の矢印を切った時は引かぬ
+const relationsQuery = useQuery({
+  queryKey: computed(
+    () =>
+      [
+        'get',
+        SCHEDULE_RELATIONS_PATH,
+        {
+          params: {
+            path: { tenant_id: tenantId.value! },
+            query: {
+              from: viewFrom.value,
+              to: to.value,
+              timezone: timeZone,
+              limit: SCHEDULE_PAGE_LIMIT,
+              include_overdue: false,
+              ...projectFilter.value,
+            },
+          },
+        },
+      ] as const,
+  ),
+  queryFn: ({ queryKey, signal }) =>
+    fetchScheduleRelations(queryKey[2].params.path, queryKey[2].params.query, signal),
+  enabled: computed(
+    () => dependenciesOn.value && !!tenantId.value && (!scoped.value || !!projectId.value),
+  ),
+});
+
 const scheduleTasks = computed(() => scheduleQuery.data.value?.tasks ?? []);
 const members = computed(() => scheduleQuery.data.value?.members ?? []);
 const unscheduledTasks = computed(() =>
@@ -212,6 +258,17 @@ const layout = computed(() =>
     collapsed: collapsed.value,
     memberIds: memberIds.value,
     members: members.value,
+    timeZone,
+    today,
+  }),
+);
+
+// 依存の矢印と、狭い画面の行の依存の印。関係が読めぬ間は何も描かず、図はそのまま出す
+const dependencies = computed(() =>
+  dependencyEdges({
+    relations: dependenciesOn.value ? (relationsQuery.data.value?.relations ?? []) : [],
+    tasks: scheduleTasks.value,
+    layout: layout.value,
     timeZone,
     today,
   }),
@@ -375,6 +432,7 @@ function retryFailed() {
   if (isProjectResolveError.value) void projectsQuery.refetch();
   if (scheduleQuery.isError.value) void scheduleQuery.refetch();
   if (unscheduledQuery.isError.value) void unscheduledQuery.refetch();
+  if (relationsQuery.isError.value) void relationsQuery.refetch();
 }
 </script>
 
@@ -501,6 +559,46 @@ function retryFailed() {
         data-testid="gantt-progress-line"
       />
       <span v-if="progressLine">今日の時点の進みを結ぶ。左へ尖れば遅れ、右は先行</span>
+      <Switch
+        :label="compact ? '依存の印' : '依存の矢印'"
+        :checked="dependenciesOn"
+        :on-checked-change="setDependencies"
+        data-testid="gantt-dependencies"
+      />
+      <template v-if="dependenciesOn && !compact">
+        <span class="inline-flex items-center gap-1" data-testid="gantt-legend-dependency">
+          <span
+            class="inline-block h-0.5 w-5"
+            style="background: var(--koyori-color-info)"
+            aria-hidden="true"
+          />
+          依存
+        </span>
+        <span class="inline-flex items-center gap-1">
+          <span
+            class="inline-block w-5 border-t-2 border-dashed"
+            style="border-color: var(--koyori-color-danger)"
+            aria-hidden="true"
+          />
+          待ちで遅れ
+        </span>
+        <span class="inline-flex items-center gap-1">
+          <span
+            class="inline-block h-0.5 w-5"
+            style="background: var(--koyori-color-text-disabled)"
+            aria-hidden="true"
+          />
+          済み
+        </span>
+      </template>
+      <!-- 関係だけが読めぬ時も図は出せるので、図を止めずにこの口だけで取り直させる -->
+      <Button
+        v-if="dependenciesOn && relationsQuery.isError.value"
+        variant="tertiary"
+        label="依存を読み込めませんでした（再試行）"
+        data-testid="gantt-dependencies-retry"
+        @click="retryFailed"
+      />
     </div>
 
     <div
@@ -644,6 +742,21 @@ function retryFailed() {
                 <span class="block truncate text-sm leading-tight">{{ row.item.task.title }}</span>
                 <span class="block truncate text-[11px] leading-tight text-muted-foreground">
                   {{ compactMeta(row.item) }}
+                  <template v-if="dependenciesOn">
+                    <span
+                      v-if="dependencies.marks.get(row.item.task.id)?.waitingFor.length"
+                      class="text-destructive"
+                      data-testid="gantt-dependency-waiting"
+                    >
+                      ・{{ dependencies.marks.get(row.item.task.id)!.waitingFor.join('・') }} 待ち
+                    </span>
+                    <span
+                      v-else-if="dependencies.marks.get(row.item.task.id)?.count"
+                      data-testid="gantt-dependency-count"
+                    >
+                      ・依存 {{ dependencies.marks.get(row.item.task.id)!.count }}
+                    </span>
+                  </template>
                 </span>
               </span>
             </button>
