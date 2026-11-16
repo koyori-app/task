@@ -44,8 +44,7 @@ rand-93f6ce9d446188ac = { package = "rand", version = "0.10" }
 rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8" }
 regex-automata = { version = "0.4", default-features = false, features = ["dfa-build", "dfa-onepass", "hybrid", "meta", "nfa-backtrack", "perf-inline", "perf-literal", "std", "unicode"] }
 regex-syntax = { version = "0.8" }
-reqwest = { version = "0.13", default-features = false, features = ["cookies", "form", "json", "multipart", "rustls"] }
-ring = { version = "0.17", features = ["std"] }
+reqwest = { version = "0.13", default-features = false, features = ["cookies", "form", "http2", "json", "multipart", "rustls", "stream"] }
 rustls = { version = "0.23", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 sea-orm = { version = "2", features = ["entity-registry", "runtime-tokio-rustls", "schema-sync", "sqlx-postgres"] }
 sea-query = { version = "1", default-features = false, features = ["backend-mysql", "backend-postgres", "backend-sqlite", "derive", "hashable-value", "postgres-array", "sea-orm", "thread-safe", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
@@ -97,7 +96,6 @@ num-traits = { version = "0.2", features = ["i128"] }
 rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8" }
 regex-automata = { version = "0.4", default-features = false, features = ["dfa-build", "dfa-onepass", "hybrid", "meta", "nfa-backtrack", "perf-inline", "perf-literal", "std", "unicode"] }
 regex-syntax = { version = "0.8" }
-ring = { version = "0.17", features = ["std"] }
 rustls = { version = "0.23", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 sea-orm-macros = { version = "2", default-features = false, features = ["async", "derive", "entity-registry", "postgres-array", "sqlx-postgres", "strum", "with-json"] }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }

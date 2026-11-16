@@ -8031,7 +8031,6 @@ dependencies = [
  "regex-automata",
  "regex-syntax",
  "reqwest",
- "ring",
  "rustls",
  "sea-orm",
  "sea-orm-macros",
