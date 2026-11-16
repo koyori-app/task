@@ -3,7 +3,7 @@ import { onMounted, onUnmounted } from 'vue';
 const EDITABLE_SELECTOR =
   'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
 
-/** 判定だけの純粋関数（テスト用に export） */
+/** 判定だけの純粋関数 */
 function shouldIgnoreShortcut(event: KeyboardEvent): boolean {
   if (event.defaultPrevented || event.repeat) return true;
   // ブラウザ・OS・既存の ⌘B / ⌘S と衝突させない

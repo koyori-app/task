@@ -1,7 +1,7 @@
 # frontend の検証（fmt / lint / knip / typecheck / unit test / build）を Forgejo Actions で回す。
 #
 # GitHub 側（.github/workflows/frontend-*.yml）と同じ内容。ジョブを分けないのは、
-# runner が 1 台の構成では pnpm install を 5 回やり直す方が高くつくため。
+# runner が 1 台の構成では pnpm install を 6 回やり直す方が高くつくため。
 #
 # 順序に意味がある: fmt:check は生成物（src/generated/api.d.ts）が無い状態で走らせる。
 # lint 以降は生成された型が要るので、その手前で openapi:generate を挟む。
