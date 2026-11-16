@@ -7,8 +7,8 @@
  * 参照定義 (`- [x]: http://e.com` の次の行に実際のチェックがある形) のとき別の `[x]` を拾う。
  * mdast-util-gfm-task-list-item は、チェックを取り除いた後の最初の段落の先頭の text を 1 字削って
  * `position.start` を進める。そのため次のどちらかになる:
- * - 先頭の子が text で、その開始が段落の開始と同じ (削った後の字が残った): `[` は開始の 4 字前
- *   (`[x]` の 3 字と、削った区切り 1 字)
+ * - 先頭の子が text で、その開始が段落の開始と同じ (削った後の字が残った): 削られた 1 字
+ *   (空白・タブ・改行) の手前から空白とタブを読み飛ばした先が `]` で、`[` はその 2 字前
  * - それ以外 (削った後に text が空になり取り除かれた): `[` は段落の開始そのもの
  * どちらも、位置の 3 字が `[ ]` / `[x]` / `[X]` で、checked と一致し、直後が空白か行末か本文の終わりであるときだけ採る。
  * 合わない項目には何も付けず、押せないまま残す。
@@ -28,7 +28,12 @@ export function remarkKfmTaskOffset() {
       if (!paragraph || start === undefined) return;
       const head = paragraph.children[0];
       const shifted = head?.type === 'text' && head.position?.start.offset === start;
-      const offset = shifted ? start - 4 : start;
+      // 削られた区切り (start - 1。空白・タブ・改行) の手前から、空白とタブを読み飛ばして `]` を探す。
+      // `]` と先頭の text の間が 1 字とは限らない (`- [x] ` で行が終わり本文が次の行にあるとき、
+      // 行末の空白は text に入らず、削られるのは改行で、`[` は 5 字以上前になる)
+      let close = start - 2;
+      while (close >= 0 && (source[close] === ' ' || source[close] === '\t')) close -= 1;
+      const offset = shifted ? close - 2 : start;
       if (offset < 0) return;
       const box = BOX.exec(source.slice(offset, offset + 3));
       if (!box) return;
