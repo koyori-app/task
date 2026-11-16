@@ -84,6 +84,7 @@ mod tenant_invitations_integration;
 mod tenant_member_role_integration;
 mod tenant_members_integration;
 mod tenant_require_2fa_integration;
+mod tenant_token_unbind_concurrency_integration;
 mod tenants_integration;
 mod test_env_guard_integration;
 mod time_tracking_integration;

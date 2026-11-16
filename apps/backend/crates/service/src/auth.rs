@@ -23,7 +23,7 @@ use tracing::{error, warn};
 use chrono::{DateTime, Utc};
 use sea_orm::prelude::DateTimeWithTimeZone;
 use sea_orm::sea_query::Expr;
-use sea_orm::sea_query::{Query, SelectStatement};
+use sea_orm::sea_query::{LockType, Query, SelectStatement};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
 };
@@ -524,6 +524,15 @@ pub fn token_ids_bound_to(tenant_id: Uuid) -> SelectStatement {
 ///
 /// 一括失効とテナントの削除で同じ処理を使う。テナントの削除は束縛を `ON DELETE CASCADE` で
 /// 消すので、行だけ `revoked = false` で残らないよう、テナントを消す前に同じトランザクションで呼ぶ。
+///
+/// 対象のトークン行を id 順にロックしてから束縛を外す。ロックしないと、同じトークンに結び付いた
+/// 別テナントの削除・一括失効が同時に走ったとき、互いに相手の束縛をまだ残っているものと見て
+/// 取り消しを見送り、束縛が 0 件のまま `revoked = false` で残る。
+///
+/// 呼び出し側は先にテナント行をロックしてから呼ぶ（削除は FOR UPDATE、一括失効は FOR SHARE）。
+/// 「テナント行 → トークン行 → 束縛行」の順をそろえるためで、同じテナントの削除と一括失効が
+/// 逆順に待ち合ってデッドロックするのを防ぐ。この関数の中でテナント行を FOR UPDATE に上げると、
+/// FOR SHARE を持って入る一括失効どうしがデッドロックするので、ここではロックしない。
 pub async fn unbind_tenant_from_tokens<C: ConnectionTrait>(
     conn: &C,
     tenant_id: Uuid,
@@ -531,6 +540,8 @@ pub async fn unbind_tenant_from_tokens<C: ConnectionTrait>(
     let tokens = PersonalTokenEntity::find()
         .filter(personal_tokens::Column::Id.in_subquery(token_ids_bound_to(tenant_id)))
         .filter(personal_tokens::Column::Revoked.eq(false))
+        .order_by_asc(personal_tokens::Column::Id)
+        .lock(LockType::NoKeyUpdate)
         .all(conn)
         .await?;
     personal_token_tenants::Entity::delete_many()
@@ -554,6 +565,34 @@ pub async fn unbind_tenant_from_tokens<C: ConnectionTrait>(
         .exec(conn)
         .await?;
     Ok(orphaned)
+}
+
+/// 利用者の PAT をまだ取り消していないものすべて取り消す。
+///
+/// `unbind_tenant_from_tokens` はトークン行を id 昇順でロックするので、こちらも同じ順で取る。
+/// 走査順で行を更新すると、同じ利用者の PAT 2 本が 2 つのテナントに結び付いた状態で
+/// 「テナントの削除」と重なったとき、取る順が食い違ってデッドロック（`40P01`）になる。
+/// 副問い合わせの `ORDER BY id FOR NO KEY UPDATE` が id 昇順にロックしてから更新するので、
+/// トランザクションの外からでも 1 文でこの順を守れる。
+/// 利用者単位の取り消し（パスワード変更・利用者の停止・BOT の停止）はこれを使う。
+pub async fn revoke_user_personal_tokens<C: ConnectionTrait>(
+    conn: &C,
+    user_id: Uuid,
+) -> Result<(), DbErr> {
+    let locked_in_id_order = Query::select()
+        .column(personal_tokens::Column::Id)
+        .from(personal_tokens::Entity)
+        .and_where(personal_tokens::Column::UserId.eq(user_id))
+        .and_where(personal_tokens::Column::Revoked.eq(false))
+        .order_by(personal_tokens::Column::Id, sea_orm::Order::Asc)
+        .lock(LockType::NoKeyUpdate)
+        .to_owned();
+    PersonalTokenEntity::update_many()
+        .col_expr(personal_tokens::Column::Revoked, Expr::value(true))
+        .filter(personal_tokens::Column::Id.in_subquery(locked_in_id_order))
+        .exec(conn)
+        .await?;
+    Ok(())
 }
 
 /// PAT の `last_used_at` を書き直す間隔。CLI や BOT は短い間隔で連続して叩くので、毎回は書かない。

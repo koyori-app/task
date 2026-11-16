@@ -237,8 +237,14 @@ pub async fn delete_tenant(
     auth.require_scope(Scope::WriteTenant)?;
     auth.ensure_tenant_owner(&state, id).await?;
     // 束縛が尽きた PAT を、テナントの削除（束縛の Cascade）より先に同じトランザクションで取り消す。
-    // しないと、行が `revoked = false` で残って単体取得だけが空の束縛で返る
+    // しないと、行が `revoked = false` で残って単体取得だけが空の束縛で返る。
+    // 先にテナント行をロックし、一括失効（テナント行 → 束縛行）と同じ順で取る（逆順だとデッドロックする）
     let txn = state.db.begin().await?;
+    tenants::Entity::find_by_id(id)
+        .lock_exclusive()
+        .one(&txn)
+        .await?
+        .ok_or(AppError::NotFound)?;
     auth::unbind_tenant_from_tokens(&txn, id).await?;
     tenants::Entity::delete_by_id(id).exec(&txn).await?;
     txn.commit().await?;
