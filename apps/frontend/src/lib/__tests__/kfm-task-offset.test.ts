@@ -113,10 +113,10 @@ describe('rehype-kfm-task-offset (原文の位置)', () => {
             const cont = prefix.startsWith('>') ? '>   ' : '';
             const src = `${prefix}${box}${gap.replace(/\n {2}/g, `\n${cont}  `)}${body}`;
             const found = boxes(await renderDescription(src));
-            const hasText = gap !== '';
-            if (found.length === 0) {
-              // `[x]foo` のように区切りが無い形はチェックにならない
-              expect(hasText, JSON.stringify(src)).toBe(false);
+            // `]` の直後が空白・タブ・行末のときだけチェックになる (`[x]foo` はならない)
+            const isCheck = /^[ \t\n]/.test(`${gap}${body}`);
+            if (!isCheck) {
+              expect(found, JSON.stringify(src)).toHaveLength(0);
               continue;
             }
             expect(found, JSON.stringify(src)).toHaveLength(1);
