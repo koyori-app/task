@@ -101,6 +101,41 @@ describe('rehype-kfm-task-offset (原文の位置)', () => {
     expect(html).not.toContain('data-kfm-task-offset');
   });
 
+  it('`]` の後ろの空白の数・タブ・行末のどの書き方でも位置が合う', async () => {
+    const gaps = ['', ' ', '  ', '   ', '\t', ' \t', '\t ', ' \n  ', '  \n  ', '\t\n  ', '\n  '];
+    const bodies = ['foo', '*foo*', '[a](http://e.com)', ' foo'];
+    const prefixes = ['- ', '1. ', '> - ', '  - ', '*\t'];
+    for (const prefix of prefixes) {
+      for (const box of ['[ ]', '[x]', '[X]']) {
+        for (const gap of gaps) {
+          for (const body of bodies) {
+            // 継続行は印の幅だけ字下げする (引用の中は `> ` を付ける)
+            const cont = prefix.startsWith('>') ? '>   ' : '';
+            const src = `${prefix}${box}${gap.replace(/\n {2}/g, `\n${cont}  `)}${body}`;
+            const found = boxes(await renderDescription(src));
+            const hasText = gap !== '';
+            if (found.length === 0) {
+              // `[x]foo` のように区切りが無い形はチェックにならない
+              expect(hasText, JSON.stringify(src)).toBe(false);
+              continue;
+            }
+            expect(found, JSON.stringify(src)).toHaveLength(1);
+            expect(src.slice(found[0].offset, found[0].offset + 3), JSON.stringify(src)).toBe(box);
+          }
+        }
+      }
+    }
+  });
+
+  it('`]` の後ろが空白 1 字で行が終わり、本文が次の行にある項目にも位置が付く', async () => {
+    for (const src of ['- [x] \n  foo', '- [ ] \n  foo', '- [x]\t\n  foo', '> - [ ] \n>   foo']) {
+      const found = boxes(await renderDescription(src));
+      expect(found, JSON.stringify(src)).toHaveLength(1);
+      expect(found[0].offset, JSON.stringify(src)).toBe(src.indexOf('['));
+      expect(src.slice(found[0].offset, found[0].offset + 3)).toMatch(/^\[[ x]\]$/);
+    }
+  });
+
   it('チェックの後が装飾・入れ子・空でも位置が合う', async () => {
     const cases = [
       '- [ ] *強調*',
@@ -140,6 +175,9 @@ describe('rehype-kfm-task-offset (原文の位置)', () => {
       '参照: [リンク][x]',
       '- [ ] *強調*',
       '- [x]',
+      '- [x] ',
+      '  foo',
+      '- [ ]\t',
       '   - [ ] 字下げ',
     ];
 

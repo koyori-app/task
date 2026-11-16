@@ -1579,6 +1579,7 @@ describe('TaskDetailHub の説明のチェックボックスの切り替え', ()
       fieldUpdating: { description: false },
       fieldErrors: { description: FAILED },
     });
+    await nextTick(); // フォーカスは描画の直後に戻す
 
     expect(document.activeElement).toBe(document.body);
   });
