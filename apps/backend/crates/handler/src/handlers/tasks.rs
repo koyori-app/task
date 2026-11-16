@@ -1002,12 +1002,12 @@ pub async fn update_task(
         state.db.begin().await?
     };
 
-    // 種別の削除と同じく、種別の行 → タスク行の順にロックする（service::ordering）。
-    // 今と同じ種別の再指定でも、タスク行を取る前に確かめる（逆順だと削除とデッドロックになる）。
+    // 種別は確かめるだけで、ロックは取らない（`milestone_id` と同じ。service::task_types の方針）。確認のあとに
+    // 削除されたら FK が更新を弾き、assignment_error が 404 にする
     if !payload.clear_task_type_id
         && let Some(type_id) = payload.task_type_id
     {
-        task_types::lock_for_assignment(&txn, project_id, type_id).await?;
+        task_types::find_in_project(&txn, project_id, type_id).await?;
     }
 
     // スプリント完了・一括割り当てと同じく、スプリント → タスクの順にロックする。
@@ -1239,7 +1239,10 @@ pub async fn update_task(
             active.parent_task_id = Set(Some(new_parent_id));
         }
     }
-    let updated = active.update(&txn).await?;
+    let updated = active
+        .update(&txn)
+        .await
+        .map_err(task_types::assignment_error)?;
     if let Some(ref desired) = payload.assignees {
         let current = task_assignees::Entity::find()
             .filter(task_assignees::Column::TaskId.eq(task_id))

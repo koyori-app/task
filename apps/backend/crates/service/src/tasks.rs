@@ -132,9 +132,9 @@ pub async fn create_task_in_txn<C: ConnectionTrait>(
             .ok_or(AppError::NotFound)?;
     }
     if let Some(tid) = payload.task_type_id {
-        // 種別の行をロックする（service::ordering）。一括作成はカウンター・スプリントの後になるが、KEY SHARE 同士は待たず、
-        // 種別を管理する側はカウンター・スプリントを取らないので循環しない
-        crate::task_types::lock_for_assignment(txn, ctx.project_id, tid).await?;
+        // 確かめるだけで、ロックは取らない（`milestone_id` と同じ。service::task_types の方針）。確認のあとに
+        // 削除されたら FK が挿入を弾き、assignment_error が 404 にする
+        crate::task_types::find_in_project(txn, ctx.project_id, tid).await?;
     }
     // 採番(カウンター行ロック)を sprint の FOR UPDATE より前に取る。ロック順を「カウンター → sprint」に
     // 固定し、一括作成と単体作成の同時実行でのデッドロックを避ける(ロールバックで番号も戻る)。
@@ -184,7 +184,8 @@ pub async fn create_task_in_txn<C: ConnectionTrait>(
         deleted_at: Set(None),
     }
     .insert(txn)
-    .await?;
+    .await
+    .map_err(crate::task_types::assignment_error)?;
 
     for a in &payload.assignees {
         require_project_access(txn, ctx.tenant_id, ctx.project_id, a.user_id).await?;

@@ -658,36 +658,6 @@ async fn a_backfill_racing_an_uncommitted_backfill_skips_the_names_it_loses() {
 }
 
 #[tokio::test]
-async fn deleting_a_type_waits_for_a_task_write_that_checked_it() {
-    let mut app = TestApp::new().await;
-    let owner = app.insert_user(true, false).await;
-    app.login_session_no_content(&owner.email, &owner.password)
-        .await;
-    let tp = app.insert_tenant_project(owner.id).await;
-    let base = types_base(tp.tenant_id, tp.project_id);
-    let bug = create_type(&app, &base, "バグ", "#ef4444").await;
-    let type_id: Uuid = bug["id"].as_str().expect("id").parse().expect("uuid");
-
-    // タスクの作成・更新は lock_for_assignment で種別を確かめてから書く。その確認のあとコミットまでの間に
-    // 種別の削除が通ると、書き込みが FK 違反になり 500 になる。確認が行を読み取りロックしていれば、削除は待つ
-    let txn = app.state.db.begin().await.expect("begin");
-    service::task_types::lock_for_assignment(&txn, tp.project_id, type_id)
-        .await
-        .expect("find");
-    let pid = backend_pid(&txn).await;
-
-    let client = app.client().clone();
-    let url = format!("{}{base}/{type_id}", app.base_url());
-    let delete = tokio::spawn(async move { client.delete(url).send().await });
-    wait_until_blocked_by(&app, pid, "種別の削除").await;
-    txn.commit().await.expect("commit");
-
-    let response = delete.await.expect("join").expect("send");
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
-    assert!(list_types(&app, &base).await.is_empty());
-}
-
-#[tokio::test]
 async fn tasks_take_a_type_on_create_and_update() {
     let mut app = TestApp::new().await;
     let owner = app.insert_user(true, false).await;
@@ -909,8 +879,9 @@ async fn deleting_a_type_keeps_its_tasks_untyped() {
     assert!(detail["task_type"].is_null());
 }
 
-/// 種別の削除は「プロジェクト行 → 種別の行 → タスク行（SET NULL）」の順にロックする。タスクの更新が
-/// 「タスク行 → 種別の行」の順で取ると、今と同じ種別を送った更新と削除がデッドロックになり、片方が 500 になる。
+/// 種別の削除は 1 文で、付いていたタスクの行を `SET NULL` で待つ。タスクの更新が種別の行を（タスク行を取ったあとに）
+/// 求めると、今と同じ種別を送った更新と削除がデッドロックになり、片方が 500 になる。更新は種別の行を求めない
+/// （確認はロックなしの読み取りで、値が変わらない UPDATE は FK の検査も走らない）ので、削除がタスク行を待つだけになる。
 /// 更新がタスク行を待っている間に削除を重ね、タスク行を解放して、両方が成功することを見る。
 #[tokio::test]
 async fn re_sending_the_current_type_while_it_is_deleted_does_not_deadlock() {
@@ -971,7 +942,7 @@ async fn re_sending_the_current_type_while_it_is_deleted_does_not_deadlock() {
     assert!(row.task_type_id.is_none());
 }
 
-/// 種別付きのタスクの作成が採番で待っている間（種別の行を `FOR KEY SHARE` で持っている）も、並べ替えは待たずに終わり、
+/// 種別付きのタスクの作成が採番で待っている間も、並べ替えは待たずに終わり（タスクの作成は種別の定義のロックを取らない）、
 /// 作成もそのあと成功する。
 #[tokio::test]
 async fn reordering_the_types_does_not_wait_for_a_typed_task_being_created() {
@@ -1015,7 +986,7 @@ async fn reordering_the_types_does_not_wait_for_a_typed_task_being_created() {
     });
     wait_until_blocked_count(&app, pid, 1, "作成").await;
 
-    // 並べ替えは、作成が種別の行を FOR KEY SHARE で持っていても待たず（NO KEY UPDATE と衝突しない）、先に終わる
+    // 並べ替えは、作成の待ちに巻き込まれず先に終わる
     let reorder = tokio::time::timeout(
         Duration::from_secs(5),
         client
@@ -1074,8 +1045,8 @@ async fn creating_a_type_past_the_position_limit_is_refused() {
 }
 
 /// 種別を送らないタスクの更新は、タスク行を取ってから通知を挿入する（FK の検査がプロジェクト行を
-/// `FOR KEY SHARE` で取る）。種別の削除がプロジェクト行を `FOR UPDATE` で握ったままタスク行（`SET NULL`）を
-/// 待つと、この更新と循環する。更新がタスク行を待っている間に削除と並べ替えを重ね、タスク行を解放して、
+/// `FOR KEY SHARE` で取る）。種別の削除や並べ替えがプロジェクト行を `FOR UPDATE` で握ると、この更新と循環する。
+/// 更新がタスク行を待っている間に削除と並べ替えを重ね（並べ替えは定義のロックで待つだけ）、タスク行を解放して、
 /// 3 つとも成功することを見る。
 #[tokio::test]
 async fn a_plain_update_with_a_notification_does_not_deadlock_with_deleting_and_reordering_types() {
@@ -1148,4 +1119,212 @@ async fn a_plain_update_with_a_notification_does_not_deadlock_with_deleting_and_
         .expect("task");
     assert!(row.task_type_id.is_none());
     assert_eq!(names(&list_types(&app, &base).await), ["機能"]);
+}
+
+/// 種別の定義を書く 4 操作（作成・更新・並べ替え・削除）は、プロジェクト単位のロックを最初に取って直列になる。
+/// テスト側がそのロックを持っている間は、どの操作も待ちに入り、解放すると成功する。
+#[tokio::test]
+async fn type_definition_writes_queue_on_the_project_lock() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(true, false).await;
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let base = types_base(tp.tenant_id, tp.project_id);
+    let client = app.client().clone();
+    let url = |path: &str| format!("{}{base}{path}", app.base_url());
+
+    // 作成 2 本: 両方が待ち、解放後に 201 で、position が重ならない
+    let txn = app.state.db.begin().await.expect("begin");
+    service::task_types::lock_definitions(&txn, tp.project_id)
+        .await
+        .expect("lock");
+    let pid = backend_pid(&txn).await;
+    let creates: Vec<_> = ["A", "B"]
+        .into_iter()
+        .map(|name| {
+            let request = client
+                .post(url(""))
+                .json(&json!({ "name": name, "color": "#111111" }));
+            tokio::spawn(async move { request.send().await })
+        })
+        .collect();
+    wait_until_blocked_count(&app, pid, 2, "作成 2 本").await;
+    txn.commit().await.expect("commit");
+    for create in creates {
+        let response = create.await.expect("join").expect("send");
+        assert_eq!(response.status(), StatusCode::CREATED);
+    }
+    let types = list_types(&app, &base).await;
+    let positions: Vec<i64> = types
+        .iter()
+        .map(|t| t["position"].as_i64().expect("position"))
+        .collect();
+    assert_eq!(positions, [0, 1]);
+    let (first, second) = (
+        types[0]["id"].as_str().expect("id").to_string(),
+        types[1]["id"].as_str().expect("id").to_string(),
+    );
+
+    // 更新・並べ替え・削除: 1 本ずつ、ロックを持つ → 待つ → 解放 → 成功
+    for (label, request, expected) in [
+        (
+            "更新",
+            client
+                .put(url(&format!("/{first}")))
+                .json(&json!({ "name": "A2" })),
+            StatusCode::OK,
+        ),
+        (
+            "並べ替え",
+            client
+                .put(url("/reorder"))
+                .json(&json!({ "ids": [second, first] })),
+            StatusCode::OK,
+        ),
+        (
+            "削除",
+            client.delete(url(&format!("/{first}"))),
+            StatusCode::NO_CONTENT,
+        ),
+    ] {
+        let txn = app.state.db.begin().await.expect("begin");
+        service::task_types::lock_definitions(&txn, tp.project_id)
+            .await
+            .expect("lock");
+        let pid = backend_pid(&txn).await;
+        let handle = tokio::spawn(async move { request.send().await });
+        wait_until_blocked_count(&app, pid, 1, label).await;
+        txn.commit().await.expect("commit");
+        let response = handle.await.expect("join").expect("send");
+        assert_eq!(response.status(), expected, "{label}");
+    }
+    assert_eq!(names(&list_types(&app, &base).await), ["B"]);
+}
+
+/// タスクに付ける種別は、書く前にロックなしで確かめるだけにする（`milestone_id` と同じ）。確認のあとに削除されたら、
+/// FK が書き込みを弾く。それを 500 ではなく 404 にする（削除が先に終わっていた場合と同じ結果）。
+/// 更新: タスク行を握って更新を待たせ、その間に種別を削除する（削除は待たない）。
+#[tokio::test]
+async fn assigning_a_type_deleted_after_the_check_is_not_found_on_update() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(true, false).await;
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let status_id = create_status(&app, &tp, "Todo", false).await;
+    let base = types_base(tp.tenant_id, tp.project_id);
+    let bug = create_type(&app, &base, "バグ", "#ef4444").await;
+    let created = app
+        .post_json_with_session(
+            &tasks_base(&tp),
+            json!({ "title": "種別なし", "status_id": status_id }),
+        )
+        .await;
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let task_id: Uuid = json_body(created).await["id"]
+        .as_str()
+        .expect("id")
+        .parse()
+        .expect("uuid");
+
+    let txn = app.state.db.begin().await.expect("begin");
+    txn.execute_raw(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        "SELECT id FROM tasks WHERE id = $1 FOR UPDATE",
+        [task_id.into()],
+    ))
+    .await
+    .expect("lock task");
+    let pid = backend_pid(&txn).await;
+
+    let client = app.client().clone();
+    let task_url = format!("{}{}/{task_id}", app.base_url(), tasks_base(&tp));
+    let update_body = json!({ "task_type_id": bug["id"] });
+    let update_client = client.clone();
+    let update =
+        tokio::spawn(async move { update_client.put(task_url).json(&update_body).send().await });
+    wait_until_blocked_count(&app, pid, 1, "更新").await;
+
+    // 種別は確認のあと。削除は待たずに通る
+    let deleted = client
+        .delete(format!(
+            "{}{base}/{}",
+            app.base_url(),
+            bug["id"].as_str().unwrap()
+        ))
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+    txn.commit().await.expect("commit");
+
+    let update = update.await.expect("join").expect("send");
+    assert_eq!(update.status(), StatusCode::NOT_FOUND, "更新");
+    let row = entity::tasks::Entity::find_by_id(task_id)
+        .one(&app.state.db)
+        .await
+        .expect("load")
+        .expect("task");
+    assert!(row.task_type_id.is_none());
+}
+
+/// 作成: 採番の行を握って、種別付きの作成を待たせ、その間に種別を削除する。作成は 404 で、タスクは増えない。
+#[tokio::test]
+async fn assigning_a_type_deleted_after_the_check_is_not_found_on_create() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(true, false).await;
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let status_id = create_status(&app, &tp, "Todo", false).await;
+    let base = types_base(tp.tenant_id, tp.project_id);
+    let bug = create_type(&app, &base, "バグ", "#ef4444").await;
+    let tasks = tasks_base(&tp);
+    // 採番の行（project_task_counters）を作っておく
+    let first = app
+        .post_json_with_session(&tasks, json!({ "title": "最初", "status_id": status_id }))
+        .await;
+    assert_eq!(first.status(), StatusCode::CREATED);
+
+    let txn = app.state.db.begin().await.expect("begin");
+    txn.execute_raw(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        "SELECT project_id FROM project_task_counters WHERE project_id = $1 FOR UPDATE",
+        [tp.project_id.into()],
+    ))
+    .await
+    .expect("lock counter");
+    let pid = backend_pid(&txn).await;
+
+    let client = app.client().clone();
+    let create_url = format!("{}{tasks}", app.base_url());
+    let create_body =
+        json!({ "title": "種別つき", "status_id": status_id, "task_type_id": bug["id"] });
+    let create_client = client.clone();
+    let create = tokio::spawn(async move {
+        create_client
+            .post(create_url)
+            .json(&create_body)
+            .send()
+            .await
+    });
+    wait_until_blocked_count(&app, pid, 1, "作成").await;
+
+    let deleted = client
+        .delete(format!(
+            "{}{base}/{}",
+            app.base_url(),
+            bug["id"].as_str().unwrap()
+        ))
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+    txn.commit().await.expect("commit");
+
+    let create = create.await.expect("join").expect("send");
+    assert_eq!(create.status(), StatusCode::NOT_FOUND, "作成");
+    let listed = json_body(app.get_with_session(&tasks).await).await;
+    assert_eq!(listed["tasks"].as_array().expect("tasks").len(), 1);
 }
