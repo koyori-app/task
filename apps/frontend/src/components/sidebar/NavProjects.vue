@@ -119,41 +119,44 @@ function isChildActive(child: ProjectChild) {
       </div>
     </div>
     <template v-else>
-      <Accordion
+      <!-- レールではアイコンだけが縦に並び、どれがプロジェクトの中の項目か分からないので、
+           開いているプロジェクトは見出しと中の項目を角丸の帯で囲む -->
+      <div
         v-for="project in sortedProjects"
-        :id="project.id"
         :key="project.id"
-        :label="project.name"
-        :default-open="isProjectActive(project)"
+        data-project-group
+        class="rounded-xl border border-transparent in-data-[sidebar-rail=true]:has-[[aria-expanded=true]]:border-border in-data-[sidebar-rail=true]:has-[[aria-expanded=true]]:bg-sidebar-accent/50 in-data-[sidebar-rail=true]:has-[[aria-expanded=true]]:-mx-1 in-data-[sidebar-rail=true]:has-[[aria-expanded=true]]:p-1"
       >
-        <template #icon>
-          <img
-            v-if="project.icon_url"
-            :src="project.icon_url"
-            alt=""
-            class="size-4 shrink-0 rounded-sm object-cover"
-          />
-          <span v-else-if="project.icon_emoji" class="text-base leading-none">{{
-            project.icon_emoji
-          }}</span>
-          <span
-            v-else
-            class="flex size-4 shrink-0 items-center justify-center rounded-full bg-accent text-[10px] font-semibold leading-none"
-            >{{ projectInitial(project) }}</span
-          >
-        </template>
-        <div v-if="tenantSlug" class="flex flex-col gap-(--koyori-space-xs)">
-          <SidebarLink
-            v-for="child in projectChildren(project)"
-            :key="child.href"
-            :label="child.label"
-            :href="child.href"
-            :current="isChildActive(child)"
-          >
-            <template #icon><component :is="child.icon" class="size-4" /></template>
-          </SidebarLink>
-        </div>
-      </Accordion>
+        <Accordion :id="project.id" :label="project.name" :default-open="isProjectActive(project)">
+          <template #icon>
+            <img
+              v-if="project.icon_url"
+              :src="project.icon_url"
+              alt=""
+              class="size-4 shrink-0 rounded-sm object-cover"
+            />
+            <span v-else-if="project.icon_emoji" class="text-base leading-none">{{
+              project.icon_emoji
+            }}</span>
+            <span
+              v-else
+              class="flex size-4 shrink-0 items-center justify-center rounded-full bg-accent text-[10px] font-semibold leading-none"
+              >{{ projectInitial(project) }}</span
+            >
+          </template>
+          <div v-if="tenantSlug" class="flex flex-col gap-(--koyori-space-xs)">
+            <SidebarLink
+              v-for="child in projectChildren(project)"
+              :key="child.href"
+              :label="child.label"
+              :href="child.href"
+              :current="isChildActive(child)"
+            >
+              <template #icon><component :is="child.icon" class="size-4" /></template>
+            </SidebarLink>
+          </div>
+        </Accordion>
+      </div>
     </template>
   </div>
 </template>
