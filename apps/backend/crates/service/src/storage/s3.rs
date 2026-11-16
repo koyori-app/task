@@ -11,7 +11,8 @@ use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
 use object_store::aws::AmazonS3Builder;
 use object_store::{
-    Attribute, Attributes, ObjectStore, PutMultipartOpts, PutOptions, PutPayload, path::Path,
+    Attribute, Attributes, ObjectStore, ObjectStoreExt, PutMultipartOptions, PutOptions,
+    PutPayload, path::Path,
 };
 
 use super::r#trait::{ByteStream, StorageBackend, StorageError};
@@ -134,7 +135,7 @@ impl StorageBackend for S3StorageBackend {
                 .await
                 .map_err(|e| StorageError::Other(format!("S3 PutObject failed: {e}")))?;
         } else {
-            let opts = PutMultipartOpts {
+            let opts = PutMultipartOptions {
                 attributes: mime_attributes(mime),
                 ..Default::default()
             };
@@ -328,8 +329,10 @@ mod tests {
         assert!(matches!(result, Err(StorageError::InvalidKey)));
     }
 
+    use futures::stream::BoxStream;
     use object_store::{
-        GetOptions, GetResult, ListResult, MultipartUpload, ObjectMeta, PutResult, UploadPart,
+        CopyOptions, GetOptions, GetResult, ListResult, MultipartUpload, ObjectMeta, PutResult,
+        UploadPart,
     };
     use std::sync::Mutex;
 
@@ -393,7 +396,7 @@ mod tests {
         async fn put_multipart_opts(
             &self,
             location: &Path,
-            opts: PutMultipartOpts,
+            opts: PutMultipartOptions,
         ) -> object_store::Result<Box<dyn MultipartUpload>> {
             let inner = self.inner.put_multipart_opts(location, opts).await?;
             Ok(Box::new(RecordingUpload {
@@ -410,13 +413,16 @@ mod tests {
         ) -> object_store::Result<GetResult> {
             self.inner.get_opts(location, options).await
         }
-        async fn delete(&self, location: &Path) -> object_store::Result<()> {
-            self.inner.delete(location).await
+        fn delete_stream(
+            &self,
+            locations: BoxStream<'static, object_store::Result<Path>>,
+        ) -> BoxStream<'static, object_store::Result<Path>> {
+            self.inner.delete_stream(locations)
         }
         fn list(
             &self,
             prefix: Option<&Path>,
-        ) -> futures::stream::BoxStream<'_, object_store::Result<ObjectMeta>> {
+        ) -> BoxStream<'static, object_store::Result<ObjectMeta>> {
             self.inner.list(prefix)
         }
         async fn list_with_delimiter(
@@ -425,11 +431,13 @@ mod tests {
         ) -> object_store::Result<ListResult> {
             self.inner.list_with_delimiter(prefix).await
         }
-        async fn copy(&self, from: &Path, to: &Path) -> object_store::Result<()> {
-            self.inner.copy(from, to).await
-        }
-        async fn copy_if_not_exists(&self, from: &Path, to: &Path) -> object_store::Result<()> {
-            self.inner.copy_if_not_exists(from, to).await
+        async fn copy_opts(
+            &self,
+            from: &Path,
+            to: &Path,
+            options: CopyOptions,
+        ) -> object_store::Result<()> {
+            self.inner.copy_opts(from, to, options).await
         }
     }
 
