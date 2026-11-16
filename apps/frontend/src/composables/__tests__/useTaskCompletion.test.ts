@@ -85,6 +85,20 @@ describe('useTaskCompletion', () => {
     expect(writes()).toHaveLength(0);
   });
 
+  it('完了にするとガントの期間なしの数を取り直す', async () => {
+    const unscheduledKey = [
+      'get',
+      '/v1/tenants/{tenant_id}/schedule/unscheduled',
+      { params: { path: { tenant_id: 'tenant-1' }, query: { limit: 200 } } },
+    ];
+    queryClient.setQueryData(unscheduledKey, { total: 1, tasks: [], members: [] });
+
+    await completion.completeMine(task, 'user-alpha');
+    await flushPromises();
+
+    expect(queryClient.getQueryState(unscheduledKey)?.isInvalidated).toBe(true);
+  });
+
   it('自分の分の完了と取り消しは担当者の complete / reopen を叩く', async () => {
     await completion.completeMine(task, 'user-alpha');
     await completion.reopenMine(task, 'user-alpha');

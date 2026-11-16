@@ -308,6 +308,29 @@ describe('useTaskRowMutations', () => {
     expect(scheduleFetch).toHaveBeenCalledTimes(2);
   });
 
+  // ガントの期間なしの数は予定と別の key なので、予定を落としても取り直されない
+  it('更新のあとにガントの期間なしの数を取り直す', async () => {
+    const unscheduledFetch = vi.fn(async () => ({ total: 0, tasks: [], members: [] }));
+    const Gantt = defineComponent({
+      setup() {
+        useQuery({
+          queryKey: ['get', '/v1/tenants/{tenant_id}/schedule/unscheduled', { params: {} }],
+          queryFn: unscheduledFetch,
+        });
+        return () => null;
+      },
+    });
+    mount(Gantt, { global: { plugins: [[VueQueryPlugin, { queryClient }]] } });
+    mountHost();
+    await flushPromises();
+    expect(unscheduledFetch).toHaveBeenCalledTimes(1);
+
+    await mutations.setSoftDeadline({ id: 'task-1' } as never, '2026-10-20T00:00:00Z');
+    await flushPromises();
+
+    expect(unscheduledFetch).toHaveBeenCalledTimes(2);
+  });
+
   // 行と詳細（useTaskComments）が同じコメント一覧へ書くので、行から投稿したときも
   // コメント一覧を落とさないと、詳細を開いたまま足したコメントが出てこない
   it('コメント追加のあとにコメント一覧を取り直す', async () => {

@@ -175,6 +175,12 @@ const scheduleQueryKey = [
   '/v1/tenants/{tenant_id}/schedule',
   { params: { path: { tenant_id: TENANT_ID }, query: { from: '2026-10-12', to: '2026-10-25' } } },
 ] as const;
+// ガントの期間なしの数。予定の key とは別なので、予定を落としても前方一致しない
+const unscheduledQueryKey = [
+  'get',
+  '/v1/tenants/{tenant_id}/schedule/unscheduled',
+  { params: { path: { tenant_id: TENANT_ID }, query: { limit: 200 } } },
+] as const;
 const searchQueryKey = [
   'get',
   TASK_SEARCH_PATH,
@@ -1014,5 +1020,55 @@ describe('useTaskDetail のキャッシュ同期', () => {
     expect(queryClient.getQueryState(searchQueryKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(scheduleQueryKey)?.isInvalidated).toBe(true);
     expect(onAfterDelete).toHaveBeenCalledWith('/acme/projects/ENG/tasks');
+  });
+
+  describe('ガントの期間なしの数', () => {
+    function seedUnscheduled() {
+      queryClient.setQueryData(unscheduledQueryKey, { total: 0, tasks: [], members: [] });
+    }
+
+    it('日付を入れると期間なしの数を取り直す（期間なしから出る）', async () => {
+      mountHost();
+      await flushPromises();
+      seedUnscheduled();
+
+      detail.onSavePlannedStartOn('2026-11-20');
+      await flushPromises();
+      putControl.resolve!({ ...baseTask, planned_start_on: '2026-11-20' });
+      await flushPromises();
+
+      expect(queryClient.getQueryState(unscheduledQueryKey)?.isInvalidated).toBe(true);
+    });
+
+    it('最後の日付を消すと期間なしの数を取り直す（期間なしに入る）', async () => {
+      const dated = baseTask as { soft_deadline: string | null };
+      dated.soft_deadline = '2026-11-20T00:00:00Z';
+      try {
+        mountHost();
+        await flushPromises();
+        seedUnscheduled();
+
+        detail.onSaveSoftDeadline(null);
+        await flushPromises();
+        putControl.resolve!({ ...baseTask, soft_deadline: null });
+        await flushPromises();
+
+        expect(await putControl.body).toEqual({ clear_soft_deadline: true });
+        expect(queryClient.getQueryState(unscheduledQueryKey)?.isInvalidated).toBe(true);
+      } finally {
+        dated.soft_deadline = null;
+      }
+    });
+
+    it('削除すると期間なしの数を取り直す', async () => {
+      mountHost();
+      await flushPromises();
+      seedUnscheduled();
+
+      detail.confirmDelete();
+      await flushPromises();
+
+      expect(queryClient.getQueryState(unscheduledQueryKey)?.isInvalidated).toBe(true);
+    });
   });
 });
