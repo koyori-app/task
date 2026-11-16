@@ -25,6 +25,9 @@ pub struct OAuthStatePayload {
     /// GitLab self-hosted のインスタンス URL
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instance_url: Option<String>,
+    /// 再認証（既に結んだ連携で本人確認する）。`link_user_id` に本人を持つ。連携は足さない。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reauth: bool,
 }
 
 /// Redis を使う [`StateStore`] 実装。

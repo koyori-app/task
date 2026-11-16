@@ -10,6 +10,9 @@ pub struct OAuthStartQuery {
     pub error_redirect_after: Option<String>,
     #[serde(default)]
     pub instance_url: Option<String>,
+    /// `true` なら、ログイン済みの利用者が既に結んだ連携で本人確認する（再認証）。連携は足さない。
+    #[serde(default)]
+    pub reauth: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]

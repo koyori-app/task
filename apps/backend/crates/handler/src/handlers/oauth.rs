@@ -38,6 +38,7 @@ use service::oauth::{
     resolve_provider, store_state,
 };
 use service::passkeys::count_user_passkeys;
+use service::reauth::mark_reauthed;
 
 use payload::oauth::*;
 
@@ -78,6 +79,8 @@ pub enum OAuthError {
     InstanceNotAllowed,
     #[error("registration disabled")]
     RegistrationDisabled,
+    #[error("reauth identity mismatch")]
+    ReauthMismatch,
 }
 
 impl From<sea_orm::DbErr> for OAuthError {
@@ -193,6 +196,13 @@ impl IntoResponse for OAuthError {
                 }),
             )
                 .into_response(),
+            OAuthError::ReauthMismatch => (
+                StatusCode::FORBIDDEN,
+                Json(ServerError {
+                    message: "oauth-reauth-mismatch".into(),
+                }),
+            )
+                .into_response(),
             OAuthError::SecurityViolation => {
                 warn!("oauth security validation failed");
                 (
@@ -217,7 +227,8 @@ impl IntoResponse for OAuthError {
         ("provider" = String, Path, description = "github | gitlab | gitlab_selfhosted | google | oidc"),
         ("redirect_after" = Option<String>, Query, description = "ログイン後のフロント相対パス"),
         ("error_redirect_after" = Option<String>, Query, description = "プロバイダーエラー時の戻り先（OAuth ボタンのあるページ）"),
-        ("instance_url" = Option<String>, Query, description = "GitLab self-hosted インスタンス URL")
+        ("instance_url" = Option<String>, Query, description = "GitLab self-hosted インスタンス URL"),
+        ("reauth" = Option<bool>, Query, description = "true なら、ログイン済みの利用者が既に結んだ連携で本人確認する（パスキーの追加と削除の再認証）。連携は足さない。ログインできるプロバイダーに限る")
     ),
     responses(
         (status = 307, description = "プロバイダー認可 URL へリダイレクト"),
@@ -247,6 +258,15 @@ pub async fn oauth_start(
     }
     // 連携専用のプロバイダーは、ログイン中の利用者にしか結べない（ここで利用者を作らない）
     if !OAuthSettings::is_sign_in_provider(&provider) && optional_auth.0.is_none() {
+        return Err(OAuthError::Unauthorized);
+    }
+    // 再認証は、ログイン済み（半認証でない）の利用者が、ログインに使える連携で行う
+    let reauth = query.reauth.unwrap_or(false);
+    if reauth
+        && (optional_auth.0.is_none()
+            || !OAuthSettings::is_sign_in_provider(&provider)
+            || session.get::<bool>("half_authed").unwrap_or(false))
+    {
         return Err(OAuthError::Unauthorized);
     }
 
@@ -307,6 +327,7 @@ pub async fn oauth_start(
             error_redirect_after,
             link_user_id,
             instance_url: instance_url.clone(),
+            reauth,
         },
     )
     .await
@@ -316,13 +337,18 @@ pub async fn oauth_start(
     session.set(OAUTH_PENDING_PROVIDER_KEY, provider.clone());
 
     let redirect_uri = settings.callback_url(&provider);
-    let authorize_url = build_authorize_url(
+    let mut authorize_url = build_authorize_url(
         &endpoints,
         &credentials.client_id,
         &redirect_uri,
         &oauth_state,
         &pkce.code_challenge,
     );
+    // 再認証では、プロバイダー側にも認証を促す。OIDC 標準の `prompt=login` を解する物に限る
+    // （GitHub と Google には、再認証を強いる手段が無い。連携先の本人でなければ、下の照合で断る）
+    if reauth && matches!(provider.as_str(), "gitlab" | "gitlab_selfhosted" | "oidc") {
+        authorize_url.push_str("&prompt=login");
+    }
 
     Ok(Redirect::temporary(&authorize_url))
 }
@@ -419,6 +445,13 @@ pub async fn oauth_callback(
             return Err(OAuthError::InvalidState);
         }
     }
+    if payload.reauth
+        && (payload.link_user_id.is_none()
+            || !OAuthSettings::is_sign_in_provider(&provider)
+            || session.get::<bool>("half_authed").unwrap_or(false))
+    {
+        return Err(OAuthError::InvalidState);
+    }
 
     let instance_url = payload.instance_url.as_deref();
     // 開始の後に許可の一覧から外れた instance とも、トークンの交換をしない（client secret を送らぬ）
@@ -459,6 +492,18 @@ pub async fn oauth_callback(
         .db_provider_key(&provider)
         .ok_or(OAuthError::ProviderNotConfigured)?;
 
+    if payload.reauth {
+        return finish_oauth_reauth(
+            &state,
+            &session,
+            &payload,
+            &db_provider,
+            instance_url,
+            &provider_info,
+        )
+        .await;
+    }
+
     let user_id = resolve_user_and_connection(
         &state,
         &provider,
@@ -483,6 +528,11 @@ pub async fn oauth_callback(
         .await
         .map_err(OAuthError::from)?;
 
+    // 連携の追加（link）では印を立てぬ。盗まれたセッションで自分の連携を足して、再認証を満たせてしまう
+    if twofa_required.is_none() && payload.link_user_id.is_none() {
+        mark_reauthed(&session);
+    }
+
     if twofa_required.is_some() {
         let twofa_redirect = format!(
             "{}/auth/2fa?redirect_after={}",
@@ -506,6 +556,50 @@ pub async fn oauth_callback(
         OAuthError::SecurityViolation
     })?;
 
+    Ok(Redirect::temporary(&frontend_redirect))
+}
+
+/// 再認証のコールバック。結んでおる連携が本人の物と照合できた時だけ、印を立てる。
+/// 連携は足さず、セッションも作り直さぬ（`resolve_user_and_connection` を通さぬ）。
+async fn finish_oauth_reauth(
+    state: &AppState,
+    session: &Session<SessionRedisPool>,
+    payload: &OAuthStatePayload,
+    db_provider: &str,
+    instance_url: Option<&str>,
+    provider_info: &ProviderUserInfo,
+) -> Result<Redirect, OAuthError> {
+    let user_id = payload.link_user_id.ok_or(OAuthError::InvalidState)?;
+    let normalized_instance = match instance_url {
+        Some(url) => Some(normalize_instance_url(url).map_err(OAuthError::Internal)?),
+        None => None,
+    };
+    let connection = find_connection(
+        &state.db,
+        db_provider,
+        &provider_info.provider_user_id,
+        normalized_instance.as_deref(),
+    )
+    .await?;
+    if connection.map(|c| c.user_id) != Some(user_id) {
+        return Err(OAuthError::ReauthMismatch);
+    }
+    let user = users::Entity::find_by_id(user_id)
+        .one(&state.db)
+        .await?
+        .ok_or(OAuthError::Unauthorized)?;
+    if user.is_bot() || user.is_suspended {
+        return Err(OAuthError::AccountSuspended);
+    }
+    mark_reauthed(session);
+    let frontend_redirect = build_frontend_redirect(
+        &state.settings.email_verification_app_url,
+        &payload.redirect_after,
+    )
+    .map_err(|e| {
+        warn!("oauth reauth redirect build failed: {e}");
+        OAuthError::SecurityViolation
+    })?;
     Ok(Redirect::temporary(&frontend_redirect))
 }
 

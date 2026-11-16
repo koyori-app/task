@@ -662,6 +662,17 @@ impl TestApp {
         Self::build(settings).await
     }
 
+    /// 再認証の有効期間（秒）を縮めて起こす。期限切れを短い待ちで試すため。
+    pub async fn new_with_reauth_window(secs: u64) -> Self {
+        init_tracing();
+        let endpoints = ensure_test_env();
+        let mut settings = settings::load_settings().expect("load settings");
+        pin_test_endpoints(&mut settings, endpoints);
+        settings.email_verification_app_url = "http://localhost:3000".to_string();
+        settings.reauth_window_secs = secs;
+        Self::build(settings).await
+    }
+
     pub async fn new_with_github() -> Self {
         init_tracing();
         load_github_test_env();
@@ -1088,6 +1099,20 @@ impl TestApp {
             .send()
             .await
             .expect("oauth start request")
+    }
+
+    /// 既に結んだ連携で本人確認する（再認証）。連携は足さぬ。
+    pub async fn oauth_start_reauth(&self) -> Response {
+        let url = format!(
+            "{}/v1/auth/oauth/gitlab_selfhosted?instance_url={}&reauth=true&redirect_after=/settings",
+            self.base_url,
+            urlencoding::encode(self.instance_url())
+        );
+        self.client
+            .get(&url)
+            .send()
+            .await
+            .expect("oauth reauth start request")
     }
 
     pub async fn follow_oauth_start(&self, start: Response) -> Response {

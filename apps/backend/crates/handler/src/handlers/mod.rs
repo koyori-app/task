@@ -27,6 +27,7 @@ pub mod project_events;
 pub mod project_members;
 pub mod projects;
 pub mod reactions;
+pub mod reauth;
 pub mod reviews;
 pub mod schedule;
 pub mod sprints;

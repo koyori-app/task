@@ -222,6 +222,15 @@ flowchart TD
 
 連携のコールバックもログインと同じ `establish_login_session` を通る。セッション ID が更新され、TOTP が有効な利用者は半認証になって `/auth/2fa` へリダイレクトされる。
 
+### 再認証
+
+`GET /v1/auth/oauth/{provider}?reauth=true` は、ログイン済みの利用者が、既に結んだ連携で本人確認する。パスキーの追加と削除の前に求める再認証の一手段である（[パスキー認証](/dev/features/auth/passkeys#再認証)）。
+
+- ログインしていない、半認証、ログインに使えないプロバイダー（`github_app`）は `401`。
+- コールバックは、プロバイダーの利用者が、本人に結んだ連携と一致した時だけ、セッションに本人確認の時刻を残す。一致しなければ `403`（`oauth-reauth-mismatch`）で、利用者も連携も作らない。
+- 連携は足さず、セッションも作り直さない。`gitlab`・`gitlab_selfhosted`・`oidc` の認可 URL には `prompt=login` を付ける。
+- 連携の追加（`link`）は、再認証として数えない。
+
 ### 連携の解除
 
 `DELETE /v1/auth/oauth/connections/{provider}` の `{provider}` には開始用 slug か DB の `provider` の値を指定する。`gitlab_selfhosted` はクエリの `instance_url` が必須で、無ければ `400` を返す。接続が無ければ `404 oauth-connection-not-found` を返す。
