@@ -57,6 +57,8 @@ OAuth 認証と Git ホスティング連携の土台。VRT ツールなど他�
 
 ## 検証（backend、コミット前に必ず）
 
+CI と同じ検証は `scripts/verify.sh` でまとめて回せる。既定の `changed` は main との差分から要る区分（`backend` / `cli` / `frontend` / `docs`）だけを回し、段ごとに 1 行で結果を出す（全文のログは `.verify/`）。区分を指定するなら `scripts/verify.sh backend frontend`、全部なら `all`。個別に回すときのコマンドは次のとおり。
+
 ```bash
 cargo fmt                              # 忘れると fmt CI で落ちる
 cargo check --workspace --all-targets
