@@ -1134,22 +1134,21 @@ async fn type_definition_writes_queue_on_the_project_lock() {
     let client = app.client().clone();
     let url = |path: &str| format!("{}{base}{path}", app.base_url());
 
-    // 作成 2 本: 両方が待ち、解放後に 201 で、position が重ならない
+    // 作成 2 本: 両方が待ち、解放後に 201 で、position が重ならない。
+    // 1 本目が待ちに入るのを確かめてから 2 本目を投げ、ロックの待ち行列に着く順を固定する
     let txn = app.state.db.begin().await.expect("begin");
     service::task_types::lock_definitions(&txn, tp.project_id)
         .await
         .expect("lock");
     let pid = backend_pid(&txn).await;
-    let creates: Vec<_> = ["A", "B"]
-        .into_iter()
-        .map(|name| {
-            let request = client
-                .post(url(""))
-                .json(&json!({ "name": name, "color": "#111111" }));
-            tokio::spawn(async move { request.send().await })
-        })
-        .collect();
-    wait_until_blocked_count(&app, pid, 2, "作成 2 本").await;
+    let mut creates = Vec::new();
+    for (arrived, name) in ["A", "B"].into_iter().enumerate() {
+        let request = client
+            .post(url(""))
+            .json(&json!({ "name": name, "color": "#111111" }));
+        creates.push(tokio::spawn(async move { request.send().await }));
+        wait_until_blocked_count(&app, pid, arrived as i64 + 1, name).await;
+    }
     txn.commit().await.expect("commit");
     for create in creates {
         let response = create.await.expect("join").expect("send");
@@ -1165,6 +1164,8 @@ async fn type_definition_writes_queue_on_the_project_lock() {
         types[0]["id"].as_str().expect("id").to_string(),
         types[1]["id"].as_str().expect("id").to_string(),
     );
+    // どちらが先にロックを取っても（position が 0 の側が違っても）成り立つよう、残る名前は一覧から控える
+    let survivor = types[1]["name"].as_str().expect("name").to_string();
 
     // 更新・並べ替え・削除: 1 本ずつ、ロックを持つ → 待つ → 解放 → 成功
     for (label, request, expected) in [
@@ -1199,7 +1200,7 @@ async fn type_definition_writes_queue_on_the_project_lock() {
         let response = handle.await.expect("join").expect("send");
         assert_eq!(response.status(), expected, "{label}");
     }
-    assert_eq!(names(&list_types(&app, &base).await), ["B"]);
+    assert_eq!(names(&list_types(&app, &base).await), [survivor]);
 }
 
 /// タスクに付ける種別は、書く前にロックなしで確かめるだけにする（`milestone_id` と同じ）。確認のあとに削除されたら、

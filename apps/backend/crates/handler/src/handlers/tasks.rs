@@ -1112,7 +1112,7 @@ pub async fn update_task(
     if payload.clear_task_type_id {
         active.task_type_id = Set(None);
     } else if let Some(v) = payload.task_type_id {
-        // 確認とロックは、タスク行を取る前に済ませている
+        // 確認は、タスク行を取る前に済ませている
         active.task_type_id = Set(Some(v));
     }
     if payload.clear_sprint_id {
