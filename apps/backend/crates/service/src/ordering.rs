@@ -3,18 +3,25 @@
 //! 並び順を変える書き込みは、プロジェクト行を `FOR UPDATE` で取ってから行い、同じプロジェクトの
 //! 書き込みを直列にする。作成が最大値を読んでから挿入するだけだと、同時の作成が同じ値を取る。
 //!
-//! # ロックの順（種別の行に触る全経路で共通）
+//! # ロックの方針（種別の行に触る全経路で共通）
 //!
-//! プロジェクト行 → 種別の行 → カウンター・スプリント → タスク行。この順に取り、逆向きには取らない。
+//! 種別の操作は、プロジェクト行を `FOR UPDATE` で握らない。タスクを更新する経路は、タスク行を
+//! `FOR UPDATE` で取ってから通知などの行を挿入し、その FK の検査がプロジェクト行を `FOR KEY SHARE` で取る。
+//! 種別の削除は `SET NULL` でタスク行を待つので、プロジェクト行の `FOR UPDATE` を握ったまま待つと、
+//! 「タスク行 → プロジェクト行」の更新と循環する。
 //!
-//! - 種別の作成・更新・削除・並べ替え: プロジェクト行を `FOR UPDATE`（[`lock_project`]）。削除は続けて種別の行
-//!   （FK の `SET NULL` でタスク行へ進む）、並べ替えは種別の全行を `FOR UPDATE`
-//! - タスクの作成・更新で種別を付ける: プロジェクト行と種別の行を `FOR KEY SHARE`
-//!   （`task_types::lock_for_assignment`）。タスク行（更新の `FOR UPDATE`、作成の挿入）より先に取る
-//! - 既定の種別の補完（マイグレーションの SQL）: プロジェクト行を `FOR UPDATE` で取ってから挿入する
+//! - 種別の作成・並べ替え、カスタムフィールドの作成、既定の種別の補完（マイグレーションの SQL）:
+//!   プロジェクト行を `FOR NO KEY UPDATE`（[`lock_project_definitions`]）。同じ操作同士は直列になるが、
+//!   FK の `FOR KEY SHARE` とは衝突しない。並べ替えは続けて種別の全行を `FOR NO KEY UPDATE`
+//! - 種別の更新（名前・色）・削除: プロジェクト行を取らない。種別の行だけ（削除は `SET NULL` でタスク行へ進む）
+//! - タスクの作成・更新で種別を付ける: 種別の行を `FOR KEY SHARE`（`task_types::lock_for_assignment`）。
+//!   更新ではタスク行を取る前に取る（削除が種別の行 → タスク行の順で取るため）。一括作成はカウンター・スプリントの後に
+//!   取るが、`FOR KEY SHARE` 同士は待たず、種別を管理する側はカウンター・スプリントを取らないので循環しない
+//! - ステータスの作成・更新・削除・並べ替えは、従来どおりプロジェクト行を `FOR UPDATE`（[`lock_project`]）で取る。
+//!   種別の行には触らない
 //!
-//! ロックの持ち主はこのモジュールと `task_types::lock_for_assignment` だけにする。ハンドラーで種別の行を
-//! 直接ロックしない。
+//! 逆順になる組が無いことは、第 4 巡の修正記録のロックの表で確かめた。ロックの持ち主はこのモジュールと
+//! `task_types::lock_for_assignment` だけにする。ハンドラーで種別の行を直接ロックしない（並べ替えを除く）。
 
 use std::collections::HashSet;
 
@@ -24,11 +31,26 @@ use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelec
 use crate::error::AppError;
 use entity::projects;
 
-/// プロジェクト行を `FOR UPDATE` で取る。トランザクションの中で、最大値の読み取りや並び順の検査より先に呼ぶ
-/// （ロックの順は常に「プロジェクト行 → 定義の行」）。プロジェクトが無ければ `NotFound`。
+/// プロジェクト行を `FOR UPDATE` で取る（ステータスの並べ替え。従来どおり）。種別・カスタムフィールドは
+/// FK の `FOR KEY SHARE` と衝突しない [`lock_project_definitions`] を使う。プロジェクトが無ければ `NotFound`。
 pub async fn lock_project<C: ConnectionTrait>(db: &C, project_id: Uuid) -> Result<(), AppError> {
     projects::Entity::find_by_id(project_id)
         .lock(LockType::Update)
+        .one(db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    Ok(())
+}
+
+/// プロジェクト行を `FOR NO KEY UPDATE` で取り、同じプロジェクトの定義（種別・カスタムフィールド）の
+/// 作成・並べ替えを直列にする。トランザクションの中で、最大値の読み取りや並び順の検査より先に呼ぶ。
+/// タスクや通知の挿入が FK の検査で取る `FOR KEY SHARE` とは衝突しない。プロジェクトが無ければ `NotFound`。
+pub async fn lock_project_definitions<C: ConnectionTrait>(
+    db: &C,
+    project_id: Uuid,
+) -> Result<(), AppError> {
+    projects::Entity::find_by_id(project_id)
+        .lock(LockType::NoKeyUpdate)
         .one(db)
         .await?
         .ok_or(AppError::NotFound)?;

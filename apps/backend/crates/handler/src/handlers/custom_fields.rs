@@ -86,7 +86,7 @@ pub async fn create_custom_field(
     let position = match payload.position {
         Some(position) => position,
         None => {
-            ordering::lock_project(&txn, project_id).await?;
+            ordering::lock_project_definitions(&txn, project_id).await?;
             let max = project_custom_fields::Entity::find()
                 .filter(project_custom_fields::Column::ProjectId.eq(project_id))
                 .order_by_desc(project_custom_fields::Column::Position)

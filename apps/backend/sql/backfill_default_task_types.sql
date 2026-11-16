@@ -1,6 +1,6 @@
--- プロジェクト行を先に FOR UPDATE で取ってから挿入する（service::ordering のロック順。
--- 種別の作成・並べ替えが、プロジェクト行 → 種別の行の順で取るのと揃える）。
-WITH locked AS (SELECT id FROM projects ORDER BY id FOR UPDATE)
+-- プロジェクト行を先に FOR NO KEY UPDATE で取ってから挿入する（service::ordering のロックの方針。
+-- 種別の作成・並べ替えと同じ強さで、タスクや通知の挿入の FK が取る FOR KEY SHARE とは衝突しない）。
+WITH locked AS (SELECT id FROM projects ORDER BY id FOR NO KEY UPDATE)
 INSERT INTO project_task_types (id, project_id, name, color, position, created_at)
 SELECT gen_random_uuid(), p.id, d.name, d.color, d.position::smallint, now()
 FROM locked p

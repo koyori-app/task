@@ -82,9 +82,9 @@ pub async fn create_task_type(
     auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    // 並べ替えと同じくプロジェクト行をロックしてから最大値を読み、同時の作成が同じ position を取らないようにする
+    // プロジェクト行（FOR NO KEY UPDATE）をロックしてから最大値を読み、同時の作成が同じ position を取らないようにする
     let txn = state.db.begin().await?;
-    ordering::lock_project(&txn, project_id).await?;
+    ordering::lock_project_definitions(&txn, project_id).await?;
     let max = project_task_types::Entity::find()
         .filter(project_task_types::Column::ProjectId.eq(project_id))
         .order_by_desc(project_task_types::Column::Position)
@@ -131,10 +131,8 @@ pub async fn update_task_type(
     auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    // 他の書き込みと同じくプロジェクト行を先に取る（service::ordering のロック順）
-    let txn = state.db.begin().await?;
-    ordering::lock_project(&txn, project_id).await?;
-    let task_type = find_in_project(&txn, project_id, id).await?;
+    // プロジェクト行は取らない（service::ordering のロックの方針）
+    let task_type = find_in_project(&state.db, project_id, id).await?;
     let mut active: project_task_types::ActiveModel = task_type.into();
     if let Some(v) = payload.name {
         active.name = Set(v);
@@ -142,8 +140,11 @@ pub async fn update_task_type(
     if let Some(v) = payload.color {
         active.color = Set(v);
     }
-    let updated = active.update(&txn).await?;
-    txn.commit().await?;
+    // 読んだあとに削除されたら、行が無いので NotFound にする
+    let updated = active.update(&state.db).await.map_err(|err| match err {
+        sea_orm::DbErr::RecordNotUpdated => AppError::NotFound,
+        err => err.into(),
+    })?;
     Ok(Json(updated.into()))
 }
 
@@ -175,11 +176,12 @@ pub async fn reorder_task_types(
         .await?;
 
     let txn = state.db.begin().await?;
-    // ステータスの並べ替えと同じロック順（プロジェクト行 → 種別全体）で、同時の書き込みを直列にする
-    ordering::lock_project(&txn, project_id).await?;
+    // プロジェクト行（FOR NO KEY UPDATE）→ 種別の全行（FOR NO KEY UPDATE）。どちらも FK の FOR KEY SHARE と
+    // 衝突しないので、タスクの付与・通知の挿入を待たせず、待たされもしない
+    ordering::lock_project_definitions(&txn, project_id).await?;
     let existing = project_task_types::Entity::find()
         .filter(project_task_types::Column::ProjectId.eq(project_id))
-        .lock(LockType::Update)
+        .lock(LockType::NoKeyUpdate)
         .all(&txn)
         .await?;
     ordering::validate_reorder(&payload.ids, existing.iter().map(|t| t.id))?;
@@ -222,18 +224,15 @@ pub async fn delete_task_type(
     auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    // プロジェクト行 → 種別の行 → タスク行（FK の ON DELETE SET NULL）の順にロックする（service::ordering）。
+    // 種別の行 → タスク行（FK の ON DELETE SET NULL）の順。プロジェクト行は取らない（service::ordering）。
     // tasks.task_type_id は SET NULL で未設定に戻る
-    let txn = state.db.begin().await?;
-    ordering::lock_project(&txn, project_id).await?;
     let result = project_task_types::Entity::delete_many()
         .filter(project_task_types::Column::Id.eq(id))
         .filter(project_task_types::Column::ProjectId.eq(project_id))
-        .exec(&txn)
+        .exec(&state.db)
         .await?;
     if result.rows_affected == 0 {
         return Err(AppError::NotFound);
     }
-    txn.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }

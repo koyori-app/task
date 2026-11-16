@@ -1002,7 +1002,7 @@ pub async fn update_task(
         state.db.begin().await?
     };
 
-    // 種別の削除と同じく、プロジェクト行 → 種別の行 → タスク行の順にロックする（service::ordering）。
+    // 種別の削除と同じく、種別の行 → タスク行の順にロックする（service::ordering）。
     // 今と同じ種別の再指定でも、タスク行を取る前に確かめる（逆順だと削除とデッドロックになる）。
     if !payload.clear_task_type_id
         && let Some(type_id) = payload.task_type_id

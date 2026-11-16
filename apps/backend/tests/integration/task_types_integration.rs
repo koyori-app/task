@@ -971,10 +971,10 @@ async fn re_sending_the_current_type_while_it_is_deleted_does_not_deadlock() {
     assert!(row.task_type_id.is_none());
 }
 
-/// 種別の並べ替えは「プロジェクト行 → 種別の全行」の順にロックする。タスクの作成が「種別の行 → プロジェクト行
-/// （挿入の FK）」の順で取ると、並べ替えとデッドロックになる。作成が採番で待っている間に並べ替えを重ねる。
+/// 種別付きのタスクの作成が採番で待っている間（種別の行を `FOR KEY SHARE` で持っている）も、並べ替えは待たずに終わり、
+/// 作成もそのあと成功する。
 #[tokio::test]
-async fn creating_a_typed_task_while_reordering_the_types_does_not_deadlock() {
+async fn reordering_the_types_does_not_wait_for_a_typed_task_being_created() {
     let mut app = TestApp::new().await;
     let owner = app.insert_user(true, false).await;
     app.login_session_no_content(&owner.email, &owner.password)
@@ -1015,17 +1015,22 @@ async fn creating_a_typed_task_while_reordering_the_types_does_not_deadlock() {
     });
     wait_until_blocked_count(&app, pid, 1, "作成").await;
 
-    let reorder_url = format!("{}{base}/reorder", app.base_url());
-    let reorder_body = json!({ "ids": [feature["id"], bug["id"]] });
-    let reorder =
-        tokio::spawn(async move { client.put(reorder_url).json(&reorder_body).send().await });
-    wait_until_blocked_count(&app, pid, 2, "作成と並べ替え").await;
+    // 並べ替えは、作成が種別の行を FOR KEY SHARE で持っていても待たず（NO KEY UPDATE と衝突しない）、先に終わる
+    let reorder = tokio::time::timeout(
+        Duration::from_secs(5),
+        client
+            .put(format!("{}{base}/reorder", app.base_url()))
+            .json(&json!({ "ids": [feature["id"], bug["id"]] }))
+            .send(),
+    )
+    .await
+    .expect("並べ替えは作成の待ちに巻き込まれない")
+    .expect("send");
+    assert_eq!(reorder.status(), StatusCode::OK, "並べ替え");
     txn.commit().await.expect("commit");
 
     let create = create.await.expect("join").expect("send");
-    let reorder = reorder.await.expect("join").expect("send");
     assert_eq!(create.status(), StatusCode::CREATED, "作成");
-    assert_eq!(reorder.status(), StatusCode::OK, "並べ替え");
     assert_eq!(names(&list_types(&app, &base).await), ["機能", "バグ"]);
 }
 
@@ -1066,4 +1071,81 @@ async fn creating_a_type_past_the_position_limit_is_refused() {
     assert_eq!(reordered.status(), StatusCode::OK);
     let added = create_type(&app, &base, "新しい", "#222222").await;
     assert_eq!(added["position"], 1);
+}
+
+/// 種別を送らないタスクの更新は、タスク行を取ってから通知を挿入する（FK の検査がプロジェクト行を
+/// `FOR KEY SHARE` で取る）。種別の削除がプロジェクト行を `FOR UPDATE` で握ったままタスク行（`SET NULL`）を
+/// 待つと、この更新と循環する。更新がタスク行を待っている間に削除と並べ替えを重ね、タスク行を解放して、
+/// 3 つとも成功することを見る。
+#[tokio::test]
+async fn a_plain_update_with_a_notification_does_not_deadlock_with_deleting_and_reordering_types() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(true, false).await;
+    let member = app.insert_user_default().await;
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    crate::common::ensure_tenant_member_for_project(&app.state.db, tp.project_id, member.id).await;
+    let status_id = create_status(&app, &tp, "Todo", false).await;
+    let base = types_base(tp.tenant_id, tp.project_id);
+    let bug = create_type(&app, &base, "バグ", "#ef4444").await;
+    let feature = create_type(&app, &base, "機能", "#3b82f6").await;
+    let created = app
+        .post_json_with_session(
+            &tasks_base(&tp),
+            json!({ "title": "種別あり", "status_id": status_id, "task_type_id": bug["id"] }),
+        )
+        .await;
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let task_id: Uuid = json_body(created).await["id"]
+        .as_str()
+        .expect("id")
+        .parse()
+        .expect("uuid");
+
+    // タスク行を握って、更新を待たせる
+    let txn = app.state.db.begin().await.expect("begin");
+    txn.execute_raw(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        "SELECT id FROM tasks WHERE id = $1 FOR UPDATE",
+        [task_id.into()],
+    ))
+    .await
+    .expect("lock task");
+    let pid = backend_pid(&txn).await;
+
+    let client = app.client().clone();
+    let task_url = format!("{}{}/{task_id}", app.base_url(), tasks_base(&tp));
+    // 種別を送らず、操作者以外を担当者にする（割り当ての通知が notifications.project_id の FK を通る）
+    let update_body = json!({ "assignees": [{ "user_id": member.id, "role": "assignee" }] });
+    let update_client = client.clone();
+    let update =
+        tokio::spawn(async move { update_client.put(task_url).json(&update_body).send().await });
+    wait_until_blocked_count(&app, pid, 1, "更新").await;
+
+    let delete_url = format!("{}{base}/{}", app.base_url(), bug["id"].as_str().unwrap());
+    let delete_client = client.clone();
+    let delete = tokio::spawn(async move { delete_client.delete(delete_url).send().await });
+    wait_until_blocked_count(&app, pid, 2, "更新と削除").await;
+
+    let reorder_url = format!("{}{base}/reorder", app.base_url());
+    let reorder_body = json!({ "ids": [feature["id"]] });
+    let reorder =
+        tokio::spawn(async move { client.put(reorder_url).json(&reorder_body).send().await });
+    wait_until_blocked_count(&app, pid, 3, "更新・削除・並べ替え").await;
+    txn.commit().await.expect("commit");
+
+    let update = update.await.expect("join").expect("send");
+    let delete = delete.await.expect("join").expect("send");
+    let reorder = reorder.await.expect("join").expect("send");
+    assert_eq!(update.status(), StatusCode::OK, "更新");
+    assert_eq!(delete.status(), StatusCode::NO_CONTENT, "削除");
+    assert_eq!(reorder.status(), StatusCode::OK, "並べ替え");
+    let row = entity::tasks::Entity::find_by_id(task_id)
+        .one(&app.state.db)
+        .await
+        .expect("load")
+        .expect("task");
+    assert!(row.task_type_id.is_none());
+    assert_eq!(names(&list_types(&app, &base).await), ["機能"]);
 }
