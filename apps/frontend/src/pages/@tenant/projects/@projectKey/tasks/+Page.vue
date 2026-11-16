@@ -89,6 +89,7 @@ const LIST_STATUSES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/status
 /** List 表示でステータスごとに最初に取る件数。「もっと見る」でこの単位ずつ増やす */
 const GROUP_PAGE_SIZE = 20;
 const LIST_LABELS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/labels' as const;
+const LIST_TASK_TYPES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/task-types' as const;
 const TASKS_PAGE_SIZE = 20;
 const SEARCH_PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 300;
@@ -388,6 +389,24 @@ const labelsQuery = useQuery({
   ]),
   queryFn: async ({ signal }) => {
     const { data, error } = await fetchClient.GET(LIST_LABELS_PATH, {
+      params: { path: { tenant_id: tenantId.value!, project_id: projectId.value! } },
+      signal,
+    });
+    if (error) throw error;
+    return data;
+  },
+  enabled: computed(() => !!tenantId.value && !!projectId.value),
+});
+
+// ---- クエリ④': 種別一覧（作成ダイアログの候補） ----
+const taskTypesQuery = useQuery({
+  queryKey: computed(() => [
+    'get',
+    LIST_TASK_TYPES_PATH,
+    { params: { path: { tenant_id: tenantId.value!, project_id: projectId.value! } } },
+  ]),
+  queryFn: async ({ signal }) => {
+    const { data, error } = await fetchClient.GET(LIST_TASK_TYPES_PATH, {
       params: { path: { tenant_id: tenantId.value!, project_id: projectId.value! } },
       signal,
     });
@@ -1095,11 +1114,15 @@ const columnItems = computed<DropdownItem[]>(() =>
             :labels="labelsQuery.data.value"
             :labels-loading="labelsQuery.isLoading.value"
             :labels-error="labelsQuery.isError.value && !projectLabels.length"
+            :task-types="taskTypesQuery.data.value"
+            :task-types-loading="taskTypesQuery.isLoading.value"
+            :task-types-error="taskTypesQuery.isError.value && !taskTypesQuery.data.value"
             :members="membersQuery.data.value"
             :members-loading="membersQuery.isLoading.value"
             :members-error="membersQuery.isError.value && !projectMembers.length"
             @created="onTaskCreated"
             @retry-labels="labelsQuery.refetch()"
+            @retry-task-types="taskTypesQuery.refetch()"
             @retry-members="membersQuery.refetch()"
           />
 

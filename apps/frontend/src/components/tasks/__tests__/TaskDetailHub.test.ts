@@ -104,6 +104,124 @@ const featureLabel: components['schemas']['LabelResponse'] = {
   project_id: 'project-id',
 };
 
+type TaskTypeOption = components['schemas']['TaskTypeResponse'];
+
+const taskTypes: TaskTypeOption[] = [
+  { id: 'type-task', project_id: 'project-id', name: 'タスク', color: '#64748b', position: 0 },
+  { id: 'type-bug', project_id: 'project-id', name: 'バグ', color: '#ef4444', position: 1 },
+  { id: 'type-feature', project_id: 'project-id', name: '機能', color: '#3b82f6', position: 2 },
+];
+
+describe('TaskDetailHub の種別', () => {
+  function mountWithTaskType(extra: Record<string, unknown> = {}) {
+    return mount(TaskDetailHub, {
+      props: {
+        task: { ...task, task_type: taskTypes[1] },
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+        projectTaskTypes: taskTypes,
+        ...extra,
+      },
+    });
+  }
+
+  function typeItems(wrapper: ReturnType<typeof mountWithTaskType>) {
+    return wrapper.get('[role="menu"][aria-label="種別"]').findAll('[role="menuitemradio"]');
+  }
+
+  it('種別があれば名前と色の点を出し、固定の「タスク」チップは出さない', () => {
+    const wrapper = mountWithTaskType();
+
+    const trigger = wrapper.get('button[aria-label="種別"]');
+    // 引き金は選んだ種別の名前だけ。以前の固定表示（アイコン + 「タスク」）ではない
+    expect(trigger.text()).toBe('バグ');
+    expect(trigger.get('span[style*="background-color"]').attributes('style')).toContain('#ef4444');
+  });
+
+  it('種別が無ければ「種別」と出す', () => {
+    const wrapper = mountWithTaskType({ task });
+
+    const trigger = wrapper.get('button[aria-label="種別"]');
+    expect(trigger.text()).toBe('種別');
+    expect(trigger.find('span[style*="background-color"]').exists()).toBe(false);
+  });
+
+  it('選択肢は「種別なし」と各種別で、選択中の種別に印が付く', () => {
+    const wrapper = mountWithTaskType();
+
+    const items = typeItems(wrapper);
+    expect(items.map((item) => item.text())).toEqual(['種別なし', 'タスク', 'バグ', '機能']);
+    expect(items.map((item) => item.attributes('aria-checked'))).toEqual([
+      'false',
+      'false',
+      'true',
+      'false',
+    ]);
+  });
+
+  it('種別が無いタスクでは「種別なし」に印が付く', () => {
+    const wrapper = mountWithTaskType({ task });
+
+    expect(typeItems(wrapper).map((item) => item.attributes('aria-checked'))).toEqual([
+      'true',
+      'false',
+      'false',
+      'false',
+    ]);
+  });
+
+  it('種別を選ぶと ID を、「種別なし」を選ぶと null を change:task_type で emit する', async () => {
+    const wrapper = mountWithTaskType();
+
+    await typeItems(wrapper)[3]!.trigger('click');
+    await typeItems(wrapper)[0]!.trigger('click');
+
+    expect(wrapper.emitted('change:task_type')).toEqual([['type-feature'], [null]]);
+  });
+
+  it('更新中は種別を触れない', () => {
+    const wrapper = mountWithTaskType({ taskTypeUpdating: true });
+
+    expect(wrapper.get('button[aria-label="種別"]').attributes('disabled')).toBeDefined();
+    expect(typeItems(wrapper).every((item) => item.attributes('aria-disabled') === 'true')).toBe(
+      true,
+    );
+  });
+
+  it('更新に失敗したら理由を出し、「保存しました」は出さない', () => {
+    const wrapper = mountWithTaskType({
+      taskTypeError: '種別の更新に失敗しました',
+      savedField: 'task_type',
+    });
+
+    expect(wrapper.text()).toContain('種別の更新に失敗しました');
+    expect(wrapper.text()).not.toContain('保存しました');
+  });
+
+  it('保存が確定したら「保存しました」を出す', () => {
+    const wrapper = mountWithTaskType({ savedField: 'task_type' });
+
+    const notices = wrapper.findAll('[role="status"]');
+    expect(notices).toHaveLength(1);
+    expect(notices[0]!.text()).toBe('保存しました');
+  });
+
+  it('候補を渡されなければメニューを出さず、種別の名前だけを表示する', () => {
+    const wrapper = mountWithTaskType({ projectTaskTypes: undefined });
+
+    expect(wrapper.find('button[aria-label="種別"]').exists()).toBe(false);
+    expect(wrapper.find('[role="menu"][aria-label="種別"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain('バグ');
+  });
+
+  it('候補を渡されず種別も無ければ何も出さない', () => {
+    const wrapper = mountWithTaskType({ task, projectTaskTypes: undefined });
+
+    expect(wrapper.find('button[aria-label="種別"]').exists()).toBe(false);
+  });
+});
+
 describe('TaskDetailHub', () => {
   /**
    * 優先度は表示だけで変更できなかった（作成時にしか決められなかった）。

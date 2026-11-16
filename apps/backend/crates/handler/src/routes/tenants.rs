@@ -219,6 +219,15 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::labels::import_labels)),
                 )
                 .nest(
+                    "/{project_id}/task-types",
+                    OpenApiRouter::<AppState>::new()
+                        .routes(routes!(crate::handlers::task_types::list_task_types))
+                        .routes(routes!(crate::handlers::task_types::create_task_type))
+                        .routes(routes!(crate::handlers::task_types::update_task_type))
+                        .routes(routes!(crate::handlers::task_types::reorder_task_types))
+                        .routes(routes!(crate::handlers::task_types::delete_task_type)),
+                )
+                .nest(
                     "/{project_id}/github",
                     crate::routes::github::tenant_github_routes(),
                 ),

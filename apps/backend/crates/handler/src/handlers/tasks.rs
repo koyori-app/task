@@ -41,6 +41,7 @@ use service::task_activities::{
     task_label_entries,
 };
 use service::task_responses::{build_task_response, build_task_responses};
+use service::task_types;
 
 // ─── Task lookup (UUID or KEY-N) ─────────────────────────────────────────
 
@@ -127,6 +128,25 @@ async fn record_task_field_activities<C: ConnectionTrait>(
             }),
         )
         .await?;
+    }
+    if payload.clear_task_type_id || payload.task_type_id.is_some() {
+        let new_type_id = if payload.clear_task_type_id {
+            None
+        } else {
+            payload.task_type_id.or(before.task_type_id)
+        };
+        if new_type_id != before.task_type_id {
+            let from = task_types::task_type_name(db, before.task_type_id).await?;
+            let to = task_types::task_type_name(db, new_type_id).await?;
+            record_activity(
+                db,
+                task_id,
+                Some(user_id),
+                "task_type_changed",
+                serde_json::json!({ "from": from, "to": to }),
+            )
+            .await?;
+        }
     }
     if payload.clear_soft_deadline || payload.soft_deadline.is_some() {
         let before_soft = before.soft_deadline.map(|dt| dt.with_timezone(&Utc));
@@ -679,6 +699,9 @@ pub async fn list_tasks(
     if let Some(mid) = q.milestone_id {
         query = query.filter(tasks::Column::MilestoneId.eq(mid));
     }
+    if let Some(tid) = q.task_type_id {
+        query = query.filter(tasks::Column::TaskTypeId.eq(tid));
+    }
     if let Some(sid) = q.sprint_id {
         query = query.filter(tasks::Column::SprintId.eq(sid));
     }
@@ -1076,6 +1099,13 @@ pub async fn update_task(
             .await?
             .ok_or(AppError::NotFound)?;
         active.milestone_id = Set(Some(v));
+    }
+    // 外す指定が値の指定より優先される（`clear_*` の他の項目と同じ）
+    if payload.clear_task_type_id {
+        active.task_type_id = Set(None);
+    } else if let Some(v) = payload.task_type_id {
+        task_types::find_in_project(&txn, project_id, v).await?;
+        active.task_type_id = Set(Some(v));
     }
     if payload.clear_sprint_id {
         active.sprint_id = Set(None);

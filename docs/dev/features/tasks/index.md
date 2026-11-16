@@ -16,7 +16,7 @@ sidebar:
 
 | # | 機能グループ | 内容 | 仕様 | 依存 | API | 画面 |
 |---|---|---|---|---|---|---|
-| 1 | コア | CRUD・ステータス・担当者・ラベル・マイルストーン・依存関係 | [tasks/core](/dev/features/tasks/core) | なし | 実装済み | 一覧・詳細・設定は実装済み。カンバンとマイルストーン管理は未実装 |
+| 1 | コア | CRUD・ステータス・担当者・ラベル・種別・マイルストーン・依存関係 | [tasks/core](/dev/features/tasks/core) | なし | 実装済み | 一覧・詳細・設定は実装済み。カンバンとマイルストーン管理は未実装 |
 | 2 | 作業時間追跡 | タイマー・手動ログ | [tasks/time-tracking](/dev/features/tasks/time-tracking) | 1 | 実装済み | 未実装（実績は山積みの計算にだけ使う） |
 | 3 | スプリント | イテレーション・バーンダウン | [tasks/sprints](/dev/features/tasks/sprints) | 1 | 実装済み | 専用画面は未実装（カレンダーに帯だけ出す） |
 | 4 | コメント・アクティビティ | スレッド・変更履歴・@メンション | [tasks/collaboration](/dev/features/tasks/collaboration) | 1 | 実装済み | 実装済み |
@@ -85,7 +85,7 @@ flowchart TD
 
 | スコープ | 主な用途 |
 |---|---|
-| `read:task` / `write:task` | タスク・ステータス・ラベル・コメント・作業時間・ウォッチャー・カスタムフィールド・保存済みビュー・添付・通知（タスク系） |
+| `read:task` / `write:task` | タスク・ステータス・ラベル・種別・コメント・作業時間・ウォッチャー・カスタムフィールド・保存済みビュー・添付・通知（タスク系） |
 | `read:milestone` / `write:milestone` | マイルストーン |
 | `read:sprint` / `write:sprint` | スプリント。完了とタスクの割り当ては `write:sprint` と `write:task` の両方が要る |
 | `read:review` / `write:review` | レビュー指摘・通知（レビュー系） |

@@ -126,6 +126,12 @@ pub enum ProjectsCommand {
         #[arg(long)]
         project: String,
     },
+    /// List the types a project's tasks can have (name, color)
+    Types {
+        /// Project key or UUID
+        #[arg(long)]
+        project: String,
+    },
     /// Show a project by key or UUID
     Show {
         /// Project key or UUID
@@ -148,6 +154,9 @@ pub enum TasksCommand {
         /// Filter by label name
         #[arg(long)]
         label: Option<String>,
+        /// Filter by type name (or UUID)
+        #[arg(long = "type")]
+        task_type: Option<String>,
         /// Filter by assignee username (or UUID)
         #[arg(long)]
         assignee: Option<String>,
@@ -222,7 +231,7 @@ pub enum TasksCommand {
     ///
     /// Each element takes the same names and values as `tasks create`: title, description,
     /// priority, status, labels, assignees, parent, soft_deadline, hard_deadline,
-    /// planned_start, estimate, progress, milestone, sprint. Every name is resolved before
+    /// planned_start, estimate, progress, milestone, sprint, type. Every name is resolved before
     /// anything is sent; the first one that cannot be resolved stops the command with
     /// `tasks[i]: ...` (i is 0-based).
     BulkCreate {
@@ -379,6 +388,9 @@ pub struct TaskFieldArgs {
     /// Sprint name (or UUID)
     #[arg(long)]
     pub sprint: Option<String>,
+    /// Type name (or UUID)
+    #[arg(long = "type")]
+    pub task_type: Option<String>,
     /// Label name; repeat to set several (replaces the current labels)
     #[arg(long = "label")]
     pub labels: Vec<String>,
@@ -420,6 +432,9 @@ pub struct TaskClearArgs {
     /// Detach from the sprint
     #[arg(long, conflicts_with = "sprint")]
     pub clear_sprint: bool,
+    /// Remove the type
+    #[arg(long, conflicts_with = "task_type")]
+    pub clear_type: bool,
     /// Remove every assignee
     #[arg(long, conflicts_with = "assignees")]
     pub clear_assignees: bool,

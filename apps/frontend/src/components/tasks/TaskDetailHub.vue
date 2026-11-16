@@ -20,6 +20,7 @@ import {
   Loader2,
   Pencil,
   Percent,
+  Shapes,
   Plus,
   ListChecks,
   SquarePen,
@@ -77,6 +78,7 @@ import '@/lib/remark-kfm-mermaid/style.css';
 type TaskDetail = components['schemas']['TaskDetailResponse'];
 type StatusOption = components['schemas']['ProjectStatusResponse'];
 type LabelOption = components['schemas']['LabelResponse'];
+type TaskTypeOption = components['schemas']['TaskTypeResponse'];
 
 const props = defineProps<{
   task: TaskDetail | null;
@@ -87,6 +89,10 @@ const props = defineProps<{
   statusError?: string | null;
   priorityUpdating?: boolean;
   priorityError?: string | null;
+  /** 選べる種別（未指定なら種別は表示のみ。選べない間は渡さない） */
+  projectTaskTypes?: TaskTypeOption[];
+  taskTypeUpdating?: boolean;
+  taskTypeError?: string | null;
   /** 担当者に選べるメンバー（未指定なら担当者は表示のみ） */
   members?: { id: string; username: string; avatar_url?: string | null }[];
   /** 担当者の更新中。ピッカーを止める（止めないと 2 回目が無言で捨てられる） */
@@ -155,6 +161,8 @@ function retryFailed() {
 const emit = defineEmits<{
   'update:statusId': [value: string];
   'change:priority': [value: TaskDetail['priority']];
+  /** 種別を選ぶ。null は「種別なし」 */
+  'change:task_type': [taskTypeId: string | null];
   'save:title': [value: string];
   // preserveWhitespace: 保存で本文の前後の空白を削らない。チェックボックスの切り替えは 1 字だけを替える操作で、
   // 先頭の字下げを削るとリストの入れ子が変わるため（編集器からの保存は従来どおり前後を削る）
@@ -203,6 +211,26 @@ const priorityItems = computed<DropdownItem[]>(() =>
     disabled: props.priorityUpdating,
   })),
 );
+
+/** 「種別なし」を選ぶ項目の値。種別の ID（UUID）とは重ならない */
+const NO_TASK_TYPE = 'none';
+
+const taskTypeItems = computed<DropdownItem[]>(() => [
+  {
+    value: NO_TASK_TYPE,
+    label: '種別なし',
+    kind: 'radio',
+    checked: !props.task?.task_type,
+    disabled: props.taskTypeUpdating,
+  },
+  ...(props.projectTaskTypes ?? []).map((taskType) => ({
+    value: taskType.id,
+    label: taskType.name,
+    kind: 'radio' as const,
+    checked: taskType.id === props.task?.task_type?.id,
+    disabled: props.taskTypeUpdating,
+  })),
+]);
 
 /**
  * 担当者全員の完了が必要なタスクで、未完了の担当者が残っている間は完了へ直接移せない
@@ -760,13 +788,56 @@ function clearDescription() {
               layout === 'pane' ? '' : 'lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:px-6 lg:py-5'
             "
           >
-            <!-- 種別。タスク種別の概念がまだ無いので固定表示（モックの Task チップ） -->
-            <span
-              class="inline-flex h-7 w-fit items-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground"
-            >
-              <CircleDashed class="size-3.5" aria-hidden="true" />
-              タスク
-            </span>
+            <!-- 種別。候補を渡された消費側では選び直せる。渡されなければ名前だけを表示する -->
+            <div v-if="projectTaskTypes || task.task_type" class="flex flex-col gap-1">
+              <Dropdown
+                v-if="projectTaskTypes"
+                top-layer
+                variant="tertiary"
+                label="種別"
+                :icon="null"
+                :disabled="taskTypeUpdating"
+                :items="taskTypeItems"
+                :on-select="
+                  (value: string) => emit('change:task_type', value === NO_TASK_TYPE ? null : value)
+                "
+              >
+                <template #trigger>
+                  <span
+                    class="flex items-center gap-1.5 text-xs"
+                    :class="task.task_type ? '' : 'text-muted-foreground'"
+                  >
+                    <span
+                      v-if="task.task_type"
+                      class="size-2 shrink-0 rounded-full"
+                      :style="{ backgroundColor: task.task_type.color }"
+                      aria-hidden="true"
+                    />
+                    <Shapes v-else class="size-3.5" aria-hidden="true" />
+                    <span class="truncate">{{ task.task_type?.name ?? '種別' }}</span>
+                  </span>
+                </template>
+              </Dropdown>
+              <span
+                v-else-if="task.task_type"
+                class="inline-flex h-7 w-fit items-center gap-1.5 rounded-md border px-2 text-xs"
+              >
+                <span
+                  class="size-2 shrink-0 rounded-full"
+                  :style="{ backgroundColor: task.task_type.color }"
+                  aria-hidden="true"
+                />
+                {{ task.task_type.name }}
+              </span>
+              <p v-if="taskTypeError" class="text-xs text-destructive">{{ taskTypeError }}</p>
+              <p
+                v-else-if="savedField === 'task_type'"
+                role="status"
+                class="text-xs text-muted-foreground"
+              >
+                保存しました
+              </p>
+            </div>
 
             <div>
               <div v-if="editingField === 'title'" class="flex flex-col gap-1">

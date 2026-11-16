@@ -94,6 +94,9 @@ const {
   statusError,
   priorityUpdating,
   priorityError,
+  projectTaskTypes,
+  taskTypeUpdating,
+  taskTypeError,
   labelsUpdating,
   labelsError,
   parentUpdating,
@@ -106,6 +109,7 @@ const {
   isError,
   onStatusChange,
   onPriorityChange,
+  onTaskTypeChange,
   onSaveTitle,
   onSaveDescription,
   onSaveProgressPct,
@@ -319,6 +323,9 @@ function onDeleteDialogCancel(event: Event) {
         :status-error="statusError"
         :priority-updating="priorityUpdating"
         :priority-error="priorityError"
+        :project-task-types="projectTaskTypes"
+        :task-type-updating="taskTypeUpdating"
+        :task-type-error="taskTypeError"
         :labels-updating="labelsUpdating"
         :labels-error="labelsError"
         :field-updating="fieldUpdating"
@@ -331,6 +338,7 @@ function onDeleteDialogCancel(event: Event) {
         :error="isError"
         @update:status-id="onStatusChange"
         @change:priority="onPriorityChange"
+        @change:task_type="onTaskTypeChange"
         @save:title="onSaveTitle"
         @save:description="onSaveDescription"
         @save:progress_pct="onSaveProgressPct"

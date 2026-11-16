@@ -110,6 +110,12 @@ const sampleStatuses = [
   },
 ];
 
+const sampleTaskTypes = [
+  { id: 'type-task', project_id: 'proj-eng', name: 'タスク', color: '#64748b', position: 0 },
+  { id: 'type-bug', project_id: 'proj-eng', name: 'バグ', color: '#ef4444', position: 1 },
+  { id: 'type-feature', project_id: 'proj-eng', name: '機能', color: '#3b82f6', position: 2 },
+];
+
 const sampleTaskDetail = {
   id: 'task-1',
   seq_id: 1,
@@ -147,6 +153,8 @@ const sampleTaskDetail = {
   ],
   custom_field_values: [],
   reactions: [] as ReactionSummary[],
+  /** 種別は任意。既定は未設定（引き金は「種別」） */
+  task_type: null as (typeof sampleTaskTypes)[number] | null,
 };
 
 const sampleSubtask = {
@@ -207,6 +215,8 @@ const sampleComments: MockComment[] = [
 
 type MockOptions = {
   task?: typeof sampleTaskDetail | null;
+  /** 最初に付いている種別。`task` と違い GET で固定せず、PUT の結果を返す */
+  taskType?: (typeof sampleTaskTypes)[number] | null;
   rejectAll?: boolean;
   rejectTenantsList?: boolean;
   rejectPut?: number;
@@ -268,6 +278,11 @@ function applyPutBody(
     }
   }
 
+  if (body.clear_task_type_id) next.task_type = null;
+  else if (typeof body.task_type_id === 'string') {
+    next.task_type = sampleTaskTypes.find((type) => type.id === body.task_type_id) ?? null;
+  }
+
   if (Array.isArray(body.label_ids)) {
     next.labels = sampleLabels.filter((label) => (body.label_ids as string[]).includes(label.id));
   }
@@ -281,6 +296,7 @@ let mutableComments: MockComment[] = [];
 function createMockFetch(overrides: MockOptions = {}) {
   mutableTaskDetail = { ...(overrides.task ?? sampleTaskDetail) };
   if (overrides.taskReactions) mutableTaskDetail.reactions = overrides.taskReactions;
+  if (overrides.taskType !== undefined) mutableTaskDetail.task_type = overrides.taskType;
   mutableComments = (overrides.comments ?? []).map((thread) => ({
     ...thread,
     replies: thread.replies.map((reply) => ({ ...reply })),
@@ -320,6 +336,9 @@ function createMockFetch(overrides: MockOptions = {}) {
     }
     if (url.includes('/labels')) {
       return jsonResponse(sampleLabels);
+    }
+    if (url.includes('/task-types')) {
+      return jsonResponse(sampleTaskTypes);
     }
     // 担当者候補はメンバー一覧とは別の口（管理者でなくても読める）
     if (url.includes('/assignable-users')) {
@@ -587,6 +606,8 @@ export const Default: Story = {
       canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
     ).resolves.toBeInTheDocument();
     await expect(canvas.findByText('ENG-1')).resolves.toBeInTheDocument();
+    // 種別が無いタスクの引き金は「種別」（以前の固定の「タスク」ではない）
+    await expect(canvas.findByRole('button', { name: '種別' })).resolves.toHaveTextContent('種別');
     await expect(
       canvas.findByText('OIDC フローとセッション管理を実装する。'),
     ).resolves.toBeInTheDocument();
@@ -1096,6 +1117,70 @@ export const RequireAllBlocked: Story = {
       'aria-disabled',
       'true',
     );
+  },
+};
+
+/** 種別があるタスク（バグ）。引き金に色の点と名前を出す */
+const bugType = sampleTaskTypes[1];
+
+export const TaskTypeSet: Story = {
+  name: '種別あり',
+  beforeEach: () => createMockFetch({ taskType: bugType }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const trigger = await canvas.findByRole('button', { name: '種別' });
+    await expect(trigger).toHaveTextContent('バグ');
+    await expect(trigger.querySelector('[style*="background-color"]')).not.toBeNull();
+  },
+};
+
+export const TaskTypeMenuOpen: Story = {
+  name: '種別のメニューを開いた状態',
+  beforeEach: () => createMockFetch({ taskType: bugType }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await user.click(await canvas.findByRole('button', { name: '種別' }));
+    // 「種別なし」と各種別が並び、選択中の種別だけに印が付く
+    await expect(await screen.findByRole('menuitemradio', { name: '種別なし' })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+    await expect(screen.getByRole('menuitemradio', { name: 'バグ' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await expect(screen.getByRole('menuitemradio', { name: '機能' })).toBeInTheDocument();
+  },
+};
+
+export const TaskTypeChange: Story = {
+  name: '種別の付け替え',
+  beforeEach: () => createMockFetch({ taskType: bugType }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    const trigger = await canvas.findByRole('button', { name: '種別' });
+    await expect(trigger).toHaveTextContent('バグ');
+    await user.click(trigger);
+    await user.click(await screen.findByRole('menuitemradio', { name: '機能' }));
+    await expect(trigger).toHaveTextContent('機能');
+    await expect(canvas.findByText('保存しました')).resolves.toBeInTheDocument();
+  },
+};
+
+export const TaskTypeChangeFailure: Story = {
+  name: '種別の保存失敗',
+  beforeEach: () => createMockFetch({ taskType: bugType, rejectPut: 500 }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    const trigger = await canvas.findByRole('button', { name: '種別' });
+    await user.click(trigger);
+    await user.click(await screen.findByRole('menuitemradio', { name: '機能' }));
+    await expect(canvas.findByText('種別の更新に失敗しました')).resolves.toBeInTheDocument();
+    // 失敗したら元の表示へ戻る
+    await expect(trigger).toHaveTextContent('バグ');
   },
 };
 

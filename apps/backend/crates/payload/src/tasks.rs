@@ -8,6 +8,7 @@ use crate::custom_fields::{CustomFieldValueInput, TaskCustomFieldValueResponse};
 use crate::labels::LabelResponse;
 use crate::mentions::{MentionMap, MentionedUser};
 use crate::or_unknown::OrUnknown;
+use crate::task_types::TaskTypeResponse;
 use crate::users::UserSummary;
 use entity::{task_assignees, task_relations, tasks};
 
@@ -51,6 +52,10 @@ pub struct TaskResponse {
     pub created_by: Option<UserSummary>,
     pub assignees: Vec<TaskAssigneeSummary>,
     pub labels: Vec<LabelResponse>,
+    /// タスクの種別。未設定なら null。古いサーバーの応答には無いので、無ければ null
+    #[serde(default)]
+    #[schema(nullable)]
+    pub task_type: Option<TaskTypeResponse>,
     #[schema(value_type = String, format = "date-time")]
     pub created_at: DateTime<Utc>,
     #[schema(value_type = String, format = "date-time")]
@@ -77,6 +82,7 @@ impl TaskResponse {
         created_by: Option<UserSummary>,
         assignees: Vec<TaskAssigneeSummary>,
         labels: Vec<LabelResponse>,
+        task_type: Option<TaskTypeResponse>,
     ) -> Self {
         Self {
             id: model.id,
@@ -99,6 +105,7 @@ impl TaskResponse {
             created_by,
             assignees,
             labels,
+            task_type,
             created_at: model.created_at.with_timezone(&Utc),
             updated_at: model.updated_at.with_timezone(&Utc),
             completed_at: model.completed_at.map(|dt| dt.with_timezone(&Utc)),
@@ -142,6 +149,9 @@ pub struct CreateTaskRequest {
     pub parent_task_id: Option<Uuid>,
     #[schema(value_type = Option<String>, format = "uuid")]
     pub milestone_id: Option<Uuid>,
+    /// タスクの種別。同じプロジェクトの種別だけ指定できる（別のプロジェクトの種別は 404）
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub task_type_id: Option<Uuid>,
     #[schema(value_type = Option<String>, format = "uuid")]
     pub sprint_id: Option<Uuid>,
     #[schema(value_type = Option<String>, format = "date-time")]
@@ -187,6 +197,12 @@ pub struct UpdateTaskRequest {
     pub milestone_id: Option<Uuid>,
     #[serde(default)]
     pub clear_milestone_id: bool,
+    /// タスクの種別。同じプロジェクトの種別だけ指定できる（別のプロジェクトの種別は 404）
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub task_type_id: Option<Uuid>,
+    /// true で種別を外す。`task_type_id` と同時に指定すると外すほうが優先される
+    #[serde(default)]
+    pub clear_task_type_id: bool,
     #[schema(value_type = Option<String>, format = "uuid")]
     pub sprint_id: Option<Uuid>,
     #[serde(default)]
@@ -243,6 +259,8 @@ pub struct ListTasksQuery {
     pub created_by: Option<Uuid>,
     pub label_id: Option<Uuid>,
     pub milestone_id: Option<Uuid>,
+    /// 種別で絞り込む
+    pub task_type_id: Option<Uuid>,
     pub sprint_id: Option<Uuid>,
     pub parent_task_id: Option<Uuid>,
     /// 開始予定日がこの日以降のタスクだけを返す（両端含む、`YYYY-MM-DD`）。
@@ -463,6 +481,49 @@ mod tests {
         }))
         .expect("task without require_all_assignees_done");
         assert!(!task.require_all_assignees_done);
+        // 種別を知らない古いサーバーの応答も読める
+        assert!(task.task_type.is_none());
+    }
+
+    /// `task_type` を埋め込んだ応答は、種別の定義ごと読める。
+    #[test]
+    fn reads_responses_with_a_task_type() {
+        let task: TaskResponse = serde_json::from_value(serde_json::json!({
+            "id": UUID,
+            "project_id": UUID,
+            "seq_id": 1,
+            "title": "t",
+            "description": null,
+            "status_id": UUID,
+            "priority": "medium",
+            "progress_pct": 0,
+            "parent_task_id": null,
+            "milestone_id": null,
+            "sprint_id": null,
+            "soft_deadline": null,
+            "hard_deadline": null,
+            "planned_start_on": null,
+            "estimated_minutes": null,
+            "is_archived": false,
+            "created_by": null,
+            "assignees": [],
+            "labels": [],
+            "task_type": {
+                "id": UUID,
+                "project_id": UUID,
+                "name": "バグ",
+                "color": "#ef4444",
+                "position": 1,
+            },
+            "created_at": "2026-11-01T00:00:00Z",
+            "updated_at": "2026-11-01T00:00:00Z",
+            "completed_at": null,
+            "deleted_at": null,
+        }))
+        .expect("task with task_type");
+        let task_type = task.task_type.expect("task_type");
+        assert_eq!(task_type.name, "バグ");
+        assert_eq!(task_type.position, 1);
     }
 
     /// 追加した設定は、使わないかぎり送らない（古いサーバーへの要求を変えない）。

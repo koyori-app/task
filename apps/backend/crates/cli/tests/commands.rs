@@ -15,6 +15,44 @@ const ALICE_ID: &str = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const BOB_ID: &str = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const BUG_LABEL: &str = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const STALE_LABEL: &str = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+const BUG_TYPE: &str = "c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c1c1";
+const FEATURE_TYPE: &str = "c2c2c2c2-c2c2-4c2c-8c2c-c2c2c2c2c2c2";
+
+fn task_type_json(id: &str, name: &str, color: &str, position: i64) -> serde_json::Value {
+    json!({
+        "id": id,
+        "project_id": PROJECT_ID,
+        "name": name,
+        "color": color,
+        "position": position,
+    })
+}
+
+/// 並びを入れ替えて返す（CLI が position の昇順に直すことを見る）。
+async fn mount_task_types(harness: &Harness, expected_calls: u64) {
+    Mock::given(method("GET"))
+        .and(path(project_path("task-types")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            task_type_json(FEATURE_TYPE, "機能", "#3b82f6", 1),
+            task_type_json(BUG_TYPE, "バグ", "#ef4444", 0),
+        ])))
+        .expect(expected_calls)
+        .mount(&harness.server)
+        .await;
+}
+
+/// 更新・作成の本文だけを取り出す（GET を除く）。
+async fn written_bodies(harness: &Harness) -> Vec<serde_json::Value> {
+    harness
+        .server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.method.as_str() != "GET")
+        .map(|r| serde_json::from_slice(&r.body).unwrap())
+        .collect()
+}
 
 fn label_json(id: &str, name: &str) -> serde_json::Value {
     json!({
@@ -547,6 +585,7 @@ async fn tasks_create_resolves_the_named_status_and_posts_it() {
             "progress_pct": null,
             "parent_task_id": null,
             "milestone_id": null,
+            "task_type_id": null,
             "sprint_id": null,
             "soft_deadline": null,
             "hard_deadline": null,
@@ -597,6 +636,7 @@ async fn tasks_create_falls_back_to_the_projects_default_status() {
             "progress_pct": null,
             "parent_task_id": null,
             "milestone_id": null,
+            "task_type_id": null,
             "sprint_id": null,
             "soft_deadline": null,
             "hard_deadline": null,
@@ -1001,4 +1041,213 @@ async fn a_response_that_no_longer_matches_the_shared_type_is_reported_not_swall
         "{}",
         err.message
     );
+}
+
+#[tokio::test]
+async fn projects_types_lists_name_and_color_in_position_order() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    mount_task_types(&harness, 2).await;
+
+    let code = harness
+        .run(&["task", "projects", "types", "--project", "APP"])
+        .await
+        .unwrap();
+    assert_eq!(code, 0);
+    let code = harness
+        .run(&["task", "--json", "projects", "types", "--project", "APP"])
+        .await
+        .unwrap();
+    assert_eq!(code, 0);
+    assert_eq!(harness.calls_to(&project_path("task-types")).await, 2);
+}
+
+#[tokio::test]
+async fn tasks_create_resolves_the_type_name_and_posts_its_id() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    mount_statuses(&harness).await;
+    mount_task_types(&harness, 1).await;
+    Mock::given(method("POST"))
+        .and(path(project_path("tasks")))
+        .and(body_partial_json(json!({ "task_type_id": BUG_TYPE })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(task_detail_json()))
+        .expect(1)
+        .mount(&harness.server)
+        .await;
+
+    let code = harness
+        .run(&[
+            "task",
+            "tasks",
+            "create",
+            "--project",
+            "APP",
+            "--title",
+            "t",
+            "--type",
+            "バグ",
+        ])
+        .await
+        .unwrap();
+    assert_eq!(code, 0);
+}
+
+#[tokio::test]
+async fn tasks_create_with_an_unknown_type_lists_the_candidates_and_posts_nothing() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    mount_statuses(&harness).await;
+    mount_task_types(&harness, 1).await;
+
+    let err = harness
+        .run(&[
+            "task",
+            "tasks",
+            "create",
+            "--project",
+            "APP",
+            "--title",
+            "t",
+            "--type",
+            "存在しない",
+        ])
+        .await
+        .unwrap_err();
+
+    assert!(err.message.contains("Type not found"), "{}", err.message);
+    assert!(err.message.contains("バグ"), "{}", err.message);
+    assert!(written_bodies(&harness).await.is_empty());
+}
+
+#[tokio::test]
+async fn tasks_update_sends_or_clears_the_type() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    // `--type` が UUID のときは一覧を取らない
+    mount_task_types(&harness, 1).await;
+    Mock::given(method("PUT"))
+        .and(path(project_path("tasks/APP-7")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(task_detail_json()))
+        .expect(4)
+        .mount(&harness.server)
+        .await;
+
+    for args in [
+        vec!["--type", "バグ"],
+        vec!["--type", FEATURE_TYPE],
+        vec!["--clear-type"],
+        vec!["--title", "only the title"],
+    ] {
+        let mut command = vec!["task", "tasks", "update", "APP-7"];
+        command.extend(args);
+        assert_eq!(harness.run(&command).await.unwrap(), 0);
+    }
+
+    let bodies = written_bodies(&harness).await;
+    assert_eq!(bodies[0]["task_type_id"], BUG_TYPE);
+    assert_eq!(bodies[0]["clear_task_type_id"], false);
+    assert_eq!(bodies[1]["task_type_id"], FEATURE_TYPE);
+    assert!(bodies[2]["task_type_id"].is_null());
+    assert_eq!(bodies[2]["clear_task_type_id"], true);
+    // 種別を指定しない更新は、種別を触らない
+    assert!(bodies[3]["task_type_id"].is_null());
+    assert_eq!(bodies[3]["clear_task_type_id"], false);
+}
+
+#[test]
+fn a_type_and_clearing_it_cannot_be_combined() {
+    let result = <task_cli::cli::Cli as clap::Parser>::try_parse_from([
+        "task",
+        "tasks",
+        "update",
+        "APP-7",
+        "--type",
+        "バグ",
+        "--clear-type",
+    ]);
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn tasks_list_filters_by_the_type() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    mount_task_types(&harness, 1).await;
+    Mock::given(method("GET"))
+        .and(path(project_path("tasks")))
+        .and(query_param("task_type_id", BUG_TYPE))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "tasks": [], "total": 0 })))
+        .expect(1)
+        .mount(&harness.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(project_path("tasks")))
+        .and(query_param_is_missing("task_type_id"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "tasks": [], "total": 0 })))
+        .expect(1)
+        .mount(&harness.server)
+        .await;
+
+    for args in [
+        vec![
+            "task",
+            "tasks",
+            "list",
+            "--project",
+            "APP",
+            "--type",
+            "バグ",
+        ],
+        vec!["task", "tasks", "list", "--project", "APP"],
+    ] {
+        assert_eq!(harness.run(&args).await.unwrap(), 0);
+    }
+}
+
+#[tokio::test]
+async fn tasks_bulk_create_resolves_each_elements_type_with_one_lookup() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    mount_statuses(&harness).await;
+    mount_task_types(&harness, 1).await;
+    Mock::given(method("POST"))
+        .and(path(project_path("tasks/bulk-create")))
+        .respond_with(
+            ResponseTemplate::new(201).set_body_json(json!({ "tasks": [task_detail_json()] })),
+        )
+        .expect(1)
+        .mount(&harness.server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("tasks.json");
+    std::fs::write(
+        &file,
+        json!([
+            { "title": "a", "type": "バグ" },
+            { "title": "b", "type": "機能" },
+            { "title": "c" },
+        ])
+        .to_string(),
+    )
+    .unwrap();
+
+    let code = harness
+        .run(&[
+            "task",
+            "tasks",
+            "bulk-create",
+            "--project",
+            "APP",
+            file.to_str().unwrap(),
+        ])
+        .await
+        .unwrap();
+    assert_eq!(code, 0);
+
+    let bodies = written_bodies(&harness).await;
+    let tasks = bodies[0]["tasks"].as_array().unwrap();
+    assert_eq!(tasks[0]["task_type_id"], BUG_TYPE);
+    assert_eq!(tasks[1]["task_type_id"], FEATURE_TYPE);
+    assert!(tasks[2]["task_type_id"].is_null());
 }

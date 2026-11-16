@@ -131,6 +131,9 @@ pub async fn create_task_in_txn<C: ConnectionTrait>(
             .await?
             .ok_or(AppError::NotFound)?;
     }
+    if let Some(tid) = payload.task_type_id {
+        crate::task_types::find_in_project(txn, ctx.project_id, tid).await?;
+    }
     // 採番(カウンター行ロック)を sprint の FOR UPDATE より前に取る。ロック順を「カウンター → sprint」に
     // 固定し、一括作成と単体作成の同時実行でのデッドロックを避ける(ロールバックで番号も戻る)。
     let seq_id = next_seq_id(txn, ctx.project_id).await?;
@@ -164,6 +167,7 @@ pub async fn create_task_in_txn<C: ConnectionTrait>(
         progress_pct: Set(payload.progress_pct.unwrap_or(0)),
         parent_task_id: Set(payload.parent_task_id),
         milestone_id: Set(payload.milestone_id),
+        task_type_id: Set(payload.task_type_id),
         sprint_id: Set(payload.sprint_id),
         soft_deadline: Set(soft_deadline),
         hard_deadline: Set(hard_deadline),
@@ -355,6 +359,7 @@ mod tests {
             hard_deadline: hard.map(dt),
             planned_start_on: start.map(d),
             require_all_assignees_done: false,
+            task_type_id: None,
             estimated_minutes: None,
             is_archived: false,
             created_by: Uuid::nil(),
