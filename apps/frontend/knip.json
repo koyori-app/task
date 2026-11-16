@@ -1,0 +1,18 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": ["+server.ts", "scripts/*.mjs", "src/**/*.type-test.ts"],
+  "project": [
+    "*.ts",
+    "src/**/*.{ts,vue,css}",
+    "server/**/*.ts",
+    "stories/**/*.{ts,vue}",
+    ".storybook/**/*.ts",
+    "buildSrc/**/*.ts",
+    "scripts/**/*.mjs",
+    "oxlint-plugins/**/*.mjs"
+  ],
+  "ignoreDependencies": ["@argos-ci/cli", "http-server"],
+  "rules": {
+    "catalogReferences": "off"
+  }
+}
