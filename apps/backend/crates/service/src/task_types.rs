@@ -2,7 +2,7 @@
 
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
-    prelude::Uuid,
+    QuerySelect, prelude::Uuid, sea_query::LockType,
 };
 
 use crate::error::AppError;
@@ -37,6 +37,9 @@ pub async fn seed_default_task_types<C: ConnectionTrait>(
 }
 
 /// 同じプロジェクトの種別を返す。無い、または別プロジェクトの種別なら `NotFound`。
+///
+/// 行を `FOR KEY SHARE` で読む。タスクの作成・更新のトランザクションの中で呼べば、確認から書き込みの
+/// コミットまで種別の削除を待たせ、FK 違反（500）にならずに `SET NULL` で外れる。
 pub async fn find_in_project<C: ConnectionTrait>(
     db: &C,
     project_id: Uuid,
@@ -44,6 +47,7 @@ pub async fn find_in_project<C: ConnectionTrait>(
 ) -> Result<project_task_types::Model, AppError> {
     project_task_types::Entity::find_by_id(id)
         .filter(project_task_types::Column::ProjectId.eq(project_id))
+        .lock(LockType::KeyShare)
         .one(db)
         .await?
         .ok_or(AppError::NotFound)

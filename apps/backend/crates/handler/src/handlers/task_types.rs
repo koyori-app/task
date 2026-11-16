@@ -96,7 +96,7 @@ pub async fn create_task_type(
         project_id: Set(project_id),
         name: Set(payload.name),
         color: Set(payload.color),
-        position: Set(ordering::next_position(max)?),
+        position: Set(ordering::next_position(max)),
         created_at: Set(chrono::Utc::now().into()),
     }
     .insert(&txn)

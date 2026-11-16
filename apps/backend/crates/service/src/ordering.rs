@@ -23,12 +23,13 @@ pub async fn lock_project<C: ConnectionTrait>(db: &C, project_id: Uuid) -> Resul
 }
 
 /// 末尾に足す定義の `position`。現在の最大値（定義が無ければ `None`）の次を返す。
-/// `SMALLINT` を越える件数は、値が重なる・負になるのを避けて 400 にする。
-pub fn next_position(current_max: Option<i16>) -> Result<i16, AppError> {
-    match current_max {
-        None => Ok(0),
-        Some(max) => max.checked_add(1).ok_or(AppError::BadRequest),
-    }
+///
+/// `SMALLINT` の上限（32,767）では張り付き、作成は失敗させない。カスタムフィールドは作成と更新で
+/// `position` を自由に渡せるので、上限の値を 1 件持つだけで以後の作成が全部失敗するのを避ける
+/// （重なった値は並べ替えで直せる）。種別とステータスは `position` を外から渡せず、並べ替えが
+/// 0 から振り直す。
+pub fn next_position(current_max: Option<i16>) -> i16 {
+    current_max.map_or(0, |max| max.saturating_add(1))
 }
 
 /// 並べ替えの `ids` が、既存の定義の集合と過不足なく一致するか。件数の違い・重複・別プロジェクトの ID は 400。
@@ -86,14 +87,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn next_position_starts_at_zero_and_stops_at_the_column_limit() {
-        assert_eq!(next_position(None).unwrap(), 0);
-        assert_eq!(next_position(Some(4)).unwrap(), 5);
-        assert_eq!(next_position(Some(i16::MAX - 1)).unwrap(), i16::MAX);
-        assert!(matches!(
-            next_position(Some(i16::MAX)),
-            Err(AppError::BadRequest)
-        ));
+    fn next_position_starts_at_zero_and_sticks_at_the_column_limit() {
+        assert_eq!(next_position(None), 0);
+        assert_eq!(next_position(Some(4)), 5);
+        assert_eq!(next_position(Some(i16::MAX - 1)), i16::MAX);
+        // 上限に達しても失敗せず、上限の値のまま
+        assert_eq!(next_position(Some(i16::MAX)), i16::MAX);
     }
 
     #[test]

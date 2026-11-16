@@ -93,7 +93,7 @@ pub async fn create_custom_field(
                 .one(&txn)
                 .await?
                 .map(|f| f.position);
-            ordering::next_position(max)?
+            ordering::next_position(max)
         }
     };
     let field = project_custom_fields::ActiveModel {

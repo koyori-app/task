@@ -346,3 +346,57 @@ async fn concurrent_custom_field_creates_get_distinct_positions() {
     positions.sort_unstable();
     assert_eq!(positions, (0..6).collect::<Vec<_>>());
 }
+
+/// 位置を指定しない作成は、位置が SMALLINT の上限に達していても成功する（上限で張り付く）。
+/// 作成と更新は位置を自由に渡せるので、上限の値を 1 件持つだけで以後の作成が全部失敗してはいけない。
+#[tokio::test]
+async fn creating_without_a_position_succeeds_even_at_the_position_limit() {
+    let mut app = TestApp::new().await;
+    let user = app.insert_user(true, false).await;
+    app.login_session_no_content(&user.email, &user.password)
+        .await;
+    let tp = app.insert_tenant_project(user.id).await;
+    let base = format!(
+        "/v1/tenants/{}/projects/{}/custom-fields",
+        tp.tenant_id, tp.project_id
+    );
+
+    let at_limit = app
+        .post_json_with_session(
+            &base,
+            serde_json::json!({ "name": "上限", "field_type": "text", "position": i16::MAX }),
+        )
+        .await;
+    assert_eq!(at_limit.status(), StatusCode::CREATED);
+
+    // 上限の次の作成も 201 で、位置は上限のまま
+    for name in ["次 1", "次 2"] {
+        let next = app
+            .post_json_with_session(
+                &base,
+                serde_json::json!({ "name": name, "field_type": "text" }),
+            )
+            .await;
+        assert_eq!(next.status(), StatusCode::CREATED, "{name}");
+        let next: Value = next.json().await.expect("json");
+        assert_eq!(next["position"], i64::from(i16::MAX), "{name}");
+    }
+
+    // 対照: 上限に達していなければ末尾（最大値の次）に付く
+    let other = format!(
+        "/v1/tenants/{}/projects/{}/custom-fields",
+        tp.tenant_id,
+        crate::common::insert_extra_project(&app, tp.tenant_id).await
+    );
+    for (name, expected) in [("先頭", 0), ("二つ目", 1)] {
+        let created = app
+            .post_json_with_session(
+                &other,
+                serde_json::json!({ "name": name, "field_type": "text" }),
+            )
+            .await;
+        assert_eq!(created.status(), StatusCode::CREATED);
+        let created: Value = created.json().await.expect("json");
+        assert_eq!(created["position"], expected, "{name}");
+    }
+}

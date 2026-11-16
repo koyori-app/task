@@ -4,10 +4,13 @@
 use crate::common::{TestApp, TestTenantProject, create_status, insert_extra_project, json_body};
 use axum::http::StatusCode;
 use entity::scopes::Scope;
-use sea_orm::{ConnectionTrait, EntityTrait, PaginatorTrait};
+use sea_orm::{
+    ConnectionTrait, DatabaseBackend, EntityTrait, PaginatorTrait, Statement, TransactionTrait,
+};
 use serde_json::{Value, json};
 use service::task_types::DEFAULT_TASK_TYPES;
 use std::collections::HashSet;
+use std::time::Duration;
 use uuid::Uuid;
 
 /// 既定の種別を入れる SQL。マイグレーション（`m20261116000000_task_types`）と同じファイルを使う。
@@ -400,7 +403,7 @@ async fn reordering_a_project_without_types_accepts_only_an_empty_list() {
 }
 
 #[tokio::test]
-async fn concurrent_creates_get_distinct_positions_in_arrival_order() {
+async fn concurrent_creates_get_distinct_positions() {
     let mut app = TestApp::new().await;
     let owner = app.insert_user(true, false).await;
     app.login_session_no_content(&owner.email, &owner.password)
@@ -548,8 +551,46 @@ async fn backfill_adds_defaults_only_to_projects_without_types() {
     assert!(total >= 4);
 }
 
+/// `blocker_pid` の接続を待っている接続が現れるまで待つ（5 秒でタイムアウト）。
+async fn wait_until_blocked_by(app: &TestApp, blocker_pid: i32, what: &str) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let row = app
+                .state
+                .db
+                .query_one_raw(Statement::from_sql_and_values(
+                    DatabaseBackend::Postgres,
+                    "SELECT COUNT(*)::bigint AS count FROM pg_stat_activity \
+                     WHERE $1 = ANY(pg_blocking_pids(pid))",
+                    [blocker_pid.into()],
+                ))
+                .await
+                .expect("query blocked backends")
+                .expect("count row");
+            if row.try_get::<i64>("", "count").expect("count") >= 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("{what} は相手のトランザクションを待つはず"));
+}
+
+async fn backend_pid(txn: &sea_orm::DatabaseTransaction) -> i32 {
+    txn.query_one_raw(Statement::from_string(
+        DatabaseBackend::Postgres,
+        "SELECT pg_backend_pid() AS pid",
+    ))
+    .await
+    .expect("query pid")
+    .expect("pid row")
+    .try_get("", "pid")
+    .expect("pid")
+}
+
 #[tokio::test]
-async fn concurrent_backfills_do_not_fail_on_the_name_constraint() {
+async fn a_backfill_racing_an_uncommitted_backfill_skips_the_names_it_loses() {
     let mut app = TestApp::new().await;
     let owner = app.insert_user(true, false).await;
     app.login_session_no_content(&owner.email, &owner.password)
@@ -557,14 +598,23 @@ async fn concurrent_backfills_do_not_fail_on_the_name_constraint() {
     let tp = app.insert_tenant_project(owner.id).await;
     let base = types_base(tp.tenant_id, tp.project_id);
 
-    // 種別の無いプロジェクトに、別々の接続から同時に流す。互いのコミット前は NOT EXISTS が両方通るので、
-    // ON CONFLICT が無いと片方が (project_id, name) の UNIQUE 違反で落ちる
-    let db = &app.state.db;
-    let results =
-        futures::future::join_all((0..4).map(|_| db.execute_unprepared(BACKFILL_SQL))).await;
-    for result in results {
-        result.expect("concurrent backfill");
-    }
+    // 接続 A: 既定の 3 件を入れたままコミットしない。
+    // 接続 B: A の行はまだ見えないので NOT EXISTS を通り、同じ (project_id, name) の挿入で A のコミットを待つ。
+    // ON CONFLICT が無ければ、A のコミット後に B は必ず UNIQUE 違反で落ちる（待ちに入るのを確かめてから A を進める）
+    let txn = app.state.db.begin().await.expect("begin");
+    txn.execute_unprepared(BACKFILL_SQL)
+        .await
+        .expect("backfill A");
+    let pid = backend_pid(&txn).await;
+
+    let db = app.state.db.clone();
+    let second = tokio::spawn(async move { db.execute_unprepared(BACKFILL_SQL).await });
+    wait_until_blocked_by(&app, pid, "2 本目の backfill").await;
+    txn.commit().await.expect("commit A");
+    second
+        .await
+        .expect("join")
+        .expect("backfill B は UNIQUE 違反で落ちない");
 
     let expected: HashSet<String> = DEFAULT_TASK_TYPES
         .iter()
@@ -573,6 +623,36 @@ async fn concurrent_backfills_do_not_fail_on_the_name_constraint() {
     let actual = names(&list_types(&app, &base).await);
     assert_eq!(actual.len(), DEFAULT_TASK_TYPES.len());
     assert_eq!(actual.into_iter().collect::<HashSet<_>>(), expected);
+}
+
+#[tokio::test]
+async fn deleting_a_type_waits_for_a_task_write_that_checked_it() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(true, false).await;
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let base = types_base(tp.tenant_id, tp.project_id);
+    let bug = create_type(&app, &base, "バグ", "#ef4444").await;
+    let type_id: Uuid = bug["id"].as_str().expect("id").parse().expect("uuid");
+
+    // タスクの作成・更新は find_in_project で種別を確かめてから書く。その確認のあとコミットまでの間に
+    // 種別の削除が通ると、書き込みが FK 違反になり 500 になる。確認が行を読み取りロックしていれば、削除は待つ
+    let txn = app.state.db.begin().await.expect("begin");
+    service::task_types::find_in_project(&txn, tp.project_id, type_id)
+        .await
+        .expect("find");
+    let pid = backend_pid(&txn).await;
+
+    let client = app.client().clone();
+    let url = format!("{}{base}/{type_id}", app.base_url());
+    let delete = tokio::spawn(async move { client.delete(url).send().await });
+    wait_until_blocked_by(&app, pid, "種別の削除").await;
+    txn.commit().await.expect("commit");
+
+    let response = delete.await.expect("join").expect("send");
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert!(list_types(&app, &base).await.is_empty());
 }
 
 #[tokio::test]
