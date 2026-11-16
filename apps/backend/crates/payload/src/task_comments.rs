@@ -84,7 +84,7 @@ impl CommentUser {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct CommentReply {
     #[schema(value_type = String, format = "uuid")]
     pub id: Uuid,
@@ -97,10 +97,13 @@ pub struct CommentReply {
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub is_deleted: bool,
     /// 絵文字リアクション（最初に付いた順）。削除済みコメントは空
+    // CLI は使わない項目なので、無い応答も読む（openapi は変えないので `required` は残す）
+    #[serde(default)]
+    #[schema(required)]
     pub reactions: Vec<ReactionSummary>,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct CommentThread {
     #[schema(value_type = String, format = "uuid")]
     pub id: Uuid,
@@ -114,10 +117,13 @@ pub struct CommentThread {
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub is_deleted: bool,
     /// 絵文字リアクション（最初に付いた順）。削除済みコメントは空
+    // CLI は使わない項目なので、無い応答も読む（openapi は変えないので `required` は残す）
+    #[serde(default)]
+    #[schema(required)]
     pub reactions: Vec<ReactionSummary>,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct CommentListResponse {
     pub comments: Vec<CommentThread>,
     /// 全コメントの本文に出る印の id から引ける表示情報（削除済みのコメントの本文は含めぬ）。
@@ -193,4 +199,79 @@ pub struct CreateCommentRequest {
 pub struct UpdateCommentRequest {
     #[validate(length(min = 1))]
     pub body: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn user() -> CommentUser {
+        CommentUser {
+            account_kind: "human".into(),
+            id: Uuid::nil(),
+            name: "alice".into(),
+            avatar_url: None,
+        }
+    }
+
+    /// CLI は一覧の応答を同じ型で読む。直列化したものが読み戻せる。
+    #[test]
+    fn the_comment_list_reads_back_what_it_serializes() {
+        let now = chrono::Utc::now();
+        let list = CommentListResponse {
+            comments: vec![CommentThread {
+                id: Uuid::nil(),
+                user: user(),
+                body: Some("本文".into()),
+                replies: vec![CommentReply {
+                    id: Uuid::nil(),
+                    user: user(),
+                    body: None,
+                    created_at: now,
+                    updated_at: now,
+                    is_deleted: true,
+                    reactions: vec![],
+                }],
+                created_at: now,
+                updated_at: now,
+                is_deleted: false,
+                reactions: vec![],
+            }],
+            mentions: MentionMap::new(),
+        };
+
+        let json = serde_json::to_value(&list).unwrap();
+        let back: CommentListResponse = serde_json::from_value(json.clone()).unwrap();
+
+        assert_eq!(serde_json::to_value(&back).unwrap(), json);
+    }
+
+    /// CLI が使わない `reactions` が無い応答でも読める（版のずれで止まらない）。
+    #[test]
+    fn a_comment_without_reactions_is_still_readable() {
+        let json = serde_json::json!({
+            "comments": [{
+                "id": Uuid::nil(),
+                "user": { "account_kind": "human", "id": Uuid::nil(), "name": "a", "avatar_url": null },
+                "body": "x",
+                "replies": [{
+                    "id": Uuid::nil(),
+                    "user": { "account_kind": "human", "id": Uuid::nil(), "name": "a", "avatar_url": null },
+                    "body": "y",
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "updated_at": "2026-01-01T00:00:00Z",
+                    "is_deleted": false,
+                }],
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+                "is_deleted": false,
+            }],
+            "mentions": {},
+        });
+
+        let list: CommentListResponse = serde_json::from_value(json).unwrap();
+
+        assert!(list.comments[0].reactions.is_empty());
+        assert!(list.comments[0].replies[0].reactions.is_empty());
+    }
 }

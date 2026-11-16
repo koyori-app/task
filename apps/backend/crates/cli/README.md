@@ -54,6 +54,26 @@ mkdir -p ~/.local/bin && tar -xzf "$asset" -C ~/.local/bin
 `--version` が名乗る版はタグと一致する（リリース時にタグから注入し、その場で
 突き合わせている）。タグ以外でビルドしたバイナリはクレートの版を名乗る。
 
+### 更新
+
+新しい版があると、コマンドの最後に標準エラーへ 1 行で知らせる
+（`A new release of task is available: 0.1.51 -> 0.2.0. Run \`task self-update\` to install it.`）。
+標準出力と終了コードは変えない。
+
+- 確認は 1 日に 1 回まで（最後に確かめた時刻を `~/.config/task/update-check.json` に置く）。待ち時間は最大 2 秒
+- `TASK_NO_UPDATE_CHECK=1` で止まる。`CI` が空でなければ出ない。タグ以外でビルドしたバイナリ（版が `0.1.0`）も出ない
+- 通信・GitHub の制限・応答の形の失敗は黙って無視する。本体のコマンドは止まらない
+
+```bash
+task self-update   # 最新の配布物を落とし、.sha256 を確かめて、今の task と入れ替える
+```
+
+`self-update` が確かめるのは `.sha256`（破損や取り違え）までで、配布元の確かさは TLS に頼る。署名の検証は
+下の「検め方」の手順で行う。Windows は非対応（動いている `.exe` は置き換えられないので、`.zip` を落として入れ替える）。
+GitHub の API を使うので、`task` のトークンは送らない。
+タグ以外でビルドしたバイナリ（手元のビルド）では、実行ファイルを置き換えず、案内を出して終了コード 1 で止まる。
+新しい実行ファイルは、元の実行ファイルの権限を引き継ぐ。
+
 ### 検め方
 
 リリースには、四つの配布物の hash を束ねた `SHA256SUMS` と、それへの keyless 署名
@@ -120,16 +140,28 @@ task tasks list --project TASK --status Todo --label bug --sort deadline_asc
 task tasks list --project TASK --type バグ     # 種別で絞る
 task tasks list --project TASK --archived
 task tasks list --project TASK --unassigned  # 担当者がいないタスクだけ
+task tasks list --project TASK --json key,title,status  # 項目を選ぶ（本文などは出ない）
 task tasks search --project TASK ページング
 task tasks search --project TASK @alice      # alice を印でメンションした説明文にも当たる
 task tasks show TASK-181                     # 説明文のメンションは @今の名 で出る
 task tasks show TASK-181 --raw               # 保存されたまま（<@利用者ID> の印）で出す
+task tasks comments TASK-181                 # コメントを古い順に読む（返信は親の下に字下げ）。`--json` は API の形のまま
 task my list --open                          # 自分の担当のうち未完了だけ
 task my list --open --page 2 --limit 100     # ページングは tasks list と同じ
 ```
 
+`tasks list` は既定で 1 件 1 行の表（`キー<TAB>状態<TAB>タイトル<TAB>ラベル<TAB>更新日時`）を出し、本文は出さない。
+`--json` は全項目（本文を含む）に `key` を足した形で出す。項目を選ぶときは `--json key,title,status`
+（`--json=key,title,status` も同じ）と並べる。出力は `{ "tasks": [...], "total", "next_cursor" }` のままで、
+各行が指定した項目だけを指定した順で持つ。選べる項目は `TaskResponse` の項目と、CLI が足す `key`・`url`・
+`status`（状態の名前。`url` は `tasks create` と同じ条件で、引けなければ `null`）。誤った名前は選べる項目を
+並べて終了コード 2 で止まる。項目を選べるのは `tasks list` だけで、ほかのコマンドに付けると終了コード 2 で
+止まる（値なしの `--json` はどのコマンドでも今までどおり全部を出す）。
+
 `tasks show` は説明文のメンションの印を `@今の名` に戻して出す。それを `tasks update --description` へ
 そのまま戻すとメンションが素の文字になるので、書き換えて戻すときは `--raw` で印のまま取る（`--json` でも同じ）。
+`tasks comment` は投稿用で、読むのは `tasks comments`。出力は作成者・日時・本文で、本文のメンションは
+`@今の名` に戻す（`--json` も同じ。形と順は API のまま）。
 `tasks show` は添付ファイル（`attachments`。名前・MIME・サイズ・コンテンツ URL）も出す。本体の取得コマンドはまだ無い。
 
 `--status` / `--label` / `--type` / `--assignee` / `--milestone` / `--sprint` は名前または UUID で指せる。
@@ -149,6 +181,11 @@ task tasks update TASK-181 --progress 40 --sprint week-40 --add-label bug
 task tasks update TASK-181 --clear-sprint --archive
 task tasks update TASK-181 --type バグ        # 種別は 1 つだけ。外すときは --clear-type
 ```
+
+`tasks create` は作ったタスクのキーと画面の URL を、`--json` なしなら `TASK-532<TAB>https://…/tasks/TASK-532` の
+1 行で出す。`--json` は今までの項目の前に `key` と `url` を足した形で出す。`url` は `api_url` が
+`<画面の URL>/api` の形で、かつトークンに `read:tenant` があるときだけ入る（無ければ `null`、1 行は
+キーだけ）。URL の取得は作る前に済ませるので、取得に失敗したらタスクは作らない。
 
 ### 一括作成
 
@@ -174,7 +211,8 @@ UUID でなく名前で書ける。`description_file` は無く、未知のキ�
   を出して終了コード 2 で終わる。解決の途中の認証・権限・通信の失敗は、位置を添えたうえで元の終了コード
   （3 / 4 / 1）のまま返す。ラベル等の一覧はプロジェクト単位で 1 回だけ取る
 - API は全件作るか 1 件も作らないか。途中で落ちたときは入力を直して丸ごと再送する
-- 出力は入力順の `KEY-N  title`。`--json` は API の応答（`tasks` 配列）をそのまま出す
+- 出力は入力順の `KEY-N<TAB>URL<TAB>title`（URL が無いときは空の列）。`--json` は API の応答の形（`tasks` 配列）で、
+  各要素に `tasks create` と同じ `key` と `url` が付く
 - 作成は件数分の通知・`task.created` Webhook を出す（`tasks create` を件数分叩いたのと同じ）
 
 - 期限は RFC 3339（`2026-09-30T12:00:00Z`）か日付だけ（`2026-09-30` = その日の始まり `00:00:00Z`）。
@@ -186,6 +224,9 @@ UUID でなく名前で書ける。`description_file` は無く、未知のキ�
   （既にいる人の役割は変えない）。全員外すときは `--clear-assignees`。作成・更新とも、
   同じユーザー ID に解決される指定は一人分にまとめる
 - 渡さなかった項目は送らないので、既存の値は消えない。消すときは `--clear-*` を使う
+- `--description` と `--description-file` が空（空白だけを含む）なら、API を呼ばず終了コード 2 で止まる。
+  途中のコマンドが失敗して空のファイルができても、本文は消えない。本文を消すのは `--clear-description` だけ。
+  `tasks create` も同じ（本文なしで作るなら、どちらも付けない）
 
 ### PR との連携
 
@@ -213,12 +254,13 @@ task tasks pr unlink TASK-181 87
 |---|---|---|
 | `api_url` | `TASK_API_URL` | `TASK_TOKEN` と組で渡す |
 | `token` | `TASK_TOKEN` | `TASK_API_URL` と組で渡す |
-| `tenant_id` | `TASK_TENANT` | 単独で上書きできる |
+| `tenant_id` | `TASK_TENANT` | 単独で上書きできる。UUID か名前（slug） |
 
 ```bash
-task config set api_url https://task.example.com
+task config set api_url https://task.example.com/api
 task auth token < token.txt        # 引数を省くと標準入力から読む
 task auth whoami                   # 使用中の鍵と持ち主・scope・有効期限・使えるテナント（tenant_ids）が出る
+task tenants list                  # 使えるテナントの ID・名前（slug）・表示名（read:tenant が要る）
 ```
 
 ### 設定の優先順位
@@ -240,18 +282,25 @@ API の URL とトークンは組で決める。片方ずつ config から補う
 
 ```bash
 # 両方を環境変数で渡す
-export TASK_API_URL=https://task.example.com
+export TASK_API_URL=https://task.example.com/api
 export TASK_TOKEN=...
 
 # 両方を解除して config に揃える
 unset TASK_API_URL TASK_TOKEN
-task config set api_url https://task.example.com
+task config set api_url https://task.example.com/api
 task auth token < token.txt
 ```
 
 `tenant_id` は、トークンが使えるテナントが 1 つなら任意。未設定ならそのテナントを
 `GET /v1/personal_tokens/me` から引く（config には書かない）。複数のテナントで使えるトークンは
 自動では選ばず、`TASK_TENANT` か `tenant_id` の指定を求めて終了コード 2 で止まる。
+このとき使えるテナントを ID と名前（slug）で並べる（名前は `read:tenant` があるときだけ。無ければ ID だけ）。
+
+`TASK_TENANT` と `tenant_id` には UUID のほか、名前（slug。`task tenants list` で調べる）も書ける。
+名前は完全一致を優先し、無ければ大文字小文字を無視して照合する。無視した照合で複数に合うときは、候補（名前と UUID）を並べて終了コード 2 で止まる。
+名前のときは `GET /v1/tenants` を 1 回叩いて ID に直すので、トークンに `read:tenant` が要る
+（無ければ終了コード 4 で止まり、UUID を使う案内を出す）。見つからなければ使える名前を並べて終了コード 2 で止まる。
+UUID のときは何も叩かない。
 設定していればそちらを使うので、使えないテナントのトークンに替えたら
 `task config unset tenant_id`（環境変数なら `TASK_TENANT` の解除）で外す。外さないと 403 になる。
 
@@ -290,3 +339,7 @@ task projects types --project TASK        # --type に渡せる名前（並び�
 リクエスト / レスポンスの型は backend の `payload` クレートをそのまま使う。手書きの
 型定義を挟まないので、API 表面が変わったのに CLI が追従していない状態はコンパイル
 エラーになる（#647 で手書き `paths.ts` が実際の応答とずれていた）。
+
+多くのコマンドの前段で読む応答（`/personal_tokens/me` のテナントなど）は、使う項目だけの型を
+`payload` に置いて読む。使わない項目が増減しても、その応答を使うコマンドだけが失敗し、ほかは止まらない。
+元の応答を直列化したものが読めることは `payload` のテストで固定している。

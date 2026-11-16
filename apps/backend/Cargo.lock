@@ -2180,6 +2180,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "filetime"
+version = "0.2.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c287a33c7f0a620c38e641e7f60827713987b3c0f26e8ddc9462cc69cf75759"
+dependencies = [
+ "cfg-if",
+ "libc",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6002,7 +6012,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -6542,6 +6552,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
+name = "tar"
+version = "0.4.46"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f6221d9a6003c78398e3b239969f352578258df48c8eb051caadae0015bc840"
+dependencies = [
+ "filetime",
+ "libc",
+ "xattr",
+]
+
+[[package]]
 name = "task-cli"
 version = "0.1.0"
 dependencies = [
@@ -6549,12 +6570,16 @@ dependencies = [
  "clap",
  "common",
  "entity",
+ "flate2",
+ "hex",
  "payload",
  "reqwest 0.13.5",
  "sea-orm",
  "serde",
  "serde_json",
  "serde_yaml_ng",
+ "sha2 0.11.1",
+ "tar",
  "tempfile",
  "tokio",
  "uuid",
@@ -7686,7 +7711,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8059,6 +8084,7 @@ dependencies = [
  "log",
  "memchr",
  "mime_guess",
+ "miniz_oxide",
  "num-traits",
  "rand 0.10.3",
  "rand 0.8.6",
@@ -8074,6 +8100,7 @@ dependencies = [
  "serde_core",
  "sha2 0.10.9",
  "sha2 0.11.1",
+ "simd-adler32",
  "slab",
  "smallvec",
  "socket2",
