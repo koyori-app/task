@@ -124,6 +124,29 @@ export const Rail: Story = {
   },
 };
 
+/**
+ * レールで開いたプロジェクトは、見出しと中の項目を角丸の帯で囲み、ほかのアイコンと見分けられるようにする。
+ * 閉じたプロジェクトには帯を付けない。
+ */
+export const RailProjectOpen: Story = {
+  render: renderWithState({ projects, rail: true }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const trigger = canvas.getByRole('button', { name: 'Design Engineering' });
+    const group = trigger.closest('[data-project-group]') as HTMLElement;
+    const other = canvas
+      .getByRole('button', { name: 'My Tasks' })
+      .closest('[data-project-group]') as HTMLElement;
+    const transparent = 'rgba(0, 0, 0, 0)';
+    await expect(getComputedStyle(group).backgroundColor).toBe(transparent);
+
+    await userEvent.click(trigger);
+    await expect(canvas.getByRole('link', { name: 'タスク' })).toBeInTheDocument();
+    await expect(getComputedStyle(group).backgroundColor).not.toBe(transparent);
+    await expect(getComputedStyle(other).backgroundColor).toBe(transparent);
+  },
+};
+
 export const Loading: Story = {
   render: renderWithState({ projects: [], loading: true }),
   play: async ({ canvasElement }) => {
