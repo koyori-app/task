@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'apps/backend/crates/service/src/task_query/fixtures/**'
       - 'apps/frontend/**'
       - '.github/workflows/frontend-test.yml'
       - 'pnpm-lock.yaml'

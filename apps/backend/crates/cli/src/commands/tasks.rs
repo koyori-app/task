@@ -1888,6 +1888,7 @@ mod tests {
     #[test]
     fn task_listing_uses_the_cursor_even_when_the_total_disagrees() {
         let tasks = TaskListResponse {
+            matches: Default::default(),
             tasks: vec![],
             total: 0,
             next_cursor: Some("next".into()),
@@ -2376,6 +2377,7 @@ mod tests {
         let alice = Uuid::new_v4();
         let one = task_detail_with(&format!("<@{alice}> 確認"), json!({}));
         let list = TaskListResponse {
+            matches: Default::default(),
             tasks: vec![one.task],
             total: 1,
             next_cursor: None,

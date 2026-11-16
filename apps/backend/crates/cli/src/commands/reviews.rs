@@ -10,8 +10,9 @@ use std::process::Stdio;
 
 use entity::review_findings::{FindingSeverity, FindingState};
 use payload::reviews::{
-    CreateFindingInput, CreateReviewRequest, FindingResponse, ReviewDetailResponse, ReviewResponse,
-    ReviewSummaryResponse, UpdateFindingStateRequest,
+    CarryOverReviewRequest, CarryOverReviewResponse, CreateFindingInput, CreateReviewRequest,
+    FindingResponse, ReviewDetailResponse, ReviewResponse, ReviewSummaryResponse,
+    UpdateFindingStateRequest,
 };
 use sea_orm::Iterable;
 use serde::Serialize;
@@ -47,6 +48,45 @@ pub async fn run(context: &Context, command: ReviewCommand, output: OutputOption
                 )
                 .await?;
             print(&created, output);
+        }
+        ReviewCommand::CarryOver {
+            project,
+            from_pr,
+            to_pr,
+            from_repo,
+        } => {
+            let from_pr = parse_pr_flag("--from-pr", &from_pr)?;
+            let to_pr = parse_pr_flag("--to-pr", &to_pr)?;
+            let from_repo = validate_repo_flag("--from-repo", from_repo.as_deref())?;
+            // 元のリポジトリを指していなければ、サーバーは現在の連携先と見る。
+            // 同じ PR 番号はその場合だけ「同じ PR」になる（明示した別リポジトリなら通る）
+            if from_pr == to_pr && from_repo.is_none() {
+                return Err(CliError::validation(
+                    "--from-pr and --to-pr must be different pull requests".to_string(),
+                ));
+            }
+            // 検証を終えてから接続する。設定不足で、直せる誤りの指摘を隠さない
+            let api = &context.connect().await?;
+            let project = resolve_project(api, &project).await?;
+            let carried: CarryOverReviewResponse = api
+                .post(
+                    &[
+                        "v1",
+                        "tenants",
+                        api.tenant_id(),
+                        "projects",
+                        &project.id.to_string(),
+                        "reviews",
+                        "carry-over",
+                    ],
+                    &CarryOverReviewRequest {
+                        from_pr_number: from_pr,
+                        from_repo,
+                        to_pr_number: to_pr,
+                    },
+                )
+                .await?;
+            print(&carried, output);
         }
         ReviewCommand::List {
             project,
@@ -231,11 +271,16 @@ fn push_optional(
 }
 
 fn parse_pr_number(raw: &str) -> Result<i32> {
+    parse_pr_flag("--pr", raw)
+}
+
+/// PR 番号のフラグを検証する。メッセージにはどのフラグが誤りかを入れる。
+fn parse_pr_flag(flag: &str, raw: &str) -> Result<i32> {
     raw.parse::<i32>()
         .ok()
         .filter(|value| *value >= 1)
         .ok_or_else(|| {
-            CliError::validation(format!("--pr must be a positive integer (got: {raw})"))
+            CliError::validation(format!("{flag} must be a positive integer (got: {raw})"))
         })
 }
 
@@ -280,6 +325,11 @@ fn validate_csv<T: Spelled + Copy>(
 /// 連携先を明示して読めるようにする。空文字は「連携を張る前に溜めたラウンド」を指す
 /// （サーバーが空文字列で控えている）ため、未指定に丸めない。
 fn validate_repo(raw: Option<&str>) -> Result<Option<String>> {
+    validate_repo_flag("--repo", raw)
+}
+
+/// [`validate_repo`] の本体。メッセージにはどのフラグが誤りかを入れる。
+fn validate_repo_flag(flag: &str, raw: Option<&str>) -> Result<Option<String>> {
     let Some(raw) = raw else { return Ok(None) };
     let value = raw.trim();
     if value.is_empty() {
@@ -288,7 +338,7 @@ fn validate_repo(raw: Option<&str>) -> Result<Option<String>> {
     let parts: Vec<&str> = value.split('/').collect();
     if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
         return Err(CliError::validation(format!(
-            "--repo must be owner/name, or \"\" for rounds recorded before the integration (got: {raw})"
+            "{flag} must be owner/name, or \"\" for rounds recorded before the integration (got: {raw})"
         )));
     }
     Ok(Some(value.to_string()))
@@ -497,7 +547,7 @@ fn format_finding(finding: &FindingResponse) -> String {
         (Some(file), None) => format!(" {file}"),
         (None, _) => String::new(),
     };
-    format!(
+    let mut line = format!(
         "{}\t{:<6}\t{:<8}\tR{}\t{}{}",
         finding.id,
         finding.severity.as_str().to_uppercase(),
@@ -505,17 +555,35 @@ fn format_finding(finding: &FindingResponse) -> String {
         finding.round,
         finding.title,
         location,
-    )
+    );
+    if let Some(source) = finding.carried_from_finding_id {
+        line.push_str(&format!("\tcarried from finding {source}"));
+    }
+    line
 }
 
 fn format_round(round: &ReviewResponse) -> String {
-    format!(
+    let mut line = format!(
         "R{}\t{}\t{}\t{} findings",
         round.round,
         &round.head_sha[..round.head_sha.len().min(12)],
         round.reviewer.username,
-        round.finding_count,
-    )
+        round.finding_count
+    );
+    if let Some(actor) = &round.carried_by {
+        if let Some(from) = &round.carried_from {
+            line.push_str(&format!(
+                "\tcarried from PR #{} R{} by {}",
+                from.pr_number, from.round, actor.username
+            ));
+        } else {
+            line.push_str(&format!(
+                "\tcarried from deleted round by {}",
+                actor.username
+            ));
+        }
+    }
+    line
 }
 
 /// 照合する HEAD。`--head` があればそれ、無ければ実行ディレクトリの HEAD。
@@ -651,6 +719,15 @@ mod tests {
                 "line": 42,
             }],
         })
+    }
+
+    #[test]
+    fn carried_findings_show_the_source() {
+        let mut copied = finding(None, None);
+        let source = uuid::Uuid::new_v4();
+        copied.carried_from_finding_id = Some(source);
+        assert!(format_finding(&copied).contains(&format!("carried from finding {source}")));
+        assert!(!format_finding(&finding(None, None)).contains("carried from"));
     }
 
     #[test]
@@ -1094,6 +1171,7 @@ mod tests {
             state: FindingState::Open.into(),
             deferred_task_id: None,
             fixed_by: None,
+            carried_from_finding_id: None,
             created_at: Utc.timestamp_opt(0, 0).unwrap(),
             updated_at: Utc.timestamp_opt(0, 0).unwrap(),
             transitions: vec![],
@@ -1143,5 +1221,26 @@ mod tests {
             join(&FindingState::iter().collect::<Vec<_>>()),
             "open, fixing, fixed, verified, deferred, rejected"
         );
+    }
+}
+
+#[cfg(test)]
+mod carried_round_tests {
+    use super::*;
+    #[test]
+    fn labels_carried_rounds() {
+        let mut round: ReviewResponse = serde_json::from_value(serde_json::json!({
+            "id": uuid::Uuid::nil(), "project_id": uuid::Uuid::nil(), "pr_number": 2,
+            "round": 1, "head_sha": "abc", "summary": "", "finding_count": 1,
+            "created_at": "2026-01-01T00:00:00Z", "reviewer_left_tenant": false,
+            "reviewer": {"id": uuid::Uuid::nil(), "username": "reviewer", "avatar_url": null},
+            "carried_by": {"id": uuid::Uuid::nil(), "username": "dev", "avatar_url": null},
+            "carried_from": {"review_id": uuid::Uuid::nil(), "pr_number": 790, "round": 3, "repository": null}
+        })).unwrap();
+        assert!(format_round(&round).contains("carried from PR #790 R3 by dev"));
+        round.carried_from = None;
+        assert!(format_round(&round).contains("carried from deleted round by dev"));
+        round.carried_by = None;
+        assert_eq!(format_round(&round), "R1\tabc\treviewer\t1 findings");
     }
 }

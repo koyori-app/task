@@ -393,39 +393,162 @@ describe('TaskAttachments', () => {
     expect(wrapper.get('[role="alert"]').text()).toContain('アップロードできませんでした');
   });
 
-  it('shows who may detach when the API rejects with 403', async () => {
-    vi.stubGlobal('fetch', async (request: Request) => {
-      if (request.method === 'GET' && request.url.endsWith('/attachments')) {
-        return Response.json({
-          attachments: [
-            {
-              id: 'attachment-1',
-              drive_file_id: 'file-1',
-              name: 'memo.txt',
-              mime_type: 'text/plain',
-              size: 5,
-              url: '/v1/drive/files/file-1/content',
-              created_at: '2026-10-01T00:00:00Z',
-            },
-          ],
-        });
-      }
-      if (request.method === 'DELETE') {
-        return Response.json({ message: 'forbidden' }, { status: 403 });
-      }
-      return Response.json({ message: 'not found' }, { status: 404 });
+  describe('添付の解除', () => {
+    const ME = 'user-me';
+    function row(id: string, name: string, createdBy?: string) {
+      return {
+        id,
+        drive_file_id: `file-${id}`,
+        name,
+        mime_type: 'text/plain',
+        size: 5,
+        url: `/v1/drive/files/file-${id}/content`,
+        created_at: '2026-10-01T00:00:00Z',
+        ...(createdBy ? { created_by: createdBy } : {}),
+      };
+    }
+    function stubApi(
+      attachments: ReturnType<typeof row>[],
+      onDelete: () => Response | Promise<Response> = () => new Response(null, { status: 204 }),
+    ) {
+      const deletes: string[] = [];
+      vi.stubGlobal('fetch', async (request: Request) => {
+        if (request.method === 'GET' && request.url.endsWith('/attachments')) {
+          return Response.json({ attachments });
+        }
+        if (request.method === 'DELETE') {
+          deletes.push(new URL(request.url).pathname);
+          return onDelete();
+        }
+        return Response.json({ message: 'not found' }, { status: 404 });
+      });
+      return deletes;
+    }
+    function mountAttachments(extra: { currentUserId?: string | null; isTenantOwner?: boolean }) {
+      return mount(TaskAttachments, {
+        props: { tenantId: 'tenant-1', projectId: 'project-1', taskId: 'TASK-1', ...extra },
+        global: { plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]] },
+      });
+    }
+    const detachSelector = (name: string) => `button[aria-label="${name} の添付を解除"]`;
+    function confirmButton(wrapper: ReturnType<typeof mountAttachments>, label: string) {
+      const button = wrapper.findAll('dialog button').find((b) => b.text() === label);
+      if (!button) throw new Error(`button "${label}" not found`);
+      return button;
+    }
+
+    it('他人が付けた添付には解除ボタンを出さず、自分が付けた添付には出す', async () => {
+      stubApi([row('1', 'mine.txt', ME), row('2', 'theirs.txt', 'user-other')]);
+      const wrapper = mountAttachments({ currentUserId: ME });
+      await flushPromises();
+
+      expect(wrapper.find(detachSelector('mine.txt')).exists()).toBe(true);
+      expect(wrapper.find(detachSelector('theirs.txt')).exists()).toBe(false);
     });
 
-    const wrapper = mount(TaskAttachments, {
-      props: { tenantId: 'tenant-1', projectId: 'project-1', taskId: 'TASK-1' },
-      global: { plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]] },
-    });
-    await flushPromises();
-    await wrapper.get('button[aria-label="memo.txt の添付を解除"]').trigger('click');
-    await flushPromises();
+    it('テナントオーナーには、他人が付けた添付にも出す', async () => {
+      stubApi([row('2', 'theirs.txt', 'user-other')]);
+      const wrapper = mountAttachments({ currentUserId: ME, isTenantOwner: true });
+      await flushPromises();
 
-    expect(wrapper.get('[role="alert"]').text()).toContain('作成者またはテナントオーナーのみ');
-    expect(wrapper.text()).toContain('memo.txt');
+      expect(wrapper.find(detachSelector('theirs.txt')).exists()).toBe(true);
+    });
+
+    it('作成者の分からない行（古いサーバー）や利用者が分からない間は、オーナー以外に出さない', async () => {
+      stubApi([row('1', 'legacy.txt'), row('2', 'mine.txt', ME)]);
+      const wrapper = mountAttachments({ currentUserId: ME });
+      await flushPromises();
+      expect(wrapper.find(detachSelector('legacy.txt')).exists()).toBe(false);
+
+      await wrapper.setProps({ currentUserId: null });
+      expect(wrapper.find(detachSelector('mine.txt')).exists()).toBe(false);
+
+      await wrapper.setProps({ isTenantOwner: true });
+      expect(wrapper.find(detachSelector('legacy.txt')).exists()).toBe(true);
+    });
+
+    it('ボタンを押しただけでは DELETE を送らず、確認の「解除する」で送る', async () => {
+      const deletes = stubApi([row('1', 'mine.txt', ME)]);
+      const wrapper = mountAttachments({ currentUserId: ME });
+      await flushPromises();
+      const dialogs = wrapper.findAll('dialog');
+      for (const dialog of dialogs) {
+        (dialog.element as HTMLDialogElement).showModal = vi.fn();
+        (dialog.element as HTMLDialogElement).close = vi.fn();
+      }
+
+      await wrapper.get(detachSelector('mine.txt')).trigger('click');
+      await flushPromises();
+      expect(deletes).toEqual([]);
+      expect(wrapper.text()).toContain('添付を解除しますか？');
+      expect(wrapper.text()).toContain('ファイルは Drive に残ります');
+
+      await confirmButton(wrapper, '解除する').trigger('click');
+      await flushPromises();
+      expect(deletes).toEqual([
+        '/api/v1/tenants/tenant-1/projects/project-1/tasks/TASK-1/attachments/1',
+      ]);
+    });
+
+    it('確認の「キャンセル」では DELETE を送らない', async () => {
+      const deletes = stubApi([row('1', 'mine.txt', ME)]);
+      const wrapper = mountAttachments({ currentUserId: ME });
+      await flushPromises();
+
+      await wrapper.get(detachSelector('mine.txt')).trigger('click');
+      await flushPromises();
+      await confirmButton(wrapper, 'キャンセル').trigger('click');
+      await flushPromises();
+
+      expect(deletes).toEqual([]);
+      expect(wrapper.text()).toContain('mine.txt');
+    });
+
+    it('解除の応答を待つ間に別のタスクで開いた確認は、応答が届いても閉じない', async () => {
+      let finishDelete!: (response: Response) => void;
+      stubApi(
+        [row('1', 'first.txt', ME), row('2', 'second.txt', ME)],
+        () => new Promise<Response>((resolve) => (finishDelete = resolve)),
+      );
+      const wrapper = mountAttachments({ currentUserId: ME });
+      await flushPromises();
+
+      await wrapper.get(detachSelector('first.txt')).trigger('click');
+      await flushPromises();
+      await confirmButton(wrapper, '解除する').trigger('click');
+      await flushPromises();
+
+      await wrapper.setProps({ taskId: 'TASK-2' });
+      await flushPromises();
+      await wrapper.get(detachSelector('second.txt')).trigger('click');
+      await flushPromises();
+      expect(wrapper.text()).toContain('「second.txt」をこのタスクから外します');
+      // 応答を待っているのは別の添付なので、この確認は「解除中…」にせず、キャンセルで閉じられる
+      expect(confirmButton(wrapper, '解除する').attributes('disabled')).toBeDefined();
+      expect(confirmButton(wrapper, 'キャンセル').attributes('disabled')).toBeUndefined();
+
+      finishDelete(new Response(null, { status: 204 }));
+      await flushPromises();
+      expect(wrapper.text()).toContain('「second.txt」をこのタスクから外します');
+    });
+
+    it('API が 403 を返したら、解除できる人を明記する', async () => {
+      stubApi([row('1', 'memo.txt', ME)], () =>
+        Response.json({ message: 'forbidden' }, { status: 403 }),
+      );
+      const wrapper = mountAttachments({ currentUserId: ME });
+      await flushPromises();
+
+      await wrapper.get(detachSelector('memo.txt')).trigger('click');
+      await flushPromises();
+      await confirmButton(wrapper, '解除する').trigger('click');
+      await flushPromises();
+
+      expect(wrapper.get('[role="alert"]').text()).toBe(
+        '添付を解除できるのは、添付した人とテナントオーナーだけです。',
+      );
+      expect(wrapper.text()).toContain('memo.txt');
+    });
   });
 
   it('keeps the list retryable when loading attachments fails', async () => {

@@ -35,6 +35,8 @@ import { computed, nextTick, ref, watch } from 'vue';
 import type { ComponentPublicInstance } from 'vue';
 import type { components } from '@/generated/api';
 import type { EditableField, MutatingField } from '@/components/tasks/editable-field';
+import TaskRefHoverCard from '@/components/tasks/TaskRefHoverCard.vue';
+import { hasTaskRefCards } from '@/lib/task-ref-card';
 import MentionHoverCard from '@/components/tasks/MentionHoverCard.vue';
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
 import TaskChecklistProgress from '@/components/tasks/TaskChecklistProgress.vue';
@@ -1453,6 +1455,18 @@ function clearDescription() {
                 :current-user-id="currentUserId"
                 :tenant-id="tenantId"
                 :mention-tenant="mentionTenant"
+              />
+              <TaskRefHoverCard
+                v-if="
+                  freshDescriptionHtml &&
+                  descriptionHtmlEl &&
+                  tenantId &&
+                  mentionTenant &&
+                  hasTaskRefCards(freshDescriptionHtml)
+                "
+                :container="descriptionHtmlEl"
+                :tenant-id="tenantId"
+                :tenant-display-id="mentionTenant"
               />
               <div v-if="editingField === 'description'" class="mt-2 flex justify-end gap-2">
                 <Button

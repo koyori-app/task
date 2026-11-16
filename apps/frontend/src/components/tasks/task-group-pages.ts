@@ -1,3 +1,4 @@
+import { taskQueryErrorsOf } from '@/lib/task-query/errors';
 import type { components } from '@/generated/api';
 import type { TaskGroup } from '@/components/tasks/task-grouped-columns';
 
@@ -6,6 +7,7 @@ type TaskResponse = components['schemas']['TaskResponse'];
 
 /** 1 ページ分のレスポンス。 */
 export type TaskGroupPage = {
+  matches?: components['schemas']['TaskListResponse']['matches'];
   tasks: TaskResponse[];
   total: number;
   next_cursor: string | null;
@@ -24,6 +26,7 @@ export type TaskGroupQueryState = {
   isLoading?: boolean;
   isFetchingNextPage?: boolean;
   isError?: boolean;
+  error?: unknown;
   hasNextPage?: boolean;
   refetch?: () => unknown;
   fetchNextPage?: () => unknown;
@@ -61,6 +64,8 @@ export function toTaskGroup(
   return {
     status,
     tasks,
+    matches: Object.assign({}, ...pages.map((page) => page.matches ?? {})),
+    queryErrors: taskQueryErrorsOf(query.error),
     // total は後のページほど新しいので、返ってきた最後の値を採る
     total: pages.at(-1)?.total ?? 0,
     // 次ページの取得中も「読み込み中」に含める。押した直後に何も起きていないように

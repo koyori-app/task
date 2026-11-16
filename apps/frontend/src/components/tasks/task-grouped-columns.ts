@@ -5,6 +5,8 @@ type TaskResponse = components['schemas']['TaskResponse'];
 
 /** ステータス 1 つ分の塊。件数はサーバの total（取得済み件数ではない）。 */
 export type TaskGroup = {
+  matches?: Record<string, components['schemas']['TaskSearchMatch']>;
+  queryErrors?: components['schemas']['TaskQueryError'][] | null;
   status: StatusResponse;
   tasks: TaskResponse[];
   total: number;

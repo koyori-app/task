@@ -84,6 +84,7 @@ function closeDeleteDialog() {
 const {
   tenantId,
   projectId,
+  isTenantOwner,
   displayTask,
   statuses,
   projectLabels,
@@ -360,7 +361,13 @@ function onDeleteDialogCancel(event: Event) {
         @delete-request="openDeleteDialog"
       >
         <template v-if="displayTask" #main>
-          <TaskAttachments :tenant-id="tenantId" :project-id="projectId" :task-id="taskId" />
+          <TaskAttachments
+            :tenant-id="tenantId"
+            :project-id="projectId"
+            :task-id="taskId"
+            :current-user-id="currentUserId"
+            :is-tenant-owner="isTenantOwner"
+          />
           <TaskSubtaskPanel
             :tenant-id="tenantId"
             :project-id="projectId"
@@ -427,6 +434,7 @@ function onDeleteDialogCancel(event: Event) {
             :list-error="commentsError"
             :on-retry="refetchComments"
             :current-user-id="currentUserId"
+            :is-tenant-owner="isTenantOwner"
             :profile-href="profileHref"
             :mention-tenant="tenantDisplayId"
             :submit-pending="submitPending"

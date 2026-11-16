@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import TaskMatchText from './query/TaskMatchText.vue';
+import TaskMatchSnippets from './query/TaskMatchSnippets.vue';
 import { computed, nextTick, ref } from 'vue';
 import {
   PhCalendarBlank,
@@ -48,6 +50,7 @@ const props = withDefaults(
     /** 空白部分から選ばれた行。選択後だけ展開矢印を見せる。 */
     selected?: boolean;
     expanded?: boolean;
+    match?: import('@/generated/api').components['schemas']['TaskSearchMatch'];
     showSubtaskToggle?: boolean;
     /** 一覧では 1 段だけネスト表示する。 */
     depth?: 0 | 1;
@@ -291,9 +294,12 @@ function selectFromKeyboard(event: KeyboardEvent) {
           <button
             type="button"
             class="block max-w-full text-left text-sm font-medium break-words hover:underline"
+            data-task-title-open
             @click="emit('open', task.id)"
           >
-            {{ task.title }}
+            <TaskMatchText v-if="match?.title" :segments="match.title" /><template v-else>{{
+              task.title
+            }}</template>
           </button>
 
           <!-- 広い幅の 2 段目。担当・期限・優先度は右の列にある -->
@@ -398,6 +404,11 @@ function selectFromKeyboard(event: KeyboardEvent) {
               </template>
             </span>
           </div>
+          <TaskMatchSnippets
+            v-if="match?.snippets.length"
+            :snippets="match.snippets"
+            class="mt-1"
+          />
         </div>
       </div>
 

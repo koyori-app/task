@@ -114,3 +114,5 @@ fn every_integration_file_is_declared() {
     missing.sort();
     assert!(missing.is_empty(), "main.rs に mod 宣言が無い: {missing:?}");
 }
+
+mod task_query_integration;

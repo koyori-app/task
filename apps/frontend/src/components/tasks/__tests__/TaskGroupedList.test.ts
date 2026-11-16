@@ -626,3 +626,18 @@ describe('TaskGroupedList のサブタスクの子の有無（実物の枝）', 
     expect(arrowOf(wrapper).attributes('aria-expanded')).toBe('true');
   });
 });
+
+it('hides empty groups while filtered and keeps matching rows flat', async () => {
+  const { wrapper } = mountList(
+    undefined,
+    [
+      { ...group, total: 1, tasks: [taskFixture('task-1', 'match')] },
+      { ...doingGroup, total: 0, tasks: [] },
+    ],
+    [status, doingStatus],
+  );
+  await wrapper.setProps({ flat: true, hideEmptyGroups: true });
+  expect(wrapper.findAll('section')).toHaveLength(1);
+  expect(wrapper.find('[aria-label="Doing を折りたたむ"]').exists()).toBe(false);
+  expect(wrapper.find('[aria-label="サブタスクを展開"]').exists()).toBe(false);
+});

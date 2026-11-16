@@ -13,8 +13,8 @@ catalogs:
       specifier: 0.1.0-alpha.6
       version: 0.1.0-alpha.6
     '@koyori-app/ui-vue':
-      specifier: 0.10.1
-      version: 0.10.1
+      specifier: 0.11.0
+      version: 0.11.0
     '@lezer/highlight':
       specifier: 1.2.5
       version: 1.2.5
@@ -79,7 +79,7 @@ importers:
         version: 0.1.4(@tanstack/vue-query@5.104.0(vue@3.5.45(typescript@6.0.3)))(openapi-fetch@0.17.0)(openapi-typescript-helpers@0.1.0)(vue@3.5.45(typescript@6.0.3))
       '@koyori-app/ui-vue':
         specifier: 'catalog:'
-        version: 0.10.1(vue@3.5.45(typescript@6.0.3))
+        version: 0.11.0(vue@3.5.45(typescript@6.0.3))
       '@lezer/highlight':
         specifier: 'catalog:'
         version: 1.2.5
@@ -311,7 +311,7 @@ importers:
         version: 1.3.9
       vite-plugin-inspect:
         specifier: 12.1.0
-        version: 12.1.0(@devframes/agentic@1.1.0(crossws@0.4.12(srvx@1.0.5))(devframe@1.1.0))(@voidzero-dev/vite-plus-core@1.5.0)(cac@7.0.0)(crossws@0.4.12(srvx@1.0.5))(srvx@1.0.5)
+        version: 12.1.0(@devframes/agentic@1.1.0)(@voidzero-dev/vite-plus-core@1.5.0)(cac@7.0.0)(crossws@0.4.12(srvx@1.0.5))(srvx@1.0.5)
       vite-plugin-vue-devtools:
         specifier: 8.2.1
         version: 8.2.1(@voidzero-dev/vite-plus-core@1.5.0)(supports-color@10.2.2)(vue@3.5.45(typescript@6.0.3))
@@ -1374,8 +1374,8 @@ packages:
       openapi-typescript-helpers: ^0.1.0
       vue: ^3.5.35
 
-  '@koyori-app/ui-vue@0.10.1':
-    resolution: {integrity: sha512-uF7mJ5C+JhKoyRaeM7wIJL/wiBRV3mF3PwxhB73EHHtKic0etIwh4DXVBLPvMo40E53qPpOiaM5I5LoOqslXoQ==}
+  '@koyori-app/ui-vue@0.11.0':
+    resolution: {integrity: sha512-gbiZKh3T26iN4E8sQlhOSP9vL0HmbM+F5bIJWm5N4gCcCMdz5Yu7ZnDD52Fv1I5V/xpFA0gzx7aXlrIFB2Z4wQ==}
     peerDependencies:
       vue: ^3.5.0
 
@@ -8825,7 +8825,7 @@ snapshots:
       openapi-typescript-helpers: 0.1.0
       vue: 3.5.45(typescript@6.0.3)
 
-  '@koyori-app/ui-vue@0.10.1(vue@3.5.45(typescript@6.0.3))':
+  '@koyori-app/ui-vue@0.11.0(vue@3.5.45(typescript@6.0.3))':
     dependencies:
       vue: 3.5.45(typescript@6.0.3)
 
@@ -14996,7 +14996,7 @@ snapshots:
       vite: '@voidzero-dev/vite-plus-core@1.5.0(@types/node@24.19.2)(@vitejs/devtools@0.7.6)(@volar/typescript@2.4.28(typescript@6.0.3))(@vue/language-core@3.3.11)(esbuild@0.28.2)(jiti@2.7.0)(typescript@6.0.3)(vue-tsc@3.3.11(typescript@6.0.3))(yaml@2.9.1)'
       vite-dev-rpc: 2.0.0(@voidzero-dev/vite-plus-core@1.5.0)
 
-  vite-plugin-inspect@12.1.0(@devframes/agentic@1.1.0(crossws@0.4.12(srvx@1.0.5))(devframe@1.1.0))(@voidzero-dev/vite-plus-core@1.5.0)(cac@7.0.0)(crossws@0.4.12(srvx@1.0.5))(srvx@1.0.5):
+  vite-plugin-inspect@12.1.0(@devframes/agentic@1.1.0)(@voidzero-dev/vite-plus-core@1.5.0)(cac@7.0.0)(crossws@0.4.12(srvx@1.0.5))(srvx@1.0.5):
     dependencies:
       '@vitejs/devtools-kit': 0.7.6(@devframes/agentic@1.1.0)(@voidzero-dev/vite-plus-core@1.5.0)(cac@7.0.0)(crossws@0.4.12(srvx@1.0.5))(srvx@1.0.5)
       ansis: 4.5.0

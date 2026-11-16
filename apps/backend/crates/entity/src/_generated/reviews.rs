@@ -34,6 +34,10 @@ pub struct Model {
     pub pr_head_checked_at: Option<DateTimeWithTimeZone>,
     #[sea_orm(nullable)]
     pub summary_comment_id: Option<i64>,
+    #[sea_orm(nullable)]
+    pub carried_from_review_id: Option<Uuid>,
+    #[sea_orm(nullable)]
+    pub carried_by: Option<Uuid>,
     pub created_at: DateTimeWithTimeZone,
     #[sea_orm(
         belongs_to,

@@ -126,7 +126,11 @@ describe('タスク一覧の分割ペインの開閉とフォーカス', () => {
     const before = link().element;
     before.focus();
     await link().trigger('click');
-    await vi.waitFor(() => expect(wrapper.find('[role="separator"]').exists()).toBe(true));
+    await vi.waitFor(() =>
+      expect(wrapper.find('[role="separator"][aria-controls="task-list-pane"]').exists()).toBe(
+        true,
+      ),
+    );
     // 一覧は作り直されている（同じ要素のままなら、この試験は戻す処理を確かめていない）
     expect(link().element).not.toBe(before);
     expect(document.activeElement).toBe(link().element);
@@ -135,7 +139,11 @@ describe('タスク一覧の分割ペインの開閉とフォーカス', () => {
     const close = wrapper.getComponent(TaskDetailPaneStub).get('button');
     close.element.focus();
     await close.trigger('click');
-    await vi.waitFor(() => expect(wrapper.find('[role="separator"]').exists()).toBe(false));
+    await vi.waitFor(() =>
+      expect(wrapper.find('[role="separator"][aria-controls="task-list-pane"]').exists()).toBe(
+        false,
+      ),
+    );
     expect(document.activeElement).toBe(link().element);
   });
 });

@@ -24,8 +24,16 @@ const emit = defineEmits<{
 
 const active = computed(() => activeTaskListSort(props.sorting));
 
+const caption = computed(() => {
+  const a = active.value;
+  const column = TASK_LIST_SORT_COLUMNS.find((c) => c.id === a?.id);
+  return column && a
+    ? `並び: ${a.desc ? column.descendingLabel : column.ascendingLabel}`
+    : '並び替え';
+});
+
 const sections = computed<DropdownSection[]>(() => [
-  ...TASK_LIST_SORT_COLUMNS.map((column) => ({
+  ...TASK_LIST_SORT_COLUMNS.filter((c) => c.id !== 'status').map((column) => ({
     label: column.label,
     items: [
       {
@@ -56,13 +64,7 @@ function onSelect(value: string) {
 </script>
 
 <template>
-  <Dropdown
-    variant="tertiary"
-    top-layer
-    :label="active ? '並び替え（変更あり）' : '並び替え'"
-    :items="sections"
-    :on-select="onSelect"
-  >
-    <template #trigger>並び替え</template>
+  <Dropdown variant="tertiary" top-layer :label="caption" :items="sections" :on-select="onSelect">
+    <template #trigger>{{ caption }}</template>
   </Dropdown>
 </template>

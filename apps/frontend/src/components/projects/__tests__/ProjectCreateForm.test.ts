@@ -131,4 +131,20 @@ describe('ProjectCreateForm', () => {
     expect(document.body.textContent).toContain('プロジェクトを作成できませんでした');
     expect(navigateMock).not.toHaveBeenCalled();
   });
+
+  it('403 は権限不足と明記する', async () => {
+    createMutateAsync.mockRejectedValue({ response: { status: 403 } });
+    mountForm();
+    await flushPromises();
+
+    await input('name').setValue('X Project');
+    await formEl().trigger('submit');
+    await flushPromises();
+
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toContain(
+      'プロジェクトを作成できるのは、テナントのオーナーと Admin だけです。',
+    );
+    expect(document.body.textContent).not.toContain('プロジェクトを作成できませんでした');
+    expect(navigateMock).not.toHaveBeenCalled();
+  });
 });
