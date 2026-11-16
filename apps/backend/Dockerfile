@@ -20,6 +20,9 @@
 # Rust のバージョンはリポジトリルートの rust-toolchain.toml と合わせること。
 # このイメージのビルドコンテキストは apps/backend なので rust-toolchain.toml はコンテキストに
 # 含まれず、ここでの指定が唯一の版指定になる（rust-toolchain.toml を上げても自動追従しない）。
+# Renovate は rust-toolchain.toml と coder/build/Dockerfile の ARG RUST_VERSION と
+# この tag を同じ PR で上げる（.github/renovate.json5 の rust-toolchain の群れ）。
+# 手で上げる時は、三か所を揃えること。
 
 ########## builder 共通 ##########
 FROM rust:1.95-bookworm AS builder-base

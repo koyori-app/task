@@ -35,6 +35,37 @@
   "branchConcurrentLimit": 100,
   // "labels": ["type/Dependencies📦"],
   "labels": ["dependencies"],
+  // Coder のイメージの ARG は、built-in の manager が拾わないので regex で拾う。
+  // 何のために: dockerfile manager は FROM の image しか見ず、ARG NODE_VERSION と
+  // ARG RUST_VERSION は対象外だった（2026-11 に dry-run で確かめた）。Renovate が
+  // .node-version と rust-toolchain.toml を上げても、Coder のイメージの版は
+  // 手で合わせるしかなかった。
+  // なぜこの形か: datasource と versioning は、.node-version（nodenv）と
+  // rust-toolchain.toml（rust-toolchain）が今使っている物に揃える。
+  // nodenv は node-version と node、rust-toolchain は rust-version と
+  // rust-release-channel。揃えないと、同じ更新が群れの中で別の版に解けてしまう。
+  // ARG の名で拾うのは、この Dockerfile の ARG が版の唯一の書き場所で、
+  // 注の位置や並びに依らないため。
+  // 何が起きたら解くか: Coder のイメージが ARG を使わなくなった時（版を
+  // .node-version などから直に読む作りに変えた時）。
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^coder/build/Dockerfile$/"],
+      "matchStrings": ["ARG NODE_VERSION=(?<currentValue>\\S+)"],
+      "depNameTemplate": "node",
+      "datasourceTemplate": "node-version",
+      "versioningTemplate": "node"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^coder/build/Dockerfile$/"],
+      "matchStrings": ["ARG RUST_VERSION=(?<currentValue>\\S+)"],
+      "depNameTemplate": "rust",
+      "datasourceTemplate": "rust-version",
+      "versioningTemplate": "rust-release-channel"
+    }
+  ],
   "packageRules": [
     {
       "matchManagers": ["github-actions", "gitlabci", "gitlabci-include"],
@@ -121,6 +152,72 @@
       "matchManagers": ["npm"],
       "matchPackagePatterns": ["^@codemirror/"],
       "groupName": "codemirror"
+    },
+    {
+      // Node の版を書く所のうち、版を厳格に指す二か所を一つの PR に束ねる。
+      // 対象: .node-version（nodenv manager）と、coder/build/Dockerfile の
+      // ARG NODE_VERSION（上の customManagers）。どちらも 24.22.0 のように patch
+      // まで書く。
+      // 何のために束ねたか: Coder のイメージは .node-version と同じ版の Node を
+      // 入れる想定だが、二つは別の manager が別々に拾うので、束ねなければ別の PR
+      // になり、片方だけが入って版がずれる。ずれても CI は落ちない（Coder の
+      // イメージは CI で作らない）ので、気づけない。
+      // なぜこの形か: matchManagers と matchDepNames の両方で絞る。depName が
+      // node なだけだと、workflows の setup-node や frontend の Dockerfile も
+      // 巻き込む。束ねない理由は次のとおり。
+      // - workflows の node-version（'24' のように major だけ）は、版を厳格に
+      //   指す所ではなく、CI が使う Node の major を表すだけなので、揃えない。
+      // - apps/frontend/Dockerfile の FROM node:24-bookworm-slim も major だけの
+      //   tag で、patch は image を作り直すたびに最新へ流れる。ビルドだけに使う
+      //   builder ステージで、配布する runtime は oven/bun なので、strict に固める
+      //   利点が薄く、digest を固めれば PR が増える。固めないので群れにも入れない。
+      //   この tag は、今までどおり dockerfile manager が単独の PR で上げる。
+      // major の上げは、separateMajorMinor（既定 true）が群れより優先されるので、
+      // patch の群れとは別の PR になる（renovate/node-runtime と
+      // renovate/major-node-runtime）。major の PR でも、この二か所は同じ PR で
+      // 動く。
+      // 自動で merge しない。この群れの manager には automerge の規則が無く、
+      // 群れの automerge は全員が true の時だけ効くので、人が見て押す。
+      // 何が起きたら解くか: Coder のイメージが .node-version に追従しなくなった
+      // 時（Coder が別の版を使うと決めた時）に解く。
+      "matchManagers": ["nodenv", "custom.regex"],
+      "matchDepNames": ["node"],
+      "groupName": "node-runtime"
+    },
+    {
+      // Rust の版を書く所のうち、版を厳格に指す三か所を一つの PR に束ねる。
+      // 対象: rust-toolchain.toml（rust-toolchain manager）、coder/build/Dockerfile
+      // の ARG RUST_VERSION（上の customManagers）、apps/backend/Dockerfile の
+      // FROM rust:1.95-bookworm（dockerfile manager）。
+      // 何のために束ねたか: backend の Docker build は apps/backend を文脈に
+      // するので rust-toolchain.toml が入らず、Dockerfile の tag が唯一の版指定に
+      // なる。束ねなければ rust-toolchain.toml だけが上がって Docker build が
+      // 古い Rust のまま成功する。Coder の ARG は、ずれても rustup が
+      // rust-toolchain.toml の版を取得するので壊れないが、イメージに焼いた版が
+      // 使われなくなり、取得が走る。
+      // CI の version-sync（scripts/check-docker-versions.sh）は、rust-toolchain.toml
+      // と backend の Dockerfile の major.minor のずれを検めるので、束ねれば
+      // この検めを通ったまま上がる。
+      // なぜこの形か: Rust は minor（1.95 → 1.96）で上がるので、tag が 1.95 のように
+      // minor までの形でも、三か所が同じ minor の更新として同じ PR に入る。
+      // patch（1.95.0 → 1.95.1）の時は tag が動かず、残る二か所が上がる。
+      // tag が patch を含まず、同じ minor の最新へ流れるのは今までどおり。
+      // 自動で merge しない（automerge を false に固定する）。toolchain の更新は
+      // lint の増減で CI が落ちうるので、人が見る。
+      // minimumReleaseAge を外す理由: 上の dockerfile の規則が、docker の minor の
+      // 更新に「リリースから 1 日」の冷却を付ける。この群れでは Dockerfile の分だけ
+      // 冷却中として枝から外れ（dry-run で確かめた）、toolchain と ARG だけの PR が
+      // 先に立つ。すると version-sync が落ち、後から Dockerfile が足されるまで
+      // 赤いままになる。冷却は automerge を遅らせるための物で、この群れは
+      // automerge しないので、外して三か所を同時に出す。
+      // 何が起きたら解くか: backend の Dockerfile が rust-toolchain.toml から
+      // 版を読む作りに変わった時（build 文脈にそれを入れた時）に、dockerfile の分を
+      // 外す。
+      "matchManagers": ["rust-toolchain", "custom.regex", "dockerfile"],
+      "matchDepNames": ["rust"],
+      "groupName": "rust-toolchain",
+      "automerge": false,
+      "minimumReleaseAge": null
     },
     {
       // workspace-hack の Cargo.toml は renovate に上げさせない。
