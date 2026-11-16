@@ -292,26 +292,34 @@ function keepDraft<T extends string | number | null>(field: EditableField, value
   return value;
 }
 
+/**
+ * 控えた下書きを捨てる。控えの持ち主はここ（keepDraft / startEditing の取り出し / discardDraft）だけ。
+ * 捨てるのは、取り出して編集を再開したとき・空にする操作・チェックボックスの切り替え（失う入力が
+ * 無いので、前に成功した下書きで「編集を再開」を出さない）
+ */
+function discardDraft(field: EditableField) {
+  delete failedDrafts.value[field];
+}
+
 function isFieldUpdating(field: EditableField) {
   return props.fieldUpdating?.[field] ?? false;
 }
 
 /**
- * 閲覧表示のままチェックボックスを切り替えられる間。編集中は編集器があり、保存中は
- * 全部のチェックボックスを止めて要求を 1 本ずつにする（順不同で届いて古い本文が残るのを防ぐ）
+ * 閲覧表示のままチェックボックスを切り替えられる間。次の間は止める:
+ * - 編集中: 編集器がある
+ * - 保存中: 全部止めて要求を 1 本ずつにする（順不同で届いて古い本文が残るのを防ぐ）
+ * - 失敗した編集の下書きを「編集を再開」で取り戻せる間: 切り替えの保存が始まると失敗表示が消え、
+ *   書いた本文を戻す手段が無くなる。再開するか、編集を取り消して下書きを捨てれば押せる
  */
 const checklistToggleable = computed(
-  () => editingField.value !== 'description' && !isFieldUpdating('description'),
+  () =>
+    editingField.value !== 'description' &&
+    !isFieldUpdating('description') &&
+    !canResume('description'),
 );
 
 const CHECKLIST_INPUT_SELECTOR = `input[type="checkbox"][${KFM_TASK_OFFSET_ATTR}]`;
-
-/**
- * 押した直後にフォーカスを戻す、直前に押したチェックボックスの位置。
- * 楽観更新で HTML が差し替わり、押した input は作り直されるので、作り直しのたびに同じ位置へ戻す。
- * 保存が終わる（押せる状態に戻る）まで持つ
- */
-let pendingFocusOffset: string | null = null;
 
 /** 項目自身の字（画像は alt）。入れ子のリストの字は含めない */
 function ownText(node: Node): string {
@@ -356,20 +364,38 @@ function syncChecklistInputs() {
     else input.setAttribute('aria-disabled', 'true');
     input.setAttribute('aria-label', checklistLabel(input) || `チェック項目 ${index + 1}`);
   });
-  if (pendingFocusOffset !== null) {
-    const offset = pendingFocusOffset;
-    // 利用者が別の場所へ移していたらそのまま（body は押した要素が差し替えで消えたとき）
-    if (document.activeElement === document.body || document.activeElement === null) {
-      root.querySelector<HTMLInputElement>(`input[${KFM_TASK_OFFSET_ATTR}="${offset}"]`)?.focus();
-    }
-    if (toggleable) pendingFocusOffset = null;
-  }
 }
 
 watch([freshDescriptionHtml, descriptionHtmlEl, checklistToggleable], syncChecklistInputs, {
   flush: 'post',
   immediate: true,
 });
+
+/**
+ * 説明の HTML が差し替わると v-html が中身を作り直し、フォーカスを持つチェックボックスは消える
+ * （押した直後の楽観更新、失敗で本文が戻ったとき）。差し替えの直前にフォーカスの位置を控え、
+ * 描画が済んだ直後に同じ位置へ戻す。控えはこの 1 回の差し替えの間だけ（持ち越す状態を持たない）。
+ * 利用者が別の場所（別の項目・説明の外）へ移していれば、そこがフォーカスを持つので何もしない。
+ * タスクが替わったときの差し替えは対象外
+ */
+watch(
+  [freshDescriptionHtml, () => props.task?.id],
+  ([, id], [, previousId]) => {
+    const root = descriptionHtmlEl.value;
+    const active = document.activeElement;
+    if (!root || id !== previousId || !(active instanceof HTMLInputElement)) return;
+    if (!root.contains(active) || !active.matches(CHECKLIST_INPUT_SELECTOR)) return;
+    const offset = active.getAttribute(KFM_TASK_OFFSET_ATTR);
+    void nextTick(() => {
+      // 差し替えで押した要素が消えると body に落ちる。そうでなければ利用者が移した先を尊重する
+      if (document.activeElement !== document.body && document.activeElement !== null) return;
+      descriptionHtmlEl.value
+        ?.querySelector<HTMLInputElement>(`input[${KFM_TASK_OFFSET_ATTR}="${offset}"]`)
+        ?.focus({ preventScroll: true });
+    });
+  },
+  { flush: 'pre' },
+);
 
 // 橋渡しは役目が終わったら捨てる。本物の HTML が届いたら不要で、失敗したら本文が戻っているので
 // 後で同じ本文になったときに古い描画を出さない
@@ -398,15 +424,10 @@ function onChecklistChange(event: Event) {
   if (next === null || next === description) return revert();
   const nextHtml = setChecklistHtmlChecked(html, offset, target.checked);
   toggleBridge.value = nextHtml === null ? null : { source: next, html: nextHtml };
-  // 前に成功した編集の下書きで「編集を再開」が出ないよう捨てる。ただし失敗表示が出ている間は、
-  // その下書きが書き直す唯一の控えなので残す
-  if (!fieldError('description')) delete failedDrafts.value.description;
-  pendingFocusOffset = String(offset);
+  // 押せるのは取り戻せる下書きが無いときだけ（checklistToggleable）。前に成功した編集の控えが
+  // 残っていれば、切り替えの失敗表示に「編集を再開」を出さないよう捨てる
+  discardDraft('description');
   emit('save:description', next, { preserveWhitespace: true });
-  // 保存が始まらなかったとき（同じ本文で何もしない等）は、後からフォーカスを動かさない
-  void nextTick(() => {
-    if (checklistToggleable.value) pendingFocusOffset = null;
-  });
 }
 
 function fieldError(field: EditableField) {
@@ -453,7 +474,7 @@ async function startEditing(field: EditableField) {
       break;
   }
   const failed = failedDrafts.value[field];
-  delete failedDrafts.value[field];
+  discardDraft(field);
   if (failed !== undefined && fieldError(field)) draftValue.value = failed;
   await nextTick();
   const control = editingControlRef.value;
@@ -638,7 +659,7 @@ const plannedStartAfterSoft = computed(() => {
 function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadline') {
   if (isFieldUpdating(field)) return;
   // 空にする操作は失う入力が無い。前に成功した下書きで「編集を再開」を出さないよう捨てる
-  delete failedDrafts.value[field];
+  discardDraft(field);
   if (field === 'planned_start_on') emit('save:planned_start_on', null);
   else if (field === 'soft_deadline') emit('save:soft_deadline', null);
   else emit('save:hard_deadline', null);
@@ -646,7 +667,7 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
 }
 
 function clearDescription() {
-  delete failedDrafts.value.description;
+  discardDraft('description');
   emit('save:description', null);
   cancelEditing();
 }

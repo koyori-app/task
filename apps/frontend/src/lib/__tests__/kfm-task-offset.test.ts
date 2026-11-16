@@ -83,12 +83,41 @@ describe('rehype-kfm-task-offset (原文の位置)', () => {
     expect(boxes(html)).toEqual([{ offset: 2, checked: true }]);
   });
 
-  it('項目の先頭の `[x]:` が定義として消費される形では、別の行の `[ ]` に位置を付けない', async () => {
-    const src = '- [x]: http://e.com\n  [ ] foo';
-    const html = await renderDescription(src);
-    // 画面のチェックは未チェックなので、`[x]` の位置を付けると押しても保存されないまま見た目だけ変わる
-    expect(html).toContain('<input');
+  it('項目の先頭の `[x]:` が参照定義として消費される形では、実際のチェックの位置を付ける', async () => {
+    // チェックは 2 行目 (構文木がチェックボックスにした方)。定義のラベルの `[x]` ではない
+    for (const second of ['[ ] foo', '[x] foo']) {
+      const src = `- [x]: http://e.com\n  ${second}\n\n参照: [リンク][x]`;
+      const found = boxes(await renderDescription(src));
+      expect(found, src).toHaveLength(1);
+      expect(found[0].offset, src).toBe(src.indexOf(second));
+      expect(found[0].checked, src).toBe(second.startsWith('[x]'));
+    }
+  });
+
+  it('先頭の字が項目の印の直後の `[x]` でも、構文木のチェックでなければ付かない', async () => {
+    // チェックの形 (`[x]:`) でなく、定義だけの項目。input が無い
+    const html = await renderDescription('- [x]: http://e.com');
+    expect(html).not.toContain('<input');
     expect(html).not.toContain('data-kfm-task-offset');
+  });
+
+  it('チェックの後が装飾・入れ子・空でも位置が合う', async () => {
+    const cases = [
+      '- [ ] *強調*',
+      '- [x] **太字** a',
+      '- [ ] [リンク](http://e.com)',
+      '- [x] `コード`',
+      '- [ ] [ ] 二重',
+      '- [x]\n  本文',
+      '- [ ] a\n  - [x] b',
+    ];
+    for (const src of cases) {
+      const found = boxes(await renderDescription(src));
+      expect(found.length, src).toBeGreaterThan(0);
+      for (const { offset, checked } of found) {
+        expect(src.slice(offset, offset + 3), src).toBe(checked ? '[x]' : '[ ]');
+      }
+    }
   });
 
   describe('切り替え関数との突き合わせ (種を固定した乱数)', () => {
@@ -107,6 +136,10 @@ describe('rehype-kfm-task-offset (原文の位置)', () => {
       '- [x] 末尾\\',
       '- [x]: http://e.com',
       '  [ ] foo',
+      '  [x] foo',
+      '参照: [リンク][x]',
+      '- [ ] *強調*',
+      '- [x]',
       '   - [ ] 字下げ',
     ];
 
@@ -134,6 +167,8 @@ describe('rehype-kfm-task-offset (原文の位置)', () => {
         const src = generate(rand);
         const html = await renderDescription(src);
         const found = boxes(html);
+        // 部品は位置の付く形だけなので、描画された全チェックボックスに位置が付く
+        expect(found.length, JSON.stringify(src)).toBe((html.match(/<input /g) ?? []).length);
         // 位置は input ごとに重ならない
         expect(new Set(found.map((b) => b.offset)).size, src).toBe(found.length);
         for (const { offset, checked } of found) {

@@ -45,7 +45,7 @@ import remarkBreaks from 'remark-breaks';
 
 import { rehypeKfmCode } from '@/lib/rehype-kfm-code';
 import { rehypeKfmLinkFavicon } from '@/lib/rehype-kfm-link-favicon';
-import { rehypeKfmTaskOffset } from '@/lib/rehype-kfm-task-offset';
+import { rehypeKfmTaskOffset, remarkKfmTaskOffset } from '@/lib/rehype-kfm-task-offset';
 import { remarkGfm } from '@/lib/remark-gfm';
 import { remarkKfmMermaid } from '@/lib/remark-kfm-mermaid';
 import { remarkKfmRawHtml } from '@/lib/remark-kfm-raw-html';
@@ -111,8 +111,10 @@ export const renderDescription = createRenderer({
       // rehype 層 (starry-night / 将来の language-* 拡張) は mermaid フェンスを見ない。
       // remarkKfmTaskRef は GFM の後ろ (autolink 済みの link の内側を触らない) かつ alerts の
       // 後ろ (alerts は先頭 text の position で原文照合するため、先に分割すると alert 化しない)。
+      // remarkKfmTaskOffset は他の層が段落や text を触る前の構文木から位置を取るため先頭に置く。
       // remarkKfmMention も同じ位置（印は text ノードの分割で札にする。表が渡されぬ描画では何もしない）。
       remarkPlugins: [
+        remarkKfmTaskOffset,
         remarkKfmRawHtml,
         remarkGfm,
         remarkKoyoriAlerts,
@@ -131,6 +133,7 @@ export const renderDescription = createRenderer({
     // remarkBreaks は mdast の text 内改行を break へ割るだけで、他プラグインと干渉しない。
     comment: {
       remarkPlugins: [
+        remarkKfmTaskOffset,
         remarkKfmRawHtml,
         remarkGfm,
         remarkKoyoriAlerts,

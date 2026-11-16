@@ -1543,8 +1543,59 @@ describe('TaskDetailHub の説明のチェックボックスの切り替え', ()
       fieldErrors: { description: FAILED },
     });
 
+    await nextTick(); // フォーカスは描画の直後に戻す
     expect(document.activeElement).toBe(boxes(wrapper)[1].element);
     expect(boxes(wrapper)[1].element.checked).toBe(false);
+  });
+
+  it('保存中に別の項目へフォーカスを移していたら、失敗で HTML が作り直されてもそちらに残る', async () => {
+    const wrapper = mountSavingOnToggle();
+    await nextTick();
+    boxes(wrapper)[1].element.focus();
+    await boxes(wrapper)[1].setValue(true);
+    await nextTick();
+    boxes(wrapper)[2].element.focus();
+
+    await wrapper.setProps({
+      task: { ...task, description: SOURCE },
+      fieldUpdating: { description: false },
+      fieldErrors: { description: FAILED },
+    });
+
+    await nextTick(); // フォーカスは描画の直後に戻す
+    expect(document.activeElement).toBe(boxes(wrapper)[2].element);
+  });
+
+  it('フォーカスが説明の外へ移っていたら、HTML が作り直されても奪わない', async () => {
+    const wrapper = mountSavingOnToggle();
+    await nextTick();
+    boxes(wrapper)[1].element.focus();
+    await boxes(wrapper)[1].setValue(true);
+    await nextTick();
+    (document.activeElement as HTMLElement).blur();
+
+    await wrapper.setProps({
+      task: { ...task, description: SOURCE },
+      fieldUpdating: { description: false },
+      fieldErrors: { description: FAILED },
+    });
+
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('タスクが替わったときの差し替えでは、前のタスクの項目へフォーカスを戻さない', async () => {
+    const wrapper = mountWith({ attachTo: document.body });
+    await nextTick();
+    boxes(wrapper)[1].element.focus();
+
+    await wrapper.setProps({
+      task: { ...task, id: 'other-task', description: '- [ ] 別の\n- [ ] タスク\n- [ ] です' },
+      descriptionHtml: undefined,
+      descriptionSource: undefined,
+    });
+    await nextTick();
+
+    expect(document.activeElement).not.toBeInstanceOf(HTMLInputElement);
   });
 
   it('失敗の戻し: description を元へ戻すとチェックも戻り、「更新に失敗しました」が出て「編集を再開」は出ない', async () => {
@@ -1568,20 +1619,25 @@ describe('TaskDetailHub の説明のチェックボックスの切り替え', ()
     expect(wrapper.get('[data-checklist-progress]').text()).toContain('1 / 3');
   });
 
-  it('編集の保存に失敗した表示でチェックボックスを押しても、書き直せる下書きは残る', async () => {
+  it('編集の保存に失敗して下書きを取り戻せる間は、チェックボックスを押せず、「編集を再開」が残る', async () => {
     const wrapper = mountWith();
     await nextTick();
     await editAndSave(wrapper, '書きかけの説明');
     await wrapper.setProps({ fieldErrors: { description: FAILED } });
     expect(resumeButton(wrapper)).toBeDefined();
+    // 切り替えの保存が始まると失敗表示が消えて下書きが戻せなくなるので、押せない
+    expect(boxes(wrapper).map((b) => b.attributes('aria-disabled'))).toEqual([
+      'true',
+      'true',
+      'true',
+    ]);
 
     await boxes(wrapper)[1].setValue(true);
-    // 親は保存を始めると失敗表示を消し、切り替えも失敗すると立て直す
-    await wrapper.setProps({ fieldErrors: {}, fieldUpdating: { description: true } });
-    await wrapper.setProps({ fieldUpdating: { description: false } });
-    await wrapper.setProps({ fieldErrors: { description: FAILED } });
-    await resumeButton(wrapper)!.trigger('click');
 
+    expect(wrapper.emitted('save:description')).toHaveLength(1); // 編集の保存だけ
+    expect(boxes(wrapper)[1].element.checked).toBe(false);
+    expect(resumeButton(wrapper)).toBeDefined();
+    await resumeButton(wrapper)!.trigger('click');
     expect((wrapper.get('textarea[aria-label="説明"]').element as HTMLTextAreaElement).value).toBe(
       '書きかけの説明',
     );
