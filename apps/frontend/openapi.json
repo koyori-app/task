@@ -2889,6 +2889,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "reauth",
+            "in": "query",
+            "description": "true なら、ログイン済みの利用者が既に結んだ連携で本人確認する（パスキーの追加と削除の再認証）。連携は足さない。ログインできるプロバイダーに限る",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -3460,6 +3469,7 @@
       "post": {
         "tags": ["Auth"],
         "summary": "パスキー登録チャレンジ発行",
+        "description": "直近の本人確認（再認証）が要る。無ければ 403（`reauth-required`）。",
         "operationId": "registration_start",
         "responses": {
           "200": {
@@ -3526,6 +3536,7 @@
       "delete": {
         "tags": ["Auth"],
         "summary": "パスキー削除",
+        "description": "直近の本人確認（再認証）が要る。無ければ 403（`reauth-required`）。",
         "operationId": "delete_passkey",
         "responses": {
           "204": {
@@ -4061,6 +4072,227 @@
           },
           "500": {
             "description": "サーバー側で問題が発生しました",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/reauth/passkey/finish": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "パスキーで再認証",
+        "description": "自分のパスキーの署名を検めて、本人確認の印を立てる。他人のパスキーは 401。",
+        "operationId": "reauth_passkey_finish",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReauthPasskeyFinishRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "再認証に成功"
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/reauth/passkey/start": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "パスキーで再認証するチャレンジ発行",
+        "description": "自分のパスキーに限った PublicKeyCredentialRequestOptions を返す。パスキーが無ければ 404。",
+        "operationId": "reauth_passkey_start",
+        "responses": {
+          "200": {
+            "description": "PublicKeyCredentialRequestOptions (WebAuthn JSON)"
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/reauth/password": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "パスワードで再認証",
+        "description": "パスキーの追加と削除の前に求める本人確認を、パスワードで行う。成功すると、有効期間（既定 300 秒）の内は再認証を求めない。パスワードを持たない利用者は 400（`password-not-set`）。",
+        "operationId": "reauth_password",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReauthPasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "再認証に成功"
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
             "content": {
               "application/json": {
                 "schema": {
@@ -30420,6 +30652,24 @@
             "items": {
               "$ref": "#/components/schemas/CommentUser"
             }
+          }
+        }
+      },
+      "ReauthPasskeyFinishRequest": {
+        "type": "object",
+        "required": ["credential"],
+        "properties": {
+          "credential": {
+            "type": "object"
+          }
+        }
+      },
+      "ReauthPasswordRequest": {
+        "type": "object",
+        "required": ["password"],
+        "properties": {
+          "password": {
+            "type": "string"
           }
         }
       },

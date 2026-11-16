@@ -35,6 +35,7 @@ mod my_tasks_integration;
 mod notification_email_integration;
 mod oauth_instances_integration;
 mod oauth_integration;
+mod passkey_reauth_integration;
 mod password_reset_integration;
 mod pat_revoke_all_integration;
 mod pat_scope_integration;
