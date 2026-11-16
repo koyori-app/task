@@ -9,7 +9,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
-use object_store::aws::AmazonS3Builder;
+use object_store::aws::{AmazonS3, AmazonS3Builder};
 use object_store::{
     Attribute, Attributes, ObjectStore, ObjectStoreExt, PutMultipartOptions, PutOptions,
     PutPayload, path::Path,
@@ -62,21 +62,14 @@ impl S3StorageBackend {
         let public_base_url =
             resolve_public_base_url(env::var("S3_PUBLIC_BASE_URL").ok(), &endpoint, &bucket);
 
-        let mut builder = AmazonS3Builder::new()
-            .with_endpoint(&endpoint)
-            .with_bucket_name(&bucket)
-            .with_region(&region)
-            .with_access_key_id(&access_key_id)
-            .with_secret_access_key(&secret_access_key)
-            .with_allow_http(endpoint.starts_with("http://"));
-
-        if force_path_style {
-            builder = builder.with_virtual_hosted_style_request(false);
-        }
-
-        let store = builder
-            .build()
-            .map_err(|e| StorageError::Other(format!("S3 client build failed: {e}")))?;
+        let store = build_s3_store(
+            &endpoint,
+            &bucket,
+            &region,
+            &access_key_id,
+            &secret_access_key,
+            force_path_style,
+        )?;
 
         Ok(Self {
             store: Arc::new(store),
@@ -84,6 +77,34 @@ impl S3StorageBackend {
             public_base_url: public_base_url.trim_end_matches('/').to_string(),
         })
     }
+}
+
+fn build_s3_store(
+    endpoint: &str,
+    bucket: &str,
+    region: &str,
+    access_key_id: &str,
+    secret_access_key: &str,
+    force_path_style: bool,
+) -> Result<AmazonS3, StorageError> {
+    let mut builder = AmazonS3Builder::new()
+        .with_endpoint(endpoint)
+        .with_bucket_name(bucket)
+        .with_region(region)
+        .with_access_key_id(access_key_id)
+        .with_secret_access_key(secret_access_key)
+        .with_allow_http(endpoint.starts_with("http://"))
+        // object_store 0.14 は既定で DeleteObjects (POST /?delete) を使う。
+        // 一括削除に対応しない S3 互換先でも従来どおり削除できるよう単体 DELETE を保つ。
+        .with_disable_bulk_delete(true);
+
+    if force_path_style {
+        builder = builder.with_virtual_hosted_style_request(false);
+    }
+
+    builder
+        .build()
+        .map_err(|e| StorageError::Other(format!("S3 client build failed: {e}")))
 }
 
 fn to_path(key: &str) -> Result<Path, StorageError> {
@@ -250,6 +271,68 @@ fn resolve_public_base_url(configured: Option<String>, endpoint: &str, bucket: &
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn s3_client_uses_single_object_delete() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut buf = [0_u8; 1024];
+
+            loop {
+                let read = socket.read(&mut buf).await.unwrap();
+                assert_ne!(read, 0, "request ended before headers");
+                request.extend_from_slice(&buf[..read]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+
+            let request_line = String::from_utf8_lossy(&request)
+                .lines()
+                .next()
+                .unwrap()
+                .to_owned();
+            let response = if request_line.starts_with("DELETE ") {
+                "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    .to_owned()
+            } else {
+                let body = "<DeleteResult><Deleted><Key>object-key</Key></Deleted></DeleteResult>";
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                )
+            };
+            socket.write_all(response.as_bytes()).await.unwrap();
+            request_line
+        });
+
+        let store = build_s3_store(
+            &endpoint,
+            "test-bucket",
+            "us-east-1",
+            "test-access-key",
+            "test-secret-key",
+            true,
+        )
+        .unwrap();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            store.delete(&Path::from("object-key")),
+        )
+        .await
+        .expect("delete timed out")
+        .expect("delete failed");
+
+        let request_line = server.await.unwrap();
+        assert_eq!(request_line, "DELETE /test-bucket/object-key HTTP/1.1");
+    }
 
     #[test]
     fn empty_public_base_url_falls_back_to_endpoint_and_bucket() {
