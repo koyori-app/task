@@ -156,7 +156,9 @@ const emit = defineEmits<{
   'update:statusId': [value: string];
   'change:priority': [value: TaskDetail['priority']];
   'save:title': [value: string];
-  'save:description': [value: string | null];
+  // preserveWhitespace: 保存で本文の前後の空白を削らない。チェックボックスの切り替えは 1 字だけを替える操作で、
+  // 先頭の字下げを削るとリストの入れ子が変わるため（編集器からの保存は従来どおり前後を削る）
+  'save:description': [value: string | null, options?: { preserveWhitespace?: boolean }];
   'save:progress_pct': [value: number];
   'save:planned_start_on': [value: string | null];
   'save:soft_deadline': [value: string | null];
@@ -304,14 +306,33 @@ const checklistToggleable = computed(
 
 const CHECKLIST_INPUT_SELECTOR = `input[type="checkbox"][${KFM_TASK_OFFSET_ATTR}]`;
 
-/** 保存が終わって押せるようになったらフォーカスを戻す、直前に押したチェックボックスの位置 */
+/**
+ * 押した直後にフォーカスを戻す、直前に押したチェックボックスの位置。
+ * 楽観更新で HTML が差し替わり、押した input は作り直されるので、作り直しのたびに同じ位置へ戻す。
+ * 保存が終わる（押せる状態に戻る）まで持つ
+ */
 let pendingFocusOffset: string | null = null;
 
-/** 項目の先頭行の字（`li` の入れ子の子は含めない）。スクリーンリーダー用の名前にする */
+/** 項目自身の字（画像は alt）。入れ子のリストの字は含めない */
+function ownText(node: Node): string {
+  if (node.nodeType === 3) return node.textContent ?? '';
+  if (node.nodeType !== 1) return '';
+  const element = node as HTMLElement;
+  const tag = element.tagName;
+  if (tag === 'UL' || tag === 'OL') return '';
+  if (tag === 'IMG') return element.getAttribute('alt') ?? '';
+  if (tag === 'BR') return '\n';
+  return Array.from(element.childNodes).map(ownText).join('');
+}
+
+/** 項目の先頭行の字。スクリーンリーダー用の名前にする。字が無ければ空 */
 function checklistLabel(input: HTMLInputElement): string {
-  const text = input.closest('li')?.textContent ?? '';
+  const li = input.closest('li');
+  if (!li) return '';
   return (
-    text
+    Array.from(li.childNodes)
+      .map(ownText)
+      .join('')
       .split('\n')
       .map((line) => line.trim())
       .find((line) => line !== '') ?? ''
@@ -320,24 +341,28 @@ function checklistLabel(input: HTMLInputElement): string {
 
 /**
  * 描画 HTML の `disabled` は固定なので、hydrate 後にここで外す（SSR の HTML は押せない）。
- * 位置の属性が無いチェックボックス（原文へ対応づけられない項目）は disabled のまま
+ * 位置の属性が無いチェックボックス（原文へ対応づけられない項目）は disabled のまま。
+ * 保存中は disabled にせず aria-disabled にする（disabled の input はフォーカスを持てず、
+ * キーボードで続けて操作している人の位置が失われるため）。押された変更は onChecklistChange が戻す
  */
 function syncChecklistInputs() {
   const root = descriptionHtmlEl.value;
   if (!root) return;
   const toggleable = checklistToggleable.value;
-  for (const input of root.querySelectorAll<HTMLInputElement>(CHECKLIST_INPUT_SELECTOR)) {
-    input.disabled = !toggleable;
-    const label = checklistLabel(input);
-    if (label) input.setAttribute('aria-label', label);
-  }
-  if (toggleable && pendingFocusOffset !== null) {
+  const inputs = root.querySelectorAll<HTMLInputElement>(CHECKLIST_INPUT_SELECTOR);
+  inputs.forEach((input, index) => {
+    input.disabled = false;
+    if (toggleable) input.removeAttribute('aria-disabled');
+    else input.setAttribute('aria-disabled', 'true');
+    input.setAttribute('aria-label', checklistLabel(input) || `チェック項目 ${index + 1}`);
+  });
+  if (pendingFocusOffset !== null) {
     const offset = pendingFocusOffset;
-    pendingFocusOffset = null;
     // 利用者が別の場所へ移していたらそのまま（body は押した要素が差し替えで消えたとき）
     if (document.activeElement === document.body || document.activeElement === null) {
       root.querySelector<HTMLInputElement>(`input[${KFM_TASK_OFFSET_ATTR}="${offset}"]`)?.focus();
     }
+    if (toggleable) pendingFocusOffset = null;
   }
 }
 
@@ -345,6 +370,18 @@ watch([freshDescriptionHtml, descriptionHtmlEl, checklistToggleable], syncCheckl
   flush: 'post',
   immediate: true,
 });
+
+// 橋渡しは役目が終わったら捨てる。本物の HTML が届いたら不要で、失敗したら本文が戻っているので
+// 後で同じ本文になったときに古い描画を出さない
+watch(
+  [
+    () => !!props.descriptionHtml && props.descriptionSource === props.task?.description,
+    () => props.fieldErrors?.description,
+  ],
+  ([fresh, error]) => {
+    if (fresh || error) toggleBridge.value = null;
+  },
+);
 
 function onChecklistChange(event: Event) {
   const target = event.target;
@@ -357,15 +394,15 @@ function onChecklistChange(event: Event) {
   const offset = Number(target.getAttribute(KFM_TASK_OFFSET_ATTR));
   if (!checklistToggleable.value || !description || !html) return revert();
   const next = toggleChecklistAt(description, offset, target.checked);
-  if (next === null) return revert();
-  // 保存は trim した本文で行われる。trim で変わる本文は橋渡しの照合に合わないので持たない
-  const nextHtml =
-    next.trim() === next ? setChecklistHtmlChecked(html, offset, target.checked) : null;
+  // 本文が変わらない（画面の状態と原文の字が食い違う）ときは保存が始まらないので、画面だけ変えない
+  if (next === null || next === description) return revert();
+  const nextHtml = setChecklistHtmlChecked(html, offset, target.checked);
   toggleBridge.value = nextHtml === null ? null : { source: next, html: nextHtml };
-  // 失敗表示に「編集を再開」を出さない（切り替えは下書きを持たない）
-  delete failedDrafts.value.description;
+  // 前に成功した編集の下書きで「編集を再開」が出ないよう捨てる。ただし失敗表示が出ている間は、
+  // その下書きが書き直す唯一の控えなので残す
+  if (!fieldError('description')) delete failedDrafts.value.description;
   pendingFocusOffset = String(offset);
-  emit('save:description', next);
+  emit('save:description', next, { preserveWhitespace: true });
   // 保存が始まらなかったとき（同じ本文で何もしない等）は、後からフォーカスを動かさない
   void nextTick(() => {
     if (checklistToggleable.value) pendingFocusOffset = null;

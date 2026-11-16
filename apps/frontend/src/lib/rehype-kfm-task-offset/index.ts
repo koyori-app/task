@@ -8,7 +8,8 @@
  * 規則:
  * - 対象は `task-list-item` の `li` のうち、`position.start.offset` を持つもの。
  *   `li` の位置から項目の印 (`-` `*` `+` `1.` `1)` と後続の空白) を読み飛ばした先の
- *   `[` を位置とする。印の読み飛ばしが合わない・`input` が見つからない項目には何も付けず、
+ *   `[` を位置とする。印の読み飛ばしが合わない・`input` が見つからない・位置の字と checked が食い違う項目には
+ *   何も付けず、
  *   押せないまま残す。
  * - `input` は詰まったリストでは `li` の直下、空行で離したリストでは `li > p` の先頭にある。
  * - 位置は、改行を LF に直した本文 (`_renderer.ts` の normalized) での JS の文字列添字。
@@ -67,8 +68,13 @@ export function rehypeKfmTaskOffset() {
       if (!marker) return;
       const checkbox = findCheckbox(node);
       if (!checkbox) return;
+      const offset = start + marker[0].length;
+      // 位置の字が本当にそのチェックボックスのものか確かめる。項目の先頭の `[x]:` がリンク参照の
+      // 定義として消費され、チェックボックスが次の行の `[ ]` になる形などは、字と checked が食い違う
+      const checked = source[offset + 1] === 'x' || source[offset + 1] === 'X';
+      if (checked !== (checkbox.properties.checked === true)) return;
       // hast の property 名 (`data-kfm-task-offset` 属性へ出る)
-      checkbox.properties.dataKfmTaskOffset = String(start + marker[0].length);
+      checkbox.properties.dataKfmTaskOffset = String(offset);
     });
   };
 }

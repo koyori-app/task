@@ -908,6 +908,41 @@ export const DescriptionChecklistToggle: Story = {
   },
 };
 
+export const DescriptionChecklistToggleKeyboard: Story = {
+  name: '説明のチェックボックスをキーボードで続けて切り替える',
+  decorators: [
+    storyDecorator(mockContext, {
+      descriptionHtml: kfmChecklistHtml,
+      descriptionSource: CHECKLIST_DESCRIPTION,
+    }),
+  ],
+  beforeEach: () =>
+    createMockFetch({ task: { ...sampleTaskDetail, description: CHECKLIST_DESCRIPTION } }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await canvas.findByText('2 / 5');
+    (await canvas.findByRole('checkbox', { name: '未了タスク' })).focus();
+
+    await user.keyboard(' ');
+
+    // 保存中に説明の表示が作り直されても、フォーカスは同じ項目にあり、保存が終わると押せる
+    await waitFor(async () => {
+      const box = await canvas.findByRole('checkbox', { name: '未了タスク' });
+      await expect(box).toBeChecked();
+      await expect(box).toHaveFocus();
+      await expect(box).not.toHaveAttribute('aria-disabled');
+    });
+    await expect(canvas.findByText('3 / 5')).resolves.toBeInTheDocument();
+
+    // そのまま次の項目へ移って切り替えられる
+    await user.tab();
+    await expect(canvas.findByRole('checkbox', { name: '親タスク' })).resolves.toHaveFocus();
+    await user.keyboard(' ');
+    await expect(canvas.findByText('4 / 5')).resolves.toBeInTheDocument();
+  },
+};
+
 export const DescriptionChecklistToggleFailure: Story = {
   name: '説明のチェックボックスの切り替えに失敗',
   decorators: [

@@ -463,10 +463,14 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     mutateTask({ title: value }, { title: value }, 'title');
   }
 
-  function onSaveDescription(value: string | null) {
+  /**
+   * 説明の保存。前後の空白は削る。ただし `preserveWhitespace` では削らない
+   * （チェックボックスの切り替えは 1 字だけを替える操作で、先頭の字下げを削るとリストの入れ子が変わる）
+   */
+  function onSaveDescription(value: string | null, options?: { preserveWhitespace?: boolean }) {
     const current = taskQuery.data.value;
     if (!current) return;
-    const normalized = value?.trim() ?? '';
+    const normalized = options?.preserveWhitespace ? (value ?? '') : (value?.trim() ?? '');
     const currentDescription = current.description ?? '';
     if (normalized === currentDescription) return;
 

@@ -83,6 +83,14 @@ describe('rehype-kfm-task-offset (原文の位置)', () => {
     expect(boxes(html)).toEqual([{ offset: 2, checked: true }]);
   });
 
+  it('項目の先頭の `[x]:` が定義として消費される形では、別の行の `[ ]` に位置を付けない', async () => {
+    const src = '- [x]: http://e.com\n  [ ] foo';
+    const html = await renderDescription(src);
+    // 画面のチェックは未チェックなので、`[x]` の位置を付けると押しても保存されないまま見た目だけ変わる
+    expect(html).toContain('<input');
+    expect(html).not.toContain('data-kfm-task-offset');
+  });
+
   describe('切り替え関数との突き合わせ (種を固定した乱数)', () => {
     const PARTS = [
       '- [ ] a',
@@ -97,6 +105,9 @@ describe('rehype-kfm-task-offset (原文の位置)', () => {
       '地の文',
       '\t- [ ] tab',
       '- [x] 末尾\\',
+      '- [x]: http://e.com',
+      '  [ ] foo',
+      '   - [ ] 字下げ',
     ];
 
     function mulberry32(seed: number) {

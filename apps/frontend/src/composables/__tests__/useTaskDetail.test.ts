@@ -858,6 +858,24 @@ describe('useTaskDetail のキャッシュ同期', () => {
       );
     });
 
+    it('説明の保存は前後の空白を削る。preserveWhitespace では 1 字も削らない（字下げでリストの入れ子が変わるため）', async () => {
+      mountHost();
+      await flushPromises();
+      const indented = '   - [x] a\n   - [ ] b\n';
+
+      detail.onSaveDescription(indented);
+      await flushPromises();
+      expect(await putControl.body).toEqual({ description: '- [x] a\n   - [ ] b' });
+
+      putControl.body = undefined;
+      putControl.resolve!({ ...baseTask, description: '- [x] a\n   - [ ] b' });
+      await flushPromises();
+
+      detail.onSaveDescription(indented, { preserveWhitespace: true });
+      await flushPromises();
+      expect(await putControl.body).toEqual({ description: indented });
+    });
+
     it('親以外の保存ではタスク本体を取り直さない', async () => {
       mountHost();
       await flushPromises();

@@ -1359,7 +1359,9 @@ describe('TaskDetailHub の説明のチェックボックスの切り替え', ()
   });
 
   function mountWith(extra: Record<string, unknown> = {}) {
+    const { attachTo, ...props } = extra;
     return mount(TaskDetailHub, {
+      attachTo: attachTo as HTMLElement | undefined,
       props: {
         task: { ...task, description: SOURCE },
         descriptionHtml: html,
@@ -1367,9 +1369,24 @@ describe('TaskDetailHub の説明のチェックボックスの切り替え', ()
         projectKey: 'TEST',
         statuses: [],
         statusId: task.status_id,
-        ...extra,
+        ...props,
       },
     });
+  }
+
+  const FAILED = '更新に失敗しました';
+
+  const resumeButton = (wrapper: ReturnType<typeof mountWith>) =>
+    wrapper.findAll('button').find((button) => button.text() === '編集を再開');
+
+  /** 説明を編集して保存する（保存の成否は呼び出し側が props で表す） */
+  async function editAndSave(wrapper: ReturnType<typeof mountWith>, value: string) {
+    await wrapper.get('button[aria-label="説明を編集"]').trigger('click');
+    await wrapper.get('textarea[aria-label="説明"]').setValue(value);
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '保存')!
+      .trigger('click');
   }
 
   const boxes = (wrapper: ReturnType<typeof mountWith>) =>
@@ -1397,7 +1414,7 @@ describe('TaskDetailHub の説明のチェックボックスの切り替え', ()
 
     await boxes(wrapper)[1].setValue(true);
 
-    expect(wrapper.emitted('save:description')).toEqual([[TOGGLED]]);
+    expect(wrapper.emitted('save:description')).toEqual([[TOGGLED, { preserveWhitespace: true }]]);
   });
 
   it('チェックを外す操作は [x] を空白へ戻した本文を emit する', async () => {
@@ -1406,7 +1423,9 @@ describe('TaskDetailHub の説明のチェックボックスの切り替え', ()
 
     await boxes(wrapper)[0].setValue(false);
 
-    expect(wrapper.emitted('save:description')).toEqual([['- [ ] 済み\n- [ ] 未了\n- [ ] 最後']]);
+    expect(wrapper.emitted('save:description')).toEqual([
+      ['- [ ] 済み\n- [ ] 未了\n- [ ] 最後', { preserveWhitespace: true }],
+    ]);
   });
 
   it('押した後に task.description が新しい本文になっても (HTML は古いまま) プレーン表示へ落ちない', async () => {
@@ -1438,14 +1457,94 @@ describe('TaskDetailHub の説明のチェックボックスの切り替え', ()
     expect(wrapper.get('[data-task-description-html]').element.innerHTML).toBe(before);
   });
 
-  it('保存中 (fieldUpdating.description) は全部 disabled。終われば有効に戻る', async () => {
+  it('保存中 (fieldUpdating.description) は全部 aria-disabled で、押しても emit せず戻す。終われば元に戻る', async () => {
     const wrapper = mountWith();
     await nextTick();
     await wrapper.setProps({ fieldUpdating: { description: true } });
-    expect(boxes(wrapper).map((b) => b.element.disabled)).toEqual([true, true, true]);
+    // disabled にするとフォーカスを持てないので aria-disabled にする
+    expect(boxes(wrapper).map((b) => b.attributes('aria-disabled'))).toEqual([
+      'true',
+      'true',
+      'true',
+    ]);
+    expect(boxes(wrapper).map((b) => b.element.disabled)).toEqual([false, false, false]);
+
+    await boxes(wrapper)[1].setValue(true);
+    expect(wrapper.emitted('save:description')).toBeUndefined();
+    expect(boxes(wrapper)[1].element.checked).toBe(false);
 
     await wrapper.setProps({ fieldUpdating: { description: false } });
-    expect(boxes(wrapper).map((b) => b.element.disabled)).toEqual([false, false, false]);
+    expect(boxes(wrapper).map((b) => b.attributes('aria-disabled'))).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
+
+  it('文字の無い項目 (画像だけ) は alt を名前にし、alt も無ければ「チェック項目 N」', async () => {
+    const source = '- [ ] ![設計図](a.png)\n- [ ] ![](b.png)\n- [ ] 親\n  - [ ] 子';
+    const wrapper = mountWith({
+      task: { ...task, description: source },
+      descriptionHtml: await renderDescription(source),
+      descriptionSource: source,
+    });
+    await nextTick();
+
+    // 入れ子の子の字は親の名前に混ぜない
+    expect(boxes(wrapper).map((b) => b.attributes('aria-label'))).toEqual([
+      '設計図',
+      'チェック項目 2',
+      '親',
+      '子',
+    ]);
+  });
+
+  /** 実際の親と同じく、emit の中で（同期に）楽観更新して保存中にする */
+  function mountSavingOnToggle() {
+    const holder: { wrapper?: ReturnType<typeof mountWith> } = {};
+    const wrapper = mountWith({
+      attachTo: document.body,
+      'onSave:description': () => {
+        void holder.wrapper!.setProps({
+          task: { ...task, description: TOGGLED },
+          fieldUpdating: { description: true },
+        });
+      },
+    });
+    holder.wrapper = wrapper;
+    return wrapper;
+  }
+
+  it('保存中は押した項目のフォーカスを保ち、HTML が作り直されても同じ項目へ戻す', async () => {
+    const wrapper = mountSavingOnToggle();
+    await nextTick();
+    boxes(wrapper)[1].element.focus();
+    await boxes(wrapper)[1].setValue(true);
+    await nextTick();
+
+    // 作り直された input は保存中も aria-disabled なのでフォーカスを持てる
+    expect(document.activeElement).toBe(boxes(wrapper)[1].element);
+    expect(boxes(wrapper)[1].attributes('aria-disabled')).toBe('true');
+
+    await wrapper.setProps({ fieldUpdating: { description: false } });
+    expect(document.activeElement).toBe(boxes(wrapper)[1].element);
+  });
+
+  it('失敗で本文が戻って HTML が作り直されても、フォーカスは同じ項目に戻る', async () => {
+    const wrapper = mountSavingOnToggle();
+    await nextTick();
+    boxes(wrapper)[1].element.focus();
+    await boxes(wrapper)[1].setValue(true);
+    await nextTick();
+
+    await wrapper.setProps({
+      task: { ...task, description: SOURCE },
+      fieldUpdating: { description: false },
+      fieldErrors: { description: FAILED },
+    });
+
+    expect(document.activeElement).toBe(boxes(wrapper)[1].element);
+    expect(boxes(wrapper)[1].element.checked).toBe(false);
   });
 
   it('失敗の戻し: description を元へ戻すとチェックも戻り、「更新に失敗しました」が出て「編集を再開」は出ない', async () => {
@@ -1467,6 +1566,38 @@ describe('TaskDetailHub の説明のチェックボックスの切り替え', ()
     expect(wrapper.text()).toContain('更新に失敗しました');
     expect(wrapper.text()).not.toContain('編集を再開');
     expect(wrapper.get('[data-checklist-progress]').text()).toContain('1 / 3');
+  });
+
+  it('編集の保存に失敗した表示でチェックボックスを押しても、書き直せる下書きは残る', async () => {
+    const wrapper = mountWith();
+    await nextTick();
+    await editAndSave(wrapper, '書きかけの説明');
+    await wrapper.setProps({ fieldErrors: { description: FAILED } });
+    expect(resumeButton(wrapper)).toBeDefined();
+
+    await boxes(wrapper)[1].setValue(true);
+    // 親は保存を始めると失敗表示を消し、切り替えも失敗すると立て直す
+    await wrapper.setProps({ fieldErrors: {}, fieldUpdating: { description: true } });
+    await wrapper.setProps({ fieldUpdating: { description: false } });
+    await wrapper.setProps({ fieldErrors: { description: FAILED } });
+    await resumeButton(wrapper)!.trigger('click');
+
+    expect((wrapper.get('textarea[aria-label="説明"]').element as HTMLTextAreaElement).value).toBe(
+      '書きかけの説明',
+    );
+  });
+
+  it('対照: 前に成功した編集の下書きは、切り替えの失敗で「編集を再開」に出ない', async () => {
+    const wrapper = mountWith();
+    await nextTick();
+    // 編集の保存は成功した（失敗表示は出ない。親が本文を保つ代わりに task はそのまま）
+    await editAndSave(wrapper, '成功した説明');
+    expect(resumeButton(wrapper)).toBeUndefined();
+
+    await boxes(wrapper)[1].setValue(true);
+    await wrapper.setProps({ fieldErrors: { description: FAILED } });
+
+    expect(resumeButton(wrapper)).toBeUndefined();
   });
 
   it('対照: descriptionSource が description と違う (他の人が更新した) と HTML を出さず、押せない', async () => {

@@ -55,8 +55,8 @@
   list-style: none;
 }
 
-/* 位置の属性を持つ項目は hydrate 後に有効になり、押して切り替えられる（TASK-539）。disabled のままは既定のカーソル */
-.kfm-content .task-list-item input[type='checkbox']:enabled {
+/* 位置の属性を持つ項目は hydrate 後に有効になり、押して切り替えられる（TASK-539）。disabled と保存中（aria-disabled）は既定のカーソル */
+.kfm-content .task-list-item input[type='checkbox']:enabled:not([aria-disabled='true']) {
   cursor: pointer;
 }
 
