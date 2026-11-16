@@ -235,3 +235,19 @@ WebAuthn の設定と検証の規則は次のとおりである。
 | 2026-11-04 | パスキーを多要素認証として扱い、ログインで TOTP を免除する | 利用者の検証を必須にして認証するので、「所持（デバイス）+ 生体または PIN」が揃う |
 
 | 2026-11-16 | パスキーの追加と削除に、直近 300 秒以内の再認証を求める。手段はパスワード・既存のパスキー・結んだ連携で、メールは使わない。最初の 1 件目の追加にも求める。連携の追加と TOTP の登録は、再認証として数えない | cookie を盗んだ者が自分の鍵を足して居座る、あるいは正規の鍵を消して締め出す攻撃を防ぐ。論文 *The State of Passkeys*（USENIX Security 26）が、登録に確認を求めない site の危うさを挙げる。連携や TOTP の追加を数えると、盗まれたセッションで再認証を満たせてしまう |
+
+### 参考
+
+検証の規則と、再認証・crossOrigin と topOrigin の検め・credential ID の長さの検めは、次の論文の攻撃の型でパスキーの実装を点検した結果を含む。
+
+- 論文: Louis Jannett ほか『The State of Passkeys: Studying the Adoption and Security of Passkeys on the Web』（35th USENIX Security Symposium、2026）。[発表ページ](https://www.usenix.org/conference/usenixsecurity26/presentation/jannett)。103 サイトを評価し、18 サイトで重大、53 サイトで高い重大度の攻撃が通ったと述べる。
+- きっかけ: ITmedia NEWS の記事『パスワードより安全なはずが……パスキー対応103サイトを検証→全てに脆弱性 独大学の調査結果』（2026-11-16）。[記事](https://www.itmedia.co.jp/news/article/2611/16/2000003199/)。
+
+直しと、論文の型の対応は次のとおりである。
+
+| 直し | 論文の型と章 |
+|---|---|
+| credential ID の長さの検め（TASK-546） | 型は「Length of credid」。表「Evaluation Results and Test Catalog」に載る |
+| crossOrigin と topOrigin の検め（TASK-545） | 型は「Framing」。章「CWE-1021: Improper Restriction of Rendered UI Layers or Frames」 |
+| パスキーの追加と削除の再認証（TASK-543） | 型ではなく所見。章「Part 2: How Websites Implement Passkeys」の「Confirming Passkey Registrations」と「Removing Passkeys」 |
+| ログイン開始でのメールごとの有無の扱い（TASK-544。今は直さず、課題として残す） | 型は「Allow Credentials」。章「CWE-204: Observable Response Discrepancy」 |
