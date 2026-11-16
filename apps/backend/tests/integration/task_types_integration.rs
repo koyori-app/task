@@ -7,6 +7,7 @@ use entity::scopes::Scope;
 use sea_orm::{ConnectionTrait, EntityTrait, PaginatorTrait};
 use serde_json::{Value, json};
 use service::task_types::DEFAULT_TASK_TYPES;
+use std::collections::HashSet;
 use uuid::Uuid;
 
 /// 既定の種別を入れる SQL。マイグレーション（`m20261116000000_task_types`）と同じファイルを使う。
@@ -176,6 +177,117 @@ async fn task_type_definitions_reject_outsiders_and_missing_scopes() {
         .post_json_with_bearer(&base, json!({ "name": "x", "color": "#111111" }), &writer)
         .await;
     assert_eq!(created.status(), StatusCode::CREATED);
+    let created = json_body(created).await;
+    let id = created["id"].as_str().expect("id").to_string();
+
+    // 拒否系: 更新・並べ替え・削除も、部外者と読み取りだけの PAT は 403 で、種別は変わらない
+    let outsider_client = {
+        app.login_session_no_content(&outsider.email, &outsider.password)
+            .await;
+        app.session_client()
+    };
+    let base_url = app.base_url().to_string();
+    let url = |path: &str| format!("{base_url}{path}");
+    for (label, response) in [
+        (
+            "outsider PUT",
+            outsider_client
+                .put(url(&format!("{base}/{id}")))
+                .json(&json!({ "name": "改名" }))
+                .send()
+                .await
+                .expect("send"),
+        ),
+        (
+            "outsider reorder",
+            outsider_client
+                .put(url(&format!("{base}/reorder")))
+                .json(&json!({ "ids": [id] }))
+                .send()
+                .await
+                .expect("send"),
+        ),
+        (
+            "outsider DELETE",
+            outsider_client
+                .delete(url(&format!("{base}/{id}")))
+                .send()
+                .await
+                .expect("send"),
+        ),
+    ] {
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{label}");
+    }
+    app.reset_session_client();
+    let read_only_client = app.client().clone();
+    for (label, response) in [
+        (
+            "read-only PUT",
+            read_only_client
+                .put(url(&format!("{base}/{id}")))
+                .bearer_auth(&read_only)
+                .json(&json!({ "name": "改名" }))
+                .send()
+                .await
+                .expect("send"),
+        ),
+        (
+            "read-only reorder",
+            read_only_client
+                .put(url(&format!("{base}/reorder")))
+                .bearer_auth(&read_only)
+                .json(&json!({ "ids": [id] }))
+                .send()
+                .await
+                .expect("send"),
+        ),
+        (
+            "read-only DELETE",
+            read_only_client
+                .delete(url(&format!("{base}/{id}")))
+                .bearer_auth(&read_only)
+                .send()
+                .await
+                .expect("send"),
+        ),
+    ] {
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{label}");
+    }
+    let still = json_body(app.get_with_bearer(&base, &read_only).await).await;
+    assert!(
+        still
+            .as_array()
+            .expect("array")
+            .iter()
+            .any(|t| t["id"] == id && t["name"] == "x"),
+        "拒否された操作で種別が変わっていない"
+    );
+
+    // 対照: 書き込みの PAT は更新・並べ替え・削除できる
+    let writer_client = app.client().clone();
+    let put = writer_client
+        .put(url(&format!("{base}/{id}")))
+        .bearer_auth(&writer)
+        .json(&json!({ "name": "改名" }))
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(put.status(), StatusCode::OK);
+    let reorder = writer_client
+        .put(url(&format!("{base}/reorder")))
+        .bearer_auth(&writer)
+        .json(&json!({ "ids": [id] }))
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(reorder.status(), StatusCode::OK);
+    let delete = writer_client
+        .delete(url(&format!("{base}/{id}")))
+        .bearer_auth(&writer)
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(delete.status(), StatusCode::NO_CONTENT);
 }
 
 #[tokio::test]
@@ -260,6 +372,69 @@ async fn task_type_reorder_requires_exactly_the_projects_types() {
     // 並べ替えたあとの作成は末尾に付く
     let d = create_type(&app, &base, "D", "#111111").await;
     assert_eq!(d["position"], 3);
+}
+
+#[tokio::test]
+async fn reordering_a_project_without_types_accepts_only_an_empty_list() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(true, false).await;
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let base = types_base(tp.tenant_id, tp.project_id);
+    let reorder = format!("{base}/reorder");
+    assert!(list_types(&app, &base).await.is_empty());
+
+    // 0 件の並べ替えは過不足が無いので 200 で、空の一覧を返す（以前は SQL の構文エラーで 500 だった）
+    let empty = app
+        .put_json_with_session(&reorder, json!({ "ids": [] }))
+        .await;
+    assert_eq!(empty.status(), StatusCode::OK);
+    assert_eq!(json_body(empty).await, json!([]));
+
+    // 対照: 0 件のプロジェクトに ID を渡すと 400
+    let some = app
+        .put_json_with_session(&reorder, json!({ "ids": [Uuid::new_v4()] }))
+        .await;
+    assert_eq!(some.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn concurrent_creates_get_distinct_positions_in_arrival_order() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(true, false).await;
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let base = types_base(tp.tenant_id, tp.project_id);
+    create_type(&app, &base, "先頭", "#111111").await;
+
+    let url = format!("{}{base}", app.base_url());
+    let client = app.client().clone();
+    let responses = futures::future::join_all((0..8).map(|i| {
+        let client = client.clone();
+        let url = url.clone();
+        async move {
+            client
+                .post(&url)
+                .json(&json!({ "name": format!("同時 {i}"), "color": "#222222" }))
+                .send()
+                .await
+                .expect("send")
+        }
+    }))
+    .await;
+    for response in &responses {
+        assert_eq!(response.status(), StatusCode::CREATED);
+    }
+
+    // 同時の作成でも position は 0..=8 で 1 つずつ重ならない
+    let positions: Vec<i64> = list_types(&app, &base)
+        .await
+        .iter()
+        .map(|t| t["position"].as_i64().expect("position"))
+        .collect();
+    assert_eq!(positions, (0..=8).collect::<Vec<_>>());
 }
 
 #[tokio::test]
@@ -371,6 +546,33 @@ async fn backfill_adds_defaults_only_to_projects_without_types() {
         .await
         .expect("count");
     assert!(total >= 4);
+}
+
+#[tokio::test]
+async fn concurrent_backfills_do_not_fail_on_the_name_constraint() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(true, false).await;
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let base = types_base(tp.tenant_id, tp.project_id);
+
+    // 種別の無いプロジェクトに、別々の接続から同時に流す。互いのコミット前は NOT EXISTS が両方通るので、
+    // ON CONFLICT が無いと片方が (project_id, name) の UNIQUE 違反で落ちる
+    let db = &app.state.db;
+    let results =
+        futures::future::join_all((0..4).map(|_| db.execute_unprepared(BACKFILL_SQL))).await;
+    for result in results {
+        result.expect("concurrent backfill");
+    }
+
+    let expected: HashSet<String> = DEFAULT_TASK_TYPES
+        .iter()
+        .map(|(n, _)| n.to_string())
+        .collect();
+    let actual = names(&list_types(&app, &base).await);
+    assert_eq!(actual.len(), DEFAULT_TASK_TYPES.len());
+    assert_eq!(actual.into_iter().collect::<HashSet<_>>(), expected);
 }
 
 #[tokio::test]
@@ -580,6 +782,14 @@ async fn deleting_a_type_keeps_its_tasks_untyped() {
         .delete_with_session(&format!("{base}/{}", bug["id"].as_str().unwrap()))
         .await;
     assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+
+    // 列も NULL に戻っている（応答は見つからない種別を null にするので、列そのものを見る）
+    let row = entity::tasks::Entity::find_by_id(task_id.parse::<Uuid>().expect("uuid"))
+        .one(&app.state.db)
+        .await
+        .expect("load task")
+        .expect("task exists");
+    assert!(row.task_type_id.is_none());
 
     // タスクは消えず、種別だけが未設定に戻る
     let detail = json_body(app.get_with_session(&format!("{tasks}/{task_id}")).await).await;

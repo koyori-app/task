@@ -299,3 +299,50 @@ async fn custom_fields_integration_suite() {
         "削除済みフィールドは返らない"
     );
 }
+
+/// 位置を指定しない作成は末尾に足す。同時の作成でも position が重ならない。
+#[tokio::test]
+async fn concurrent_custom_field_creates_get_distinct_positions() {
+    let mut app = TestApp::new().await;
+    let user = app.insert_user(true, false).await;
+    app.login_session_no_content(&user.email, &user.password)
+        .await;
+    let tp = app.insert_tenant_project(user.id).await;
+    let base = format!(
+        "/v1/tenants/{}/projects/{}/custom-fields",
+        tp.tenant_id, tp.project_id
+    );
+    let url = format!("{}{base}", app.base_url());
+    let client = app.client().clone();
+
+    let responses = futures::future::join_all((0..6).map(|i| {
+        let client = client.clone();
+        let url = url.clone();
+        async move {
+            client
+                .post(&url)
+                .json(&serde_json::json!({ "name": format!("f{i}"), "field_type": "text" }))
+                .send()
+                .await
+                .expect("send")
+        }
+    }))
+    .await;
+    for response in &responses {
+        assert_eq!(response.status(), StatusCode::CREATED);
+    }
+
+    let list: Value = app
+        .get_with_session(&base)
+        .await
+        .json()
+        .await
+        .expect("list json");
+    let fields = list["fields"].as_array().expect("fields");
+    let mut positions: Vec<i64> = fields
+        .iter()
+        .map(|f| f["position"].as_i64().expect("position"))
+        .collect();
+    positions.sort_unstable();
+    assert_eq!(positions, (0..6).collect::<Vec<_>>());
+}

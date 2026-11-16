@@ -18,6 +18,7 @@ const {
     taskTypes: [] as unknown[],
     isPending: false,
     isError: false,
+    isFetching: false,
   },
   // vi.hoisted は import 前に走るため vue の ref は使えない。
   // コンポーネントは .value を読むだけなので素のオブジェクトで足りる
@@ -37,6 +38,7 @@ vi.mock('@tanstack/vue-query', async (importOriginal) => {
     useQuery: vi.fn(() => ({
       data: { value: queryState.taskTypes },
       isPending: { value: queryState.isPending },
+      isFetching: { value: queryState.isFetching },
       isError: { value: queryState.isError },
     })),
   };
@@ -94,8 +96,10 @@ const featureType: TaskTypeResponse = {
   project_id: PROJECT_UUID,
 };
 
+let queryClient: QueryClient;
+
 function mountView() {
-  const queryClient = new QueryClient({
+  queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return mount(TaskTypesSection, {
@@ -152,6 +156,7 @@ describe('TaskTypesSection', () => {
     queryState.taskTypes = [];
     queryState.isPending = false;
     queryState.isError = false;
+    queryState.isFetching = false;
     mutationPending.post.value = false;
     mutationPending.put.value = false;
     mutationPending.delete.value = false;
@@ -369,6 +374,84 @@ describe('TaskTypesSection', () => {
       params: { path: { tenant_id: TENANT_UUID, project_id: PROJECT_UUID } },
       body: { ids: [featureType.id, bugType.id] },
     });
+  });
+
+  it('並べ替えの応答を一覧のキャッシュへ先に入れる（再取得を待たずに次の操作が新しい並びから始まる）', async () => {
+    const reordered = [
+      { ...featureType, position: 0 },
+      { ...bugType, position: 1 },
+    ];
+    reorderMutateAsync.mockResolvedValue(reordered);
+    queryState.taskTypes = [bugType, featureType];
+    mountView();
+    await flushPromises();
+
+    clickByAriaLabel('種別「機能」を上へ');
+    await flushPromises();
+
+    const cached = queryClient
+      .getQueryCache()
+      .findAll({ queryKey: ['get', '/v1/tenants/{tenant_id}/projects/{project_id}/task-types'] })
+      .map((query) => query.state.data);
+    expect(cached).toContainEqual(reordered);
+  });
+
+  it('一覧の再取得中は並べ替えのボタンを止める', async () => {
+    queryState.taskTypes = [bugType, featureType];
+    queryState.isFetching = true;
+    mountView();
+    await flushPromises();
+
+    for (const name of ['種別「バグ」を下へ', '種別「機能」を上へ']) {
+      expect(
+        document.body.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`)?.disabled,
+        name,
+      ).toBe(true);
+    }
+  });
+
+  it('名前や色を変えたら、詳細・一覧・検索・カレンダーのタスクのキャッシュも取り直す', async () => {
+    updateMutateAsync.mockResolvedValue(bugType);
+    queryState.taskTypes = [bugType];
+    mountView();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    await flushPromises();
+
+    clickByAriaLabel('種別「バグ」を編集');
+    await flushPromises();
+    await input('task-type-name').setValue('不具合');
+    await formEl().trigger('submit');
+    await flushPromises();
+
+    const paths = invalidate.mock.calls.map(
+      ([filter]) => (filter as { queryKey: unknown[] }).queryKey[1],
+    );
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        '/v1/tenants/{tenant_id}/projects/{project_id}/tasks',
+        '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}',
+        '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/search',
+        '/v1/tenants/{tenant_id}/schedule',
+      ]),
+    );
+  });
+
+  it('削除したときも、タスクのキャッシュを取り直す', async () => {
+    deleteMutateAsync.mockResolvedValue(undefined);
+    queryState.taskTypes = [bugType];
+    mountView();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    await flushPromises();
+
+    clickByAriaLabel('種別「バグ」を削除');
+    await flushPromises();
+    clickBodyButton('削除する');
+    await flushPromises();
+
+    const paths = invalidate.mock.calls.map(
+      ([filter]) => (filter as { queryKey: unknown[] }).queryKey[1],
+    );
+    expect(paths).toContain('/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}');
   });
 
   it('並べ替えに失敗したら理由を出す', async () => {

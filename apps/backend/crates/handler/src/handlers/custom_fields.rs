@@ -12,20 +12,10 @@ use entity::project_custom_fields;
 use payload::custom_fields::*;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
-    prelude::Uuid,
+    TransactionTrait, prelude::Uuid,
 };
 use service::custom_fields::validate_select_options;
-
-async fn next_position(state: &AppState, project_id: Uuid) -> Result<i16, AppError> {
-    let max = project_custom_fields::Entity::find()
-        .filter(project_custom_fields::Column::ProjectId.eq(project_id))
-        .order_by_desc(project_custom_fields::Column::Position)
-        .one(&state.db)
-        .await?
-        .map(|f| f.position)
-        .unwrap_or(-1);
-    Ok(max.saturating_add(1))
-}
+use service::ordering;
 
 #[axum::debug_handler]
 #[utoipa::path(
@@ -91,9 +81,21 @@ pub async fn create_custom_field(
     } else if payload.options.is_some() {
         return Err(AppError::BadRequest);
     }
-    let position = payload
-        .position
-        .unwrap_or(next_position(&state, project_id).await?);
+    // 位置を指定しない作成は末尾に足す。同時の作成が同じ position を取らないよう、プロジェクト行をロックしてから最大値を読む
+    let txn = state.db.begin().await?;
+    let position = match payload.position {
+        Some(position) => position,
+        None => {
+            ordering::lock_project(&txn, project_id).await?;
+            let max = project_custom_fields::Entity::find()
+                .filter(project_custom_fields::Column::ProjectId.eq(project_id))
+                .order_by_desc(project_custom_fields::Column::Position)
+                .one(&txn)
+                .await?
+                .map(|f| f.position);
+            ordering::next_position(max)?
+        }
+    };
     let field = project_custom_fields::ActiveModel {
         id: Set(Uuid::new_v4()),
         project_id: Set(project_id),
@@ -104,8 +106,9 @@ pub async fn create_custom_field(
         position: Set(position),
         created_at: Set(chrono::Utc::now().into()),
     }
-    .insert(&state.db)
+    .insert(&txn)
     .await?;
+    txn.commit().await?;
     Ok((StatusCode::CREATED, Json(field.into())))
 }
 

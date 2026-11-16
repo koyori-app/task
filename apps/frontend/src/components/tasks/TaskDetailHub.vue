@@ -788,10 +788,10 @@ function clearDescription() {
               layout === 'pane' ? '' : 'lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:px-6 lg:py-5'
             "
           >
-            <!-- 種別。候補を渡された消費側では選び直せる。渡されなければ名前だけを表示する -->
-            <div v-if="projectTaskTypes || task.task_type" class="flex flex-col gap-1">
+            <!-- 種別。候補（1 件以上）を渡された消費側では選び直せる。渡されなければ名前だけを表示し、候補も種別も無ければ出さない -->
+            <div v-if="projectTaskTypes?.length || task.task_type" class="flex flex-col gap-1">
               <Dropdown
-                v-if="projectTaskTypes"
+                v-if="projectTaskTypes?.length"
                 top-layer
                 variant="tertiary"
                 label="種別"

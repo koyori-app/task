@@ -8,17 +8,14 @@ use axum::{
     http::StatusCode,
 };
 use axum_valid::Valid;
-use entity::{project_task_types, projects};
+use entity::project_task_types;
 use payload::task_types::*;
 use sea_orm::{
-    ActiveModelTrait,
-    ActiveValue::Set,
-    ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
-    prelude::Uuid,
-    sea_query::{CaseStatement, Expr, LockType},
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
+    QuerySelect, TransactionTrait, prelude::Uuid, sea_query::LockType,
 };
+use service::ordering;
 use service::task_types::find_in_project;
-use std::collections::HashSet;
 
 async fn list_ordered<C: sea_orm::ConnectionTrait>(
     db: &C,
@@ -85,23 +82,26 @@ pub async fn create_task_type(
     auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
+    // 並べ替えと同じくプロジェクト行をロックしてから最大値を読み、同時の作成が同じ position を取らないようにする
+    let txn = state.db.begin().await?;
+    ordering::lock_project(&txn, project_id).await?;
     let max = project_task_types::Entity::find()
         .filter(project_task_types::Column::ProjectId.eq(project_id))
         .order_by_desc(project_task_types::Column::Position)
-        .one(&state.db)
+        .one(&txn)
         .await?
-        .map(|t| t.position)
-        .unwrap_or(-1);
+        .map(|t| t.position);
     let created = project_task_types::ActiveModel {
         id: Set(Uuid::new_v4()),
         project_id: Set(project_id),
         name: Set(payload.name),
         color: Set(payload.color),
-        position: Set(max.saturating_add(1)),
+        position: Set(ordering::next_position(max)?),
         created_at: Set(chrono::Utc::now().into()),
     }
-    .insert(&state.db)
+    .insert(&txn)
     .await?;
+    txn.commit().await?;
     Ok((StatusCode::CREATED, Json(created.into())))
 }
 
@@ -171,42 +171,22 @@ pub async fn reorder_task_types(
 
     let txn = state.db.begin().await?;
     // ステータスの並べ替えと同じロック順（プロジェクト行 → 種別全体）で、同時の書き込みを直列にする
-    projects::Entity::find_by_id(project_id)
-        .lock(LockType::Update)
-        .one(&txn)
-        .await?
-        .ok_or(AppError::NotFound)?;
+    ordering::lock_project(&txn, project_id).await?;
     let existing = project_task_types::Entity::find()
         .filter(project_task_types::Column::ProjectId.eq(project_id))
         .lock(LockType::Update)
         .all(&txn)
         .await?;
-    let existing_ids: HashSet<Uuid> = existing.iter().map(|t| t.id).collect();
-    if payload.ids.len() != existing.len()
-        || payload.ids.iter().collect::<HashSet<_>>().len() != payload.ids.len()
-        || payload.ids.iter().any(|id| !existing_ids.contains(id))
-    {
-        return Err(AppError::BadRequest);
-    }
-
-    // (project_id, position) に UNIQUE は無いので、全件の position を 1 回の UPDATE で振り直せる
-    let mut position_case = CaseStatement::new();
-    for (pos, id) in payload.ids.iter().enumerate() {
-        position_case = position_case.case(
-            project_task_types::Column::Id.eq(*id),
-            Expr::value(pos as i16),
-        );
-    }
-    project_task_types::Entity::update_many()
-        .col_expr(
-            project_task_types::Column::Position,
-            position_case
-                .finally(Expr::col(project_task_types::Column::Position))
-                .into(),
-        )
-        .filter(project_task_types::Column::ProjectId.eq(project_id))
-        .exec(&txn)
-        .await?;
+    ordering::validate_reorder(&payload.ids, existing.iter().map(|t| t.id))?;
+    ordering::reassign_positions::<project_task_types::Entity, _>(
+        &txn,
+        project_task_types::Column::Id,
+        project_task_types::Column::Position,
+        project_task_types::Column::ProjectId,
+        project_id,
+        &payload.ids,
+    )
+    .await?;
     let list = list_ordered(&txn, project_id).await?;
     txn.commit().await?;
     Ok(Json(list.into_iter().map(Into::into).collect()))

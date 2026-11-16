@@ -215,6 +215,19 @@ describe('TaskDetailHub の種別', () => {
     expect(wrapper.text()).toContain('バグ');
   });
 
+  it('候補が 0 件で種別も無ければ、作成ダイアログと同じくチップを出さない', () => {
+    const wrapper = mountWithTaskType({ task, projectTaskTypes: [] });
+
+    expect(wrapper.find('button[aria-label="種別"]').exists()).toBe(false);
+  });
+
+  it('候補が 0 件でも種別が付いていれば、名前だけを表示する', () => {
+    const wrapper = mountWithTaskType({ projectTaskTypes: [] });
+
+    expect(wrapper.find('button[aria-label="種別"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain('バグ');
+  });
+
   it('候補を渡されず種別も無ければ何も出さない', () => {
     const wrapper = mountWithTaskType({ task, projectTaskTypes: undefined });
 

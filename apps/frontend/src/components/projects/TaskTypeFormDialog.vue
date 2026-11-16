@@ -5,12 +5,12 @@ import { useQueryClient } from '@tanstack/vue-query';
 import { computed, ref, useId } from 'vue';
 import { Button, Dialog, Field, Input } from '@koyori-app/ui-vue';
 import { apiClient } from '@/lib/api-vue-query';
+import { invalidateTaskCachesAfterTaskTypeChange } from '@/lib/task-type-cache';
 import type { components } from '@/generated/api';
 
 type TaskTypeResponse = components['schemas']['TaskTypeResponse'];
 
 const TASK_TYPES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/task-types' as const;
-const TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
 const TASK_TYPE_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/task-types/{id}' as const;
 
 /** 種別の色のプリセット（自由入力も可） */
@@ -88,7 +88,7 @@ const form = useForm({
       }
       await queryClient.invalidateQueries({ queryKey: ['get', TASK_TYPES_PATH] });
       // 名前と色を変えたら、タスクに埋め込まれた種別も古くなる
-      if (props.taskType) await queryClient.invalidateQueries({ queryKey: ['get', TASKS_PATH] });
+      if (props.taskType) await invalidateTaskCachesAfterTaskTypeChange(queryClient);
       emit('close');
     } catch {
       submitError.value = '種別を保存できませんでした';

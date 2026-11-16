@@ -4,12 +4,11 @@ use axum::{
     http::StatusCode,
 };
 use axum_valid::Valid;
-use sea_orm::sea_query::{CaseStatement, Expr, Func, LockType};
+use sea_orm::sea_query::{Expr, Func, LockType};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseTransaction, EntityTrait,
     PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait, prelude::Uuid,
 };
-use std::collections::HashSet;
 
 use crate::AppState;
 use crate::error::AppError;
@@ -17,6 +16,7 @@ use crate::extractors::AuthUser;
 use crate::openapi::CrudErrors;
 use entity::{project_statuses, projects, tasks};
 use payload::statuses::*;
+use service::ordering;
 
 // Call after removing a Done state, while holding the project row lock. Persist
 // the fallback so later inserts or position changes cannot move the completion target.
@@ -319,49 +319,24 @@ pub async fn reorder_statuses(
     // Same lock order as create_status / update_status: take the stable project
     // row first, then the whole status set, so concurrent status writes for this
     // project serialize instead of racing on an unlocked read.
-    projects::Entity::find_by_id(project_id)
-        .lock(LockType::Update)
-        .one(&txn)
-        .await?
-        .ok_or(AppError::NotFound)?;
+    ordering::lock_project(&txn, project_id).await?;
     let existing = project_statuses::Entity::find()
         .filter(project_statuses::Column::ProjectId.eq(project_id))
         .lock(LockType::Update)
         .all(&txn)
         .await?;
-    if payload.ids.len() != existing.len() {
-        return Err(AppError::BadRequest);
-    }
-    let existing_ids: HashSet<Uuid> = existing.iter().map(|s| s.id).collect();
-    if payload.ids.len() != payload.ids.iter().collect::<HashSet<_>>().len()
-        || payload.ids.iter().any(|id| !existing_ids.contains(id))
-    {
-        return Err(AppError::BadRequest);
-    }
+    ordering::validate_reorder(&payload.ids, existing.iter().map(|s| s.id))?;
 
-    // Reassign every position in a single UPDATE via a CASE expression instead of
-    // the previous per-id find + update loop (N+1). The payload is a bijection
-    // onto the locked status set, and (project_id, position) has no unique
-    // constraint, so reassigning the whole set at once cannot transiently collide.
-    // The final `finally` keeps any unmatched row's current position, guarding the
-    // NOT NULL column even though the bijection means every row is matched.
-    let mut position_case = CaseStatement::new();
-    for (pos, sid) in payload.ids.iter().enumerate() {
-        position_case = position_case.case(
-            project_statuses::Column::Id.eq(*sid),
-            Expr::value(pos as i16),
-        );
-    }
-    project_statuses::Entity::update_many()
-        .col_expr(
-            project_statuses::Column::Position,
-            position_case
-                .finally(Expr::col(project_statuses::Column::Position))
-                .into(),
-        )
-        .filter(project_statuses::Column::ProjectId.eq(project_id))
-        .exec(&txn)
-        .await?;
+    // 全件の position を 1 回の UPDATE で振り直す（詳細は service::ordering）。
+    ordering::reassign_positions::<project_statuses::Entity, _>(
+        &txn,
+        project_statuses::Column::Id,
+        project_statuses::Column::Position,
+        project_statuses::Column::ProjectId,
+        project_id,
+        &payload.ids,
+    )
+    .await?;
 
     let updated = project_statuses::Entity::find()
         .filter(project_statuses::Column::ProjectId.eq(project_id))

@@ -5,6 +5,7 @@ import { computed, ref } from 'vue';
 import { Button, Dialog } from '@koyori-app/ui-vue';
 import TaskTypeFormDialog from '@/components/projects/TaskTypeFormDialog.vue';
 import { apiClient, projectTaskTypesQueryOptions } from '@/lib/api-vue-query';
+import { invalidateTaskCachesAfterTaskTypeChange } from '@/lib/task-type-cache';
 import type { ProjectUuid, TenantUuid } from '@/lib/api-ids';
 import type { components } from '@/generated/api';
 
@@ -13,7 +14,6 @@ type TaskTypeResponse = components['schemas']['TaskTypeResponse'];
 const TASK_TYPES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/task-types' as const;
 const TASK_TYPE_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/task-types/{id}' as const;
 const REORDER_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/task-types/reorder' as const;
-const TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
 
 const props = defineProps<{
   tenantId: string;
@@ -36,6 +36,10 @@ const taskTypesQuery = useQuery(
   ),
 );
 const taskTypes = computed(() => taskTypesQuery.data.value ?? []);
+// 並べ替えの送信中と、そのあとの再取得中は次の並べ替えを止める（古い並びから計算しない）
+const reorderBusy = computed(
+  () => reorderMutation.isPending.value || !!taskTypesQuery.isFetching?.value,
+);
 
 const deleteMutation = apiClient.useMutation('delete', TASK_TYPE_PATH);
 const reorderMutation = apiClient.useMutation('put', REORDER_PATH);
@@ -75,7 +79,7 @@ async function confirmDelete() {
     // 付いていたタスクは種別が外れるので、タスクの表示も取り直す
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['get', TASK_TYPES_PATH] }),
-      queryClient.invalidateQueries({ queryKey: ['get', TASKS_PATH] }),
+      invalidateTaskCachesAfterTaskTypeChange(queryClient),
     ]);
     deleteTarget.value = null;
   } catch {
@@ -90,10 +94,16 @@ async function moveType(index: number, offset: -1 | 1) {
   [reordered[index], reordered[target]] = [reordered[target]!, reordered[index]!];
   reorderError.value = null;
   try {
-    await reorderMutation.mutateAsync({
+    const result = await reorderMutation.mutateAsync({
       params: { path: { tenant_id: props.tenantId, project_id: props.projectId } },
       body: { ids: reordered.map((taskType) => taskType.id) },
     });
+    // 応答は並べ替え後の一覧。再取得が終わる前に次の操作が古い並びから計算されないよう、先にキャッシュへ入れる
+    queryClient.setQueryData(
+      projectTaskTypesQueryOptions(props.tenantId as TenantUuid, props.projectId as ProjectUuid)
+        .queryKey,
+      result,
+    );
     await queryClient.invalidateQueries({ queryKey: ['get', TASK_TYPES_PATH] });
   } catch {
     reorderError.value = '並び順を変更できませんでした';
@@ -149,7 +159,7 @@ async function moveType(index: number, offset: -1 | 1) {
           <Button
             type="button"
             variant="ghost"
-            :disabled="index === 0 || reorderMutation.isPending.value"
+            :disabled="index === 0 || reorderBusy"
             :ariaLabel="`種別「${taskType.name}」を上へ`"
             @click="moveType(Number(index), -1)"
           >
@@ -158,7 +168,7 @@ async function moveType(index: number, offset: -1 | 1) {
           <Button
             type="button"
             variant="ghost"
-            :disabled="index === taskTypes.length - 1 || reorderMutation.isPending.value"
+            :disabled="index === taskTypes.length - 1 || reorderBusy"
             :ariaLabel="`種別「${taskType.name}」を下へ`"
             @click="moveType(Number(index), 1)"
           >
