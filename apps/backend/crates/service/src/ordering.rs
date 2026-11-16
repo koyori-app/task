@@ -2,6 +2,19 @@
 //!
 //! 並び順を変える書き込みは、プロジェクト行を `FOR UPDATE` で取ってから行い、同じプロジェクトの
 //! 書き込みを直列にする。作成が最大値を読んでから挿入するだけだと、同時の作成が同じ値を取る。
+//!
+//! # ロックの順（種別の行に触る全経路で共通）
+//!
+//! プロジェクト行 → 種別の行 → カウンター・スプリント → タスク行。この順に取り、逆向きには取らない。
+//!
+//! - 種別の作成・更新・削除・並べ替え: プロジェクト行を `FOR UPDATE`（[`lock_project`]）。削除は続けて種別の行
+//!   （FK の `SET NULL` でタスク行へ進む）、並べ替えは種別の全行を `FOR UPDATE`
+//! - タスクの作成・更新で種別を付ける: プロジェクト行と種別の行を `FOR KEY SHARE`
+//!   （`task_types::lock_for_assignment`）。タスク行（更新の `FOR UPDATE`、作成の挿入）より先に取る
+//! - 既定の種別の補完（マイグレーションの SQL）: プロジェクト行を `FOR UPDATE` で取ってから挿入する
+//!
+//! ロックの持ち主はこのモジュールと `task_types::lock_for_assignment` だけにする。ハンドラーで種別の行を
+//! 直接ロックしない。
 
 use std::collections::HashSet;
 
@@ -26,10 +39,22 @@ pub async fn lock_project<C: ConnectionTrait>(db: &C, project_id: Uuid) -> Resul
 ///
 /// `SMALLINT` の上限（32,767）では張り付き、作成は失敗させない。カスタムフィールドは作成と更新で
 /// `position` を自由に渡せるので、上限の値を 1 件持つだけで以後の作成が全部失敗するのを避ける
-/// （重なった値は並べ替えで直せる）。種別とステータスは `position` を外から渡せず、並べ替えが
-/// 0 から振り直す。
+/// （重なった値は、更新で `position` を渡して直せる）。
+/// 種別は [`next_unique_position`] を使う。ステータスは作成で位置を受け取り、この関数を使わない。
 pub fn next_position(current_max: Option<i16>) -> i16 {
     current_max.map_or(0, |max| max.saturating_add(1))
+}
+
+/// 末尾に足す定義の `position`。[`next_position`] と違い、上限（32,767）に達していたら 400 にする。
+///
+/// 種別は `position` を外から渡せず、並べ替えが 0 から振り直す。上限で張り付くと、同じ値の種別が
+/// 並び（`position`、`id` の順）で末尾に付く保証が無くなるので、作成を断って件数を 32,768 以下に保つ
+/// （並べ替えの `position as i16` もこれで収まる）。
+pub fn next_unique_position(current_max: Option<i16>) -> Result<i16, AppError> {
+    match current_max {
+        None => Ok(0),
+        Some(max) => max.checked_add(1).ok_or(AppError::BadRequest),
+    }
 }
 
 /// 並べ替えの `ids` が、既存の定義の集合と過不足なく一致するか。件数の違い・重複・別プロジェクトの ID は 400。
@@ -93,6 +118,17 @@ mod tests {
         assert_eq!(next_position(Some(i16::MAX - 1)), i16::MAX);
         // 上限に達しても失敗せず、上限の値のまま
         assert_eq!(next_position(Some(i16::MAX)), i16::MAX);
+    }
+
+    #[test]
+    fn next_unique_position_refuses_to_go_past_the_column_limit() {
+        assert_eq!(next_unique_position(None).unwrap(), 0);
+        assert_eq!(next_unique_position(Some(4)).unwrap(), 5);
+        assert_eq!(next_unique_position(Some(i16::MAX - 1)).unwrap(), i16::MAX);
+        assert!(matches!(
+            next_unique_position(Some(i16::MAX)),
+            Err(AppError::BadRequest)
+        ));
     }
 
     #[test]

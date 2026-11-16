@@ -6,7 +6,7 @@ use sea_orm::{
 };
 
 use crate::error::AppError;
-use entity::project_task_types;
+use entity::{project_task_types, projects};
 
 /// 新しいプロジェクトに入れる既定の種別（名前, 色）。並びがそのまま `position` になる。
 /// 既存プロジェクトへの追加は `apps/backend/sql/backfill_default_task_types.sql` が同じ値で行う。
@@ -36,15 +36,35 @@ pub async fn seed_default_task_types<C: ConnectionTrait>(
     Ok(())
 }
 
-/// 同じプロジェクトの種別を返す。無い、または別プロジェクトの種別なら `NotFound`。
-///
-/// 行を `FOR KEY SHARE` で読む。タスクの作成・更新のトランザクションの中で呼べば、確認から書き込みの
-/// コミットまで種別の削除を待たせ、FK 違反（500）にならずに `SET NULL` で外れる。
+/// 同じプロジェクトの種別を返す（ロックなしの読み取り）。無い、または別プロジェクトの種別なら `NotFound`。
 pub async fn find_in_project<C: ConnectionTrait>(
     db: &C,
     project_id: Uuid,
     id: Uuid,
 ) -> Result<project_task_types::Model, AppError> {
+    project_task_types::Entity::find_by_id(id)
+        .filter(project_task_types::Column::ProjectId.eq(project_id))
+        .one(db)
+        .await?
+        .ok_or(AppError::NotFound)
+}
+
+/// タスクに付ける種別を確かめ、プロジェクト行と種別の行を `FOR KEY SHARE` で取る。
+///
+/// タスクの作成・更新のトランザクションの中で、**タスク行を取る前**に呼ぶ（ロックの順は
+/// [`crate::ordering`] の説明のとおり）。確認からコミットまで種別の削除・並べ替えを待たせ、FK 違反（500）に
+/// ならずに `SET NULL` で外れる。種別の削除はプロジェクト行 → 種別の行 → タスク行の順に取るので、
+/// 逆順（タスク行 → 種別の行）で取るとデッドロックになる。無い、または別プロジェクトの種別なら `NotFound`。
+pub async fn lock_for_assignment<C: ConnectionTrait>(
+    db: &C,
+    project_id: Uuid,
+    id: Uuid,
+) -> Result<project_task_types::Model, AppError> {
+    projects::Entity::find_by_id(project_id)
+        .lock(LockType::KeyShare)
+        .one(db)
+        .await?
+        .ok_or(AppError::NotFound)?;
     project_task_types::Entity::find_by_id(id)
         .filter(project_task_types::Column::ProjectId.eq(project_id))
         .lock(LockType::KeyShare)

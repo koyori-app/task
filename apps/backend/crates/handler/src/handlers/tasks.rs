@@ -1002,6 +1002,14 @@ pub async fn update_task(
         state.db.begin().await?
     };
 
+    // 種別の削除と同じく、プロジェクト行 → 種別の行 → タスク行の順にロックする（service::ordering）。
+    // 今と同じ種別の再指定でも、タスク行を取る前に確かめる（逆順だと削除とデッドロックになる）。
+    if !payload.clear_task_type_id
+        && let Some(type_id) = payload.task_type_id
+    {
+        task_types::lock_for_assignment(&txn, project_id, type_id).await?;
+    }
+
     // スプリント完了・一括割り当てと同じく、スプリント → タスクの順にロックする。
     if !payload.clear_sprint_id
         && let Some(sprint_id) = payload.sprint_id
@@ -1104,7 +1112,7 @@ pub async fn update_task(
     if payload.clear_task_type_id {
         active.task_type_id = Set(None);
     } else if let Some(v) = payload.task_type_id {
-        task_types::find_in_project(&txn, project_id, v).await?;
+        // 確認とロックは、タスク行を取る前に済ませている
         active.task_type_id = Set(Some(v));
     }
     if payload.clear_sprint_id {

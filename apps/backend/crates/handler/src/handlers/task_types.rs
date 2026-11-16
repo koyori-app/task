@@ -96,7 +96,7 @@ pub async fn create_task_type(
         project_id: Set(project_id),
         name: Set(payload.name),
         color: Set(payload.color),
-        position: Set(ordering::next_position(max)),
+        position: Set(ordering::next_unique_position(max)?),
         created_at: Set(chrono::Utc::now().into()),
     }
     .insert(&txn)
@@ -131,7 +131,10 @@ pub async fn update_task_type(
     auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    let task_type = find_in_project(&state.db, project_id, id).await?;
+    // 他の書き込みと同じくプロジェクト行を先に取る（service::ordering のロック順）
+    let txn = state.db.begin().await?;
+    ordering::lock_project(&txn, project_id).await?;
+    let task_type = find_in_project(&txn, project_id, id).await?;
     let mut active: project_task_types::ActiveModel = task_type.into();
     if let Some(v) = payload.name {
         active.name = Set(v);
@@ -139,7 +142,9 @@ pub async fn update_task_type(
     if let Some(v) = payload.color {
         active.color = Set(v);
     }
-    Ok(Json(active.update(&state.db).await?.into()))
+    let updated = active.update(&txn).await?;
+    txn.commit().await?;
+    Ok(Json(updated.into()))
 }
 
 #[axum::debug_handler]
@@ -217,14 +222,18 @@ pub async fn delete_task_type(
     auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
-    // tasks.task_type_id は FK の ON DELETE SET NULL で未設定に戻る
+    // プロジェクト行 → 種別の行 → タスク行（FK の ON DELETE SET NULL）の順にロックする（service::ordering）。
+    // tasks.task_type_id は SET NULL で未設定に戻る
+    let txn = state.db.begin().await?;
+    ordering::lock_project(&txn, project_id).await?;
     let result = project_task_types::Entity::delete_many()
         .filter(project_task_types::Column::Id.eq(id))
         .filter(project_task_types::Column::ProjectId.eq(project_id))
-        .exec(&state.db)
+        .exec(&txn)
         .await?;
     if result.rows_affected == 0 {
         return Err(AppError::NotFound);
     }
+    txn.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }

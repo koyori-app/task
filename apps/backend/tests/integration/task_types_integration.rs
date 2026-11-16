@@ -5,7 +5,8 @@ use crate::common::{TestApp, TestTenantProject, create_status, insert_extra_proj
 use axum::http::StatusCode;
 use entity::scopes::Scope;
 use sea_orm::{
-    ConnectionTrait, DatabaseBackend, EntityTrait, PaginatorTrait, Statement, TransactionTrait,
+    ActiveModelTrait, ConnectionTrait, DatabaseBackend, EntityTrait, PaginatorTrait, Statement,
+    TransactionTrait,
 };
 use serde_json::{Value, json};
 use service::task_types::DEFAULT_TASK_TYPES;
@@ -577,6 +578,37 @@ async fn wait_until_blocked_by(app: &TestApp, blocker_pid: i32, what: &str) {
     .unwrap_or_else(|_| panic!("{what} は相手のトランザクションを待つはず"));
 }
 
+/// `blocker_pid` を（直接または別の待ちを介して）待っている接続が `count` 本以上になるまで待つ。
+async fn wait_until_blocked_count(app: &TestApp, blocker_pid: i32, count: i64, what: &str) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let row = app
+                .state
+                .db
+                .query_one_raw(Statement::from_sql_and_values(
+                    DatabaseBackend::Postgres,
+                    "WITH RECURSIVE blocked(pid) AS ( \
+                         SELECT pid FROM pg_stat_activity \
+                         WHERE $1 = ANY(pg_blocking_pids(pid)) \
+                         UNION \
+                         SELECT activity.pid FROM pg_stat_activity AS activity \
+                         JOIN blocked ON blocked.pid = ANY(pg_blocking_pids(activity.pid)) \
+                     ) SELECT COUNT(*)::bigint AS count FROM blocked",
+                    [blocker_pid.into()],
+                ))
+                .await
+                .expect("query blocked backends")
+                .expect("count row");
+            if row.try_get::<i64>("", "count").expect("count") >= count {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("{what}: {count} 本が待ちに入るはず"));
+}
+
 async fn backend_pid(txn: &sea_orm::DatabaseTransaction) -> i32 {
     txn.query_one_raw(Statement::from_string(
         DatabaseBackend::Postgres,
@@ -636,10 +668,10 @@ async fn deleting_a_type_waits_for_a_task_write_that_checked_it() {
     let bug = create_type(&app, &base, "バグ", "#ef4444").await;
     let type_id: Uuid = bug["id"].as_str().expect("id").parse().expect("uuid");
 
-    // タスクの作成・更新は find_in_project で種別を確かめてから書く。その確認のあとコミットまでの間に
+    // タスクの作成・更新は lock_for_assignment で種別を確かめてから書く。その確認のあとコミットまでの間に
     // 種別の削除が通ると、書き込みが FK 違反になり 500 になる。確認が行を読み取りロックしていれば、削除は待つ
     let txn = app.state.db.begin().await.expect("begin");
-    service::task_types::find_in_project(&txn, tp.project_id, type_id)
+    service::task_types::lock_for_assignment(&txn, tp.project_id, type_id)
         .await
         .expect("find");
     let pid = backend_pid(&txn).await;
@@ -875,4 +907,163 @@ async fn deleting_a_type_keeps_its_tasks_untyped() {
     let detail = json_body(app.get_with_session(&format!("{tasks}/{task_id}")).await).await;
     assert_eq!(detail["title"], "残る");
     assert!(detail["task_type"].is_null());
+}
+
+/// 種別の削除は「プロジェクト行 → 種別の行 → タスク行（SET NULL）」の順にロックする。タスクの更新が
+/// 「タスク行 → 種別の行」の順で取ると、今と同じ種別を送った更新と削除がデッドロックになり、片方が 500 になる。
+/// 更新がタスク行を待っている間に削除を重ね、タスク行を解放して、両方が成功することを見る。
+#[tokio::test]
+async fn re_sending_the_current_type_while_it_is_deleted_does_not_deadlock() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(true, false).await;
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let status_id = create_status(&app, &tp, "Todo", false).await;
+    let base = types_base(tp.tenant_id, tp.project_id);
+    let bug = create_type(&app, &base, "バグ", "#ef4444").await;
+    let created = app
+        .post_json_with_session(
+            &tasks_base(&tp),
+            json!({ "title": "種別あり", "status_id": status_id, "task_type_id": bug["id"] }),
+        )
+        .await;
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let task_id: Uuid = json_body(created).await["id"]
+        .as_str()
+        .expect("id")
+        .parse()
+        .expect("uuid");
+
+    // タスク行を握って、更新を待たせる
+    let txn = app.state.db.begin().await.expect("begin");
+    txn.execute_raw(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        "SELECT id FROM tasks WHERE id = $1 FOR UPDATE",
+        [task_id.into()],
+    ))
+    .await
+    .expect("lock task");
+    let pid = backend_pid(&txn).await;
+
+    let client = app.client().clone();
+    let task_url = format!("{}{}/{task_id}", app.base_url(), tasks_base(&tp));
+    let update_client = client.clone();
+    let update_body = json!({ "task_type_id": bug["id"] });
+    let update =
+        tokio::spawn(async move { update_client.put(task_url).json(&update_body).send().await });
+    wait_until_blocked_count(&app, pid, 1, "更新").await;
+
+    let delete_url = format!("{}{base}/{}", app.base_url(), bug["id"].as_str().unwrap());
+    let delete = tokio::spawn(async move { client.delete(delete_url).send().await });
+    wait_until_blocked_count(&app, pid, 2, "更新と削除").await;
+    txn.commit().await.expect("commit");
+
+    let update = update.await.expect("join").expect("send");
+    let delete = delete.await.expect("join").expect("send");
+    assert_eq!(update.status(), StatusCode::OK, "更新");
+    assert_eq!(delete.status(), StatusCode::NO_CONTENT, "削除");
+    let row = entity::tasks::Entity::find_by_id(task_id)
+        .one(&app.state.db)
+        .await
+        .expect("load")
+        .expect("task");
+    assert!(row.task_type_id.is_none());
+}
+
+/// 種別の並べ替えは「プロジェクト行 → 種別の全行」の順にロックする。タスクの作成が「種別の行 → プロジェクト行
+/// （挿入の FK）」の順で取ると、並べ替えとデッドロックになる。作成が採番で待っている間に並べ替えを重ねる。
+#[tokio::test]
+async fn creating_a_typed_task_while_reordering_the_types_does_not_deadlock() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(true, false).await;
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let status_id = create_status(&app, &tp, "Todo", false).await;
+    let base = types_base(tp.tenant_id, tp.project_id);
+    let bug = create_type(&app, &base, "バグ", "#ef4444").await;
+    let feature = create_type(&app, &base, "機能", "#3b82f6").await;
+    let tasks = tasks_base(&tp);
+    // 採番の行（project_task_counters）を作っておく
+    let first = app
+        .post_json_with_session(&tasks, json!({ "title": "最初", "status_id": status_id }))
+        .await;
+    assert_eq!(first.status(), StatusCode::CREATED);
+
+    let txn = app.state.db.begin().await.expect("begin");
+    txn.execute_raw(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        "SELECT project_id FROM project_task_counters WHERE project_id = $1 FOR UPDATE",
+        [tp.project_id.into()],
+    ))
+    .await
+    .expect("lock counter");
+    let pid = backend_pid(&txn).await;
+
+    let client = app.client().clone();
+    let create_url = format!("{}{tasks}", app.base_url());
+    let create_client = client.clone();
+    let create_body =
+        json!({ "title": "種別つき", "status_id": status_id, "task_type_id": bug["id"] });
+    let create = tokio::spawn(async move {
+        create_client
+            .post(create_url)
+            .json(&create_body)
+            .send()
+            .await
+    });
+    wait_until_blocked_count(&app, pid, 1, "作成").await;
+
+    let reorder_url = format!("{}{base}/reorder", app.base_url());
+    let reorder_body = json!({ "ids": [feature["id"], bug["id"]] });
+    let reorder =
+        tokio::spawn(async move { client.put(reorder_url).json(&reorder_body).send().await });
+    wait_until_blocked_count(&app, pid, 2, "作成と並べ替え").await;
+    txn.commit().await.expect("commit");
+
+    let create = create.await.expect("join").expect("send");
+    let reorder = reorder.await.expect("join").expect("send");
+    assert_eq!(create.status(), StatusCode::CREATED, "作成");
+    assert_eq!(reorder.status(), StatusCode::OK, "並べ替え");
+    assert_eq!(names(&list_types(&app, &base).await), ["機能", "バグ"]);
+}
+
+#[tokio::test]
+async fn creating_a_type_past_the_position_limit_is_refused() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user(true, false).await;
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let base = types_base(tp.tenant_id, tp.project_id);
+
+    // 上限（32,767）の種別を直接入れる。並べ替えで振り直す API 経由では作れない件数
+    entity::project_task_types::ActiveModel {
+        id: sea_orm::ActiveValue::Set(Uuid::new_v4()),
+        project_id: sea_orm::ActiveValue::Set(tp.project_id),
+        name: sea_orm::ActiveValue::Set("末尾".into()),
+        color: sea_orm::ActiveValue::Set("#111111".into()),
+        position: sea_orm::ActiveValue::Set(i16::MAX),
+        created_at: sea_orm::ActiveValue::Set(chrono::Utc::now().into()),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert");
+
+    // 同じ position の種別を末尾に付けると、並び（position、id の順）で末尾になる保証が無い。作成は 400 で断り、何も増えない
+    let refused = app
+        .post_json_with_session(&base, json!({ "name": "新しい", "color": "#222222" }))
+        .await;
+    assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(names(&list_types(&app, &base).await), ["末尾"]);
+
+    // 並べ替えで振り直すと、以後は末尾に付く
+    let id = list_types(&app, &base).await[0]["id"].clone();
+    let reordered = app
+        .put_json_with_session(&format!("{base}/reorder"), json!({ "ids": [id] }))
+        .await;
+    assert_eq!(reordered.status(), StatusCode::OK);
+    let added = create_type(&app, &base, "新しい", "#222222").await;
+    assert_eq!(added["position"], 1);
 }

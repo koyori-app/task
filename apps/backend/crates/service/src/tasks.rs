@@ -132,7 +132,8 @@ pub async fn create_task_in_txn<C: ConnectionTrait>(
             .ok_or(AppError::NotFound)?;
     }
     if let Some(tid) = payload.task_type_id {
-        crate::task_types::find_in_project(txn, ctx.project_id, tid).await?;
+        // タスク行より先に、プロジェクト行 → 種別の行の順でロックする（service::ordering）
+        crate::task_types::lock_for_assignment(txn, ctx.project_id, tid).await?;
     }
     // 採番(カウンター行ロック)を sprint の FOR UPDATE より前に取る。ロック順を「カウンター → sprint」に
     // 固定し、一括作成と単体作成の同時実行でのデッドロックを避ける(ロールバックで番号も戻る)。
