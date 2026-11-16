@@ -67,6 +67,9 @@ const {
   statusError,
   priorityUpdating,
   priorityError,
+  projectTaskTypes,
+  taskTypeUpdating,
+  taskTypeError,
   labelsUpdating,
   labelsError,
   parentUpdating,
@@ -79,6 +82,7 @@ const {
   isError,
   onStatusChange,
   onPriorityChange,
+  onTaskTypeChange,
   onSaveTitle,
   onSaveDescription,
   onSaveProgressPct,
@@ -283,6 +287,9 @@ function openSimilarTask(seqId: number) {
     :status-error="statusError"
     :priority-updating="priorityUpdating"
     :priority-error="priorityError"
+    :project-task-types="projectTaskTypes"
+    :task-type-updating="taskTypeUpdating"
+    :task-type-error="taskTypeError"
     :labels-updating="labelsUpdating"
     :labels-error="labelsError"
     :field-updating="fieldUpdating"
@@ -293,6 +300,7 @@ function openSimilarTask(seqId: number) {
     :error="isError"
     @update:status-id="onStatusChange"
     @change:priority="onPriorityChange"
+    @change:task_type="onTaskTypeChange"
     @save:title="onSaveTitle"
     @save:description="onSaveDescription"
     @save:progress_pct="onSaveProgressPct"

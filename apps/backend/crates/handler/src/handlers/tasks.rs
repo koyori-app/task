@@ -41,6 +41,7 @@ use service::task_activities::{
     task_label_entries,
 };
 use service::task_responses::{build_task_response, build_task_responses};
+use service::task_types;
 
 // ─── Task lookup (UUID or KEY-N) ─────────────────────────────────────────
 
@@ -127,6 +128,25 @@ async fn record_task_field_activities<C: ConnectionTrait>(
             }),
         )
         .await?;
+    }
+    if payload.clear_task_type_id || payload.task_type_id.is_some() {
+        let new_type_id = if payload.clear_task_type_id {
+            None
+        } else {
+            payload.task_type_id.or(before.task_type_id)
+        };
+        if new_type_id != before.task_type_id {
+            let from = task_types::task_type_name(db, before.task_type_id).await?;
+            let to = task_types::task_type_name(db, new_type_id).await?;
+            record_activity(
+                db,
+                task_id,
+                Some(user_id),
+                "task_type_changed",
+                serde_json::json!({ "from": from, "to": to }),
+            )
+            .await?;
+        }
     }
     if payload.clear_soft_deadline || payload.soft_deadline.is_some() {
         let before_soft = before.soft_deadline.map(|dt| dt.with_timezone(&Utc));
@@ -679,6 +699,9 @@ pub async fn list_tasks(
     if let Some(mid) = q.milestone_id {
         query = query.filter(tasks::Column::MilestoneId.eq(mid));
     }
+    if let Some(tid) = q.task_type_id {
+        query = query.filter(tasks::Column::TaskTypeId.eq(tid));
+    }
     if let Some(sid) = q.sprint_id {
         query = query.filter(tasks::Column::SprintId.eq(sid));
     }
@@ -979,6 +1002,14 @@ pub async fn update_task(
         state.db.begin().await?
     };
 
+    // 種別は確かめるだけで、ロックは取らない（`milestone_id` と同じ。service::task_types の方針）。確認のあとに
+    // 削除されたら FK が更新を弾き、assignment_error が 404 にする
+    if !payload.clear_task_type_id
+        && let Some(type_id) = payload.task_type_id
+    {
+        task_types::find_in_project(&txn, project_id, type_id).await?;
+    }
+
     // スプリント完了・一括割り当てと同じく、スプリント → タスクの順にロックする。
     if !payload.clear_sprint_id
         && let Some(sprint_id) = payload.sprint_id
@@ -1076,6 +1107,13 @@ pub async fn update_task(
             .await?
             .ok_or(AppError::NotFound)?;
         active.milestone_id = Set(Some(v));
+    }
+    // 外す指定が値の指定より優先される（`clear_*` の他の項目と同じ）
+    if payload.clear_task_type_id {
+        active.task_type_id = Set(None);
+    } else if let Some(v) = payload.task_type_id {
+        // 確認は、タスク行を取る前に済ませている
+        active.task_type_id = Set(Some(v));
     }
     if payload.clear_sprint_id {
         active.sprint_id = Set(None);
@@ -1201,7 +1239,10 @@ pub async fn update_task(
             active.parent_task_id = Set(Some(new_parent_id));
         }
     }
-    let updated = active.update(&txn).await?;
+    let updated = active
+        .update(&txn)
+        .await
+        .map_err(task_types::assignment_error)?;
     if let Some(ref desired) = payload.assignees {
         let current = task_assignees::Entity::find()
             .filter(task_assignees::Column::TaskId.eq(task_id))

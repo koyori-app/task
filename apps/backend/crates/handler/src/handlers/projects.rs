@@ -143,6 +143,7 @@ pub async fn create_project(
     };
     drive_folder.insert(&txn).await?;
     seed_default_statuses(&txn, model.id).await?;
+    service::task_types::seed_default_task_types(&txn, model.id).await?;
     txn.commit().await?;
 
     Ok((StatusCode::CREATED, Json(model.into())))

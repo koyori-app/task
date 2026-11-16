@@ -26,6 +26,7 @@ pub mod project_custom_fields;
 pub mod project_members;
 pub mod project_statuses;
 pub mod project_task_counters;
+pub mod project_task_types;
 pub mod project_task_views;
 pub mod projects;
 pub mod reactions;

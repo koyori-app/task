@@ -34,6 +34,7 @@ pub mod statuses;
 pub mod task_comments;
 pub mod task_extensions;
 pub mod task_notifications;
+pub mod task_types;
 pub mod tasks;
 pub mod tenant_invitations;
 pub mod tenant_members;

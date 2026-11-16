@@ -1,13 +1,14 @@
 //! プロジェクト。
 
 use payload::labels::LabelResponse;
+use payload::task_types::TaskTypeResponse;
 use serde::Serialize;
 
 use crate::Context;
 use crate::cli::ProjectsCommand;
 use crate::error::Result;
 use crate::output::{OutputOptions, print};
-use crate::resolve::{list_labels, list_projects, list_statuses, resolve_project};
+use crate::resolve::{list_labels, list_projects, list_statuses, list_task_types, resolve_project};
 
 /// 人間向けの一覧はキーで包んで出す（TypeScript 版と同じ形）。
 #[derive(Serialize)]
@@ -72,6 +73,19 @@ pub async fn run(
                 print(&lines, output);
             }
         }
+        // `--type` に渡せる名前を CLI だけで調べられるようにする。画面の並び（position 昇順）のまま出す
+        ProjectsCommand::Types { project } => {
+            let project = resolve_project(api, &project).await?;
+            let mut types = list_task_types(api, project.id).await?;
+            types.sort_by_key(|task_type| task_type.position);
+            if output.json {
+                print(&types, output);
+            } else {
+                // ラベルと同じく、オブジェクトを渡すと id まで含む JSON になるので 1 件 1 行にする
+                let lines: Vec<String> = types.iter().map(format_task_type_line).collect();
+                print(&lines, output);
+            }
+        }
         ProjectsCommand::Show { key } => print(&resolve_project(api, &key).await?, output),
     }
     Ok(0)
@@ -87,6 +101,11 @@ fn format_label_line(label: &LabelResponse) -> String {
         label.color,
         single_line(&label.description)
     )
+}
+
+/// 人間向けの 1 行: `{name}\t{color}`。名前の改行・タブは空白に畳み、タブ区切りの 2 列を崩さない。
+fn format_task_type_line(task_type: &TaskTypeResponse) -> String {
+    format!("{}\t{}", single_line(&task_type.name), task_type.color)
 }
 
 fn single_line(text: &str) -> String {
@@ -134,5 +153,17 @@ mod tests {
         let mut l = label("a\tb");
         l.name = "bug\nurgent\tnow".to_string();
         assert_eq!(format_label_line(&l), "bug urgent now\t#112233\ta b");
+    }
+
+    #[test]
+    fn formats_a_task_type_as_name_and_color_on_one_line() {
+        let task_type = TaskTypeResponse {
+            id: Uuid::nil(),
+            project_id: Uuid::nil(),
+            name: "バグ\n報告\t用".to_string(),
+            color: "#ef4444".to_string(),
+            position: 1,
+        };
+        assert_eq!(format_task_type_line(&task_type), "バグ 報告 用\t#ef4444");
     }
 }

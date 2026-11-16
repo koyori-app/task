@@ -262,6 +262,23 @@ describe('activityLine', () => {
     expect(line('priority_changed', { from: 'low', to })).toMatchObject({ to: { text } });
   });
 
+  it('種別は名前で出し、外したときは「なし」にする', () => {
+    expect(line('task_type_changed', { from: 'タスク', to: 'バグ' })).toEqual({
+      kind: 'change',
+      label: '種別',
+      from: { text: 'タスク' },
+      to: { text: 'バグ' },
+    });
+    expect(line('task_type_changed', { from: 'バグ', to: null })).toEqual({
+      kind: 'change',
+      label: '種別',
+      from: { text: 'バグ' },
+      to: { text: 'なし' },
+    });
+    // 付いていなかった種別を付けるとき、変更前は無い
+    expect(line('task_type_changed', { from: null, to: 'バグ' })).toMatchObject({ from: null });
+  });
+
   it.each([
     ['label_added', 'ラベルを追加'],
     ['label_removed', 'ラベルを解除'],

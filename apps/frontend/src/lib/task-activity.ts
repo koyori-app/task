@@ -51,6 +51,10 @@ export function activityText(item: ActivityItem): string {
       const to = str('to');
       return to ? `優先度を ${priorityLabel(to)} に変更しました` : '優先度を変更しました';
     }
+    case 'task_type_changed': {
+      const to = str('to');
+      return to ? `種別を ${to} に変更しました` : '種別を外しました';
+    }
     case 'label_added':
     case 'label_removed': {
       const name = str('name');

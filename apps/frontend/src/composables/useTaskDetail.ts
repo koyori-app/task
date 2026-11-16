@@ -17,6 +17,7 @@ export const GET_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/task
 const LIST_STATUSES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/statuses' as const;
 const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
 const LIST_LABELS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/labels' as const;
+const LIST_TASK_TYPES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/task-types' as const;
 // カレンダー（オーバーレイで詳細を開いたまま裏に残る）の帯も同じタスクを持つ
 const SCHEDULE_PATH = '/v1/tenants/{tenant_id}/schedule' as const;
 /** 「保存しました」を出しておく時間（ミリ秒） */
@@ -106,6 +107,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
   const statusError = ref<string | null>(null);
   const priorityError = ref<string | null>(null);
   const labelsError = ref<string | null>(null);
+  const taskTypeError = ref<string | null>(null);
   const parentError = ref<string | null>(null);
   const deleteError = ref<string | null>(null);
   const fieldErrors = ref<Partial<Record<EditableField, string>>>({});
@@ -137,6 +139,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     optimisticTask.value = {};
     pendingFieldRevisions.value = {};
     parentError.value = null;
+    taskTypeError.value = null;
   });
 
   const taskQueryKey = computed(
@@ -210,6 +213,23 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     enabled: computed(() => !!tenantId.value && !!projectId.value),
   });
 
+  const taskTypesQuery = useQuery({
+    queryKey: computed(() => [
+      'get',
+      LIST_TASK_TYPES_PATH,
+      { params: { path: { tenant_id: tenantId.value!, project_id: projectId.value! } } },
+    ]),
+    queryFn: async ({ signal }) => {
+      const { data, error } = await fetchClient.GET(LIST_TASK_TYPES_PATH, {
+        params: { path: { tenant_id: tenantId.value!, project_id: projectId.value! } },
+        signal,
+      });
+      if (error) throw error;
+      return data;
+    },
+    enabled: computed(() => !!tenantId.value && !!projectId.value),
+  });
+
   watch(
     // 移動先と status_id が同じだと値が変わらないので、前のタスクの選択を残さないよう taskId も見る
     [() => taskQuery.data.value?.status_id, taskId],
@@ -240,6 +260,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
   const statusUpdating = computed(() => pendingFieldRevisions.value.status_id !== undefined);
   const priorityUpdating = computed(() => pendingFieldRevisions.value.priority !== undefined);
   const labelsUpdating = computed(() => pendingFieldRevisions.value.labels !== undefined);
+  const taskTypeUpdating = computed(() => pendingFieldRevisions.value.task_type !== undefined);
   const parentUpdating = computed(() => pendingFieldRevisions.value.parent_task_id !== undefined);
 
   const updateTaskMutation = apiClient.useMutation('put', GET_TASK_PATH);
@@ -326,6 +347,10 @@ export function useTaskDetail(params: UseTaskDetailParams) {
       labelsError.value = 'ラベルの更新に失敗しました';
       return;
     }
+    if (field === 'task_type') {
+      taskTypeError.value = '種別の更新に失敗しました';
+      return;
+    }
     if (field === 'parent_task_id') {
       parentError.value = parentErrorMessage(error);
       return;
@@ -381,6 +406,8 @@ export function useTaskDetail(params: UseTaskDetailParams) {
       priorityError.value = null;
     } else if (field === 'labels') {
       labelsError.value = null;
+    } else if (field === 'task_type') {
+      taskTypeError.value = null;
     } else if (field === 'parent_task_id') {
       parentError.value = null;
     } else {
@@ -404,6 +431,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     if (field === 'status_id') statusError.value = null;
     else if (field === 'priority') priorityError.value = null;
     else if (field === 'labels') labelsError.value = null;
+    else if (field === 'task_type') taskTypeError.value = null;
     else if (field === 'parent_task_id') parentError.value = null;
     else fieldErrors.value = { ...fieldErrors.value, [field]: undefined };
     if (savedField.value === field) savedField.value = null;
@@ -440,6 +468,11 @@ export function useTaskDetail(params: UseTaskDetailParams) {
           void queryClient.invalidateQueries({ queryKey });
           void queryClient.invalidateQueries({ queryKey: ['get', LIST_LABELS_PATH] });
         }
+        // 消された種別を選ぶと 404 になる。タスクと候補を取り直して、選べる種別を直す
+        if (field === 'task_type') {
+          void queryClient.invalidateQueries({ queryKey });
+          void queryClient.invalidateQueries({ queryKey: ['get', LIST_TASK_TYPES_PATH] });
+        }
       });
   }
 
@@ -457,16 +490,35 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     mutateTask({ priority: nextPriority }, { priority: nextPriority }, 'priority');
   }
 
+  /** `null` で種別を外す。API は値と clear フラグを別に持つ */
+  function onTaskTypeChange(taskTypeId: string | null) {
+    const current = taskQuery.data.value;
+    if (!current || taskTypeId === (current.task_type?.id ?? null)) return;
+    // 候補に無い ID（候補の取得前や、別の画面で消された種別）は楽観表示を作れないので、応答を待つ
+    const next = taskTypeId
+      ? (taskTypesQuery.data.value ?? []).find((taskType) => taskType.id === taskTypeId)
+      : null;
+    mutateTask(
+      taskTypeId ? { task_type_id: taskTypeId } : { clear_task_type_id: true },
+      next === undefined ? {} : { task_type: next },
+      'task_type',
+    );
+  }
+
   function onSaveTitle(value: string) {
     const current = taskQuery.data.value;
     if (!current || value === current.title) return;
     mutateTask({ title: value }, { title: value }, 'title');
   }
 
-  function onSaveDescription(value: string | null) {
+  /**
+   * 説明の保存。前後の空白は削る。ただし `preserveWhitespace` では削らない
+   * （チェックボックスの切り替えは 1 字だけを替える操作で、先頭の字下げを削るとリストの入れ子が変わる）
+   */
+  function onSaveDescription(value: string | null, options?: { preserveWhitespace?: boolean }) {
     const current = taskQuery.data.value;
     if (!current) return;
-    const normalized = value?.trim() ?? '';
+    const normalized = options?.preserveWhitespace ? (value ?? '') : (value?.trim() ?? '');
     const currentDescription = current.description ?? '';
     if (normalized === currentDescription) return;
 
@@ -610,6 +662,11 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     projectLabels: computed(() => labelsQuery.data.value ?? []),
     projectLabelsLoading: computed(() => labelsQuery.isLoading.value),
     projectLabelsError: computed(() => labelsQuery.isError.value),
+    /** 未取得（読み込み中・失敗）は undefined。Hub は表示のみにする */
+    projectTaskTypes: computed(() => taskTypesQuery.data.value),
+    taskTypeUpdating,
+    taskTypeError,
+    onTaskTypeChange,
     selectedStatusId,
     statusUpdating,
     statusError,
