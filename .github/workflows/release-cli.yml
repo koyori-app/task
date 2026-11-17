@@ -28,6 +28,9 @@ on:
       - 'cliff.toml'
       - 'CHANGELOG.md'
       - 'scripts/changelog.sh'
+      - 'scripts/changelog_pr_map.py'
+      - 'scripts/changelog_pr_map_test.py'
+      - 'scripts/changelog-fixtures/**'
   workflow_dispatch:
 
 concurrency:

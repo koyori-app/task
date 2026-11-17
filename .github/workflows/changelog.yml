@@ -46,18 +46,14 @@ jobs:
             git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
           fi
 
-      # 古いタグを打ち直したときに CHANGELOG.md を巻き戻さない。版のタグ（vX.Y.Z。cliff.toml の
-      # tag_pattern と同じ）でない rc などは書き直さず、最新の版を決めるときにも数えない
+      # 古いタグを打ち直したときに CHANGELOG.md を巻き戻さない。最新の版は版のタグ（cliff.toml の
+      # tag_pattern。vX.Y.Z）だけから選ぶので、rc などの版のタグでないものもここで書き直さない
       - name: Skip unless the tag is the latest version
         id: latest
         run: |
           set -euo pipefail
-          pattern='^v[0-9]+\.[0-9]+\.[0-9]+$'
-          latest=$(git tag -l 'v*' --sort=-v:refname | { grep -E "$pattern" || true; } | head -1)
-          if ! grep -qE "$pattern" <<<"$GITHUB_REF_NAME"; then
-            echo "$GITHUB_REF_NAME は版のタグでないので書き直さない"
-            echo "value=false" >> "$GITHUB_OUTPUT"
-          elif [ "$latest" = "$GITHUB_REF_NAME" ]; then
+          latest=$(scripts/changelog.sh latest)
+          if [ "$latest" = "$GITHUB_REF_NAME" ]; then
             echo "value=true" >> "$GITHUB_OUTPUT"
           else
             echo "最新の版は $latest なので $GITHUB_REF_NAME では書き直さない"

@@ -1,18 +1,24 @@
 #!/usr/bin/env bash
 # CHANGELOG.md とリリースノートを git-cliff（cliff.toml）で作る。
 #
-# 使い方: scripts/changelog.sh write [<tag>]   CHANGELOG.md を <tag> までの内容で書き直す（既定は最新の v* タグ）
-#         scripts/changelog.sh notes [<tag>]   <tag> のリリースノートを標準出力へ出す（既定は最新の v* タグ）。
-#                                              まだ無いタグを渡すと、未リリースの分をその版として出す
+# 使い方: scripts/changelog.sh write [<tag>]   CHANGELOG.md を <tag> までの内容で書き直す（既定は最新の版のタグ）。
+#                                              版のタグでないもの（v0.1.53-rc.1 など）は拒む
+#         scripts/changelog.sh notes [<tag>]   <tag> のリリースノートを標準出力へ出す（既定は最新の版のタグ）。
+#                                              まだ無いタグや版のタグでないものを渡すと、最後の版の
+#                                              後ろの分（未リリースの分）をその名前の版として出す
 #         scripts/changelog.sh check           cliff.toml の固定の検査と、CHANGELOG.md のずれの検査
+#         scripts/changelog.sh latest          最新の版のタグを出す（GitHub へ取りに行かない）
+# 版のタグは cliff.toml の tag_pattern（vX.Y.Z）に当たるものだけ。ここと changelog.yml はそれを読む
 # 環境変数: GIT_CLIFF（git-cliff の実行ファイル。既定は PATH の git-cliff、無ければ npx で版を固定して呼ぶ）
 #           CHANGELOG_PR_MAP（PR の一覧の TSV。渡せば GitHub へ取りに行かない）
 # マージ済みの PR の一覧を GitHub から取るので、gh と、その認証（gh auth login か GH_TOKEN）が要る。
+# 一覧を表にするのは scripts/changelog_pr_map.py（python3。標準ライブラリだけ）。
 set -euo pipefail
 
 # release-cli.yml と changelog.yml の tool: git-cliff@<版> と揃える
 GIT_CLIFF_VERSION=2.14.2
-REPO=koyori-app/task
+REPO_OWNER=koyori-app
+REPO_NAME=task
 
 root=$(git rev-parse --show-toplevel)
 cd "$root"
@@ -32,8 +38,9 @@ cliff() {
 # PR の数だけの項目に広げる。PR の本文の Closes #N と Closes TASK-N（Fixes / Resolves も。大文字小文字を
 # 問わない）は、題に無いものだけを「（#N、TASK-N を解決）」として題に足す（cliff.toml が Issue と
 # タスクへのリンクにする）。Closes 等の付かない TASK-N の言及は載せない。
-# コード（フェンスとインライン）・引用の行・HTML のコメントの中の Closes は、他の PR の説明などで
-# この PR の宣言ではないので拾わない（GitHub もコードの中は解釈しない）。
+# 本文は Markdown のまま読まず、GitHub が描画した HTML（bodyHTML）を changelog_pr_map.py が
+# HTML のパーサーで読み、コード・引用・取り消し線の要素の外の地の文だけから拾う。
+# フェンスの種類や字下げなど Markdown の書き方の差は GitHub の描画に任せる（正規表現で除かない）。
 # 取れなければ止める（表が無いと下の PR が黙って抜けた CHANGELOG ができる）
 fetch_pr_map() {
   [ -z "${CHANGELOG_PR_MAP:-}" ] || return 0
@@ -43,27 +50,26 @@ fetch_pr_map() {
   # trap は関数の外で走るので、パスをここで展開して渡す
   # shellcheck disable=SC2064
   trap "rm -f '$CHANGELOG_PR_MAP' '$pulls'" EXIT
-  gh api --paginate "repos/$REPO/pulls?state=closed&per_page=100" >"$pulls" ||
+  # shellcheck disable=SC2016
+  gh api graphql --paginate -F owner="$REPO_OWNER" -F name="$REPO_NAME" -f query='
+    query($owner: String!, $name: String!, $endCursor: String) {
+      repository(owner: $owner, name: $name) {
+        pullRequests(states: MERGED, first: 100, after: $endCursor, orderBy: {field: CREATED_AT, direction: ASC}) {
+          pageInfo { hasNextPage endCursor }
+          nodes { number title bodyHTML mergeCommit { oid } }
+        }
+      }
+    }' >"$pulls" ||
     { echo "PR の一覧を取れない（gh auth login か GH_TOKEN を確かめる）" >&2; exit 1; }
-  jq -r 'def closes($ref): [(.body // "")
-        | gsub("```[\\s\\S]*?```"; "") | gsub("<!--[\\s\\S]*?-->"; "")
-        | gsub("`[^`\\n]*`"; "") | gsub("(?m)^[ \\t]*>[^\\n]*"; "")
-        | scan("(?i)\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\\s+" + $ref + "([0-9]+)\\b") | .[0] | tonumber]
-      | unique | map(tostring);
-    .[] | select(.merged_at != null) | .title as $title
-    | ((closes("#") | map(select(. as $n | $title | test("#" + $n + "\\b") | not)) | map("#" + .))
-      + (closes("TASK-") | map(select(. as $n | $title | test("TASK-" + $n + "\\b"; "i") | not)) | map("TASK-" + .)))
-      as $closes
-    | [ .merge_commit_sha, .number,
-        ($title | gsub("[\\t\\n\\r]"; " "))
-          + (if ($closes | length) > 0 then "（" + ($closes | join("、")) + " を解決）" else "" end)
-      ] | @tsv' "$pulls" | sort -t$'\t' -k2,2n >"$CHANGELOG_PR_MAP"
+  python3 -B "$root/scripts/changelog_pr_map.py" <"$pulls" >"$CHANGELOG_PR_MAP"
   [ -s "$CHANGELOG_PR_MAP" ] || { echo "PR の一覧が空" >&2; exit 1; }
   export CHANGELOG_PR_MAP
 }
 
-# 版のタグ（cliff.toml の tag_pattern と同じ形）だけを扱う。v0.1.53-rc.1 などは版と見なさない
-VERSION_TAG='^v[0-9]+\.[0-9]+\.[0-9]+$'
+# 版のタグ（cliff.toml の tag_pattern）だけを扱う。v0.1.53-rc.1 などは版と見なさない。
+# 形を cliff.toml の 1 か所に置き、ここで読む
+VERSION_TAG=$(sed -n "s/^tag_pattern = '\(.*\)'\$/\1/p" "$root/cliff.toml")
+[ -n "$VERSION_TAG" ] || { echo "cliff.toml に tag_pattern が無い" >&2; exit 1; }
 is_version_tag() { grep -qE "$VERSION_TAG" <<<"$1"; }
 version_tags() { git tag -l 'v*' "$@" | { grep -E "$VERSION_TAG" || true; }; }
 
@@ -72,7 +78,7 @@ latest_tag() { version_tags --sort=-v:refname | head -1; }
 # 最初のコミット。git-cliff は範囲の終わりだけを渡せないので、始まりに使う
 first_commit() { git rev-list --max-parents=0 HEAD | tail -1; }
 
-# <tag> の 1 つ前の v* タグ。無ければ空
+# <tag> の 1 つ前の版のタグ。無ければ空
 previous_tag() {
   version_tags --sort=v:refname | awk -v tag="$1" '$0 == tag { print prev; exit } { prev = $0 }'
 }
@@ -100,8 +106,22 @@ fail() { echo "changelog check: $*" >&2; exit 1; }
 # 項目の行（PR へのリンクで終わる箇条書き）
 ITEM='^- .*\(\[#[0-9]+\]\(https://github\.com/koyori-app/task/pull/[0-9]+\)\)$'
 
+# PR の本文から解決の参照を拾う部分（changelog_pr_map.py）の単体テスト。
+# 保存した描画結果（changelog-fixtures/closes.html）に加えて、同じ本文（closes.md）を今の GitHub に
+# 描画させた結果でも同じ参照になることを見る（GitHub の描画が変わったらここで気づく）
+check_pr_map() {
+  local fixtures="$root/scripts/changelog-fixtures" rendered
+  rendered=$(mktemp)
+  jq -n --rawfile text "$fixtures/closes.md" '{text: $text, mode: "gfm", context: "koyori-app/task"}' |
+    gh api markdown --input - >"$rendered" || { rm -f "$rendered"; fail "closes.md を GitHub に描画させられない"; }
+  CHANGELOG_RENDERED_FIXTURE="$rendered" python3 -B "$root/scripts/changelog_pr_map_test.py" ||
+    { rm -f "$rendered"; fail "changelog_pr_map.py のテストが落ちた"; }
+  rm -f "$rendered"
+}
+
 check() {
   local out tag expected
+  check_pr_map
   # 履歴は変わらないので、過去のリリースの出力を固定して cliff.toml の退行を見る
   out=$(notes v0.1.52)
   [ "$(grep -cE -- "$ITEM" <<<"$out")" -eq 14 ] || fail "v0.1.52 の項目が 14 件でない"
@@ -169,5 +189,6 @@ case ${1:-} in
   write) fetch_pr_map; write "${2:-}" ;;
   notes) fetch_pr_map; notes "${2:-}" ;;
   check) fetch_pr_map; check ;;
-  *) sed -n '2,10p' "$0" >&2; exit 2 ;;
+  latest) latest_tag ;;
+  *) awk 'NR > 1 && /^set /{ exit } NR > 1' "$0" >&2; exit 2 ;;
 esac
