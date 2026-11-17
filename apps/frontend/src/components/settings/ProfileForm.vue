@@ -44,6 +44,9 @@ const avatarRemoved = ref(false);
 const previewAvatarUrl = computed(() => (avatarRemoved.value ? null : avatarUrl.value || null));
 const avatarFileInput = ref<HTMLInputElement | null>(null);
 const uploading = ref(false);
+// 保存（PATCH）の通信中。アップロードと保存はどちらもアバターを書き換えるので重ねない。
+// 重なると応答の届く順で画面とサーバーの状態が食い違う（削除の保存が後着して新しい画像を消すなど）
+const saving = ref(false);
 
 const form = useForm({
   defaultValues: {
@@ -55,6 +58,7 @@ const form = useForm({
     saved.value = false;
     const username = value.username.trim();
     const removeAvatar = avatarRemoved.value;
+    saving.value = true;
     try {
       await updateProfile.mutateAsync({
         body: {
@@ -75,9 +79,17 @@ const form = useForm({
         err.response?.status === 400
           ? '入力内容を確認してください。'
           : '保存できませんでした。時間をおいて再度お試しください。';
+    } finally {
+      saving.value = false;
     }
   },
 });
+
+function submit() {
+  // アップロード中は保存しない（Enter での送信も含む）
+  if (uploading.value) return;
+  void form.handleSubmit();
+}
 
 function resetSubmitFeedback() {
   saved.value = false;
@@ -89,7 +101,7 @@ async function uploadAvatar(event: Event) {
   const file = input.files?.[0];
   // 同じファイルを選び直しても change が発火するよう空に戻す
   input.value = '';
-  if (!file) return;
+  if (!file || saving.value || uploading.value) return;
   resetSubmitFeedback();
   if (file.size > AVATAR_MAX_BYTES) {
     submitError.value = AVATAR_TOO_LARGE;
@@ -129,11 +141,7 @@ async function uploadAvatar(event: Event) {
 </script>
 
 <template>
-  <HydrationSafeForm
-    v-slot="{ isHydrated }"
-    @submit="() => form.handleSubmit()"
-    @input="resetSubmitFeedback"
-  >
+  <HydrationSafeForm v-slot="{ isHydrated }" @submit="submit" @input="resetSubmitFeedback">
     <div class="flex flex-col gap-6">
       <Field
         id="avatar"
@@ -163,14 +171,14 @@ async function uploadAvatar(event: Event) {
             <Button
               type="button"
               variant="tertiary"
-              :disabled="uploading"
+              :disabled="uploading || saving"
               :label="uploading ? 'アップロード中…' : '画像を選ぶ'"
               @click="avatarFileInput?.click()"
             />
             <Button
               type="button"
               variant="tertiary"
-              :disabled="!avatarUrl || avatarRemoved"
+              :disabled="!avatarUrl || avatarRemoved || uploading || saving"
               label="削除"
               @click="
                 avatarRemoved = true;
@@ -237,7 +245,7 @@ async function uploadAvatar(event: Event) {
           <div>
             <Button
               type="submit"
-              :disabled="!canSubmit || isSubmitting || !isHydrated"
+              :disabled="!canSubmit || isSubmitting || uploading || !isHydrated"
               :label="isSubmitting ? '保存中…' : '変更を保存'"
             />
           </div>

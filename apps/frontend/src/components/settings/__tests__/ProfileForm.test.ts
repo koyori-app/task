@@ -64,6 +64,41 @@ function stubUploadAvatar(status = 200, response: unknown = user) {
   return uploads;
 }
 
+/**
+ * PATCH /v1/auth/me と POST /v1/auth/me/avatar を受け、指定した方の応答を release を呼ぶまで止める。
+ * 保存とアップロードの通信が重なる場合を再現する。
+ */
+function stubPending(pending: 'patch' | 'upload', uploadResponse: unknown = user) {
+  const bodies: unknown[] = [];
+  const uploads: FormData[] = [];
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const json = (body: unknown) =>
+    new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (input instanceof Request) {
+      const pathname = new URL(input.url, 'http://localhost').pathname;
+      if (pathname.endsWith('/v1/auth/me') && input.method === 'PATCH') {
+        bodies.push(await input.clone().json());
+        if (pending === 'patch') await gate;
+        return json({ ...user, avatar_url: null });
+      }
+    } else if (String(input).endsWith('/v1/auth/me/avatar') && init?.method === 'POST') {
+      uploads.push(init.body as FormData);
+      if (pending === 'upload') await gate;
+      return json(uploadResponse);
+    }
+    return new Response(JSON.stringify({ message: 'not-found' }), { status: 404 });
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return { bodies, uploads, release: () => release() };
+}
+
 async function chooseFile(wrapper: ReturnType<typeof mountForm>, file: File) {
   const input = wrapper.find('[data-testid="avatar-file-input"]');
   Object.defineProperty(input.element, 'files', { value: [file], configurable: true });
@@ -181,6 +216,62 @@ describe('ProfileForm', () => {
     expect(bodies).toHaveLength(1);
     expect(bodies[0]).not.toHaveProperty('clear_avatar_url');
     expect(bodies[0]).not.toHaveProperty('avatar_url');
+  });
+
+  it('削除の保存中は「画像を選ぶ」を押せず、選んだ画像も送らない', async () => {
+    const { bodies, uploads, release } = stubPending('patch');
+    const wrapper = mountForm();
+    await flushPromises();
+
+    await findButton(wrapper, '削除').trigger('click');
+    await wrapper.find('form').trigger('submit');
+    await flushPromises();
+    expect(bodies).toHaveLength(1);
+
+    expect(findButton(wrapper, '画像を選ぶ').attributes('disabled')).toBeDefined();
+    await chooseFile(wrapper, new File([new Uint8Array([0x89])], 'me.png'));
+    expect(uploads).toHaveLength(0);
+
+    release();
+    await flushPromises();
+
+    expect(wrapper.find('img').exists()).toBe(false);
+    expect(findButton(wrapper, '画像を選ぶ').attributes('disabled')).toBeUndefined();
+  });
+
+  it('保存中は「削除」を押せない', async () => {
+    const { release } = stubPending('patch');
+    const wrapper = mountForm();
+    await flushPromises();
+
+    await wrapper.find('form').trigger('submit');
+    await flushPromises();
+    expect(findButton(wrapper, '削除').attributes('disabled')).toBeDefined();
+
+    release();
+    await flushPromises();
+    expect(findButton(wrapper, '削除').attributes('disabled')).toBeUndefined();
+  });
+
+  it('アップロード中は「削除」「変更を保存」を押せず、送信もしない', async () => {
+    const uploadedUrl = 'https://task.example.com/v1/avatars/avatar-new.png';
+    const { bodies, release } = stubPending('upload', { ...user, avatar_url: uploadedUrl });
+    const wrapper = mountForm();
+    await flushPromises();
+
+    await chooseFile(wrapper, new File([new Uint8Array([0x89])], 'me.png'));
+    expect(findButton(wrapper, '削除').attributes('disabled')).toBeDefined();
+    expect(findButton(wrapper, '変更を保存').attributes('disabled')).toBeDefined();
+    await wrapper.find('form').trigger('submit');
+    await flushPromises();
+    expect(bodies).toHaveLength(0);
+
+    release();
+    await flushPromises();
+
+    expect(wrapper.find('img').attributes('src')).toBe(uploadedUrl);
+    expect(findButton(wrapper, '削除').attributes('disabled')).toBeUndefined();
+    expect(findButton(wrapper, '変更を保存').attributes('disabled')).toBeUndefined();
   });
 
   it('保存に失敗したら削除は未保存のまま残る', async () => {
