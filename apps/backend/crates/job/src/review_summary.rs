@@ -469,7 +469,7 @@ async fn update_summary(
     .await?;
     // 現在の連携先で出したラウンドが 1 件も無ければ書かない。連携を差し替えた直後の
     // PR がこれに当たる（旧リポジトリのラウンドはこの範囲に入らない。仕様 §7）
-    if snapshot.rounds == 0 {
+    if !snapshot.has_rounds {
         tracing::debug!(
             project_id = %job.project_id,
             pr = job.pr_number,
@@ -886,7 +886,7 @@ async fn notify_pr_author<C: ConnectionTrait>(
     };
     for round in rounds {
         // 自分で出したラウンドは自分に知らせない
-        if round.reviewer_id == author_id {
+        if round.reviewer_id == author_id || round.carried_by == Some(author_id) {
             continue;
         }
         let findings = service::reviews::round_findings(db, round.id).await?;

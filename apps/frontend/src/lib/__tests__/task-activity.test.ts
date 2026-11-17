@@ -51,6 +51,13 @@ describe('activityText', () => {
     expect(text('priority_changed', { from: 'low', to })).toBe(`優先度を ${label} に変更しました`);
   });
 
+  it('種別の付け替えは新しい種別の名前を出し、外したときはその旨を出す', () => {
+    expect(text('task_type_changed', { from: 'タスク', to: 'バグ' })).toBe(
+      '種別を バグ に変更しました',
+    );
+    expect(text('task_type_changed', { from: 'バグ', to: null })).toBe('種別を外しました');
+  });
+
   it.each([
     ['assignee_completed', { user_id: 'u1' }, '自分の担当分を完了にしました'],
     ['assignee_reopened', { user_id: 'u1' }, '自分の担当分の完了を取り消しました'],

@@ -239,6 +239,8 @@ Drive にはファイル ID だけで引ける経路がある（`GET /v1/drive/f
 
 `GET /v1/tenants` は `TenantListItemResponse`（`TenantResponse` の全欄 + `membership`）を返す。`membership` は `TenantMembershipKind` で、`TenantRole` と同じ流儀の PascalCase 文字列（`Owner` / `Member` / `Guest`）である。取得・作成・更新のエンドポイントは `TenantResponse` を返す。ゲストにはテナント設定の欄（`owner_id` / `drive_quota_bytes` / `require_2fa`）を返さない（null）。
 
+frontend は `membership` と `member_role` から、権限の無い操作を出さない。プロジェクトの作成（サイドバーの「+」と作成画面）は `Owner` と `Admin` にだけ出す。プロジェクト設定の一般の保存と削除は、共有プロジェクトでは `Owner` と `Admin`、個人プロジェクトでは `Owner` にだけ出す。サイドバーの「設定」は残し、ワークフロー・ラベル・カスタムフィールドなど、プロジェクトに入れる人に API が許す節へは入れるようにする。それでも拒否されたときは、403 を権限不足として表示する。
+
 ### 担当者候補のスコープ
 
 担当者候補の 2 つでスコープが違うのは、返す量が違うためである。名前を指定しない形は「そのプロジェクトで担当者にできる利用者全員」を 1 リクエストで返すので、読むだけの主体に許すと利用者を列挙されてしまう。メンバー未指定の共有プロジェクトではテナント全体が返る。`username` を指定した形は呼び出し側が既に知っている名前と完全一致した 1 人だけを返し、外れたときも候補を出さない。担当者で絞ったタスク一覧は読むだけの操作なので、こちらは `read:task` で通す。

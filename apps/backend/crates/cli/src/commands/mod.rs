@@ -6,3 +6,4 @@ pub mod projects;
 pub mod reviews;
 pub mod sprints;
 pub mod tasks;
+pub mod tenants;

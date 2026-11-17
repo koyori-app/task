@@ -43,7 +43,9 @@ const props = defineProps<{
   projectKey: string;
   tenantId: string | null | undefined;
   projectId: string | null | undefined;
-  labelId?: string | null;
+  subtaskFilters?: import('@/composables/useTaskSubtasks').TaskSubtaskFilters;
+  flat?: boolean;
+  hideEmptyGroups?: boolean;
   projectLabels: LabelResponse[];
   members: ProjectMember[];
   /** 担当者候補の取得状態。取得中・失敗を「候補 0 人」と混ぜない */
@@ -437,7 +439,9 @@ async function commitAdding(statusId: string) {
     <!-- 行の 2 段と列の切り替えは、この根の幅で決める（task-grouped-columns.ts） -->
     <!-- 群どうしの余白も落とし先に含めるので、gap ではなく群の padding で空ける -->
     <section
-      v-for="group in groups"
+      v-for="group in groups.filter(
+        (g) => !hideEmptyGroups || g.isLoading || g.isError || g.total > 0,
+      )"
       :key="group.status.id"
       :data-dnd-status-id="group.status.id"
       class="pb-4 last:pb-0"
@@ -495,7 +499,7 @@ async function commitAdding(statusId: string) {
           <div :inert="collapsed[group.status.id] || undefined">
             <div :class="[TASK_HEADER_GRID, 'border-b text-xs text-muted-foreground']">
               <TaskListSortHeader
-                v-for="column in TASK_LIST_SORT_COLUMNS"
+                v-for="column in TASK_LIST_SORT_COLUMNS.filter((c) => c.id !== 'status')"
                 :key="column.id"
                 :column="column"
                 :sorting="sorting"
@@ -521,6 +525,8 @@ async function commitAdding(statusId: string) {
                   data-dnd-task
                   :project-key="projectKey"
                   :task="task"
+                  :match="group.matches?.[task.id]"
+                  :show-subtask-toggle="!flat"
                   :statuses="statuses"
                   :project-labels="projectLabels"
                   :members="members"
@@ -543,12 +549,12 @@ async function commitAdding(statusId: string) {
                   :on-comment="(body: string) => onComment(task, body)"
                 />
                 <TaskSubtaskBranch
-                  v-if="isBranchOpen(task)"
+                  v-if="!flat && isBranchOpen(task)"
                   :project-key="projectKey"
                   :parent-task="task"
                   :filters="{
                     status_id: group.status.id,
-                    label_id: labelId ?? undefined,
+                    ...subtaskFilters,
                     is_archived: false,
                   }"
                   :tenant-id="tenantId"

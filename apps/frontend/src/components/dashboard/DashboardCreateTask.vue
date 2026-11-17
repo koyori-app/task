@@ -7,6 +7,7 @@ import {
   fetchClient,
   useAssignableUsersQuery,
   projectLabelsQueryOptions,
+  projectTaskTypesQueryOptions,
 } from '@/lib/api-vue-query';
 import CreateTaskDialog from '@/components/tasks/CreateTaskDialog.vue';
 import { Button, Dialog } from '@koyori-app/ui-vue';
@@ -52,6 +53,12 @@ const statuses = useQuery({
 const labels = useQuery(
   computed(() => ({
     ...projectLabelsQueryOptions(props.tenantId, projectId.value),
+    enabled: props.open && editing.value && !!projectId.value,
+  })),
+);
+const taskTypes = useQuery(
+  computed(() => ({
+    ...projectTaskTypesQueryOptions(props.tenantId, projectId.value),
     enabled: props.open && editing.value && !!projectId.value,
   })),
 );
@@ -124,12 +131,16 @@ function onCreated(task: CreatedTask) {
     :labels="labels.data.value"
     :labels-loading="labels.isLoading.value"
     :labels-error="labels.isError.value && !labels.data.value"
+    :task-types="taskTypes.data.value"
+    :task-types-loading="taskTypes.isLoading.value"
+    :task-types-error="taskTypes.isError.value && !taskTypes.data.value"
     :members="members.data.value"
     :members-loading="members.isLoading.value"
     :members-error="members.isError.value && !members.data.value"
     :initial-assignee-ids="currentUserId ? [currentUserId] : []"
     @update:open="emit('update:open', $event)"
     @retry-labels="labels.refetch()"
+    @retry-task-types="taskTypes.refetch()"
     @retry-members="members.refetch()"
     @created="onCreated"
   />

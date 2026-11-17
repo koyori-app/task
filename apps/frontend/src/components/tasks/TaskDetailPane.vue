@@ -84,6 +84,7 @@ function closeDeleteDialog() {
 const {
   tenantId,
   projectId,
+  isTenantOwner,
   displayTask,
   statuses,
   projectLabels,
@@ -94,6 +95,9 @@ const {
   statusError,
   priorityUpdating,
   priorityError,
+  projectTaskTypes,
+  taskTypeUpdating,
+  taskTypeError,
   labelsUpdating,
   labelsError,
   parentUpdating,
@@ -106,6 +110,7 @@ const {
   isError,
   onStatusChange,
   onPriorityChange,
+  onTaskTypeChange,
   onSaveTitle,
   onSaveDescription,
   onSaveProgressPct,
@@ -319,6 +324,9 @@ function onDeleteDialogCancel(event: Event) {
         :status-error="statusError"
         :priority-updating="priorityUpdating"
         :priority-error="priorityError"
+        :project-task-types="projectTaskTypes"
+        :task-type-updating="taskTypeUpdating"
+        :task-type-error="taskTypeError"
         :labels-updating="labelsUpdating"
         :labels-error="labelsError"
         :field-updating="fieldUpdating"
@@ -331,6 +339,7 @@ function onDeleteDialogCancel(event: Event) {
         :error="isError"
         @update:status-id="onStatusChange"
         @change:priority="onPriorityChange"
+        @change:task_type="onTaskTypeChange"
         @save:title="onSaveTitle"
         @save:description="onSaveDescription"
         @save:progress_pct="onSaveProgressPct"
@@ -352,7 +361,13 @@ function onDeleteDialogCancel(event: Event) {
         @delete-request="openDeleteDialog"
       >
         <template v-if="displayTask" #main>
-          <TaskAttachments :tenant-id="tenantId" :project-id="projectId" :task-id="taskId" />
+          <TaskAttachments
+            :tenant-id="tenantId"
+            :project-id="projectId"
+            :task-id="taskId"
+            :current-user-id="currentUserId"
+            :is-tenant-owner="isTenantOwner"
+          />
           <TaskSubtaskPanel
             :tenant-id="tenantId"
             :project-id="projectId"
@@ -419,6 +434,7 @@ function onDeleteDialogCancel(event: Event) {
             :list-error="commentsError"
             :on-retry="refetchComments"
             :current-user-id="currentUserId"
+            :is-tenant-owner="isTenantOwner"
             :profile-href="profileHref"
             :mention-tenant="tenantDisplayId"
             :submit-pending="submitPending"

@@ -101,6 +101,7 @@ beforeEach(() => {
         [`${projectBase}/tasks`, { tasks: [child], total: 1, next_cursor: null }],
         [`${projectBase}/statuses`, [status]],
         [`${projectBase}/labels`, []],
+        [`${projectBase}/task-types`, []],
         [`${projectBase}/assignable-users`, []],
         // タスク詳細の「似ているタスク」。認可は search と同じ（ReadTask）
         [`${projectBase}/tasks/similar`, { tasks: [] }],

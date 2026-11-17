@@ -13,7 +13,11 @@ const mockContext = {
 
 const TENANT_UUID = '11111111-1111-1111-1111-111111111111';
 
-const sampleTenants = (displayId: string) => [
+/** 見ている人のテナントでの関わり方。既定はオーナー（一般の保存と削除を出す） */
+type Viewer = { membership: 'Owner' | 'Member'; member_role: 'Admin' | 'Member' | null };
+const OWNER: Viewer = { membership: 'Owner', member_role: null };
+
+const sampleTenants = (displayId: string, viewer: Viewer = OWNER) => [
   {
     id: TENANT_UUID,
     display_id: displayId,
@@ -22,6 +26,7 @@ const sampleTenants = (displayId: string) => [
     icon_url: '',
     owner_id: '00000000-0000-0000-0000-000000000002',
     require_2fa: false,
+    ...viewer,
   },
 ];
 
@@ -89,6 +94,7 @@ const jsonResponse = (data: unknown, status = 200) =>
   });
 
 type MockOptions = {
+  viewer?: Viewer;
   rejectWrite?: number;
   rejectStatuses?: boolean;
   hangStatuses?: boolean;
@@ -107,7 +113,7 @@ function mockFetch(overrides: MockOptions = {}) {
       const method = typeof req === 'string' ? 'GET' : req.method;
       const pathname = new URL(url, 'http://localhost').pathname;
       if (isListTenantsUrl(url)) {
-        return jsonResponse(sampleTenants(mockContext.routeParams.tenant));
+        return jsonResponse(sampleTenants(mockContext.routeParams.tenant, overrides.viewer));
       }
       if (pathname.endsWith('/statuses')) {
         if (overrides.hangStatuses) return new Promise<Response>(() => {});
@@ -220,6 +226,46 @@ export const Default: Story = {
     await expect(canvas.findByLabelText('名前')).resolves.toHaveValue('Team Alpha');
     await expect(canvas.getByLabelText('キー')).toBeDisabled();
     await expect(canvas.getByLabelText('キー')).toHaveValue('ALPHA');
+  },
+};
+
+/** テナントの Member。一般は読み取りだけで、保存と削除を出さない。他の節には入れる */
+export const MemberReadOnly: Story = {
+  name: 'テナントの Member（一般は読み取りだけ・削除なし）',
+  beforeEach: mockFetch({ viewer: { membership: 'Member', member_role: 'Member' } }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await expect(canvas.findByRole('heading', { name: '一般' })).resolves.toBeInTheDocument();
+    await expect(
+      canvas.findByText(
+        '名前・説明・アイコンを変更できるのは、テナントのオーナーと Admin だけです。',
+      ),
+    ).resolves.toBeInTheDocument();
+    await expect(canvas.queryByRole('button', { name: '変更を保存' })).toBeNull();
+    await expect(canvas.queryByLabelText('名前')).toBeNull();
+    const nav = await canvas.findByRole('navigation', { name: '設定セクション' });
+    await expect(within(nav).queryByRole('button', { name: '削除' })).toBeNull();
+    // ワークフローなど、API が入れる人に許している節へは入れる
+    await user.click(within(nav).getByRole('button', { name: 'ワークフロー' }));
+    await expect(canvas.findByLabelText('レビュー中の名前')).resolves.toHaveValue('レビュー中');
+  },
+};
+
+/** 保存が 403 になったとき、権限不足と分かる文言を出す */
+export const SaveForbidden: Story = {
+  name: '保存が 403（権限不足の文言）',
+  beforeEach: mockFetch({ rejectWrite: 403 }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await canvas.findByLabelText('名前');
+    await user.click(canvas.getByRole('button', { name: '変更を保存' }));
+    await expect(
+      canvas.findByText(
+        'プロジェクトの設定を変更できるのは、テナントのオーナーと Admin だけです。',
+      ),
+    ).resolves.toBeInTheDocument();
   },
 };
 

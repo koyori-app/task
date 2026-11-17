@@ -14775,6 +14775,150 @@
         }
       }
     },
+    "/v1/tenants/{tenant_id}/projects/{project_id}/reviews/carry-over": {
+      "post": {
+        "tags": ["Reviews"],
+        "summary": "別の PR の未解決の指摘を引き継ぐ",
+        "description": "出し直した PR へ、元の PR の未解決（open / fixing / fixed）の指摘を写す。元の PR の記録は変えない。未解決の指摘を持つ元ラウンド 1 本につき、写しのラウンドを 1 本作る（作成者と head は元のまま。引き継いだ人は権限を得ない）。写しのラウンドはレビューに数えない。引き継ぎ済みの指摘は飛ばす。",
+        "operationId": "carry_over_review",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "プロジェクトID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CarryOverReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "作った写しのラウンドと指摘",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CarryOverReviewResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "引き継ぎ元と先が同じ PR、または入力の形式違い",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "元の PR にラウンドが無い、または引き継げる指摘が無い",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tenants/{tenant_id}/projects/{project_id}/reviews/pull-requests": {
       "get": {
         "tags": ["Reviews"],
@@ -16771,6 +16915,619 @@
         }
       }
     },
+    "/v1/tenants/{tenant_id}/projects/{project_id}/task-types": {
+      "get": {
+        "tags": ["Task Types"],
+        "summary": "プロジェクトのタスク種別一覧",
+        "operationId": "list_task_types",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "プロジェクトID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "並び順（position の昇順）のタスク種別一覧",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TaskTypeResponse"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Task Types"],
+        "summary": "タスク種別作成",
+        "description": "並び順は末尾に付く。同じプロジェクトに同名の種別があると 409",
+        "operationId": "create_task_type",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "プロジェクトID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTaskTypeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "作成されたタスク種別",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskTypeResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tenants/{tenant_id}/projects/{project_id}/task-types/reorder": {
+      "put": {
+        "tags": ["Task Types"],
+        "summary": "タスク種別の並び順一括更新",
+        "description": "プロジェクトの全種別の ID を、並べたい順に過不足なく渡す。足りない・余る・重複する・別プロジェクトの ID が混ざると 400",
+        "operationId": "reorder_task_types",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "プロジェクトID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReorderTaskTypesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "並び替え後のタスク種別一覧",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TaskTypeResponse"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tenants/{tenant_id}/projects/{project_id}/task-types/{id}": {
+      "put": {
+        "tags": ["Task Types"],
+        "summary": "タスク種別更新",
+        "operationId": "update_task_type",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "プロジェクトID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "タスク種別ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTaskTypeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "更新後のタスク種別",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskTypeResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Task Types"],
+        "summary": "タスク種別削除",
+        "description": "付いていたタスクは残り、種別が未設定に戻る",
+        "operationId": "delete_task_type",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "プロジェクトID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "タスク種別ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "削除しました"
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tenants/{tenant_id}/projects/{project_id}/task-views": {
       "get": {
         "tags": ["TaskViews"],
@@ -17279,6 +18036,24 @@
             }
           },
           {
+            "name": "q",
+            "in": "query",
+            "description": "一覧の条件式。空は条件なし。",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "timezone",
+            "in": "query",
+            "description": "due: の今日を決める IANA タイムゾーン（既定 UTC）。",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "status_id",
             "in": "query",
             "required": false,
@@ -17336,6 +18111,16 @@
           {
             "name": "milestone_id",
             "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "task_type_id",
+            "in": "query",
+            "description": "種別で絞り込む",
             "required": false,
             "schema": {
               "type": "string",
@@ -17444,6 +18229,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/TaskListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "条件式が不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskQueryErrorResponse"
                 }
               }
             }
@@ -17812,6 +18607,117 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BulkCreateTasksResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tenants/{tenant_id}/projects/{project_id}/tasks/facets": {
+      "get": {
+        "tags": ["Tasks"],
+        "summary": "条件式の候補件数",
+        "operationId": "list_task_facets",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskFacetsResponse"
                 }
               }
             }
@@ -26755,6 +27661,64 @@
           }
         }
       },
+      "CarriedFromRound": {
+        "type": "object",
+        "description": "引き継ぎの写しが指す、元のラウンド。",
+        "required": ["review_id", "pr_number", "round"],
+        "properties": {
+          "pr_number": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "repository": {
+            "type": ["string", "null"],
+            "description": "元のリポジトリ（`owner/name`）。連携前のラウンドなら `null`"
+          },
+          "review_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "round": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "CarryOverReviewRequest": {
+        "type": "object",
+        "description": "別の PR の未解決の指摘を、この PR の新しいラウンドへ引き継ぐ（TASK-495）。\n\n元 PR の記録は変えない。引き継ぎ先は現在の連携先に限る。",
+        "required": ["from_pr_number", "to_pr_number"],
+        "properties": {
+          "from_pr_number": {
+            "type": "integer",
+            "format": "int32",
+            "description": "引き継ぎ元の PR 番号"
+          },
+          "from_repo": {
+            "type": ["string", "null"],
+            "description": "引き継ぎ元のリポジトリ（`owner/name`。空文字は連携前のラウンド）。既定は現在の連携先"
+          },
+          "to_pr_number": {
+            "type": "integer",
+            "format": "int32",
+            "description": "引き継ぎ先の PR 番号（現在の連携先の PR）"
+          }
+        }
+      },
+      "CarryOverReviewResponse": {
+        "type": "object",
+        "description": "引き継ぎで作ったラウンドと、その指摘。",
+        "required": ["rounds"],
+        "properties": {
+          "rounds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReviewDetailResponse"
+            },
+            "description": "作った写しのラウンド（元のラウンド番号の昇順）"
+          }
+        }
+      },
       "CommentListResponse": {
         "type": "object",
         "required": ["comments", "mentions"],
@@ -27327,7 +28291,24 @@
             "type": "string",
             "format": "uuid"
           },
+          "task_type_id": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "タスクの種別。同じプロジェクトの種別だけ指定できる（別のプロジェクトの種別は 404）"
+          },
           "title": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateTaskTypeRequest": {
+        "type": "object",
+        "required": ["name", "color"],
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "name": {
             "type": "string"
           }
         }
@@ -27930,6 +28911,21 @@
           }
         }
       },
+      "FacetCount": {
+        "type": "object",
+        "required": ["id", "count"],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "FindingResponse": {
         "type": "object",
         "required": [
@@ -27961,6 +28957,11 @@
           },
           "body": {
             "type": "string"
+          },
+          "carried_from_finding_id": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "引き継ぎの写しのとき、元の指摘"
           },
           "created_at": {
             "type": "string",
@@ -28387,6 +29388,82 @@
             "format": "password"
           }
         }
+      },
+      "MatchComment": {
+        "type": "object",
+        "required": ["id", "created_at"],
+        "properties": {
+          "author": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UserSummary"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "MatchSegment": {
+        "type": "object",
+        "required": ["text", "hit"],
+        "properties": {
+          "hit": {
+            "type": "boolean"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "MatchSnippet": {
+        "type": "object",
+        "required": ["source", "segments", "truncated_start", "truncated_end"],
+        "properties": {
+          "comment": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MatchComment"
+              }
+            ]
+          },
+          "segments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MatchSegment"
+            }
+          },
+          "source": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MatchSource"
+              }
+            ],
+            "x-or-unknown": true
+          },
+          "truncated_end": {
+            "type": "boolean"
+          },
+          "truncated_start": {
+            "type": "boolean"
+          }
+        }
+      },
+      "MatchSource": {
+        "type": "string",
+        "enum": ["description", "comment"]
       },
       "MentionStatus": {
         "type": "string",
@@ -29045,6 +30122,25 @@
           }
         }
       },
+      "PriorityFacetCount": {
+        "type": "object",
+        "required": ["priority", "count"],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "priority": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TaskPriority"
+              }
+            ],
+            "x-or-unknown": true
+          }
+        }
+      },
       "ProjectCustomFieldResponse": {
         "type": "object",
         "required": [
@@ -29375,6 +30471,20 @@
           }
         }
       },
+      "ReorderTaskTypesRequest": {
+        "type": "object",
+        "description": "並び順の一括更新。プロジェクトの全種別の ID を、並べたい順に過不足なく渡す",
+        "required": ["ids"],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        }
+      },
       "Require2faPolicyRequest": {
         "type": "object",
         "required": ["enabled"],
@@ -29434,6 +30544,28 @@
           "finding_count"
         ],
         "properties": {
+          "carried_by": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UserSummary",
+                "description": "引き継ぎの写しのとき、引き継いだ利用者（`reviewer` は元のラウンドの作成者のまま）。\n写しのラウンドはレビューに数えない"
+              }
+            ]
+          },
+          "carried_from": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CarriedFromRound",
+                "description": "引き継ぎの写しのとき、元のラウンド。元のラウンドが無くなっていれば `null`"
+              }
+            ]
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -29563,15 +30695,7 @@
       "ReviewedPullRequest": {
         "type": "object",
         "description": "レビューのある PR の一覧行。画面の PR 一覧が使う。",
-        "required": [
-          "pr_number",
-          "rounds",
-          "unresolved",
-          "blocking",
-          "blocking_fixed",
-          "last_reviewed_at",
-          "state"
-        ],
+        "required": ["pr_number", "rounds", "unresolved", "blocking", "blocking_fixed", "state"],
         "properties": {
           "blocking": {
             "type": "integer",
@@ -29586,9 +30710,9 @@
             "minimum": 0
           },
           "last_reviewed_at": {
-            "type": "string",
+            "type": ["string", "null"],
             "format": "date-time",
-            "description": "最新ラウンドの作成時刻"
+            "description": "最新のレビューの作成時刻。写しだけの PR は null"
           },
           "merge_effects_processed_at": {
             "type": ["string", "null"],
@@ -30181,6 +31305,11 @@
             "type": "string",
             "format": "date-time"
           },
+          "created_by": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "添付を作成した利用者。解除できるのはこの利用者とテナントオーナー。\nこの欄を返さない旧いサーバーの応答では `None`"
+          },
           "drive_file_id": {
             "type": "string",
             "format": "uuid"
@@ -30328,6 +31457,60 @@
             }
           }
         ]
+      },
+      "TaskFacetsResponse": {
+        "type": "object",
+        "required": [
+          "statuses",
+          "labels",
+          "assignees",
+          "authors",
+          "priorities",
+          "unassigned",
+          "unlabeled"
+        ],
+        "properties": {
+          "assignees": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FacetCount"
+            }
+          },
+          "authors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FacetCount"
+            }
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FacetCount"
+            }
+          },
+          "priorities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PriorityFacetCount"
+            }
+          },
+          "statuses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FacetCount"
+            }
+          },
+          "unassigned": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "unlabeled": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
       },
       "TaskForgeBranch": {
         "type": "object",
@@ -30635,6 +31818,15 @@
         "type": "object",
         "required": ["tasks", "total", "next_cursor"],
         "properties": {
+          "matches": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/TaskSearchMatch"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
           "next_cursor": {
             "type": ["string", "null"],
             "description": "次のページを引く鍵。`null` なら取り切っている。\n`cursor` を渡していない要求でも返すので、先頭ページから継いでいける"
@@ -30656,6 +31848,56 @@
       "TaskPriority": {
         "type": "string",
         "enum": ["CriticalFire", "Critical", "High", "Medium", "Low", "Trivial"]
+      },
+      "TaskQueryError": {
+        "type": "object",
+        "required": ["code", "term"],
+        "properties": {
+          "code": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TaskQueryErrorCode"
+              }
+            ],
+            "x-or-unknown": true
+          },
+          "key": {
+            "type": ["string", "null"]
+          },
+          "term": {
+            "type": "string"
+          },
+          "value": {
+            "type": ["string", "null"]
+          }
+        }
+      },
+      "TaskQueryErrorCode": {
+        "type": "string",
+        "enum": [
+          "unknown-value",
+          "invalid-value",
+          "empty-value",
+          "not-negatable",
+          "duplicate-sort",
+          "conflicting-sort",
+          "too-long"
+        ]
+      },
+      "TaskQueryErrorResponse": {
+        "type": "object",
+        "required": ["message", "errors"],
+        "properties": {
+          "errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskQueryError"
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        }
       },
       "TaskRelationResponse": {
         "type": "object",
@@ -30832,12 +32074,41 @@
             "type": "string",
             "format": "uuid"
           },
+          "task_type": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TaskTypeResponse",
+                "description": "タスクの種別。未設定なら null。古いサーバーの応答には無いので、無ければ null"
+              }
+            ]
+          },
           "title": {
             "type": "string"
           },
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "TaskSearchMatch": {
+        "type": "object",
+        "required": ["snippets"],
+        "properties": {
+          "snippets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MatchSnippet"
+            }
+          },
+          "title": {
+            "type": ["array", "null"],
+            "items": {
+              "$ref": "#/components/schemas/MatchSegment"
+            }
           }
         }
       },
@@ -30854,6 +32125,32 @@
             "format": "uuid"
           },
           "user_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "TaskTypeResponse": {
+        "type": "object",
+        "description": "タスク種別の定義。プロジェクトごとに持ち、1 つのタスクに 0 か 1 つ付く",
+        "required": ["id", "project_id", "name", "color", "position"],
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32",
+            "description": "並び順（昇順）"
+          },
+          "project_id": {
             "type": "string",
             "format": "uuid"
           }
@@ -31472,6 +32769,10 @@
           "clear_sprint_id": {
             "type": "boolean"
           },
+          "clear_task_type_id": {
+            "type": "boolean",
+            "description": "true で種別を外す。`task_type_id` と同時に指定すると外すほうが優先される"
+          },
           "custom_field_values": {
             "type": ["array", "null"],
             "items": {
@@ -31550,7 +32851,23 @@
             "type": ["string", "null"],
             "format": "uuid"
           },
+          "task_type_id": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "タスクの種別。同じプロジェクトの種別だけ指定できる（別のプロジェクトの種別は 404）"
+          },
           "title": {
+            "type": ["string", "null"]
+          }
+        }
+      },
+      "UpdateTaskTypeRequest": {
+        "type": "object",
+        "properties": {
+          "color": {
+            "type": ["string", "null"]
+          },
+          "name": {
             "type": ["string", "null"]
           }
         }
@@ -31988,6 +33305,10 @@
     {
       "name": "Labels",
       "description": "ラベル一覧"
+    },
+    {
+      "name": "Task Types",
+      "description": "タスク種別の定義"
     },
     {
       "name": "Custom Fields",

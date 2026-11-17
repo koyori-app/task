@@ -104,6 +104,11 @@ const labels = [
   },
 ];
 
+const taskTypes = [
+  { id: 'type-task', project_id: 'project-uuid', name: 'タスク', color: '#64748b', position: 0 },
+  { id: 'type-bug', project_id: 'project-uuid', name: 'バグ', color: '#ef4444', position: 1 },
+];
+
 /** 担当者の候補。`assignable-users` はメンバー行ではなく利用者そのものを返す */
 type AssignableUser = components['schemas']['AssignableUserResponse'];
 const members: AssignableUser[] = [
@@ -116,6 +121,9 @@ type MountOptions = {
   labels?: typeof labels;
   labelsLoading?: boolean;
   labelsError?: boolean;
+  taskTypes?: typeof taskTypes;
+  taskTypesLoading?: boolean;
+  taskTypesError?: boolean;
   members?: typeof members;
   membersLoading?: boolean;
   membersError?: boolean;
@@ -134,6 +142,9 @@ function mountDialog(queryClient: QueryClient, options: MountOptions = {}) {
       labels: options.labels,
       labelsLoading: options.labelsLoading,
       labelsError: options.labelsError,
+      taskTypes: options.taskTypes,
+      taskTypesLoading: options.taskTypesLoading,
+      taskTypesError: options.taskTypesError,
       members: options.members,
       membersLoading: options.membersLoading,
       membersError: options.membersError,
@@ -1870,6 +1881,149 @@ describe('CreateTaskDialog initialAssigneeIds', () => {
     await new DOMWrapper(getTitleInput()).setValue('外したまま');
     await submit();
     expect(mutateAsync.mock.calls[0][0].body.assignees).toBeUndefined();
+    wrapper.unmount();
+  });
+});
+
+describe('CreateTaskDialog の種別', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    isHydrated.value = true;
+    isPending.value = false;
+    mutateAsync.mockReset();
+    mutateAsync.mockResolvedValue(createdTask);
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  function typeTrigger() {
+    return pickerTrigger(document.body, '種別');
+  }
+
+  async function submitWithTitle(title: string) {
+    await new DOMWrapper(getTitleInput()).setValue(title);
+    getForm().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flushPromises();
+  }
+
+  it('チップ列の先頭に種別を出し、選択肢は「種別なし」と各種別で、色の点が付く', async () => {
+    const wrapper = mountDialog(queryClient, { taskTypes });
+    await nextTick();
+
+    const chips = document.body.querySelector('[data-task-chips]')!;
+    expect(chips.firstElementChild?.querySelector('button[aria-label^="種別"]')).not.toBeNull();
+    const trigger = typeTrigger();
+    expect(trigger.textContent?.trim()).toBe('種別');
+    expect(pickerOptions(trigger).map((option) => accessibleText(option))).toEqual([
+      '種別なし',
+      'タスク',
+      'バグ',
+    ]);
+    expect(
+      pickerOption(trigger, 'バグ').querySelector('[style*="background-color"]'),
+    ).not.toBeNull();
+    expect(trigger.closest('[data-menu-top-layer]')).not.toBeNull();
+    wrapper.unmount();
+  });
+
+  it('選んだ種別を task_type_id として作成リクエストに含め、引き金に名前と色を出す', async () => {
+    const wrapper = mountDialog(queryClient, { taskTypes });
+    await nextTick();
+
+    pickerOption(typeTrigger(), 'バグ').click();
+    await nextTick();
+    expect(typeTrigger().textContent).toContain('バグ');
+    expect(typeTrigger().querySelector('[style*="background-color"]')).not.toBeNull();
+    expect(document.body.querySelector<HTMLInputElement>('input[name="task_type_id"]')?.value).toBe(
+      'type-bug',
+    );
+
+    await submitWithTitle('種別つき');
+
+    expect(mutateAsync).toHaveBeenCalledTimes(1);
+    expect(mutateAsync.mock.calls[0][0].body.task_type_id).toBe('type-bug');
+    wrapper.unmount();
+  });
+
+  it('選ばなければ、「種別なし」に戻しても task_type_id を送らない', async () => {
+    const wrapper = mountDialog(queryClient, { taskTypes });
+    await nextTick();
+    await submitWithTitle('種別なし');
+    expect(mutateAsync.mock.calls[0][0].body).not.toHaveProperty('task_type_id');
+
+    pickerOption(typeTrigger(), 'バグ').click();
+    await nextTick();
+    pickerOption(typeTrigger(), '種別なし').click();
+    await nextTick();
+    await submitWithTitle('戻した');
+
+    expect(mutateAsync.mock.calls[1][0].body).not.toHaveProperty('task_type_id');
+    wrapper.unmount();
+  });
+
+  it('種別だけ選んでも確認し、作成後は未選択に戻る', async () => {
+    const wrapper = mountDialog(queryClient, { taskTypes });
+    await nextTick();
+    pickerOption(typeTrigger(), 'バグ').click();
+    await nextTick();
+
+    pressEscape();
+    await nextTick();
+    expect(!!findButton('破棄する')?.closest('dialog[open]')).toBe(true);
+    clickButton('戻る');
+    await nextTick();
+
+    await submitWithTitle('作成する');
+    expect(typeTrigger().textContent?.trim()).toBe('種別');
+    wrapper.unmount();
+  });
+
+  it('候補が渡されなければ（未指定・0 件）チップを出さない', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    expect(document.body.querySelector('button[aria-label^="種別"]')).toBeNull();
+
+    await wrapper.setProps({ taskTypes: [] });
+    expect(document.body.querySelector('button[aria-label^="種別"]')).toBeNull();
+    wrapper.unmount();
+  });
+
+  it('取得中は読み込み中を、失敗は再試行つきのエラーを出す', async () => {
+    const wrapper = mountDialog(queryClient, { taskTypesLoading: true });
+    await nextTick();
+    const group = () =>
+      document.body.querySelector('[role="group"][aria-labelledby="task-type-label"]');
+    expect(group()?.textContent).toContain('種別を読み込み中');
+
+    await wrapper.setProps({ taskTypesLoading: false, taskTypesError: true });
+    expect(group()?.textContent).toContain('種別の取得に失敗しました');
+    [...group()!.querySelectorAll('button')]
+      .find((b) => b.textContent?.trim() === '再試行')!
+      .click();
+    await nextTick();
+    expect(wrapper.emitted('retryTaskTypes')).toHaveLength(1);
+    wrapper.unmount();
+  });
+
+  it('候補の取得し直しで選んだ種別が消えていたら外し、取得中（undefined）は保持する', async () => {
+    const wrapper = mountDialog(queryClient, { taskTypes });
+    await nextTick();
+    pickerOption(typeTrigger(), 'バグ').click();
+    await nextTick();
+
+    await wrapper.setProps({ taskTypes: undefined, taskTypesLoading: true });
+    await wrapper.setProps({ taskTypes, taskTypesLoading: false });
+    expect(typeTrigger().textContent).toContain('バグ');
+
+    await wrapper.setProps({ taskTypes: taskTypes.filter((t) => t.id !== 'type-bug') });
+    await submitWithTitle('消えた種別');
+    expect(mutateAsync.mock.calls[0][0].body).not.toHaveProperty('task_type_id');
     wrapper.unmount();
   });
 });

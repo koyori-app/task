@@ -241,6 +241,16 @@ export function activityLine(item: ActivityItem, lookups: ActivityLookups = {}):
         ? { kind: 'change', label: '優先度', from: priorityValue(payload.from), to }
         : textLine(item);
     }
+    case 'task_type_changed': {
+      const value = (raw: unknown): ActivityValue | null =>
+        typeof raw === 'string' ? { text: raw } : null;
+      return {
+        kind: 'change',
+        label: '種別',
+        from: value(payload.from),
+        to: value(payload.to) ?? { text: 'なし' },
+      };
+    }
     case 'deadline_changed':
       return {
         kind: 'change',

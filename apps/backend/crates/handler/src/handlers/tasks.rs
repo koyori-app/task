@@ -2,6 +2,7 @@ use axum::{
     Json,
     extract::{Path, Query, State},
     http::StatusCode,
+    response::{IntoResponse, Response},
 };
 use axum_valid::Valid;
 use chrono::Utc;
@@ -28,6 +29,7 @@ use entity::{
     labels, milestones, project_statuses, sprints, task_assignees, task_labels, task_relations,
     tasks, users,
 };
+use payload::task_query::*;
 use payload::tasks::*;
 use service::custom_fields::{
     ensure_required_custom_fields, load_task_custom_field_values, upsert_task_custom_field_values,
@@ -40,7 +42,9 @@ use service::task_activities::{
     extract_mentions, priority_label, record_activity, record_label_diff, status_name,
     task_label_entries,
 };
+use service::task_query::{filter, matches, parse, resolve};
 use service::task_responses::{build_task_response, build_task_responses};
+use service::task_types;
 
 // ─── Task lookup (UUID or KEY-N) ─────────────────────────────────────────
 
@@ -127,6 +131,25 @@ async fn record_task_field_activities<C: ConnectionTrait>(
             }),
         )
         .await?;
+    }
+    if payload.clear_task_type_id || payload.task_type_id.is_some() {
+        let new_type_id = if payload.clear_task_type_id {
+            None
+        } else {
+            payload.task_type_id.or(before.task_type_id)
+        };
+        if new_type_id != before.task_type_id {
+            let from = task_types::task_type_name(db, before.task_type_id).await?;
+            let to = task_types::task_type_name(db, new_type_id).await?;
+            record_activity(
+                db,
+                task_id,
+                Some(user_id),
+                "task_type_changed",
+                serde_json::json!({ "from": from, "to": to }),
+            )
+            .await?;
+        }
     }
     if payload.clear_soft_deadline || payload.soft_deadline.is_some() {
         let before_soft = before.soft_deadline.map(|dt| dt.with_timezone(&Utc));
@@ -323,6 +346,18 @@ enum TaskCursor {
         created_at: chrono::DateTime<chrono::Utc>,
         id: Uuid,
     },
+    #[serde(rename = "updated_at_desc")]
+    UpdatedAtDesc {
+        updated_at: chrono::DateTime<chrono::Utc>,
+        id: Uuid,
+    },
+    #[serde(rename = "numeric")]
+    Numeric {
+        field: String,
+        desc: bool,
+        value: i32,
+        id: Uuid,
+    },
     #[serde(rename = "title_asc")]
     TitleAsc { title: String, id: Uuid },
     #[serde(rename = "title_desc")]
@@ -351,6 +386,11 @@ enum TaskCursor {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TaskSort {
     CreatedAtDesc,
+    UpdatedAtDesc,
+    KeyAsc,
+    KeyDesc,
+    StatusAsc,
+    StatusDesc,
     TitleAsc,
     TitleDesc,
     AssigneeAsc,
@@ -415,10 +455,36 @@ fn response_priority_rank(task: &TaskResponse) -> Result<i32, AppError> {
     Ok(priority_rank(priority))
 }
 
+fn status_sort_key() -> SimpleExpr {
+    Expr::cust("(SELECT s.position FROM project_statuses s WHERE s.id = tasks.status_id)")
+}
 impl TaskSort {
+    fn from_spec(spec: parse::SortSpec) -> Self {
+        use parse::SortField;
+        let name = match spec.field {
+            SortField::Created => "created_at",
+            SortField::Updated => "updated_at",
+            SortField::Title => "title",
+            SortField::Assignee => "assignee",
+            SortField::Priority => "priority",
+            SortField::Due => "deadline",
+            SortField::Key => "key",
+            SortField::Status => "status",
+        };
+        Self::parse(Some(&format!(
+            "{name}_{}",
+            if spec.desc { "desc" } else { "asc" }
+        )))
+    }
+
     /// 知らない値は既定（作成日の新しい順）に倒す。既存の挙動を変えない
     fn parse(raw: Option<&str>) -> Self {
         match raw.unwrap_or("created_at_desc") {
+            "updated_at_desc" => Self::UpdatedAtDesc,
+            "key_asc" => Self::KeyAsc,
+            "key_desc" => Self::KeyDesc,
+            "status_asc" => Self::StatusAsc,
+            "status_desc" => Self::StatusDesc,
             "title_asc" => Self::TitleAsc,
             "title_desc" => Self::TitleDesc,
             "assignee_asc" => Self::AssigneeAsc,
@@ -441,6 +507,30 @@ impl TaskSort {
                 created_at: task.created_at,
                 id: task.id,
             },
+            Self::UpdatedAtDesc => TaskCursor::UpdatedAtDesc {
+                updated_at: task.updated_at,
+                id: task.id,
+            },
+            Self::KeyAsc | Self::KeyDesc | Self::StatusAsc | Self::StatusDesc => {
+                let status = matches!(self, Self::StatusAsc | Self::StatusDesc);
+                let value = if status {
+                    i32::from(
+                        project_statuses::Entity::find_by_id(task.status_id)
+                            .one(db)
+                            .await?
+                            .ok_or(AppError::NotFound)?
+                            .position,
+                    )
+                } else {
+                    task.seq_id
+                };
+                TaskCursor::Numeric {
+                    field: if status { "status" } else { "key" }.into(),
+                    desc: matches!(self, Self::KeyDesc | Self::StatusDesc),
+                    value,
+                    id: task.id,
+                }
+            }
             Self::TitleAsc => TaskCursor::TitleAsc {
                 title: task.title.clone(),
                 id: task.id,
@@ -489,6 +579,46 @@ impl TaskSort {
                         .add(tasks::Column::CreatedAt.eq(at))
                         .add(tasks::Column::Id.lt(id)),
                 )
+            }
+            (Self::UpdatedAtDesc, TaskCursor::UpdatedAtDesc { updated_at, id }) => {
+                let at: DateTimeWithTimeZone = updated_at.into();
+                Condition::any().add(tasks::Column::UpdatedAt.lt(at)).add(
+                    Condition::all()
+                        .add(tasks::Column::UpdatedAt.eq(at))
+                        .add(tasks::Column::Id.lt(id)),
+                )
+            }
+            (
+                sort @ (Self::KeyAsc | Self::KeyDesc | Self::StatusAsc | Self::StatusDesc),
+                TaskCursor::Numeric {
+                    field,
+                    desc,
+                    value,
+                    id,
+                },
+            ) => {
+                let status = matches!(sort, Self::StatusAsc | Self::StatusDesc);
+                if field != if status { "status" } else { "key" }
+                    || desc != matches!(sort, Self::KeyDesc | Self::StatusDesc)
+                {
+                    return Err(AppError::BadRequest);
+                }
+                let key = if status {
+                    status_sort_key()
+                } else {
+                    Expr::col((tasks::Entity, tasks::Column::SeqId))
+                };
+                Condition::any()
+                    .add(if desc {
+                        key.clone().lt(value)
+                    } else {
+                        key.clone().gt(value)
+                    })
+                    .add(
+                        Condition::all()
+                            .add(key.eq(value))
+                            .add(tasks::Column::Id.lt(id)),
+                    )
             }
             (Self::TitleAsc, TaskCursor::TitleAsc { title, id }) => Condition::any()
                 .add(tasks::Column::Title.gt(title.clone()))
@@ -651,6 +781,7 @@ async fn build_task_detail_response(
     ),
     responses(
         (status = 200, description = "タスク一覧", body = TaskListResponse),
+        (status = 400, description = "条件式が不正", body = TaskQueryErrorResponse),
         CrudErrors,
     )
 )]
@@ -659,15 +790,61 @@ pub async fn list_tasks(
     auth: AuthUser,
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
     Query(q): Query<ListTasksQuery>,
-) -> Result<Json<TaskListResponse>, AppError> {
+) -> Result<Response, AppError> {
     auth.require_scope(entity::scopes::Scope::ReadTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
 
+    let timezone = q.timezone.as_deref().unwrap_or("UTC");
+    if timezone.len() > 100 || !service::timezone::exists(&state.db, timezone).await? {
+        return Err(AppError::BadRequest);
+    }
+    let invalid = |errors| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(TaskQueryErrorResponse {
+                message: INVALID_TASK_QUERY.into(),
+                errors,
+            }),
+        )
+            .into_response()
+    };
+    let parsed = match parse::parse(q.q.as_deref().unwrap_or("")) {
+        Ok(p) => p,
+        Err(errors) => return Ok(invalid(errors)),
+    };
+    let resolved = match resolve::resolve(
+        &state.db,
+        &resolve::ResolveContext {
+            project_id,
+            viewer_id: auth.user_id,
+        },
+        parsed,
+    )
+    .await?
+    {
+        Ok(r) => r,
+        Err(errors) => return Ok(invalid(errors)),
+    };
+    if resolved.sort.is_some() && q.sort.is_some() {
+        return Ok(invalid(vec![parse::error(
+            TaskQueryErrorCode::ConflictingSort,
+            Some(service::task_query::lex::Key::Sort),
+            None,
+            q.q.clone().unwrap_or_default(),
+        )]));
+    }
     let mut query = tasks::Entity::find()
         .filter(tasks::Column::ProjectId.eq(project_id))
-        .filter(tasks::Column::DeletedAt.is_null())
-        .filter(tasks::Column::IsArchived.eq(q.is_archived));
+        .filter(tasks::Column::DeletedAt.is_null());
+    // `is:archived` / `-is:archived` は書かれた分すべてを AND で満たす（互いに矛盾すれば 0 件）。
+    // 式に無いときだけ従来の `is_archived` パラメーターに従う。
+    if resolved.archived.is_empty() {
+        query = query.filter(tasks::Column::IsArchived.eq(q.is_archived));
+    }
+    for archived in &resolved.archived {
+        query = query.filter(tasks::Column::IsArchived.eq(*archived));
+    }
 
     if let Some(sid) = q.status_id {
         query = query.filter(tasks::Column::StatusId.eq(sid));
@@ -678,6 +855,9 @@ pub async fn list_tasks(
     }
     if let Some(mid) = q.milestone_id {
         query = query.filter(tasks::Column::MilestoneId.eq(mid));
+    }
+    if let Some(tid) = q.task_type_id {
+        query = query.filter(tasks::Column::TaskTypeId.eq(tid));
     }
     if let Some(sid) = q.sprint_id {
         query = query.filter(tasks::Column::SprintId.eq(sid));
@@ -722,6 +902,7 @@ pub async fn list_tasks(
         ));
     }
 
+    query = query.filter(filter::condition(&resolved, timezone));
     if q.root_only {
         // ページング前の同じ絞り込み条件を満たす親だけを存在扱いにする。
         // 親が条件外で子だけが条件内なら、その子をルートとして返す。
@@ -737,7 +918,10 @@ pub async fn list_tasks(
         );
     }
 
-    let sort = TaskSort::parse(q.sort.as_deref());
+    let sort = resolved
+        .sort
+        .map(TaskSort::from_spec)
+        .unwrap_or_else(|| TaskSort::parse(q.sort.as_deref()));
     let limit = q.limit.clamp(1, 200);
     let total = query.clone().count(&state.db).await?;
 
@@ -751,6 +935,11 @@ pub async fn list_tasks(
     }
 
     query = match sort {
+        TaskSort::UpdatedAtDesc => query.order_by_desc(tasks::Column::UpdatedAt),
+        TaskSort::KeyAsc => query.order_by_asc(tasks::Column::SeqId),
+        TaskSort::KeyDesc => query.order_by_desc(tasks::Column::SeqId),
+        TaskSort::StatusAsc => query.order_by(status_sort_key(), Order::Asc),
+        TaskSort::StatusDesc => query.order_by(status_sort_key(), Order::Desc),
         TaskSort::CreatedAtDesc => query.order_by_desc(tasks::Column::CreatedAt),
         TaskSort::TitleAsc => query.order_by_asc(tasks::Column::Title),
         TaskSort::TitleDesc => query.order_by_desc(tasks::Column::Title),
@@ -792,11 +981,18 @@ pub async fn list_tasks(
     } else {
         None
     };
+    let matches = if resolved.has_positive_text() {
+        matches::for_tasks(&state.db, project_id, &resolved, &tasks).await?
+    } else {
+        HashMap::new()
+    };
     Ok(Json(TaskListResponse {
+        matches,
         tasks,
         total,
         next_cursor,
-    }))
+    })
+    .into_response())
 }
 
 #[axum::debug_handler]
@@ -979,6 +1175,14 @@ pub async fn update_task(
         state.db.begin().await?
     };
 
+    // 種別は確かめるだけで、ロックは取らない（`milestone_id` と同じ。service::task_types の方針）。確認のあとに
+    // 削除されたら FK が更新を弾き、assignment_error が 404 にする
+    if !payload.clear_task_type_id
+        && let Some(type_id) = payload.task_type_id
+    {
+        task_types::find_in_project(&txn, project_id, type_id).await?;
+    }
+
     // スプリント完了・一括割り当てと同じく、スプリント → タスクの順にロックする。
     if !payload.clear_sprint_id
         && let Some(sprint_id) = payload.sprint_id
@@ -1076,6 +1280,13 @@ pub async fn update_task(
             .await?
             .ok_or(AppError::NotFound)?;
         active.milestone_id = Set(Some(v));
+    }
+    // 外す指定が値の指定より優先される（`clear_*` の他の項目と同じ）
+    if payload.clear_task_type_id {
+        active.task_type_id = Set(None);
+    } else if let Some(v) = payload.task_type_id {
+        // 確認は、タスク行を取る前に済ませている
+        active.task_type_id = Set(Some(v));
     }
     if payload.clear_sprint_id {
         active.sprint_id = Set(None);
@@ -1201,7 +1412,10 @@ pub async fn update_task(
             active.parent_task_id = Set(Some(new_parent_id));
         }
     }
-    let updated = active.update(&txn).await?;
+    let updated = active
+        .update(&txn)
+        .await
+        .map_err(task_types::assignment_error)?;
     if let Some(ref desired) = payload.assignees {
         let current = task_assignees::Entity::find()
             .filter(task_assignees::Column::TaskId.eq(task_id))
@@ -1991,4 +2205,22 @@ pub async fn remove_relation(
     .await?;
     txn.commit().await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod task_query_cursor_tests {
+    use super::*;
+    #[test]
+    fn updated_cursor_rejects_a_different_sort() {
+        let cursor = TaskCursor::UpdatedAtDesc {
+            updated_at: Utc::now(),
+            id: Uuid::new_v4(),
+        };
+        assert!(TaskSort::TitleAsc.keyset_after(cursor).is_err());
+        let cursor = TaskCursor::UpdatedAtDesc {
+            updated_at: Utc::now(),
+            id: Uuid::new_v4(),
+        };
+        assert!(TaskSort::UpdatedAtDesc.keyset_after(cursor).is_ok());
+    }
 }

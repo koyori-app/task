@@ -1,0 +1,119 @@
+use super::{
+    lex::Key,
+    parse::{DueValue, FilterValue, SearchScope},
+    resolve::{ResolvedTaskQuery, ResolvedText, ResolvedValue},
+};
+use entity::tasks;
+use sea_orm::sea_query::{Expr, ExprTrait};
+use sea_orm::{ColumnTrait, Condition, Value};
+
+/// 本文の `<@利用者ID>` の印を、語に含まれない区切り（制御文字 U+0001）に置き換えた式。語の ILIKE は印の中の
+/// UUID に当てない（`42`・`add` のような 16 進の文字だけの語が、メンションの UUID に当たって塗りも抜粋もない
+/// 行を出さないため）。空文字に置き換えると前後がつながり、`確認<@ID>お願い` が語「確認お願い」に当たってしまう
+/// ので、区切りに置き換えて印をまたぐ語は当てない（抜粋側は印を `@名` に戻した本文なので、同じくまたがない）。
+/// `@名` の検索は別経路（下の `mention_ids`）で印そのものに当てる。
+pub fn mask_mentions(column: &str) -> String {
+    format!("regexp_replace({column}, '<@[0-9a-fA-F-]{{36}}>', chr(1), 'g')")
+}
+pub fn ilike_pattern(text: &str) -> String {
+    format!("%{}%", common::db::escape_like(text))
+}
+pub fn text_condition(text: &ResolvedText, scope: SearchScope) -> Condition {
+    let mut any = Condition::any();
+    let pattern = ilike_pattern(&text.text);
+    // 印の置き換えに使う U+0001 を含む語は、説明とコメントでは印の位置にしか当たらないので当てない
+    // （`?q=%01` がメンションを含む行すべてに当たり、`-%01` がそれらを落とすのを防ぐ）
+    let masked = !text.text.contains('\u{1}');
+    for (enabled, sql) in [
+        (scope.title, "tasks.title ILIKE $1 ESCAPE '\\'".to_string()),
+        (
+            scope.description && masked,
+            format!(
+                "{} ILIKE $1 ESCAPE '\\'",
+                mask_mentions("COALESCE(tasks.description, '')")
+            ),
+        ),
+        (
+            scope.comment && masked,
+            format!(
+                "EXISTS (SELECT 1 FROM task_comments c WHERE c.task_id = tasks.id AND c.deleted_at IS NULL AND {} ILIKE $1 ESCAPE '\\')",
+                mask_mentions("c.body")
+            ),
+        ),
+    ] {
+        if enabled {
+            any = any.add(Expr::cust_with_values(sql, [pattern.clone()]));
+        }
+    }
+    for id in &text.mention_ids {
+        let pattern = format!("%<@{id}>%");
+        if scope.description {
+            any = any.add(Expr::cust_with_values(
+                "COALESCE(tasks.description, '') LIKE $1",
+                [pattern.clone()],
+            ));
+        }
+        if scope.comment {
+            any = any.add(Expr::cust_with_values("EXISTS (SELECT 1 FROM task_comments c WHERE c.task_id = tasks.id AND c.deleted_at IS NULL AND c.body LIKE $1)", [pattern]));
+        }
+    }
+    any
+}
+pub fn condition(resolved: &ResolvedTaskQuery, timezone: &str) -> Condition {
+    let mut all = Condition::all();
+    for t in &resolved.texts {
+        let term = text_condition(t, resolved.scope);
+        all = all.add(if t.negated { term.not() } else { term });
+    }
+    for f in &resolved.filters {
+        let term = match &f.value {
+            ResolvedValue::Ids(ids) => match f.key {
+                Key::Status => Condition::all().add(tasks::Column::StatusId.is_in(ids.clone())),
+                Key::Author => Condition::all().add(tasks::Column::CreatedBy.is_in(ids.clone())),
+                Key::Label | Key::Assignee => {
+                    let (table, column) = if f.key == Key::Label {
+                        ("task_labels", "label_id")
+                    } else {
+                        ("task_assignees", "user_id")
+                    };
+                    let mut any = Condition::any();
+                    for id in ids {
+                        any = any.add(Expr::cust_with_values(format!("EXISTS (SELECT 1 FROM {table} x WHERE x.task_id = tasks.id AND x.{column} = $1)"), [*id]));
+                    }
+                    any
+                }
+                _ => unreachable!("only name conditions resolve to ids"),
+            },
+            ResolvedValue::Other(value) => match value {
+                FilterValue::Priorities(values) => {
+                    Condition::all().add(tasks::Column::Priority.is_in(values.clone()))
+                }
+                FilterValue::NoAssignee => Condition::all().add(Expr::cust(
+                    "NOT EXISTS (SELECT 1 FROM task_assignees a WHERE a.task_id = tasks.id)",
+                )),
+                FilterValue::NoLabel => Condition::all().add(Expr::cust(
+                    "NOT EXISTS (SELECT 1 FROM task_labels l WHERE l.task_id = tasks.id)",
+                )),
+                FilterValue::Subtask => {
+                    Condition::all().add(tasks::Column::ParentTaskId.is_not_null())
+                }
+                FilterValue::Due(values) => {
+                    let due = crate::deadline_filter::due_date_sql("tasks");
+                    let today = crate::deadline_filter::today_sql("$1");
+                    let mut any = Condition::any();
+                    for value in values {
+                        any = any.add(match value {
+                            DueValue::Overdue => Expr::cust_with_values(format!("{due} < {today} AND EXISTS (SELECT 1 FROM project_statuses s WHERE s.id = tasks.status_id AND s.is_done_state = false)"), vec![Value::from(timezone)]),
+                            DueValue::Within(n) => Expr::cust_with_values(format!("{due} >= {today} AND {due} < {today} + $2::integer"), vec![Value::from(timezone), Value::from(i32::from(*n))]),
+                        });
+                    }
+                    // NULL の期限は false に寄せる。否定（-due:overdue など）では期限なしのタスクが残る。
+                    Condition::all().add(Expr::expr(any).if_null(false))
+                }
+                FilterValue::Names(_) => unreachable!("names are resolved first"),
+            },
+        };
+        all = all.add(if f.negated { term.not() } else { term });
+    }
+    all
+}

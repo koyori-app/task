@@ -46,6 +46,15 @@ pub enum ReviewError {
     NotDeferrable(FindingSeverity),
     #[error("project {0} has no default status; cannot create the deferred task")]
     NoDefaultStatus(Uuid),
+    /// 引き継ぎ元と引き継ぎ先が同じ PR。
+    #[error("carry-over source and destination are the same pull request")]
+    CarryOverSamePullRequest,
+    /// 引き継ぎ元の PR にラウンドが無い（番号や `from_repo` の取り違え）。
+    #[error("pull request #{0} has no review rounds to carry over")]
+    CarryOverSourceHasNoRounds(i32),
+    /// 引き継げる指摘が無い（解決済みか、引き継ぎ済み）。
+    #[error("pull request #{from_pr} has no findings to carry over to #{to_pr}")]
+    NothingToCarryOver { from_pr: i32, to_pr: i32 },
     #[error(transparent)]
     Db(#[from] sea_orm::DbErr),
 }
@@ -75,6 +84,17 @@ impl From<ReviewError> for common::error::AppError {
             ReviewError::NoDefaultStatus(_) => Self::ConflictDetail(
                 "プロジェクトに既定ステータスが無いため、繰り延べ先のタスクを作れません".into(),
             ),
+            // 引き継ぎ元と引き継ぎ先の取り違えは入力の誤り
+            ReviewError::CarryOverSamePullRequest => {
+                Self::BadRequestDetail("引き継ぎ元と引き継ぎ先が同じ PR です".into())
+            }
+            // 元 PR の番号違いも 409 にして理由を届ける（CLI は 404 を固定文言に丸める）
+            ReviewError::CarryOverSourceHasNoRounds(pr) => Self::ConflictDetail(format!(
+                "PR #{pr} にレビューラウンドがありません（PR 番号と from_repo を確かめてください）"
+            )),
+            ReviewError::NothingToCarryOver { from_pr, to_pr } => Self::ConflictDetail(format!(
+                "PR #{from_pr} に引き継げる指摘がありません（未解決（open / fixing / fixed）で、PR #{to_pr} へまだ引き継いでいないものが対象です）"
+            )),
             ReviewError::Db(err) => err.into(),
         }
     }
@@ -169,11 +189,24 @@ fn scoped_rounds(
         .filter(reviews::Column::PrNumber.eq(pr_number))
 }
 
+/// レビューとして数えるラウンド。引き継ぎで作った写し（`carried_by` が有る行）を除く。
+///
+/// 写しは指摘の入れ物で、誰かがその head を見た記録ではない。「ラウンドが 1 件以上」
+/// 「最新ラウンドの head」「その head にラウンドを出した人」の判定はこちらで引く。
+fn review_rounds(
+    project_id: Uuid,
+    repo: &RepoRef,
+    pr_number: i32,
+) -> sea_orm::Select<reviews::Entity> {
+    scoped_rounds(project_id, repo, pr_number).filter(reviews::Column::CarriedBy.is_null())
+}
+
 /// PR 内の次のラウンド番号を返す。
 ///
 /// 同じ PR に同時にラウンドを作られると
 /// `UNIQUE (project_id, repo_owner, repo_name, pr_number, round)` にぶつかるため、
-/// プロジェクト行を掴んで採番から挿入までを直列化する。
+/// プロジェクト行を NO KEY UPDATE で掴んで採番から挿入までを直列化する。
+/// 互いには競合するが、通知やタスク挿入の FK 検査（KEY SHARE）は妨げない。
 /// レビューの起票は頻度が低く、この粒度で待たせても実害がない。
 pub async fn next_round<C: ConnectionTrait>(
     db: &C,
@@ -182,7 +215,7 @@ pub async fn next_round<C: ConnectionTrait>(
     pr_number: i32,
 ) -> Result<i32, sea_orm::DbErr> {
     projects::Entity::find_by_id(project_id)
-        .lock(LockType::Update)
+        .lock(LockType::NoKeyUpdate)
         .one(db)
         .await?;
 
@@ -236,6 +269,182 @@ pub async fn review_participants<C: ConnectionTrait>(
     }
 
     Ok(ids)
+}
+
+/// 引き継ぎで作った写しのラウンドと、その指摘。
+#[derive(Debug, Clone)]
+pub struct CarriedRound {
+    pub review: reviews::Model,
+    pub findings: Vec<review_findings::Model>,
+}
+
+/// 履歴や総評に書く、引き継ぎ元のラウンドの呼び名（`PR #790 R3`）。
+///
+/// リポジトリが違うときだけ接頭辞を付ける。連携前のラウンド（空のリポジトリ）は
+/// `連携前の` と書く。
+fn carry_origin_label(
+    from_repo: &RepoRef,
+    to_repo: &RepoRef,
+    pr_number: i32,
+    round: i32,
+) -> String {
+    let base = format!("PR #{pr_number} R{round}");
+    if from_repo.owner == to_repo.owner && from_repo.name == to_repo.name {
+        base
+    } else if from_repo.is_linked() {
+        format!("{}/{} の {base}", from_repo.owner, from_repo.name)
+    } else {
+        format!("連携前の {base}")
+    }
+}
+
+/// 別の PR の未解決（open / fixing / fixed）の指摘を、`to_pr` の新しいラウンドへ写す。
+///
+/// 元の記録には触れない。未解決の指摘を持つ元ラウンド 1 本につき、写しのラウンドを
+/// 1 本作る（`carried_by` を持ち、[`review_rounds`] には数えない）。写しの作成者と
+/// `head_sha` は元のラウンドのままにする。作成者を引き継いだ人にすると、PR の作者が
+/// 自分で引き継いで High を `rejected` にでき、マージ基準を 1 人で迂回できてしまう。
+/// 引き継ぎ済みの指摘は飛ばす（再実行しても増えない）。
+///
+/// 呼び出し側はトランザクションを渡すこと。
+pub async fn carry_over<C: ConnectionTrait>(
+    db: &C,
+    project_id: Uuid,
+    from_repo: &RepoRef,
+    from_pr: i32,
+    to_repo: &RepoRef,
+    to_pr: i32,
+    actor_id: Uuid,
+) -> Result<Vec<CarriedRound>, ReviewError> {
+    let same_repo = from_repo.owner == to_repo.owner && from_repo.name == to_repo.name;
+    if same_repo && from_pr == to_pr {
+        return Err(ReviewError::CarryOverSamePullRequest);
+    }
+
+    let source_rounds = scoped_rounds(project_id, from_repo, from_pr)
+        .order_by_asc(reviews::Column::Round)
+        .all(db)
+        .await?;
+    if source_rounds.is_empty() {
+        return Err(ReviewError::CarryOverSourceHasNoRounds(from_pr));
+    }
+
+    // 遷移と同じ指摘→プロジェクトの順にロックし、写す状態を確定する。
+    // 採番の NO KEY UPDATE は FK 検査の KEY SHARE と競合しないので、
+    // 遷移の通知・繰り延べタスク作成と循環せず、起票同士は直列になる。
+    let mut unresolved: Vec<review_findings::Model> = review_findings::Entity::find()
+        .filter(review_findings::Column::ReviewId.is_in(source_rounds.iter().map(|r| r.id)))
+        .order_by_asc(review_findings::Column::CreatedAt)
+        .order_by_asc(review_findings::Column::Id)
+        .lock(LockType::Share)
+        .all(db)
+        .await?
+        .into_iter()
+        .filter(|finding| finding.state.counts_as_unresolved())
+        .collect();
+
+    let mut next = next_round(db, project_id, to_repo, to_pr).await?;
+
+    // 引き継ぎ済みを除く。写しが今どの状態でも、引き継いだ事実は変わらない
+    if !unresolved.is_empty() {
+        let destination_ids: Vec<Uuid> = scoped_rounds(project_id, to_repo, to_pr)
+            .select_only()
+            .column(reviews::Column::Id)
+            .into_tuple()
+            .all(db)
+            .await?;
+        let already: std::collections::HashSet<Uuid> = review_findings::Entity::find()
+            .filter(review_findings::Column::ReviewId.is_in(destination_ids))
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|finding| finding.carried_root_finding_id.unwrap_or(finding.id))
+            .collect();
+        let mut seen = already;
+        unresolved
+            .retain(|finding| seen.insert(finding.carried_root_finding_id.unwrap_or(finding.id)));
+    }
+    if unresolved.is_empty() {
+        return Err(ReviewError::NothingToCarryOver { from_pr, to_pr });
+    }
+
+    ensure_pull_request_row(db, project_id, to_repo, to_pr).await?;
+
+    let now = chrono::Utc::now();
+    let mut carried = Vec::new();
+    for source in &source_rounds {
+        let mine: Vec<&review_findings::Model> = unresolved
+            .iter()
+            .filter(|finding| finding.review_id == source.id)
+            .collect();
+        if mine.is_empty() {
+            continue;
+        }
+        let origin = carry_origin_label(from_repo, to_repo, from_pr, source.round);
+        let review = reviews::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            project_id: Set(project_id),
+            integration_id: Set(to_repo.integration_id),
+            repo_owner: Set(to_repo.owner.clone()),
+            repo_name: Set(to_repo.name.clone()),
+            pr_number: Set(to_pr),
+            round: Set(next),
+            head_sha: Set(source.head_sha.clone()),
+            reviewer_id: Set(source.reviewer_id),
+            summary: Set(format!(
+                "{origin} から未解決の指摘 {} 件を引き継ぎ",
+                mine.len()
+            )),
+            pr_title: Set(None),
+            pr_author: Set(None),
+            pr_head_sha: Set(None),
+            pr_head_checked_at: Set(None),
+            summary_comment_id: Set(None),
+            carried_from_review_id: Set(Some(source.id)),
+            carried_by: Set(Some(actor_id)),
+            created_at: Set(now.into()),
+        }
+        .insert(db)
+        .await?;
+        next += 1;
+
+        let mut findings = Vec::with_capacity(mine.len());
+        for original in mine {
+            let finding = review_findings::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                review_id: Set(review.id),
+                severity: Set(original.severity),
+                title: Set(original.title.clone()),
+                body: Set(original.body.clone()),
+                file: Set(original.file.clone()),
+                line: Set(original.line),
+                state: Set(original.state),
+                // 繰り延べ先タスクは引き継がない（未解決の写しは deferred ではない）
+                deferred_task_id: Set(None),
+                fixed_by: Set(original.fixed_by),
+                carried_from_finding_id: Set(Some(original.id)),
+                carried_root_finding_id: Set(Some(
+                    original.carried_root_finding_id.unwrap_or(original.id),
+                )),
+                created_at: Set(now.into()),
+                updated_at: Set(now.into()),
+            }
+            .insert(db)
+            .await?;
+            record_transition(
+                db,
+                finding.id,
+                actor_id,
+                None,
+                finding.state,
+                Some(format!("{origin} の指摘 {} から引き継ぎ", original.id)),
+            )
+            .await?;
+            findings.push(finding);
+        }
+        carried.push(CarriedRound { review, findings });
+    }
+    Ok(carried)
 }
 
 /// PR 作者がまだ埋まっていないラウンド。要約ジョブが作者を控えるときの通知対象を、
@@ -663,6 +872,7 @@ pub async fn create_deferred_task<C: ConnectionTrait>(
         hard_deadline: Set(None),
         planned_start_on: Set(None),
         require_all_assignees_done: Set(false),
+        task_type_id: Set(None),
         estimated_minutes: Set(None),
         is_archived: Set(false),
         created_by: Set(actor_id),
@@ -937,7 +1147,7 @@ pub async fn latest_head_sha<C: ConnectionTrait>(
     repo: &RepoRef,
     pr_number: i32,
 ) -> Result<Option<String>, sea_orm::DbErr> {
-    let latest: Option<String> = scoped_rounds(project_id, repo, pr_number)
+    let latest: Option<String> = review_rounds(project_id, repo, pr_number)
         .select_only()
         .column(reviews::Column::HeadSha)
         .order_by_desc(reviews::Column::Round)
@@ -956,7 +1166,7 @@ pub async fn reviewer_ids_at_head<C: ConnectionTrait>(
     pr_number: i32,
     head_sha: &str,
 ) -> Result<Vec<Uuid>, sea_orm::DbErr> {
-    scoped_rounds(project_id, repo, pr_number)
+    review_rounds(project_id, repo, pr_number)
         .filter(reviews::Column::HeadSha.eq(head_sha))
         .select_only()
         .column(reviews::Column::ReviewerId)
@@ -1028,14 +1238,14 @@ pub async fn cached_pr_head<C: ConnectionTrait>(
     })
 }
 
-/// PR 内のラウンド数（= 最大の round）。
+/// PR 内のレビューのラウンド数（= 引き継ぎの写しを除く最大の round）。
 pub async fn round_count<C: ConnectionTrait>(
     db: &C,
     project_id: Uuid,
     repo: &RepoRef,
     pr_number: i32,
 ) -> Result<i32, sea_orm::DbErr> {
-    let last: Option<i32> = scoped_rounds(project_id, repo, pr_number)
+    let last: Option<i32> = review_rounds(project_id, repo, pr_number)
         .select_only()
         .column(reviews::Column::Round)
         .order_by_desc(reviews::Column::Round)
@@ -1095,15 +1305,17 @@ pub async fn reviewed_pull_requests<C: ConnectionTrait>(
                 unresolved: 0,
                 blocking: 0,
                 blocking_fixed: 0,
-                last_reviewed_at: round.created_at.with_timezone(&chrono::Utc),
+                last_reviewed_at: None,
                 state: "unknown".into(),
                 merged_at: None,
                 merge_effects_processed_at: None,
                 pull_request_id: None,
             });
         // ラウンドは round 昇順なので、最後に見たものが最新
-        entry.rounds = round.round;
-        entry.last_reviewed_at = round.created_at.with_timezone(&chrono::Utc);
+        if round.carried_by.is_none() {
+            entry.rounds = round.round;
+            entry.last_reviewed_at = Some(round.created_at.with_timezone(&chrono::Utc));
+        }
         if round.pr_title.is_some() {
             entry.pr_title = round.pr_title.clone();
         }
@@ -1243,7 +1455,10 @@ pub async fn blocking_by_task_pull_request<C: ConnectionTrait>(
 /// 要約コメントに使う 1 PR ぶんの状態。
 pub struct SummarySnapshot {
     pub pr_number: i32,
+    /// レビューのラウンド数（引き継ぎの写しを除く）
     pub rounds: i32,
+    /// 引き継ぎの写しを含めて、ラウンドが 1 本でもあるか。要約コメントを書くかの判定に使う
+    pub has_rounds: bool,
     pub counts: Vec<(FindingSeverity, FindingState, u64)>,
     pub blocking: u64,
     /// 最新ラウンドがレビューした commit
@@ -1309,7 +1524,11 @@ pub async fn summary_snapshot<C: ConnectionTrait>(
     let owner_override_rejections =
         owner_override_rejection_count(db, project_id, repo, pr_number).await?;
 
-    let latest = scoped_rounds(project_id, repo, pr_number)
+    let has_rounds = scoped_rounds(project_id, repo, pr_number)
+        .one(db)
+        .await?
+        .is_some();
+    let latest = review_rounds(project_id, repo, pr_number)
         .order_by_desc(reviews::Column::Round)
         .one(db)
         .await?;
@@ -1320,6 +1539,7 @@ pub async fn summary_snapshot<C: ConnectionTrait>(
     Ok(SummarySnapshot {
         pr_number,
         rounds,
+        has_rounds,
         counts,
         blocking,
         latest_head_sha,
@@ -1381,6 +1601,12 @@ pub fn render_summary_comment(
                  確認できませんでした。"
             ),
         };
+    } else if snapshot.blocking == 0 && snapshot.rounds == 0 {
+        // 引き継いだ指摘だけがあり、この PR のレビューはまだ無い
+        let _ = writeln!(
+            out,
+            "**未レビュー** — 引き継いだ指摘だけがあり、この PR のレビューはまだありません。"
+        );
     } else {
         let _ = writeln!(
             out,
@@ -1624,6 +1850,47 @@ mod tests {
             AppError::from(ReviewError::SelfVerification),
             AppError::Forbidden
         ));
+
+        // 引き継ぎ: 元 PR の番号違いと、引き継ぐ指摘が無いときも理由を返す
+        let no_rounds = message(ReviewError::CarryOverSourceHasNoRounds(790));
+        assert!(
+            no_rounds.contains("#790") && no_rounds.contains("レビューラウンドがありません"),
+            "どの PR に無いのか分かる: {no_rounds}"
+        );
+        let nothing = message(ReviewError::NothingToCarryOver {
+            from_pr: 790,
+            to_pr: 1119,
+        });
+        assert!(
+            nothing.contains("#790")
+                && nothing.contains("#1119")
+                && nothing.contains("引き継げる指摘がありません"),
+            "元と先が分かる: {nothing}"
+        );
+        // 同じ PR は入力の誤りなので 400
+        assert!(matches!(
+            AppError::from(ReviewError::CarryOverSamePullRequest),
+            AppError::BadRequestDetail(_)
+        ));
+    }
+
+    #[test]
+    fn carry_origin_names_the_repository_only_when_it_differs() {
+        let repo = |owner: &str, name: &str| RepoRef {
+            integration_id: None,
+            owner: owner.into(),
+            name: name.into(),
+        };
+        let current = repo("acme", "app");
+        assert_eq!(carry_origin_label(&current, &current, 790, 3), "PR #790 R3");
+        assert_eq!(
+            carry_origin_label(&repo("acme", "old"), &current, 790, 3),
+            "acme/old の PR #790 R3"
+        );
+        assert_eq!(
+            carry_origin_label(&RepoRef::unlinked(), &current, 790, 3),
+            "連携前の PR #790 R3"
+        );
     }
 
     /// 繰り延べはマージ可否の集計から外れるため、マージ前必須の重大度には許さない。
@@ -1696,6 +1963,7 @@ mod tests {
         SummarySnapshot {
             pr_number: 618,
             rounds: 2,
+            has_rounds: true,
             counts,
             blocking,
             // 既定は「レビューした commit = 現在の head」（鮮度は満たしている）
@@ -1837,6 +2105,44 @@ mod tests {
             "2026-08-26 10:00",
         );
         assert!(overridden.contains("オーナー代行での棄却: 2 件"));
+    }
+
+    /// 引き継いだ指摘だけがある PR は「未レビュー」と書く（「マージ可」でも「マージ不可」でもない）。
+    /// 塞ぐ指摘があるときは、既存の「マージ不可」のまま。
+    #[test]
+    fn summary_comment_says_unreviewed_for_carried_findings_only() {
+        let carried_only = |counts| SummarySnapshot {
+            rounds: 0,
+            latest_head_sha: None,
+            latest_reviewer_id: None,
+            ..snapshot(counts)
+        };
+        let low = render_summary_comment(
+            &carried_only(vec![(FindingSeverity::Low, Open, 1)]),
+            MARKER,
+            "2026-08-26 10:00",
+        );
+        assert!(low.contains("**未レビュー**"), "{low}");
+        assert!(
+            !low.contains("マージ可") && !low.contains("マージ不可"),
+            "{low}"
+        );
+
+        let high = render_summary_comment(
+            &carried_only(vec![(FindingSeverity::High, Open, 1)]),
+            MARKER,
+            "2026-08-26 10:00",
+        );
+        assert!(high.contains("マージ不可"), "{high}");
+        assert!(!high.contains("未レビュー"), "{high}");
+
+        // 対照: レビューのラウンドがあれば未レビューとは書かない
+        let reviewed = render_summary_comment(
+            &snapshot(vec![(FindingSeverity::Low, Open, 1)]),
+            MARKER,
+            "2026-08-26 10:00",
+        );
+        assert!(!reviewed.contains("未レビュー"), "{reviewed}");
     }
 
     #[test]

@@ -331,15 +331,39 @@ describe('useTaskComments', () => {
 
   it('削除が API に拒否されたら false を返し、サーバの message を見せる', async () => {
     control.threads = [sampleThread('c-1', '消せないコメント')];
-    control.rejectDelete = { status: 403, message: 'forbidden' };
+    control.rejectDelete = { status: 409, message: 'conflict' };
     mountHost();
     await flushPromises();
 
     const deleted = await comments.deleteComment('c-1');
 
     expect(deleted).toBe(false);
-    expect(comments.deleteError.value).toBe('コメントを削除できませんでした（forbidden）');
+    expect(comments.deleteError.value).toBe('コメントを削除できませんでした（conflict）');
     expect(comments.deletingCommentId.value).toBe(null);
     expect(comments.deleteErrorCommentId.value).toBe('c-1');
+  });
+
+  it('削除の 403 は、投稿者とテナントオーナーだけと明記する', async () => {
+    control.threads = [sampleThread('c-1', '消せないコメント')];
+    control.rejectDelete = { status: 403, message: 'forbidden' };
+    mountHost();
+    await flushPromises();
+
+    await comments.deleteComment('c-1');
+
+    expect(comments.deleteError.value).toBe(
+      'コメントを削除できるのは、投稿者とテナントオーナーだけです。',
+    );
+  });
+
+  it('削除が 500 のときは、サーバの message を見せる', async () => {
+    control.threads = [sampleThread('c-1', '消せないコメント')];
+    control.rejectDelete = { status: 500, message: 'boom' };
+    mountHost();
+    await flushPromises();
+
+    await comments.deleteComment('c-1');
+
+    expect(comments.deleteError.value).toBe('コメントを削除できませんでした（boom）');
   });
 });

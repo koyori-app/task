@@ -92,7 +92,7 @@ export type RenderOptions = {
   readonly currentUserId?: string | null;
   /**
    * メンションの札をプロフィールへの link にする時のテナント（表示用 id）。省けば札は link にならない。
-   * `taskRef` とは別に持つ（コメントは KEY-N の link を付けぬまま、札だけを link にするため）。
+   * `taskRef` とは別の引数で、メンションのリンク先を指定する。
    */
   readonly mentionTenant?: string;
 };

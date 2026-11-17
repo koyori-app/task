@@ -1,3 +1,6 @@
+import { tokenizeTaskQuery } from '@/lib/task-query/tokenize';
+import { sortOf } from '@/lib/task-query/edit';
+import { activeTaskListSort, type TaskListSortingState } from '@/components/tasks/task-list-sort';
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test';
 import { provide, reactive, nextTick } from 'vue';
@@ -298,19 +301,6 @@ const sampleLabels = [
   },
 ];
 
-const sampleSearchTasks = {
-  tasks: [
-    {
-      id: 'task-search-1',
-      seq_id: 42,
-      title: 'OAuth 検索結果',
-      highlight: '<em>OAuth</em> 認証 &amp; フローを更新する',
-      score: 0.98,
-    },
-  ],
-  total: 75,
-};
-
 /**
  * fetch モックで全 API エンドポイントを差し替える
  */
@@ -413,8 +403,8 @@ function createMockFetch(
     projects?: typeof sampleProjects;
     statuses?: typeof sampleStatuses;
     tasks?: { tasks: unknown[]; total: number };
-    searchTasks?: typeof sampleSearchTasks;
     rejectSearch?: boolean;
+    invalidQuery?: boolean;
     rejectAll?: boolean;
     rejectTenantsList?: boolean;
     rejectLabels?: boolean;
@@ -517,8 +507,89 @@ function createMockFetch(
       const body = (await req.clone().json()) as { status_id?: string };
       if (body.status_id) savedStatusIds.set(updateMatch[1]!, body.status_id);
     }
+    if (url.includes('/tasks/facets'))
+      return jsonResponse({
+        statuses: sampleStatuses.map((s) => ({ id: s.id, count: 2 })),
+        labels: sampleLabels.map((l) => ({ id: l.id, count: 12 })),
+        assignees: [],
+        authors: [],
+        priorities: [],
+        unassigned: 2,
+        unlabeled: 1,
+      });
     // List 表示はステータスごとに問い合わせる。件数（total）もその絞り込みで返す
     const query = new URL(url, 'http://localhost').searchParams;
+    const expression = query.get('q') ?? '';
+    if (expression && overrides.rejectSearch) return jsonResponse({ message: 'server error' }, 500);
+    if (expression && overrides.invalidQuery)
+      return jsonResponse(
+        {
+          message: 'invalid-task-query',
+          errors: [
+            { code: 'unknown-value', key: 'status', value: '無い名前', term: 'status:無い名前' },
+          ],
+        },
+        400,
+      );
+    const tokens = tokenizeTaskQuery(expression);
+    const words = tokens
+      .filter((t) => t.kind !== 'qualifier' && !t.negated)
+      .map((t) => (t.kind !== 'qualifier' ? t.text : ''));
+    function filterQuery<
+      T extends { title?: string; status_id?: string; labels?: { id?: string; name?: string }[] },
+    >(tasks: T[]): T[] {
+      return tasks.filter((task) =>
+        tokens.every((t) => {
+          let match = true;
+          if (t.kind !== 'qualifier')
+            match = (task.title ?? '').includes(t.text) || t.text === '通知';
+          else if (t.key === 'status')
+            match = t.values.includes(
+              sampleStatuses.find((s) => s.id === task.status_id)?.name ?? '',
+            );
+          else if (t.key === 'label')
+            match =
+              task.labels?.some((l) =>
+                t.values.includes(
+                  l.name ?? sampleLabels.find((label) => label.id === l.id)?.name ?? '',
+                ),
+              ) ?? false;
+          return t.negated ? !match : match;
+        }),
+      );
+    }
+    function withMatches(tasks: { id: string; title?: string }[]) {
+      return Object.fromEntries(
+        tasks.map((t) => [
+          t.id,
+          {
+            title: words.length ? [{ text: t.title ?? '', hit: true }] : null,
+            snippets: words.length
+              ? [
+                  {
+                    source: 'description',
+                    segments: [{ text: '通知の送信を確認します', hit: true }],
+                    truncated_start: false,
+                    truncated_end: false,
+                    comment: null,
+                  },
+                  {
+                    source: 'comment',
+                    segments: [{ text: '通知について確認しました', hit: true }],
+                    truncated_start: false,
+                    truncated_end: false,
+                    comment: {
+                      id: 'comment-1',
+                      author: { id: 'user-1', username: '佐藤', avatar_url: null },
+                      created_at: '2026-11-12T00:00:00Z',
+                    },
+                  },
+                ]
+              : [],
+          },
+        ]),
+      );
+    }
     const statusFilter = query.get('status_id');
     const labelFilter = query.get('label_id');
     const parentFilter = query.get('parent_task_id');
@@ -540,19 +611,21 @@ function createMockFetch(
           SortableStoryTask & { id: string; status_id: string; labels: Array<{ id: string }> }
         >
       ).map((task) => ({ ...task, status_id: savedStatusIds.get(task.id) ?? task.status_id }));
-      const filtered = all.filter(
+      const filtered = filterQuery(all).filter(
         (task) =>
           task.status_id === statusFilter &&
           (!labelFilter || task.labels.some((label) => label.id === labelFilter)),
       );
-      const sorted = sortStoryTasks(filtered, query.get('sort'));
-      return jsonResponse({ tasks: sorted, total: sorted.length });
-    }
-    if (url.includes('/tasks/search')) {
-      if (overrides.rejectSearch) {
-        return jsonResponse({ message: 'search failed' }, 500);
-      }
-      return jsonResponse(overrides.searchTasks ?? sampleSearchTasks);
+      const sorted = sortStoryTasks(
+        filtered,
+        expression ? taskListApiSort(sortOf(expression)) : query.get('sort'),
+      );
+      return jsonResponse({
+        tasks: sorted,
+        total: sorted.length,
+        next_cursor: null,
+        matches: withMatches(sorted),
+      });
     }
     // 単体タスク詳細（分割ビューのペインが叩く）: /tasks/{seqKey}
     const detailMatch = url.match(/\/tasks\/([^/?]+)(?:\?|$)/);
@@ -569,7 +642,20 @@ function createMockFetch(
       return jsonResponse({ ...task, labels: task.labels ?? [] });
     }
     if (url.includes('/tasks')) {
-      return jsonResponse(overrides.tasks ?? sampleTasks);
+      const tasks = filterQuery(
+        (overrides.tasks ?? sampleTasks).tasks as Array<{
+          id: string;
+          title: string;
+          status_id: string;
+          labels: { name: string }[];
+        }>,
+      );
+      return jsonResponse({
+        tasks,
+        total: tasks.length,
+        next_cursor: null,
+        matches: withMatches(tasks),
+      });
     }
     // 残ったプロジェクト系だけを最後に受ける
     if (url.includes('/v1/tenants/') && url.includes('/projects')) {
@@ -719,7 +805,10 @@ function createLabelFilterMockFetch(): LabelFilterMock {
     if (url.includes('/labels')) {
       return jsonResponse(sampleLabels);
     }
-    if (url.includes('/tasks') && url.includes('label_id=label-bug')) {
+    if (
+      url.includes('/tasks') &&
+      new URL(url, 'http://localhost').searchParams.get('q')?.includes('label:bug')
+    ) {
       await filteredTasksGate;
       return jsonResponse(bugFilteredTasks);
     }
@@ -801,7 +890,7 @@ const meta = {
       description: {
         component:
           'プロジェクトタスク一覧の TanStack Table ビュー。fetch モックで全 API エンドポイントを差し替え。' +
-          ' 入力のデバウンス後にプロジェクトスコープのサーバー側検索 API へ接続する。',
+          ' 条件式を Enter で確定すると、同じ一覧 API で絞り込む。',
       },
     },
   },
@@ -840,67 +929,59 @@ export const Empty: Story = {
   },
 };
 
-export const SearchResults: Story = {
-  name: 'サーバー検索・正常',
+const filteredContext = (q: string, view = 'list') => ({
+  ...mockContext,
+  urlParsed: { search: { q, view } },
+});
+export const FilterCommitted: Story = {
+  decorators: [storyDecorator(filteredContext('通知 sort:priority'))],
+  beforeEach: mockFetch,
+};
+export const SuggestWhileTyping: Story = {
   beforeEach: mockFetch,
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    const searchInput = await canvas.findByRole('searchbox', { name: 'タスクを検索' });
-    await userEvent.type(searchInput, 'OAuth');
-
-    await expect(canvas.findByText('OAuth 検索結果')).resolves.toBeInTheDocument();
-    const highlight = canvasElement.querySelector('td em');
-    await expect(highlight).toBeInTheDocument();
-    await expect(highlight).toHaveTextContent('OAuth');
-    await expect(highlight?.closest('td')).toHaveTextContent('OAuth 認証 & フローを更新する');
-    await expect(
-      canvas.findByText(/上位\s+1\s+件\s+\/\s+全\s+75\s+件/),
-    ).resolves.toBeInTheDocument();
-    await expect(canvas.findByText('ENG-42')).resolves.toBeInTheDocument();
-    await expect(canvas.queryByText('ログイン画面の UI 実装')).not.toBeInTheDocument();
+    await userEvent.type(
+      await within(canvasElement).findByRole('combobox', { name: 'タスクを検索' }),
+      'label:b',
+    );
   },
 };
-
-export const EmptySearchInput: Story = {
-  name: 'サーバー検索・空入力',
+export const SuggestKeys: Story = {
   beforeEach: mockFetch,
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    const searchInput = await canvas.findByRole('searchbox', { name: 'タスクを検索' });
-    await userEvent.type(searchInput, '   ');
-    await new Promise((resolve) => setTimeout(resolve, 400));
-
-    await expect(canvas.findByText('OAuth 対応を実装する')).resolves.toBeInTheDocument();
-    await expect(canvas.queryByText('OAuth 検索結果')).not.toBeInTheDocument();
+    await userEvent.click(
+      await within(canvasElement).findByRole('combobox', { name: 'タスクを検索' }),
+    );
   },
 };
-
-export const SearchNoResults: Story = {
-  name: 'サーバー検索・0件',
-  beforeEach: () => createMockFetch({ searchTasks: { tasks: [], total: 0 } }),
+export const SyntaxCard: Story = {
+  beforeEach: mockFetch,
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    const searchInput = await canvas.findByRole('searchbox', { name: 'タスクを検索' });
-    await userEvent.type(searchInput, '存在しないタスク');
-
-    await expect(canvas.findByText('検索結果がありません')).resolves.toBeInTheDocument();
-    await expect(
-      canvas.findByText(/上位\s+0\s+件\s+\/\s+全\s+0\s+件/),
-    ).resolves.toBeInTheDocument();
+    await userEvent.click(
+      await within(canvasElement).findByRole('button', { name: '書き方の早見表' }),
+    );
   },
 };
-
-export const SearchApiError: Story = {
-  name: 'サーバー検索・APIエラー',
+export const FilterNoResults: Story = {
+  decorators: [storyDecorator(filteredContext('存在しないタスク'))],
+  beforeEach: mockFetch,
+};
+export const FilterInvalidQuery: Story = {
+  decorators: [storyDecorator(filteredContext('status:無い名前'))],
+  beforeEach: () => createMockFetch({ invalidQuery: true }),
+};
+export const FilterApiError: Story = {
+  decorators: [storyDecorator(filteredContext('通知'))],
   beforeEach: () => createMockFetch({ rejectSearch: true }),
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    const searchInput = await canvas.findByRole('searchbox', { name: 'タスクを検索' });
-    await userEvent.type(searchInput, '失敗する検索');
-
-    await expect(canvas.findByText('検索に失敗しました')).resolves.toBeInTheDocument();
-    await expect(canvas.findByRole('button', { name: '再試行' })).resolves.toBeInTheDocument();
-  },
+};
+export const FilterTable: Story = {
+  decorators: [storyDecorator(filteredContext('通知 sort:priority', 'table'))],
+  beforeEach: mockFetch,
+};
+export const FilterNarrow: Story = {
+  ...FilterCommitted,
+  parameters: { viewport: { defaultViewport: 'mobile1' } },
+  globals: { viewport: { value: 'mobile1', isRotated: false } },
 };
 
 const listContext = {
@@ -1414,7 +1495,7 @@ export const ListViewSubtasks: Story = {
 
     // 展開中にラベルで絞ると、親は残り、ラベルのない子は消える。
     await user.click(await canvas.findByRole('button', { name: 'ラベル' }));
-    await user.click(await screen.findByRole('menuitemradio', { name: /bug/ }));
+    await user.click(await screen.findByRole('menuitemcheckbox', { name: /bug/ }));
     await expect(
       canvas.findByRole('textbox', { name: 'OAuth 対応を実装する のサブタスク名' }),
     ).resolves.toBeInTheDocument();
@@ -1768,11 +1849,13 @@ export const ProjectSwitch: Story = {
     await userEvent.click(await canvas.findByRole('button', { name: 'ラベル' }));
     const labelMenu = within(document.body);
     await expect(
-      labelMenu.findByRole('menuitemradio', { name: /campaign/ }),
+      labelMenu.findByRole('menuitemcheckbox', { name: /campaign/ }),
     ).resolves.toBeInTheDocument();
-    await expect(labelMenu.queryByRole('menuitemradio', { name: /bug/ })).not.toBeInTheDocument();
     await expect(
-      labelMenu.queryByRole('menuitemradio', { name: /エンジニアリング/ }),
+      labelMenu.queryByRole('menuitemcheckbox', { name: /bug/ }),
+    ).not.toBeInTheDocument();
+    await expect(
+      labelMenu.queryByRole('menuitemcheckbox', { name: /エンジニアリング/ }),
     ).not.toBeInTheDocument();
   },
 };
@@ -1798,7 +1881,7 @@ export const LabelFilter: Story = {
 
     await user.click(await canvas.findByRole('button', { name: 'ラベル' }));
     const menu = within(document.body);
-    await user.click(await menu.findByRole('menuitemradio', { name: /bug/ }));
+    await user.click(await menu.findByRole('menuitemcheckbox', { name: /bug/ }));
 
     // フィルタ済みレスポンスが返るまで、旧条件（未絞り込み）のタスクを表示しない
     const pollUntil = performance.now() + 1000;
@@ -1904,3 +1987,11 @@ export const SplitPaneResize: Story = {
     await expect(localStorage.getItem('tasks-split-view')).toBe(String(start - 10));
   },
 };
+
+// Storybook の旧 API モックに合わせる変換。
+function taskListApiSort(sorting: TaskListSortingState): string {
+  const active = activeTaskListSort(sorting);
+  return active
+    ? `${active.id === 'due_date' ? 'deadline' : active.id}_${active.desc ? 'desc' : 'asc'}`
+    : 'created_at_desc';
+}

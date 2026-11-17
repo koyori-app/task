@@ -4,8 +4,9 @@ use chrono::Utc;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, prelude::Uuid};
 
 use crate::error::AppError;
-use entity::{labels, task_assignees, task_labels, tasks, users};
+use entity::{labels, project_task_types, task_assignees, task_labels, tasks, users};
 use payload::labels::LabelResponse;
+use payload::task_types::TaskTypeResponse;
 use payload::tasks::{TaskAssigneeSummary, TaskResponse};
 use payload::users::UserSummary;
 
@@ -13,8 +14,8 @@ fn sort_task_labels(task_labels: &mut [LabelResponse]) {
     task_labels.sort_by(|a, b| a.name.cmp(&b.name).then(a.id.cmp(&b.id)));
 }
 
-/// tasks::Model の集合からユーザー情報（作成者・担当者）とラベルを埋め込んだ
-/// TaskResponse を組み立てる。関連はバッチ取得（追加クエリ4本）。
+/// tasks::Model の集合からユーザー情報（作成者・担当者）とラベル・種別を埋め込んだ
+/// TaskResponse を組み立てる。関連はバッチ取得（追加クエリ5本）。
 pub async fn build_task_responses<C: ConnectionTrait>(
     db: &C,
     task_models: Vec<tasks::Model>,
@@ -54,6 +55,16 @@ pub async fn build_task_responses<C: ConnectionTrait>(
         sort_task_labels(task_labels);
     }
 
+    let task_type_map: HashMap<Uuid, TaskTypeResponse> = project_task_types::Entity::find()
+        .filter(
+            project_task_types::Column::Id.is_in(task_models.iter().filter_map(|t| t.task_type_id)),
+        )
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|t| (t.id, t.into()))
+        .collect();
+
     let mut user_ids: HashSet<Uuid> = task_models.iter().map(|t| t.created_by).collect();
     user_ids.extend(assignee_rows.iter().map(|a| a.user_id));
     let user_map: HashMap<Uuid, UserSummary> = users::Entity::find()
@@ -87,7 +98,10 @@ pub async fn build_task_responses<C: ConnectionTrait>(
             let created_by = user_map.get(&t.created_by).cloned();
             let assignees = assignees_by_task.remove(&t.id).unwrap_or_default();
             let task_labels = labels_by_task.remove(&t.id).unwrap_or_default();
-            TaskResponse::from_parts(t, created_by, assignees, task_labels)
+            let task_type = t
+                .task_type_id
+                .and_then(|id| task_type_map.get(&id).cloned());
+            TaskResponse::from_parts(t, created_by, assignees, task_labels, task_type)
         })
         .collect())
 }

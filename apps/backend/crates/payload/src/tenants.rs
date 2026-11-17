@@ -77,6 +77,17 @@ pub enum TenantMembershipKind {
     Guest,
 }
 
+/// `GET /v1/tenants` の要素のうち、テナントを指すのに要る項目だけ（CLI が読む）。
+///
+/// 応答の全体（`TenantListItemResponse`）で読むと、CLI が使わない項目の増減で止まる。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TenantRef {
+    pub id: Uuid,
+    pub display_id: String,
+    #[serde(default)]
+    pub name: String,
+}
+
 /// `GET /v1/tenants` 専用のレスポンス。テナントの欄に `membership` の印を加えたもの。
 ///
 /// 客分（membership=Guest）のテナントは一覧に出る。客分に開く tenant-wide の口は
@@ -141,5 +152,45 @@ impl TenantListItemResponse {
             membership,
             member_role,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// CLI は `GET /v1/tenants` を `TenantRef` で読む。サーバーが返す全体の応答を読み戻せる。
+    #[test]
+    fn a_tenant_ref_reads_the_list_item_the_server_returns() {
+        let item = TenantListItemResponse {
+            id: Uuid::from_u128(1),
+            display_id: "acme".into(),
+            name: "Acme".into(),
+            description: String::new(),
+            icon_url: String::new(),
+            icon_emoji: None,
+            owner_id: None,
+            drive_quota_bytes: None,
+            require_2fa: None,
+            membership: TenantMembershipKind::Member,
+            member_role: None,
+        };
+
+        let tenant: TenantRef =
+            serde_json::from_value(serde_json::to_value(&item).unwrap()).unwrap();
+
+        assert_eq!(tenant.id, item.id);
+        assert_eq!(tenant.display_id, "acme");
+        assert_eq!(tenant.name, "Acme");
+    }
+
+    #[test]
+    fn a_tenant_ref_without_a_name_is_still_readable() {
+        let tenant: TenantRef = serde_json::from_value(serde_json::json!({
+            "id": Uuid::from_u128(1),
+            "display_id": "acme",
+        }))
+        .unwrap();
+        assert_eq!(tenant.name, "");
     }
 }

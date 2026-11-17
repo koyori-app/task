@@ -13,3 +13,6 @@ node_modules
 
 # macOS
 .DS_Store
+
+# scripts/verify.sh のログ
+/.verify/

@@ -48,12 +48,17 @@ const sampleProject: ProjectResponse = {
   personal_owner_id: null,
 };
 
-function mountView(options: { searchSection?: string } = {}) {
+function mountView(options: { searchSection?: string; canManage?: boolean } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return mount(ProjectSettingsView, {
-    props: { tenantId: TENANT_UUID, tenantSlug: 'acme', project: sampleProject },
+    props: {
+      tenantId: TENANT_UUID,
+      tenantSlug: 'acme',
+      project: sampleProject,
+      canManage: options.canManage ?? true,
+    },
     global: {
       plugins: [[VueQueryPlugin, { queryClient }]],
       provide:
@@ -248,5 +253,109 @@ describe('ProjectSettingsView', () => {
     const nav = document.body.querySelector('nav[aria-label="設定セクション"]')!;
     const activeNav = nav.querySelector('button[aria-current="true"]');
     expect(activeNav?.textContent).toContain('一般');
+  });
+
+  it('403 は権限不足と明記する', async () => {
+    updateMutateAsync.mockRejectedValue({ response: { status: 403 } });
+    mountView();
+    await flushPromises();
+
+    await formEl().trigger('submit');
+    await flushPromises();
+
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toContain(
+      'プロジェクトの設定を変更できるのは、テナントのオーナーと Admin だけです。',
+    );
+    expect(document.body.textContent).not.toContain('プロジェクトを更新できませんでした');
+  });
+
+  describe('プロジェクトを管理できない人（canManage: false）', () => {
+    function navLabels() {
+      const nav = document.body.querySelector('nav[aria-label="設定セクション"]')!;
+      return [...nav.querySelectorAll('button')].map((b) => b.textContent?.trim());
+    }
+
+    it('一般は読み取りだけで、保存の入力も保存ボタンも出さず、案内文を出す', async () => {
+      mountView({ canManage: false });
+      await flushPromises();
+
+      expect(document.body.querySelector('form')).toBeNull();
+      expect(document.body.querySelector('#name')).toBeNull();
+      expect(
+        [...document.body.querySelectorAll('button')].some((b) =>
+          b.textContent?.includes('変更を保存'),
+        ),
+      ).toBe(false);
+      const main = document.body.textContent ?? '';
+      expect(main).toContain('Team Alpha');
+      expect(main).toContain('Shared project');
+      expect(main).toContain('ALPHA');
+      expect(document.body.querySelector('[role="status"]')?.textContent).toContain(
+        '名前・説明・アイコンを変更できるのは、テナントのオーナーと Admin だけです。',
+      );
+    });
+
+    it('ナビに「削除」が無く、削除の確認も出せない', async () => {
+      mountView({ canManage: false });
+      await flushPromises();
+
+      expect(navLabels()).not.toContain('削除');
+      expect(navLabels()).toContain('ワークフロー');
+      expect(document.body.querySelector('button[aria-label="プロジェクトを削除"]')).toBeNull();
+    });
+
+    it('他の節（ワークフローなど）へは切り替えられる', async () => {
+      mountView({ canManage: false });
+      await flushPromises();
+
+      const nav = document.body.querySelector('nav[aria-label="設定セクション"]')!;
+      const workflow = [...nav.querySelectorAll('button')].find((b) =>
+        b.textContent?.includes('ワークフロー'),
+      );
+      workflow!.click();
+      await flushPromises();
+
+      expect(nav.querySelector('button[aria-current="true"]')?.textContent).toContain(
+        'ワークフロー',
+      );
+    });
+
+    it('?section=danger で来ても、削除ではなく一般を出す', async () => {
+      mountView({ canManage: false, searchSection: 'danger' });
+      await flushPromises();
+
+      const nav = document.body.querySelector('nav[aria-label="設定セクション"]')!;
+      expect(nav.querySelector('button[aria-current="true"]')?.textContent).toContain('一般');
+      expect(document.body.textContent).not.toContain(
+        'このプロジェクトとすべてのタスクを完全に削除します',
+      );
+    });
+
+    it('削除の節を開いたまま canManage が false になったら、一般へ戻る', async () => {
+      const wrapper = mountView({ canManage: true });
+      await flushPromises();
+      const nav = document.body.querySelector('nav[aria-label="設定セクション"]')!;
+      [...nav.querySelectorAll('button')].find((b) => b.textContent?.includes('削除'))!.click();
+      await flushPromises();
+      expect(document.body.textContent).toContain(
+        'このプロジェクトとすべてのタスクを完全に削除します',
+      );
+
+      await wrapper.setProps({ canManage: false });
+      await flushPromises();
+
+      expect(nav.querySelector('button[aria-current="true"]')?.textContent).toContain('一般');
+      expect(document.body.textContent).not.toContain(
+        'このプロジェクトとすべてのタスクを完全に削除します',
+      );
+    });
+
+    it('対照: canManage が true なら、保存の入力と「削除」が出る', async () => {
+      mountView({ canManage: true });
+      await flushPromises();
+
+      expect(document.body.querySelector('#name')).not.toBeNull();
+      expect(navLabels()).toContain('削除');
+    });
   });
 });

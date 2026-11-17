@@ -196,6 +196,10 @@ pub struct TaskAttachmentResponse {
     pub url: String,
     #[schema(value_type = String, format = "date-time")]
     pub created_at: chrono::DateTime<chrono::Utc>,
+    /// 添付を作成した利用者。解除できるのはこの利用者とテナントオーナー。
+    /// この欄を返さない旧いサーバーの応答では `None`
+    #[schema(value_type = Option<String>, format = "uuid", nullable)]
+    pub created_by: Option<Uuid>,
     /// 添付の由来。`manual`（手動）または `body`（Drive の Markdown 本文から抽出）
     #[schema(example = "manual")]
     pub source: String,
@@ -215,6 +219,7 @@ impl TaskAttachmentResponse {
             mime_type: file.mime_type,
             size: file.size,
             created_at: row.created_at.with_timezone(&chrono::Utc),
+            created_by: Some(row.created_by),
             source: row.source,
         }
     }
