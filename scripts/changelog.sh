@@ -32,6 +32,8 @@ cliff() {
 # PR の数だけの項目に広げる。PR の本文の Closes #N と Closes TASK-N（Fixes / Resolves も。大文字小文字を
 # 問わない）は、題に無いものだけを「（#N、TASK-N を解決）」として題に足す（cliff.toml が Issue と
 # タスクへのリンクにする）。Closes 等の付かない TASK-N の言及は載せない。
+# コード（フェンスとインライン）・引用の行・HTML のコメントの中の Closes は、他の PR の説明などで
+# この PR の宣言ではないので拾わない（GitHub もコードの中は解釈しない）。
 # 取れなければ止める（表が無いと下の PR が黙って抜けた CHANGELOG ができる）
 fetch_pr_map() {
   [ -z "${CHANGELOG_PR_MAP:-}" ] || return 0
@@ -44,6 +46,8 @@ fetch_pr_map() {
   gh api --paginate "repos/$REPO/pulls?state=closed&per_page=100" >"$pulls" ||
     { echo "PR の一覧を取れない（gh auth login か GH_TOKEN を確かめる）" >&2; exit 1; }
   jq -r 'def closes($ref): [(.body // "")
+        | gsub("```[\\s\\S]*?```"; "") | gsub("<!--[\\s\\S]*?-->"; "")
+        | gsub("`[^`\\n]*`"; "") | gsub("(?m)^[ \\t]*>[^\\n]*"; "")
         | scan("(?i)\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\\s+" + $ref + "([0-9]+)\\b") | .[0] | tonumber]
       | unique | map(tostring);
     .[] | select(.merged_at != null) | .title as $title
@@ -58,24 +62,32 @@ fetch_pr_map() {
   export CHANGELOG_PR_MAP
 }
 
-latest_tag() { git tag -l 'v*' --sort=-v:refname | head -1; }
+# 版のタグ（cliff.toml の tag_pattern と同じ形）だけを扱う。v0.1.53-rc.1 などは版と見なさない
+VERSION_TAG='^v[0-9]+\.[0-9]+\.[0-9]+$'
+is_version_tag() { grep -qE "$VERSION_TAG" <<<"$1"; }
+version_tags() { git tag -l 'v*' "$@" | { grep -E "$VERSION_TAG" || true; }; }
+
+latest_tag() { version_tags --sort=-v:refname | head -1; }
 
 # 最初のコミット。git-cliff は範囲の終わりだけを渡せないので、始まりに使う
 first_commit() { git rev-list --max-parents=0 HEAD | tail -1; }
 
 # <tag> の 1 つ前の v* タグ。無ければ空
 previous_tag() {
-  git tag -l 'v*' --sort=v:refname | awk -v tag="$1" '$0 == tag { print prev; exit } { prev = $0 }'
+  version_tags --sort=v:refname | awk -v tag="$1" '$0 == tag { print prev; exit } { prev = $0 }'
 }
 
 write() {
   local tag=${1:-$(latest_tag)}
+  # 版でないタグまでで作ると「未リリース」の節が入り、ずれの検査が落ち続ける
+  is_version_tag "$tag" || { echo "版のタグ（vX.Y.Z）でない: $tag" >&2; exit 1; }
   cliff --output "$root/CHANGELOG.md" "$(first_commit)..$tag"
 }
 
 notes() {
   local tag=${1:-$(latest_tag)} prev
-  if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+  # 版でないタグ（rc など）は、まだ無いタグと同じく、最後の版の後ろの分をその名前で出す
+  if is_version_tag "$tag" && git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
     prev=$(previous_tag "$tag")
     cliff --strip header "${prev:-$(first_commit)}..$tag"
   else
@@ -126,6 +138,20 @@ check() {
   out=$(notes v0.1.16)
   grep -qF '（[#683](https://github.com/koyori-app/task/issues/683) を解決） ([#684](https://github.com/koyori-app/task/pull/684))' <<<"$out" ||
     fail "PR の本文の Closes（#683）が出ていない"
+  out=$(notes v0.1.0)
+  # 引用とコードの中の Closes（#350 の本文は #351 の `Closes #309` を説明しているだけ）は拾わない。
+  # 対照として、行頭に Closes #309 を持つ #351 は解決として載せる
+  grep -qF -- '- **frontend**: create tasks from the project view ([#350](https://github.com/koyori-app/task/pull/350))' <<<"$out" ||
+    fail "引用の中の Closes（#350 の #309）を解決として拾っている"
+  grep -qF '（[#309](https://github.com/koyori-app/task/issues/309) を解決） ([#351](https://github.com/koyori-app/task/pull/351))' <<<"$out" ||
+    fail "PR の本文の Closes（#351 の #309）が出ていない"
+  # 題にも本文の Closes にもある #N（#278 の #151）は題の側だけを残す
+  grep -qF -- '- **workspace**: service / job / handler クレートへ分割 ([#151](https://github.com/koyori-app/task/issues/151) Phase 4) ([#278](https://github.com/koyori-app/task/pull/278))' <<<"$out" ||
+    fail "題と Closes にある #151（#278）が 1 度でない"
+  # 版のタグは vX.Y.Z だけ（rc などを最新の版や前の版にしない）
+  is_version_tag v0.1.52 || fail "v0.1.52 を版のタグと見ていない"
+  is_version_tag v0.1.53-rc.1 && fail "v0.1.53-rc.1 を版のタグと見ている"
+  [ "$(previous_tag v0.1.52)" = v0.1.51 ] || fail "v0.1.52 の前の版が v0.1.51 でない"
 
   # CHANGELOG.md は、先頭の版までを生成し直した結果と一致する
   [ -f "$root/CHANGELOG.md" ] || fail "CHANGELOG.md が無い: scripts/changelog.sh write"

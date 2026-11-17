@@ -779,7 +779,7 @@ v0.1.0 初回リリース
 - e2e foundation ([#111](https://github.com/koyori-app/task/pull/111))
 - **frontend**: 登録成功表示にパスワード再設定への導線を追加する（[#135](https://github.com/koyori-app/task/issues/135) を解決） ([#345](https://github.com/koyori-app/task/pull/345))
 - **frontend**: connect project nav to the projects API（[#306](https://github.com/koyori-app/task/issues/306) を解決） ([#349](https://github.com/koyori-app/task/pull/349))
-- **frontend**: create tasks from the project view（[#309](https://github.com/koyori-app/task/issues/309) を解決） ([#350](https://github.com/koyori-app/task/pull/350))
+- **frontend**: create tasks from the project view ([#350](https://github.com/koyori-app/task/pull/350))
 - **frontend**: focus My Tasks on assigned tasks（[#359](https://github.com/koyori-app/task/issues/359) を解決） ([#360](https://github.com/koyori-app/task/pull/360))
 - **frontend**: プロジェクトの作成・編集・削除（デザイン準拠のページ + サイドバー導線）（[#365](https://github.com/koyori-app/task/issues/365)、[#369](https://github.com/koyori-app/task/issues/369) を解決） ([#366](https://github.com/koyori-app/task/pull/366))
 - **frontend**: edit and delete tasks from the detail hub（[#309](https://github.com/koyori-app/task/issues/309) を解決） ([#351](https://github.com/koyori-app/task/pull/351))

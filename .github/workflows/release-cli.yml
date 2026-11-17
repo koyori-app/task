@@ -214,7 +214,10 @@ jobs:
         with:
           tool: git-cliff@2.14.2
 
+      # 検査は GitHub の上の今の PR の題・本文を読むので、マージ済みの PR を後から直すと落ちる。
+      # タグの push で落とすとリリースと無関係な理由で公開が止まるので、PR と手動実行だけで回す
       - name: Check the changelog
+        if: github.event_name != 'push' || github.ref_type != 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: scripts/changelog.sh check
@@ -231,7 +234,7 @@ jobs:
             scripts/changelog.sh notes v0.0.0 > release-notes.md
           fi
           cat release-notes.md >> "$GITHUB_STEP_SUMMARY"
-          [ -s release-notes.md ] || { echo "::error::リリースの本文が空です"; exit 1; }
+          grep -q '^## \[' release-notes.md || { echo "::error::リリースの本文に版の見出しがありません"; exit 1; }
 
       # 名前を release ジョブの pattern: task-* に当てない（配布物に混ぜない）
       - name: Upload
