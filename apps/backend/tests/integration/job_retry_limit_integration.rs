@@ -31,6 +31,9 @@ const QUEUE_LABEL: &str = "retry-limit-probe";
 const DEADLINE: Duration = Duration::from_secs(120);
 /// 上限を越えて走るなら、この間に次の試行が走る（再試行は待たずに即座に走る）
 const SETTLE: Duration = Duration::from_secs(3);
+/// 試験ごとの見張り。上限で打ち切られないリトライは休まず回って tokio のタイマーを止めるので、
+/// `DEADLINE` の timeout は効かない。正常の最長（初回の schema 同期込みで 1 分余り）の三倍ほど
+const WATCHDOG: Duration = Duration::from_secs(240);
 
 /// 試行を数える。上限を越えて走れば成功するので、越えたかどうかが結果にも表れる。
 async fn fails_until_beyond(
@@ -76,6 +79,7 @@ fn run_failing_job(
     policy: AttemptLimit<apalis::layers::retry::RetryPolicy>,
     max_attempts: usize,
 ) -> Outcome {
+    let _watchdog = crate::common::watchdog("失敗し続けるジョブの試行が止まること", WATCHDOG);
     let runs: Runs = Arc::default();
     let mut outcome = None;
     let events = sentry::test::with_captured_events(|| {

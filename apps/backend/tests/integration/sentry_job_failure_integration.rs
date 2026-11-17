@@ -27,6 +27,9 @@ const VICTIM: &str = "victim@example.com";
 const DEADLINE: Duration = Duration::from_secs(180);
 /// 使い切った後も回り続けるリトライが、重複して報告しないことを見る長さ
 const SETTLE: Duration = Duration::from_secs(3);
+/// 試験ごとの見張り。上限で打ち切られないリトライは休まず回って tokio のタイマーを止めるので、
+/// `DEADLINE` の timeout は効かない。正常の最長（初回の schema 同期込みで 1 分余り）の三倍ほど
+const WATCHDOG: Duration = Duration::from_secs(240);
 
 fn probe_storage(app: &TestApp, queue: &str) -> ProbeStorage {
     PostgresStorage::new(&app.state.pg_pool).with_config(Config::default().queue(queue))
@@ -108,6 +111,7 @@ fn events_of_failing_job(
     policy: AttemptLimit<RetryPolicy>,
     max_attempts: usize,
 ) -> Vec<Event<'static>> {
+    let _watchdog = crate::common::watchdog("失敗し続けるジョブの試行の使い切り", WATCHDOG);
     sentry::test::with_captured_events(|| {
         let subscriber = tracing_subscriber::registry().with(observability::tracing_layer());
         tracing::subscriber::with_default(subscriber, || {
@@ -174,6 +178,7 @@ fn refetched_job_reports_only_when_killed() {
 
 #[test]
 fn successful_job_reports_nothing() {
+    let _watchdog = crate::common::watchdog("成功するジョブの Done", WATCHDOG);
     let events = sentry::test::with_captured_events(|| {
         runtime().block_on(async {
             let app = TestApp::new().await;
