@@ -8,8 +8,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use apalis::prelude::{BackoffConfig, BoxDynError, Data, IntervalStrategy, StrategyBuilder};
-use apalis_postgres::{Config, JsonCodec, PgPool, PgTask, PostgresStorage};
+use apalis::prelude::{BoxDynError, Data};
+use apalis_postgres::{Config, PgPool, PostgresStorage};
 use sea_orm::{ActiveEnum, EntityTrait};
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -41,23 +41,18 @@ impl TenantInvitationEmailJob {
     }
 }
 
-pub type TenantInvitationEmailStorage = PostgresStorage<
-    TenantInvitationEmailJob,
-    apalis_postgres::CompactType,
-    JsonCodec<apalis_postgres::CompactType>,
-    apalis_postgres::PgNotify,
->;
+pub type TenantInvitationEmailStorage = PostgresStorage<TenantInvitationEmailJob>;
 
 pub fn build_storage(pool: &PgPool, _settings: &Settings) -> TenantInvitationEmailStorage {
-    let config = Config::new(QUEUE_NAME).with_poll_interval(
-        StrategyBuilder::new()
-            .apply(
-                IntervalStrategy::new(Duration::from_secs(2))
-                    .with_backoff(BackoffConfig::default()),
-            )
-            .build(),
-    );
-    PostgresStorage::new_with_notify(pool, &config)
+    PostgresStorage::new(pool).with_config(Config::default().queue(QUEUE_NAME))
+}
+
+/// ワーカーが使う backend。INSERT の通知（LISTEN）と、取りこぼしを拾う定期の poll を併用する。
+/// ワーカーの世代ごとに作り直す（通知の接続は世代ごとに張る）。
+pub fn worker_backend(
+    storage: &TenantInvitationEmailStorage,
+) -> crate::WorkerBackend<TenantInvitationEmailJob> {
+    crate::worker_backend(storage, Duration::from_secs(2))
 }
 
 pub async fn setup(
@@ -78,11 +73,11 @@ async fn enqueue_in(
     invitation_id: Uuid,
     generation: i32,
 ) -> Result<(), anyhow::Error> {
-    let task = PgTask::new(serde_json::to_vec(&TenantInvitationEmailJob::new(
+    let task = crate::new_task(serde_json::to_vec(&TenantInvitationEmailJob::new(
         invitation_id,
         generation,
     ))?);
-    apalis_postgres::sink::push_tasks(tx, Config::new(QUEUE_NAME), vec![task]).await?;
+    apalis_postgres::queries::push_tasks(tx, QUEUE_NAME, vec![task]).await?;
     Ok(())
 }
 

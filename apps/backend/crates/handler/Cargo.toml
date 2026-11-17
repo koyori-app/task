@@ -13,7 +13,7 @@ anyhow = { workspace = true }
 auth-core = { workspace = true }
 forge-core = { workspace = true }
 forge-github = { workspace = true }
-apalis-postgres = { version = "1.0.0-rc.8", default-features = false, features = ["migrate", "tokio-comp", "time"] }
+apalis-postgres = { version = "1.1.0", default-features = false, features = ["migrate", "tokio-comp"] }
 axum = { workspace = true, features = ["multipart"] }
 axum-extra = { version = "0.12", default-features = false, features = ["query"] }
 axum-valid = "0.25.0"

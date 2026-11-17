@@ -7,10 +7,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use apalis::prelude::{
-    BackoffConfig, BoxDynError, Data, IntervalStrategy, StrategyBuilder, TaskSink,
-};
-use apalis_postgres::{Config, JsonCodec, PgPool, PostgresStorage};
+use apalis::prelude::{BoxDynError, Data, TaskSink};
+use apalis_postgres::{Config, PgPool, PostgresStorage};
 use serde::{Deserialize, Serialize};
 
 use common::settings::Settings;
@@ -34,23 +32,18 @@ impl AlreadyRegisteredEmailJob {
     }
 }
 
-pub type AlreadyRegisteredEmailStorage = PostgresStorage<
-    AlreadyRegisteredEmailJob,
-    apalis_postgres::CompactType,
-    JsonCodec<apalis_postgres::CompactType>,
-    apalis_postgres::PgNotify,
->;
+pub type AlreadyRegisteredEmailStorage = PostgresStorage<AlreadyRegisteredEmailJob>;
 
 pub fn build_storage(pool: &PgPool, _settings: &Settings) -> AlreadyRegisteredEmailStorage {
-    let config = Config::new(QUEUE_NAME).with_poll_interval(
-        StrategyBuilder::new()
-            .apply(
-                IntervalStrategy::new(Duration::from_secs(2))
-                    .with_backoff(BackoffConfig::default()),
-            )
-            .build(),
-    );
-    PostgresStorage::new_with_notify(pool, &config)
+    PostgresStorage::new(pool).with_config(Config::default().queue(QUEUE_NAME))
+}
+
+/// ワーカーが使う backend。INSERT の通知（LISTEN）と、取りこぼしを拾う定期の poll を併用する。
+/// ワーカーの世代ごとに作り直す（通知の接続は世代ごとに張る）。
+pub fn worker_backend(
+    storage: &AlreadyRegisteredEmailStorage,
+) -> crate::WorkerBackend<AlreadyRegisteredEmailJob> {
+    crate::worker_backend(storage, Duration::from_secs(2))
 }
 
 pub async fn setup(
@@ -67,7 +60,7 @@ pub async fn enqueue(
 ) -> Result<(), anyhow::Error> {
     let mut storage = storage.clone();
     storage
-        .push(job)
+        .push_task(crate::new_task(job))
         .await
         .map_err(|e| anyhow::anyhow!("push already registered email job: {e}"))
 }

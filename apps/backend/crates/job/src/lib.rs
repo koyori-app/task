@@ -15,8 +15,10 @@ pub mod verification_email;
 pub mod webhook_delivery;
 
 use std::sync::Arc;
+use std::time::Duration;
 
-use apalis_postgres::PgPool;
+use apalis::prelude::{BackendExt, BackoffConfig, PollWith, Strategy, Task, TaskBuilder};
+use apalis_postgres::{PgPool, PostgresStorage, Pubsub};
 
 use common::settings::Settings;
 
@@ -52,6 +54,37 @@ pub struct JobState {
     /// 利用者の連携トークン（`oauth_connections`）を復号・更新するための設定。
     /// 要約ジョブがレビュワー本人の名義で PR を Approve するのに使う
     pub oauth_settings: service::oauth::OAuthSettings,
+}
+
+/// 積むジョブの最大試行回数。apalis-postgres 1.0.0-rc.8 までの既定（5）に合わせる。
+/// 1.0.0-rc.9 以降の既定は 25 で、積む側が決めなければ、リトライの上限が 5 倍になる。
+/// 使い切った後の行は `Failed` のまま残る（rc.8 までは `Killed`）。
+pub const DEFAULT_MAX_ATTEMPTS: usize = 5;
+
+/// ジョブを積む `Task`。最大試行回数を [`DEFAULT_MAX_ATTEMPTS`] に決める。
+pub fn new_task<Args>(args: Args) -> Task<Args> {
+    TaskBuilder::new(args)
+        .max_attempts(DEFAULT_MAX_ATTEMPTS)
+        .build()
+}
+
+/// ワーカーの backend の型。storage に、INSERT の通知と定期の poll を束ねた戦略を足したもの。
+pub type WorkerBackend<Args> = PollWith<PostgresStorage<Args>, Strategy>;
+
+/// ワーカーが使う backend を組む。INSERT の通知（LISTEN）で即座に起き、通知を取りこぼしても
+/// `poll_interval` を基準に（空振りが続けば伸ばしながら）poll で拾う。
+/// 通知の接続は backend ごとに別に張るので、ワーカーの世代ごとに呼ぶ。
+pub fn worker_backend<Args>(
+    storage: &PostgresStorage<Args>,
+    poll_interval: Duration,
+) -> WorkerBackend<Args> {
+    let strategy = Strategy::new()
+        .stream(Pubsub::new(
+            storage.pool().clone(),
+            storage.config().queue.to_string(),
+        ))
+        .interval_with_backoff(poll_interval, BackoffConfig::default());
+    storage.clone().poll_with_strategy(strategy)
 }
 
 pub async fn setup_pool(database_url: &str) -> Result<PgPool, anyhow::Error> {

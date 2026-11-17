@@ -34,6 +34,7 @@ mod m20261112000000_task_require_all_assignees_done;
 mod m20261114000000_personal_token_tenants;
 mod m20261115000000_review_carry_over;
 mod m20261116000000_task_types;
+mod m20261117000000_apalis_migration_history_schema;
 
 pub struct Migrator;
 
@@ -75,6 +76,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261114000000_personal_token_tenants::Migration),
             Box::new(m20261115000000_review_carry_over::Migration),
             Box::new(m20261116000000_task_types::Migration),
+            Box::new(m20261117000000_apalis_migration_history_schema::Migration),
         ]
     }
 }

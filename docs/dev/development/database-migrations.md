@@ -39,7 +39,20 @@ Docker Compose では `migration` サービスが `/app/run-migration.sh` を実
 
 > [!WARNING]
 > `fresh` は全テーブルを DROP し、`refresh` と `reset` は全マイグレーションをロールバックする。どれもデータを失う操作なので、本番や共有の DB には流さず、捨ててよい DB に向けて実行する。
-> Compose の DB で `fresh` を使うと apalis の適用記録（`public._sqlx_migrations`）も消え、backend が `42P06`（schema "apalis" already exists）で起動できなくなることがある。Compose で初期化するときは `docker compose run --rm migration /app/migration fresh` を手動で実行する。
+> `fresh` は `apalis` スキーマ（ジョブの表と、apalis の適用記録 `apalis._sqlx_migrations`）には触れない。apalis-postgres 1.0.0-rc.8 以前では、適用記録が `public` にあったので `fresh` で消え、backend が `42P06`（schema "apalis" already exists）で起動できなくなったが、1.0.0-rc.9 以降では起きない。Compose で初期化するときは `docker compose run --rm migration /app/migration fresh` を手動で実行する。
+
+## apalis の表
+
+ジョブの表（`apalis` スキーマ）は、backend の起動時に apalis-postgres が自分の移行で作る。SeaORM のマイグレーションには入れない。
+
+apalis-postgres 1.0.0-rc.9 から、その適用記録は `public._sqlx_migrations` ではなく `apalis._sqlx_migrations` に置く。1.0.0-rc.8 以前の版で作った DB は、新しい版の backend を起動する前に、記録の移動と、最初の移行のチェックサムの付け替えが要る。これは SeaORM のマイグレーション `m20261117000000_apalis_migration_history_schema` が行う。`migration` サービスが `up` を終えてから backend を起動する Compose の順序では、手で何もしなくてよい。
+
+- `public._sqlx_migrations` に apalis の最初の移行（version 20220530084123）の記録が在る DB だけを対象にする。他の物が同じ名前の表を使っていても、その version が無ければ触らない。
+- 新しい DB と、既に移し終えた DB では何もしない。
+- 移す前に新しい版の backend を起動して、空の `apalis._sqlx_migrations` ができてしまった DB も、その表を捨ててから移す。両方に記録の行が在る時は、どちらも壊さずに失敗する。
+- `down` は元へ戻さない。apalis-postgres を 1.0.0-rc.8 以前へ戻す時は、apalis-postgres の README の「Upgrading to 1.0」の逆の手順を手で行う。
+
+新しい版の apalis-postgres の移行は、`hstore` 拡張（`CREATE EXTENSION IF NOT EXISTS hstore`）を作る。DB の利用者に、その権限が要る。
 
 ## エンティティの再生成
 

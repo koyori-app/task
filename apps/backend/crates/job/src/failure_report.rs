@@ -19,7 +19,6 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
 use apalis::prelude::Task;
-use apalis_postgres::PgContext;
 use tower::{Layer, Service};
 
 /// ワーカーの組み立てで `.retry(..)` の後に `.layer(..)` する（後に足したものが内側になる）。
@@ -82,13 +81,12 @@ impl ReportedTasks {
     }
 }
 
-impl<S, Args, IdType> Service<Task<Args, PgContext, IdType>> for JobFailureReport<S>
+impl<S, Args> Service<Task<Args>> for JobFailureReport<S>
 where
-    S: Service<Task<Args, PgContext, IdType>>,
+    S: Service<Task<Args>>,
     S::Future: Send + 'static,
     S::Response: 'static,
     S::Error: 'static,
-    IdType: std::fmt::Display,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -98,12 +96,15 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, task: Task<Args, PgContext, IdType>) -> Self::Future {
+    fn call(&mut self, task: Task<Args>) -> Self::Future {
         let queue = self.queue;
         let reported = self.reported.clone();
-        let task_id = task.parts.task_id.as_ref().map(ToString::to_string);
-        let attempt = task.parts.attempt.clone();
-        let max_attempts = task.parts.ctx.max_attempts();
+        let task_id = task.ctx().task_id().map(ToString::to_string);
+        let attempt = task.ctx().raw_attempt().clone();
+        let max_attempts = task
+            .ctx()
+            .max_attempts()
+            .unwrap_or(crate::DEFAULT_MAX_ATTEMPTS);
         let future = self.inner.call(task);
         Box::pin(async move {
             let result = future.await;
@@ -120,8 +121,8 @@ where
 
 /// `apalis_postgres` の ack が Killed にする条件と同じ。これより手前の失敗は Failed になり、
 /// リトライを使い切っていても再び取得される。
-fn is_final_attempt(attempt: usize, max_attempts: i32) -> bool {
-    max_attempts as usize <= attempt
+fn is_final_attempt(attempt: usize, max_attempts: usize) -> bool {
+    max_attempts <= attempt
 }
 
 fn report(queue: &str, task_id: Option<&str>, attempts: usize) {
