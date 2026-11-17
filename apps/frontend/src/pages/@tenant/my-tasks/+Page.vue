@@ -100,7 +100,10 @@ watch(
   { flush: 'sync' },
 );
 
-watch(tenantId, () => {
+watch(tenantId, (_next, prev) => {
+  // 初回の解決（null → ID。テナント一覧がキャッシュに無いとき）では、URL から読んだ件数を保つ。
+  // 戻すと再読み込みや共有リンクで `?shown=` が 50 件に戻り、URL からも消える
+  if (!prev) return;
   offset.value = 0;
   limit.value = MY_TASKS_PAGE_LIMIT;
   loadedTasks.value = [];

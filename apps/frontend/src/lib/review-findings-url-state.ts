@@ -136,7 +136,8 @@ export function applyReviewFindingsUrlState(url: URL, state: ReviewFindingsUrlSt
   // 1 ページ目も明示されたなら残す。page が無い URL は「表示中の PR が載るページ」を指すため、
   // 省くと 2 ページ目の PR を選んだまま 1 ページ目に戻した状態を再表示で復元できない
   if (state.page !== null) next.searchParams.set('page', String(state.page));
-  if (state.q !== '') next.searchParams.set('q', state.q);
+  // 読む側と同じ上限で切る（書いた URL を開き直しても同じ検索語になるように）
+  if (state.q !== '') next.searchParams.set('q', state.q.slice(0, PR_QUERY_MAX_LENGTH));
   // 選んだ状態は `open` でも書く。Open が 1 件も無い一覧の既定は「すべて」なので、
   // 省くと明示した Open が再表示で「すべて」になる
   if (state.prState !== null) next.searchParams.set('pr_state', state.prState);

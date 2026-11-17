@@ -1001,6 +1001,31 @@ describe('ReviewFindingsView', () => {
       expect(prNavButtons().map((b) => b.textContent)).toEqual([expect.stringContaining('#620')]);
     });
 
+    it('pr が無く q がある URL では、検索語で絞った一覧の先頭の PR を開く', async () => {
+      stubFetch({ findings: [finding()], prNumbers: [620, 619, 618] });
+      const wrapper = mountView({ initialUrlState: { ...noPrUrlState, q: '619' } });
+      await flushPromises();
+
+      expect(new URL(window.location.href).searchParams.get('pr')).toBe('619');
+      expect(wrapper.find('[data-testid="pr-rail-note"]').exists()).toBe(false);
+    });
+
+    it('pr が無く q に一致する PR が無ければ、これまでどおり状態で絞った先頭を開く', async () => {
+      stubFetch({ findings: [finding()], prNumbers: [620, 619, 618] });
+      mountView({ initialUrlState: { ...noPrUrlState, q: '99999' } });
+      await flushPromises();
+
+      expect(new URL(window.location.href).searchParams.get('pr')).toBe('620');
+    });
+
+    it('検索欄は 200 文字までしか入らず、URL から読む上限と揃う', async () => {
+      stubFetch({ findings: [finding()], prNumbers: [620, 619, 618] });
+      const wrapper = mountView({ initialUrlState: noPrUrlState });
+      await flushPromises();
+
+      expect(wrapper.get('#filter-pr').attributes('maxlength')).toBe('200');
+    });
+
     it('Open が無い一覧でも、URL で明示した Open は「すべて」へ倒さない', async () => {
       stubFetch({
         findings: [finding({ pr_number: 620 })],

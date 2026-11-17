@@ -195,5 +195,12 @@ describe('review findings URL state', () => {
     expect(parsed.state.q).toBe('a'.repeat(200));
     expect(parsed.warnings).toHaveLength(1);
     expect(parsed.warnings[0]).toContain('PR の状態');
+
+    // 書く側も同じ上限で切り、書いた URL を開き直しても検索語が変わらない
+    const written = applyReviewFindingsUrlState(
+      new URL('https://app.example.com/acme/projects/APP/reviews'),
+      { ...DEFAULT_REVIEW_FINDINGS_URL_STATE, q: 'b'.repeat(250) },
+    );
+    expect(written.searchParams.get('q')).toBe('b'.repeat(200));
   });
 });

@@ -331,6 +331,25 @@ watch(
 );
 const overlayProjectKey = computed(() => overlayTaskSeqKey.value?.replace(/-\d+$/, '') ?? '');
 
+// 同じページへのクライアント遷移（サイドバーのガントを押す・戻る等）ではページが作り直されないので、
+// URL を読み直して状態を合わせる。今の状態と同じ項目は入れない（自分の replaceState は
+// pageContext を動かさないので循環しない）
+watch(
+  () => pageContext.urlParsed?.searchAll,
+  (searchAll) => {
+    const next = parseGanttUrlState(searchAll, today);
+    if (next.from !== from.value) from.value = next.from;
+    if (next.memberIds.join('\n') !== memberIds.value.join('\n')) memberIds.value = next.memberIds;
+    if (next.scale !== scale.value) scale.value = next.scale;
+    if (next.groupBy !== groupBy.value) groupBy.value = next.groupBy;
+    if (next.progressLine !== urlProgressLine.value) urlProgressLine.value = next.progressLine;
+    if (next.selected !== selectedTaskId.value) {
+      overlayParentStack.value = [];
+      selectedTaskId.value = next.selected;
+    }
+  },
+);
+
 function openTask(task: { seq_key: string; seq_id: number; project: { key: string } }) {
   if (!canInline.value) {
     void navigate(taskDetailHref(tenantDisplayId.value, task.project.key, task.seq_id));

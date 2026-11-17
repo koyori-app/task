@@ -41,6 +41,7 @@ import {
 } from '@/lib/review-findings';
 import {
   DEFAULT_REVIEW_FINDINGS_URL_STATE,
+  PR_QUERY_MAX_LENGTH,
   applyReviewFindingsUrlState,
   parseReviewFindingsUrlState,
   relativeReviewFindingHref,
@@ -345,7 +346,11 @@ watch(
       prStateFilter.value = initialPrStateFilter(list, prPage.value);
     }
     if (selectedPr.value === null) {
-      const first = filterPullRequests(list, '', null, prStateFilter.value)[0] ?? list[0];
+      // URL の `q` で絞って開いたときは、一覧に出ている PR を開く
+      const first =
+        filterPullRequests(list, prQuery.value, null, prStateFilter.value)[0] ??
+        filterPullRequests(list, '', null, prStateFilter.value)[0] ??
+        list[0];
       selectedPr.value = first.pr_number;
       writeUrl('replace');
     }
@@ -633,6 +638,7 @@ async function onRoundCreated() {
                 type="search"
                 autocomplete="off"
                 placeholder="例: 231、共有リンク"
+                :max-length="PR_QUERY_MAX_LENGTH"
                 :value="prQuery"
                 :on-value-change="
                   (v: string) => {

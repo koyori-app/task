@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { reactive, ref } from 'vue';
+import { reactive } from 'vue';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 
@@ -15,15 +15,8 @@ const { navigate, GET, pageContext } = vi.hoisted(() => ({
 }));
 vi.mock('vike/client/router', () => ({ navigate }));
 vi.mock('vike-vue/usePageContext', () => ({ usePageContext: () => pageContext.value }));
-vi.mock('@/composables/useResolvedTenantId', () => ({
-  useResolvedTenantId: () => ({
-    tenantId: ref('tenant-id'),
-    isTenantNotFound: ref(false),
-    isResolving: ref(false),
-    isError: ref(false),
-    tenantsQuery: { refetch: vi.fn() },
-  }),
-}));
+// useResolvedTenantId は本物を使う。テナント一覧が届くまで tenantId は null で、届いて ID になる
+// （再読み込み・共有リンクで開いたときと同じ順）
 vi.mock('@/lib/api-vue-query', () => ({ fetchClient: { GET } }));
 
 import Page from '../+Page.vue';
@@ -55,7 +48,8 @@ function task(n: number) {
 /** `total` 件あるものとして、要求の limit / offset どおりに返す */
 function respondWith(total: number) {
   GET.mockImplementation(
-    async (_path: string, { params }: { params: { query: Record<string, unknown> } }) => {
+    async (path: string, { params }: { params: { query: Record<string, unknown> } }) => {
+      if (path === '/v1/tenants') return { data: [{ id: 'tenant-id', display_id: 'acme' }] };
       const limit = Number(params.query.limit);
       const offset = Number(params.query.offset);
       const tasks = Array.from({ length: Math.max(0, Math.min(limit, total - offset)) }, (_, i) =>
@@ -73,7 +67,9 @@ function mountPage(search: Record<string, string> = {}) {
 }
 
 const queries = () =>
-  GET.mock.calls.map(([, { params }]) => params.query as Record<string, unknown>);
+  GET.mock.calls
+    .filter(([path]) => path === '/v1/tenants/{tenant_id}/users/me/tasks')
+    .map(([, { params }]) => params.query as Record<string, unknown>);
 const tab = (wrapper: ReturnType<typeof mountPage>, label: string) =>
   wrapper.findAll('button').find((b) => b.text() === label)!;
 const urlParams = () => new URL(window.location.href).searchParams;
@@ -115,6 +111,20 @@ describe('My Tasks のタブと件数を URL に持つ（TASK-474）', () => {
     await flushPromises();
     expect(queries().at(-1)).toMatchObject({ limit: 50, offset: 100 });
     expect(wrapper.findAll('a').length).toBe(150);
+    expect(urlParams().get('shown')).toBe('150');
+  });
+
+  it('テナント一覧が後から届いても（再読み込み・共有リンク）?shown= を 50 件に戻さない', async () => {
+    respondWith(300);
+    window.history.replaceState(null, '', '/acme/my-tasks?tab=week&shown=150');
+    const wrapper = mountPage({ tab: 'week', shown: '150' });
+    // マウントの時点ではテナントは未解決で、タスクはまだ取らない
+    expect(queries()).toEqual([]);
+    await flushPromises();
+
+    expect(queries()).toEqual([expect.objectContaining({ filter: 'week', limit: 150, offset: 0 })]);
+    expect(wrapper.findAll('a').length).toBe(150);
+    expect(urlParams().get('tab')).toBe('week');
     expect(urlParams().get('shown')).toBe('150');
   });
 
