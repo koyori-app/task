@@ -3,7 +3,8 @@
 //! 手書きの型を挟まないのは、フィールド名の食い違いを実行時ではなくコンパイル時に
 //! 出したいため（#647 で手書き `paths.ts` が実際の応答とずれていた）。
 
-use payload::personal_tokens::PersonalTokenIdentityResponse;
+use payload::personal_tokens::PersonalTokenTenants;
+use payload::tenants::TenantRef;
 use reqwest::{Method, StatusCode, Url};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -17,8 +18,8 @@ pub struct ApiClient {
     tenant_id: String,
     /// 明示した tenant の由来。自動解決・tenant 無しの口では `None`
     tenant_source: Option<TenantSource>,
-    /// 自動解決で取った `/me` の応答。明示 tenant のときは取らない
-    token_identity: Option<PersonalTokenIdentityResponse>,
+    /// テナントを名前（slug）で指したときの、その slug。ID に直した結果と並べて持つ
+    tenant_slug: Option<String>,
 }
 
 impl ApiClient {
@@ -44,47 +45,118 @@ impl ApiClient {
             base,
             tenant_id: tenant_id.unwrap_or_default(),
             tenant_source,
-            token_identity: None,
+            tenant_slug: None,
         })
     }
 
-    /// tenant が明示されていなければ、トークンの束縛先を `/me` から引いて埋める。
+    /// 行き先のテナントを決める。
     ///
-    /// 束縛が 1 つならそれを使う。複数なら、黙って 1 つを選ぶと別のテナントへ書き込みかねないので、
-    /// 明示を求めて止まる（要求は送らない）。
+    /// - 明示が UUID: そのまま使う（何も叩かない）。
+    /// - 明示が UUID でない: 名前（slug）として `GET /v1/tenants` から ID に直す。
+    /// - 明示なし: トークンの束縛先を `/me` から引く。束縛が 1 つならそれを使う。複数なら、
+    ///   黙って 1 つを選ぶと別のテナントへ書き込みかねないので、明示を求めて止まる（要求は送らない）。
     ///
     /// config には書かない。トークンを替えたときに古いテナントが残るため
     pub(crate) async fn resolve_tenant(mut self) -> Result<Self> {
         if self.tenant_source.is_some() {
+            if crate::resolve::is_uuid(&self.tenant_id) {
+                return Ok(self);
+            }
+            let name = self.tenant_id.clone();
+            let tenants = self.list_tenants().await.map_err(|mut err| {
+                if err.exit_code == 4 {
+                    // 403 は束縛の食い違いではなく、名前を引く権限が無いこと。
+                    // `http_error` が付ける「tenant_id is set by …」の案内は原因が違う
+                    err.message = format!(
+                        "Cannot look up the tenant \"{name}\" by name: the token needs the read:tenant scope. Use the tenant UUID instead."
+                    );
+                }
+                err
+            })?;
+            let picked = pick_tenant(&tenants, &name)?;
+            self.tenant_id = picked.id.to_string();
+            self.tenant_slug = Some(picked.display_id.clone());
             return Ok(self);
         }
-        let identity: PersonalTokenIdentityResponse =
+        let identity: PersonalTokenTenants =
             self.get(&["v1", "personal_tokens", "me"], &[]).await?;
         self.tenant_id = match identity.bound_tenant_ids().as_slice() {
             [only] => only.to_string(),
             [] => return Err(CliError::new("The token is not bound to any tenant")),
             many => {
-                let ids = many
+                // 名前は補足。引けなくても（`read:tenant` が無い・通信の失敗）ID だけでこの
+                // エラーを報告する。ここは既にエラーを返す途中なので、名前の取得の失敗は握り潰す
+                let names = self.list_tenants().await.unwrap_or_default();
+                let candidates = many
                     .iter()
-                    .map(ToString::to_string)
+                    .map(|id| match names.iter().find(|tenant| tenant.id == *id) {
+                        Some(tenant) => format!("{} ({id})", tenant.display_id),
+                        None => id.to_string(),
+                    })
                     .collect::<Vec<_>>()
                     .join(", ");
                 return Err(CliError::validation(format!(
-                    "This token can be used in {} tenants: {ids}. Choose one with TASK_TENANT=<tenant_id>, or run `task config set tenant_id <tenant_id>` when api_url and token also come from the config.",
+                    "This token can be used in {} tenants: {candidates}. Choose one with TASK_TENANT=<name or tenant_id>, or run `task config set tenant_id <name or tenant_id>` when api_url and token also come from the config.",
                     many.len()
                 )));
             }
         };
-        self.token_identity = Some(identity);
         Ok(self)
+    }
+
+    /// 画面の URL。`api_url` が `<画面の URL>/api` の形のときだけ分かる（API は画面の URL を返さない）。
+    pub(crate) fn web_base(&self) -> Option<Url> {
+        let mut url = self.base.clone();
+        url.set_query(None);
+        url.set_fragment(None);
+        {
+            let mut path = url.path_segments_mut().ok()?;
+            path.pop_if_empty();
+        }
+        if url.path_segments()?.next_back()? != "api" {
+            return None;
+        }
+        url.path_segments_mut().ok()?.pop();
+        Some(url)
+    }
+
+    /// タスクの画面の URL を組み立てるのに要るもの。作る前に引いておく
+    /// （作ったあとで失敗すると、呼び出し側が再実行して二重に起票する）。
+    ///
+    /// - `api_url` が `<画面の URL>/api` の形でなければ `None`（何も叩かない）。
+    /// - テナントの slug が分からなければ `GET /v1/tenants` で引く。`read:tenant` が無い（403）
+    ///   ときは `None`。ほかの失敗は返す。
+    pub(crate) async fn web_location(&self) -> Result<Option<WebLocation>> {
+        let Some(base) = self.web_base() else {
+            return Ok(None);
+        };
+        let tenant_slug = match &self.tenant_slug {
+            Some(slug) => slug.clone(),
+            None => {
+                let tenants = match self.list_tenants().await {
+                    Ok(tenants) => tenants,
+                    Err(err) if err.exit_code == 4 => return Ok(None),
+                    Err(err) => return Err(err),
+                };
+                match tenants
+                    .into_iter()
+                    .find(|tenant| tenant.id.to_string() == self.tenant_id)
+                {
+                    Some(tenant) => tenant.display_id,
+                    None => return Ok(None),
+                }
+            }
+        };
+        Ok(Some(WebLocation { base, tenant_slug }))
+    }
+
+    /// このトークンで使えるテナント（`GET /v1/tenants`）。scope `read:tenant` が要る。
+    pub(crate) async fn list_tenants(&self) -> Result<Vec<TenantRef>> {
+        self.get(&["v1", "tenants"], &[]).await
     }
 
     pub fn tenant_id(&self) -> &str {
         &self.tenant_id
-    }
-
-    pub fn token_identity(&self) -> Option<&PersonalTokenIdentityResponse> {
-        self.token_identity.as_ref()
     }
 
     pub async fn get<T: DeserializeOwned>(
@@ -204,6 +276,65 @@ impl ApiClient {
     }
 }
 
+/// 画面の URL の組み立て元。
+pub(crate) struct WebLocation {
+    base: Url,
+    tenant_slug: String,
+}
+
+impl WebLocation {
+    /// `{画面の URL}/{テナントの slug}/projects/{KEY}/tasks/{KEY}-{seq_id}`
+    /// （メールの URL・frontend の `task-display` と同じ形）。
+    pub(crate) fn task_url(&self, project_key: &str, seq_id: i32) -> String {
+        let mut url = self.base.clone();
+        if let Ok(mut path) = url.path_segments_mut() {
+            path.pop_if_empty().extend([
+                self.tenant_slug.as_str(),
+                "projects",
+                project_key,
+                "tasks",
+                &format!("{project_key}-{seq_id}"),
+            ]);
+        }
+        url.to_string()
+    }
+}
+
+/// 名前（slug）に合うテナント。完全一致を優先し、無ければ大文字小文字を無視して照合する
+/// （プロジェクトや状態の名前解決と同じ優先）。無視した照合で複数に合うなら、選ばずに候補を示す。
+fn pick_tenant<'a>(tenants: &'a [TenantRef], name: &str) -> Result<&'a TenantRef> {
+    let describe = |list: Vec<&TenantRef>| {
+        list.iter()
+            .map(|tenant| format!("{} ({})", tenant.display_id, tenant.id))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    if let Some(exact) = tenants.iter().find(|tenant| tenant.display_id == name) {
+        return Ok(exact);
+    }
+    let folded: Vec<&TenantRef> = tenants
+        .iter()
+        .filter(|tenant| tenant.display_id.eq_ignore_ascii_case(name))
+        .collect();
+    match folded.as_slice() {
+        [only] => Ok(only),
+        [] => {
+            let usable = if tenants.is_empty() {
+                "none".to_string()
+            } else {
+                describe(tenants.iter().collect())
+            };
+            Err(CliError::validation(format!(
+                "Tenant not found: {name} (this token can be used in: {usable})"
+            )))
+        }
+        _ => Err(CliError::validation(format!(
+            "Ambiguous tenant: {name} (candidates: {}); specify a UUID",
+            describe(folded)
+        ))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,5 +388,88 @@ mod tests {
             .url(&["v1", "reviews"], &[("repo", String::new())])
             .unwrap();
         assert_eq!(url.query(), Some("repo="));
+    }
+
+    fn tenant(id: u128, slug: &str) -> TenantRef {
+        TenantRef {
+            id: uuid::Uuid::from_u128(id),
+            display_id: slug.into(),
+            name: slug.to_uppercase(),
+        }
+    }
+
+    #[test]
+    fn picks_a_tenant_by_exact_name_before_a_case_insensitive_one() {
+        let tenants = [tenant(1, "Acme"), tenant(2, "acme"), tenant(3, "dmm")];
+        assert_eq!(pick_tenant(&tenants, "acme").unwrap().id.as_u128(), 2);
+        assert_eq!(pick_tenant(&tenants, "Acme").unwrap().id.as_u128(), 1);
+        assert_eq!(pick_tenant(&tenants, "dmm").unwrap().id.as_u128(), 3);
+        // 大文字小文字だけが違う一致が 1 件なら、それを選ぶ
+        assert_eq!(pick_tenant(&tenants, "DMM").unwrap().id.as_u128(), 3);
+    }
+
+    /// 大文字小文字を無視した一致が複数あるとき、先頭を黙って選ぶと別のテナントを操作してしまう。
+    #[test]
+    fn an_ambiguous_case_insensitive_tenant_name_lists_the_candidates() {
+        let tenants = [tenant(1, "Acme"), tenant(2, "acme"), tenant(3, "dmm")];
+        let err = pick_tenant(&tenants, "ACME").unwrap_err();
+        assert_eq!(err.exit_code, 2);
+        assert!(
+            err.message.contains("Ambiguous tenant: ACME"),
+            "{}",
+            err.message
+        );
+        assert!(
+            err.message
+                .contains(&format!("Acme ({})", uuid::Uuid::from_u128(1)))
+        );
+        assert!(
+            err.message
+                .contains(&format!("acme ({})", uuid::Uuid::from_u128(2)))
+        );
+        assert!(!err.message.contains("dmm"), "{}", err.message);
+    }
+
+    #[test]
+    fn an_unknown_tenant_name_lists_the_usable_tenants() {
+        let tenants = [tenant(1, "acme"), tenant(2, "dmm")];
+        let err = pick_tenant(&tenants, "nope").unwrap_err();
+        assert_eq!(err.exit_code, 2);
+        assert!(
+            err.message.contains("Tenant not found: nope"),
+            "{}",
+            err.message
+        );
+        assert!(err.message.contains("acme ("), "{}", err.message);
+        assert!(err.message.contains("dmm ("), "{}", err.message);
+        let err = pick_tenant(&[], "nope").unwrap_err();
+        assert!(err.message.contains("none"), "{}", err.message);
+    }
+
+    #[test]
+    fn the_web_base_is_the_api_url_without_the_api_segment() {
+        let base = |url: &str| client(url).web_base().map(|url| url.to_string());
+        assert_eq!(base("https://h/api").as_deref(), Some("https://h/"));
+        assert_eq!(base("https://h/x/api/").as_deref(), Some("https://h/x"));
+        assert_eq!(base("https://h"), None);
+        assert_eq!(base("https://h/v2"), None);
+        assert_eq!(base("https://h/api/v2"), None);
+    }
+
+    #[test]
+    fn builds_the_task_url_from_the_web_base() {
+        for (api_url, expected) in [
+            ("https://h/api", "https://h/acme/projects/APP/tasks/APP-7"),
+            (
+                "https://h/x/api/",
+                "https://h/x/acme/projects/APP/tasks/APP-7",
+            ),
+        ] {
+            let location = WebLocation {
+                base: client(api_url).web_base().unwrap(),
+                tenant_slug: "acme".into(),
+            };
+            assert_eq!(location.task_url("APP", 7), expected);
+        }
     }
 }

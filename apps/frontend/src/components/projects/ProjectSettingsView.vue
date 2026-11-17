@@ -6,6 +6,7 @@ import {
   PhGear,
   PhKanban,
   PhPlugsConnected,
+  PhShapes,
   PhTag,
   PhTextbox,
   PhUsers,
@@ -22,9 +23,10 @@ import EmojiIconPicker from '@/components/projects/EmojiIconPicker.vue';
 import IntegrationsSection from '@/components/projects/IntegrationsSection.vue';
 import LabelsSection from '@/components/projects/LabelsSection.vue';
 import MembersSection from '@/components/projects/MembersSection.vue';
+import TaskTypesSection from '@/components/projects/TaskTypesSection.vue';
 import WebhooksSection from '@/components/projects/WebhooksSection.vue';
 import WorkflowStatusesEditor from '@/components/projects/WorkflowStatusesEditor.vue';
-import { apiClient } from '@/lib/api-vue-query';
+import { apiClient, queryErrorStatus } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
 
 type ProjectResponse = components['schemas']['ProjectResponse'];
@@ -38,6 +40,7 @@ type SettingsSection =
   | 'members'
   | 'workflow'
   | 'labels'
+  | 'types'
   | 'fields'
   | 'integrations'
   | 'webhooks'
@@ -47,6 +50,8 @@ const props = defineProps<{
   tenantId: string;
   tenantSlug: string;
   project: ProjectResponse;
+  /** 名前・説明・アイコンの更新とプロジェクトの削除ができる人か（テナントのオーナーと Admin） */
+  canManage: boolean;
 }>();
 
 const queryClient = useQueryClient();
@@ -61,7 +66,7 @@ const icon = ref<string | null>(props.project.icon_emoji ?? null);
  * 当てはまらない節が全部フォールバックの 1 つに落ち、一般・ラベル・カスタムフィールド・
  * 連携の 4 つが同じ絵になっていた。ここで必須にすれば足し忘れが型で分かる。
  */
-const sections: {
+const allSections: {
   key: SettingsSection;
   label: string;
   icon: Component;
@@ -71,23 +76,35 @@ const sections: {
   { key: 'members', label: 'メンバー', icon: PhUsers },
   { key: 'workflow', label: 'ワークフロー', icon: PhKanban },
   { key: 'labels', label: 'ラベル', icon: PhTag },
+  { key: 'types', label: '種別', icon: PhShapes },
   { key: 'fields', label: 'カスタムフィールド', icon: PhTextbox },
   { key: 'integrations', label: '連携', icon: PhPlugsConnected },
   { key: 'webhooks', label: 'Webhook', icon: PhWebhooksLogo },
   { key: 'danger', label: '削除', icon: PhWarning, danger: true },
 ];
 
+// 削除は管理できる人にだけ出す。それ以外の節（ワークフロー・ラベルなど）は
+// API がプロジェクトに入れる人へ許しているので、入口は残す
+const sections = computed(() =>
+  props.canManage ? allSections : allSections.filter((section) => section.key !== 'danger'),
+);
+
 /** `?section=` から初期表示セクションを決める（GitHub callback の戻り先が利用。#386） */
 function initialSection(): SettingsSection {
   const search = (pageContext as { urlParsed?: { search?: Record<string, string> } } | undefined)
     ?.urlParsed?.search;
   const requested = search?.section;
-  return sections.some((section) => section.key === requested)
+  return sections.value.some((section) => section.key === requested)
     ? (requested as SettingsSection)
     : 'general';
 }
 
 const activeSection = ref<SettingsSection>(initialSection());
+
+// 削除の節を開いたまま管理できなくなったら（権限の変更を取り込んだとき）一般へ戻す
+watch(sections, (next) => {
+  if (!next.some((section) => section.key === activeSection.value)) activeSection.value = 'general';
+});
 
 const nonBlankName = type('string').narrow((name) => name.trim().length >= 1);
 
@@ -120,8 +137,11 @@ const form = useForm({
       });
       await queryClient.invalidateQueries({ queryKey: ['get', LIST_PROJECTS_PATH] });
       saveDone.value = true;
-    } catch {
-      submitError.value = 'プロジェクトを更新できませんでした';
+    } catch (error) {
+      submitError.value =
+        queryErrorStatus(error) === 403
+          ? 'プロジェクトの設定を変更できるのは、テナントのオーナーと Admin だけです。'
+          : 'プロジェクトを更新できませんでした';
     }
   },
 });
@@ -199,8 +219,34 @@ function onDeleted() {
 
       <!-- セクション本体 -->
       <div class="w-full min-w-0 max-w-[640px] flex-1">
+        <!-- 一般（管理できない人には読み取りだけ） -->
+        <div v-if="activeSection === 'general' && !canManage">
+          <h2 class="mb-6 border-b pb-4 text-xl font-semibold">一般</h2>
+          <dl class="mb-5 flex flex-col gap-4 text-sm">
+            <div v-if="project.icon_emoji">
+              <dt class="mb-1 text-xs font-medium text-muted-foreground">アイコン</dt>
+              <dd class="text-2xl leading-none">{{ project.icon_emoji }}</dd>
+            </div>
+            <div>
+              <dt class="mb-1 text-xs font-medium text-muted-foreground">名前</dt>
+              <dd>{{ project.name }}</dd>
+            </div>
+            <div>
+              <dt class="mb-1 text-xs font-medium text-muted-foreground">キー</dt>
+              <dd class="font-mono text-xs">{{ project.key }}</dd>
+            </div>
+            <div>
+              <dt class="mb-1 text-xs font-medium text-muted-foreground">説明</dt>
+              <dd class="whitespace-pre-wrap">{{ project.description || '説明はありません' }}</dd>
+            </div>
+          </dl>
+          <p role="status" class="text-sm text-muted-foreground">
+            名前・説明・アイコンを変更できるのは、テナントのオーナーと Admin だけです。
+          </p>
+        </div>
+
         <!-- 一般 -->
-        <form v-if="activeSection === 'general'" @submit.prevent="form.handleSubmit">
+        <form v-else-if="activeSection === 'general'" @submit.prevent="form.handleSubmit">
           <h2 class="mb-6 border-b pb-4 text-xl font-semibold">一般</h2>
 
           <div class="mb-5 flex items-start gap-4">
@@ -299,6 +345,13 @@ function onDeleted() {
           :project-id="project.id"
         />
 
+        <!-- 種別 -->
+        <TaskTypesSection
+          v-else-if="activeSection === 'types'"
+          :tenant-id="tenantId"
+          :project-id="project.id"
+        />
+
         <!-- カスタムフィールド -->
         <CustomFieldsSection
           v-else-if="activeSection === 'fields'"
@@ -346,6 +399,7 @@ function onDeleted() {
     </div>
 
     <DeleteProjectDialog
+      v-if="canManage"
       :open="isDeleteOpen"
       :tenant-id="tenantId"
       :project="project"

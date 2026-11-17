@@ -200,3 +200,34 @@ describe('CommentBody', () => {
     expect(plain.find('[role="dialog"]').exists()).toBe(false);
   }, 30_000);
 });
+
+describe('CommentBody のタスク参照カード', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it('コメントの KEY-N をリンクにする', async () => {
+    const wrapper = mount(CommentBody, {
+      props: { body: 'TASK-58 を見て', commentId: 'task-ref', mentionTenant: 'acme' },
+    });
+    await waitForKfm(wrapper);
+    expect(wrapper.get('a.kfm-task-ref').attributes('href')).toBe(
+      '/acme/projects/TASK/tasks/TASK-58',
+    );
+  });
+  it.each([
+    ['TASK-58', undefined, undefined, 0, 0],
+    ['`TASK-58`', 'acme', ME, 0, 0],
+    ['TASK-58', 'acme', ME, 1, 1],
+    ['TASK-58', 'acme', undefined, 1, 0],
+    [`TASK-58 <@${ME}>`, 'acme', ME, 1, 2],
+  ] as const)('本文 %s のリンクとカード', async (body, mentionTenant, tenantId, links, cards) => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const wrapper = mount(CommentBody, {
+      props: { body, commentId: 'boundary', mentionTenant, tenantId, mentions },
+      attachTo: document.body,
+    });
+    await waitForKfm(wrapper);
+    await vi.waitFor(() => expect(wrapper.findAll('a.kfm-task-ref')).toHaveLength(links));
+    await vi.waitFor(() => expect(wrapper.findAll('[role="dialog"]')).toHaveLength(cards));
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});

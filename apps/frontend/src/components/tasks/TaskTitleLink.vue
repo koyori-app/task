@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskMatchText from './query/TaskMatchText.vue';
 import { computed } from 'vue';
 
 import { taskDetailHref, taskSeqKey } from '@/lib/task-display';
@@ -9,6 +10,7 @@ const props = withDefaults(
     projectKey: string;
     seqId: number;
     title: string;
+    segments?: import('@/generated/api').components['schemas']['MatchSegment'][];
     /** 何行まで出すか。既定は 1 行で省略する */
     lines?: 1 | 2 | 'all';
   }>(),
@@ -59,6 +61,6 @@ function onPlainClick(event: MouseEvent) {
       テーブル全体へ広がり、「どこをタップしても一番下の行が開く」状態になっていた。
       一覧の行（DataListRow）はクリック操作を持たないので、開くのはこのリンクだけ。
     -->
-    {{ title }}
+    <TaskMatchText v-if="segments" :segments="segments" /><template v-else>{{ title }}</template>
   </a>
 </template>

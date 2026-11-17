@@ -45,6 +45,8 @@ pub struct Model {
     #[sea_orm(has_one)]
     pub project_task_counters: HasOne<super::project_task_counters::Entity>,
     #[sea_orm(has_many)]
+    pub project_task_types: HasMany<super::project_task_types::Entity>,
+    #[sea_orm(has_many)]
     pub project_task_views: HasMany<super::project_task_views::Entity>,
     #[sea_orm(has_one)]
     pub sprints: HasOne<super::sprints::Entity>,

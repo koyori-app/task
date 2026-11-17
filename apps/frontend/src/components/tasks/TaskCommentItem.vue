@@ -26,13 +26,12 @@ const props = defineProps<{
   deleting?: boolean;
   /**
    * ログイン中ユーザーの ID（/v1/auth/me）。未取得なら null。
-   * 編集は backend が投稿者本人以外を必ず 403 にするため、編集ボタンは
-   * comment.user.id が一致するときだけ出す。削除は backend が投稿者本人に
-   * 加えテナントオーナーにも許していて、frontend からはオーナーかどうかを
-   * 確実に判定できないため、削除ボタンは全コメントに出したままにする —
-   * 可否は backend が判定し、拒否されたら deleteError を拒まれた通りに表示する。
+   * 編集は投稿者本人だけ、削除は投稿者本人とテナントオーナーだけを backend が通す
+   * （delete_comment と同じ）。どちらにも当たらないコメントには出さない。
    */
   currentUserId?: string | null;
+  /** 見ている人がテナントオーナーか。他人のコメントの削除を出すかに使う */
+  isTenantOwner?: boolean;
   /** 本文の札をプロフィールへの link にするテナント（表示用 id。CommentBody 参照） */
   mentionTenant?: string;
   /** プロフィールのカードがプロフィール API を引くテナント（UUID）。無ければカードは名前と画像だけ */
@@ -75,14 +74,17 @@ const showHeaderAddButton = computed(
     !hasReactions.value,
 );
 
+const isAuthor = computed(
+  () => !!props.currentUserId && props.comment.user.id === props.currentUserId,
+);
+const canDelete = computed(() => isAuthor.value || !!props.isTenantOwner);
+
 const menuItems = computed(() => [
   ...(hasReactions.value ? [{ value: 'reactions', label: 'リアクションを見る' }] : []),
-  ...(props.comment.user.id === props.currentUserId
-    ? [{ value: 'edit', label: 'コメントを編集' }]
+  ...(isAuthor.value ? [{ value: 'edit', label: 'コメントを編集' }] : []),
+  ...(canDelete.value && !confirmingDelete.value
+    ? [{ value: 'delete', label: 'コメントを削除', destructive: true }]
     : []),
-  ...(confirmingDelete.value
-    ? []
-    : [{ value: 'delete', label: 'コメントを削除', destructive: true }]),
 ]);
 
 function onMenuSelect(value: string) {

@@ -6,6 +6,7 @@ use payload::project_members::AssignableUserResponse;
 use payload::projects::ProjectResponse;
 use payload::sprints::SprintResponse;
 use payload::statuses::ProjectStatusResponse;
+use payload::task_types::TaskTypeResponse;
 use uuid::Uuid;
 
 use crate::api::ApiClient;
@@ -198,6 +199,29 @@ pub fn pick_label_id(items: &[LabelResponse], name: &str) -> Result<Uuid> {
     }
     pick_named_id(
         "Label",
+        name,
+        items.iter().map(|item| (item.id, item.name.as_str())),
+    )
+}
+
+pub async fn list_task_types(api: &ApiClient, project_id: Uuid) -> Result<Vec<TaskTypeResponse>> {
+    list_under_project(api, project_id, "task-types", &[]).await
+}
+
+pub async fn resolve_task_type_id(api: &ApiClient, project_id: Uuid, name: &str) -> Result<Uuid> {
+    if let Ok(uuid) = Uuid::parse_str(name) {
+        return Ok(uuid);
+    }
+    pick_task_type_id(&list_task_types(api, project_id).await?, name)
+}
+
+/// 取得済みの一覧から名前で引く（一括作成が一覧を使い回すための入口）。
+pub fn pick_task_type_id(items: &[TaskTypeResponse], name: &str) -> Result<Uuid> {
+    if let Ok(uuid) = Uuid::parse_str(name) {
+        return Ok(uuid);
+    }
+    pick_named_id(
+        "Type",
         name,
         items.iter().map(|item| (item.id, item.name.as_str())),
     )

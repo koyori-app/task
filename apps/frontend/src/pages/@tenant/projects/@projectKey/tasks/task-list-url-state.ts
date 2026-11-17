@@ -1,5 +1,5 @@
-import type { SortingState } from '@tanstack/vue-table';
-import { computed, watch, type Ref } from 'vue';
+import { setSort, qualifierValues, setQualifierValues } from '@/lib/task-query/edit';
+import { computed, ref, watch, type Ref } from 'vue';
 
 /**
  * タスク一覧の「今どこを見ているか」を URL クエリで持つ。
@@ -21,53 +21,13 @@ export type TaskListUrlState = {
   page: number;
   /** 確定済みの検索語（デバウンス後に投げているもの） */
   q: string;
-  labelId: string | null;
-  sorting: SortingState;
 };
 
 export const DEFAULT_TASK_LIST_URL_STATE: TaskListUrlState = {
   view: 'list',
   page: 1,
   q: '',
-  labelId: null,
-  sorting: [],
 };
-
-/**
- * 並び替えを受け付ける列 id。`+Page.vue` の `columns` のうち
- * `enableSorting: false` でないもの（`select` と `labels` は対象外）。
- *
- * **拒否リストではなく許可リストにする。** TanStack の `getColumn` は
- * `flatColumns.reduce((acc, c) => { acc[c.id] = c }, {})` という素のオブジェクトを引くため、
- * `Object.prototype` のメンバー名（`__proto__` / `constructor` / `toString` /
- * `valueOf` / `hasOwnProperty` …）を渡すと prototype 側の値が返り、
- * 「存在しない列」として弾かれない。`getSortedRowModel` は
- * `table.getColumn(sort.id)?.getCanSort()` を呼ぶので `?.` をすり抜けて
- * `getCanSort is not a function` で throw し、一覧の描画が止まる。
- * 一覧は `getSortedRowModel()` を渡し `manualSorting` を付けていないので、
- * URL の値がそのままクライアント側のソートに入る。
- */
-const SORTABLE_COLUMN_IDS = new Set(['key', 'title', 'status', 'priority', 'assignee', 'due_date']);
-
-/** `title:asc,priority:desc` 形式。TanStack の SortingState と 1:1。 */
-function parseSorting(raw: string | undefined): SortingState {
-  if (!raw) return [];
-  return raw
-    .split(',')
-    .map((entry) => {
-      const [id, direction] = entry.split(':');
-      // 並び替えできない列・向きが asc/desc 以外は捨てる。細工されたクエリで
-      // TanStack へ不正な state を渡さない
-      if (!id || !SORTABLE_COLUMN_IDS.has(id)) return null;
-      if (direction !== 'asc' && direction !== 'desc') return null;
-      return { id, desc: direction === 'desc' };
-    })
-    .filter((entry): entry is { id: string; desc: boolean } => entry !== null);
-}
-
-function serializeSorting(sorting: SortingState): string {
-  return sorting.map((sort) => `${sort.id}:${sort.desc ? 'desc' : 'asc'}`).join(',');
-}
 
 function parsePage(raw: string | undefined): number {
   if (!raw) return DEFAULT_TASK_LIST_URL_STATE.page;
@@ -79,15 +39,45 @@ function parsePage(raw: string | undefined): number {
 
 export function parseTaskListUrlState(
   search: Record<string, string | undefined> | undefined,
-): TaskListUrlState {
+): TaskListUrlState & { legacyLabelId: string | null } {
   return {
     // 未知の値は既定の List へ倒す（表示形式が消えるより安全）
     view: search?.view === 'table' ? 'table' : DEFAULT_TASK_LIST_URL_STATE.view,
     page: parsePage(search?.page),
-    q: search?.q?.trim() ?? '',
-    labelId: search?.label || null,
-    sorting: parseSorting(search?.sort),
+    q: legacyQuery(search),
+    legacyLabelId: search?.label || null,
   };
+}
+
+/**
+ * 旧 URL の `?label=<id>` を、ラベル名の条件（`label:名`）へ一度だけ移す。
+ *
+ * ラベル一覧が届くまでが「移行待ち」で、その間は URL の `label` を残し、式の変更によるページ先頭への戻りと
+ * 範囲外ページの丸めを止める。一覧の取得に失敗したときは移行を諦めて待ちを解く
+ * （解かないと、以後に式を変えてもページが先頭へ戻らず、丸めも止まったままになる）。
+ * このとき `label` は URL から落ちる。
+ */
+export function useLegacyLabelMigration(params: {
+  legacyLabelId: string | null;
+  labels: Readonly<Ref<{ id: string; name: string }[] | null>>;
+  isError: Readonly<Ref<boolean>>;
+  query: Ref<string>;
+}): Readonly<Ref<boolean>> {
+  let legacyLabelId = params.legacyLabelId;
+  const pending = ref(!!legacyLabelId);
+  watch(
+    [params.labels, params.isError],
+    ([labels, isError]) => {
+      if (!legacyLabelId) return;
+      if (labels === null && !isError) return;
+      const label = labels?.find((l) => l.id === legacyLabelId);
+      legacyLabelId = null;
+      if (label) params.query.value = setQualifierValues(params.query.value, 'label', [label.name]);
+      pending.value = false;
+    },
+    { immediate: true },
+  );
+  return pending;
 }
 
 /**
@@ -95,14 +85,18 @@ export function parseTaskListUrlState(
  *
  * `selected` など、この関数が扱わないクエリは触らない（選択タスクは別の関心）。
  */
-export function applyTaskListUrlState(url: URL, state: TaskListUrlState): URL {
+export function applyTaskListUrlState(
+  url: URL,
+  state: TaskListUrlState,
+  legacyLabelPending = false,
+): URL {
   const next = new URL(url.href);
   const entries: [string, string][] = [
     ['view', state.view === DEFAULT_TASK_LIST_URL_STATE.view ? '' : state.view],
     ['page', state.page > 1 ? String(state.page) : ''],
     ['q', state.q],
-    ['label', state.labelId ?? ''],
-    ['sort', serializeSorting(state.sorting)],
+    ...(legacyLabelPending ? [] : ([['label', '']] as [string, string][])),
+    ['sort', ''],
   ];
   for (const [key, value] of entries) {
     if (value) next.searchParams.set(key, value);
@@ -130,12 +124,11 @@ export function clampPage(page: number, total: number, pageSize: number): number
  * （型検査も lint も通る）。同期の配線ごとここへ寄せてテストで固定する。
  */
 export function useTaskListUrlSync(params: {
+  legacyLabelPending?: Readonly<Ref<boolean>>;
   selectedTaskId: Ref<string | null>;
   view: Ref<TaskListView>;
   pagination: Ref<{ pageIndex: number; pageSize: number }>;
-  submittedSearchQuery: Ref<string>;
-  selectedLabelId: Ref<string | null>;
-  sorting: Ref<SortingState>;
+  query: Ref<string>;
   /**
    * 取得済みの総件数。**未取得は `null`**。
    *
@@ -153,33 +146,35 @@ export function useTaskListUrlSync(params: {
    */
   isPagerActive: Readonly<Ref<boolean>>;
 }) {
-  const { selectedTaskId, view, pagination, submittedSearchQuery, selectedLabelId, sorting } =
-    params;
+  const { selectedTaskId, view, pagination, query } = params;
 
   const listState = computed<TaskListUrlState>(() => ({
     view: view.value,
     page: pagination.value.pageIndex + 1,
-    q: submittedSearchQuery.value,
-    labelId: selectedLabelId.value,
-    sorting: sorting.value,
+    q: query.value,
   }));
 
-  watch([selectedTaskId, listState], ([selected, state]) => {
-    if (typeof window === 'undefined') return;
-    let url = new URL(window.location.href);
-    if (selected) url.searchParams.set('selected', selected);
-    else url.searchParams.delete('selected');
-    url = applyTaskListUrlState(url, state);
-    // history を汚さない: 戻るで一覧より前へ抜けられなくなるのを避ける
-    window.history.replaceState(window.history.state, '', url);
-  });
+  watch(
+    [selectedTaskId, listState, () => params.legacyLabelPending?.value],
+    ([selected, state]) => {
+      if (typeof window === 'undefined') return;
+      let url = new URL(window.location.href);
+      if (selected) url.searchParams.set('selected', selected);
+      else url.searchParams.delete('selected');
+      url = applyTaskListUrlState(url, state, params.legacyLabelPending?.value);
+      // history を汚さない: 戻るで一覧より前へ抜けられなくなるのを避ける
+      window.history.replaceState(window.history.state, '', url);
+    },
+    { immediate: true },
+  );
 
   // ページャを使っていない表示（List・検索）は丸めの対象外。
   // immediate にするのは、キャッシュ由来の件数や 0 件の一覧でも初回に検査するため
+  // 旧ラベルの移行待ちが解けたときも検査する（取得に失敗して諦めた場合は件数が変わらないため）
   watch(
-    [params.taskTotal, params.isPagerActive],
+    [params.taskTotal, params.isPagerActive, () => params.legacyLabelPending?.value],
     ([total, pagerActive]) => {
-      if (!pagerActive) return;
+      if (!pagerActive || params.legacyLabelPending?.value) return;
       // 未取得のあいだは待つ（0 件と区別する）
       if (total === null) return;
       const clamped = clampPage(pagination.value.pageIndex + 1, total, pagination.value.pageSize);
@@ -191,4 +186,18 @@ export function useTaskListUrlSync(params: {
   );
 
   return { listState };
+}
+
+function legacyQuery(search: Record<string, string | undefined> | undefined): string {
+  const q = search?.q?.trim() ?? '';
+  if (qualifierValues(q, 'sort').length) return q;
+  const entry = search?.sort?.split(',')[0];
+  if (!entry) return q;
+  const [id, direction] = entry.split(':');
+  if (
+    !['key', 'status', 'title', 'priority', 'assignee', 'due_date'].includes(id ?? '') ||
+    !['asc', 'desc'].includes(direction ?? '')
+  )
+    return q;
+  return setSort(q, [{ id: id!, desc: direction === 'desc' }]);
 }

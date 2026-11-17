@@ -9,6 +9,7 @@ import {
   PhSunHorizon,
   PhUser,
 } from '@phosphor-icons/vue';
+import { SidebarLink } from '@koyori-app/ui-vue';
 import { computed, type Component } from 'vue';
 import { usePreference } from '@/composables/useLocalSettings';
 
@@ -44,29 +45,21 @@ defineProps<{ currentPath: string }>();
 </script>
 
 <template>
-  <nav class="flex flex-col gap-1" aria-label="アカウント設定">
+  <nav class="flex flex-col gap-(--koyori-space-xs)" aria-label="アカウント設定">
+    <!-- サイドバー（Drawer）のナビと同じ SidebarLink で並べ、見た目と振る舞いを揃える -->
     <template v-for="(group, groupIndex) in groups" :key="groupIndex">
       <hr v-if="groupIndex > 0" class="koyori-separator my-1" data-nav-separator />
-      <template v-for="item in group" :key="item.title">
-        <a
-          v-if="item.href"
-          :href="item.href"
-          :aria-current="item.href === currentPath ? 'page' : undefined"
-          class="flex items-center gap-2 rounded-md px-3 py-2 text-sm aria-[current=page]:bg-accent aria-[current=page]:font-medium hover:bg-accent/50"
-        >
-          <component :is="item.icon" class="size-4 shrink-0" />
-          <span>{{ item.title }}</span>
-        </a>
-        <span
-          v-else
-          aria-disabled="true"
-          title="未実装です"
-          class="text-muted-foreground/50 flex cursor-not-allowed items-center gap-2 rounded-md px-3 py-2 text-sm"
-        >
-          <component :is="item.icon" class="size-4 shrink-0" />
-          <span>{{ item.title }}</span>
-        </span>
-      </template>
+      <SidebarLink
+        v-for="item in group"
+        :key="item.title"
+        :label="item.title"
+        :href="item.href ?? ''"
+        :current="item.href !== undefined && item.href === currentPath"
+        :disabled="item.href === undefined"
+        :title="item.href === undefined ? '未実装です' : undefined"
+      >
+        <template #icon><component :is="item.icon" class="size-4" /></template>
+      </SidebarLink>
     </template>
   </nav>
 </template>

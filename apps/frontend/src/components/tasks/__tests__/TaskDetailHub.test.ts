@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { config, enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { QueryClient, useQuery, VueQueryPlugin } from '@tanstack/vue-query';
 import { defineComponent, nextTick } from 'vue';
@@ -20,6 +20,7 @@ vi.mock('@/components/markdown/MarkdownEditor.vue', async () => ({
 import { ConfirmDialog } from '@koyori-app/ui-vue';
 import TaskDetailHub from '../TaskDetailHub.vue';
 import { PRIORITY_CONFIG } from '@/lib/task-display';
+import { renderDescription } from '@/lib/markup-renderer';
 
 enableAutoUnmount(afterEach);
 
@@ -102,6 +103,137 @@ const featureLabel: components['schemas']['LabelResponse'] = {
   icon_url: null,
   project_id: 'project-id',
 };
+
+type TaskTypeOption = components['schemas']['TaskTypeResponse'];
+
+const taskTypes: TaskTypeOption[] = [
+  { id: 'type-task', project_id: 'project-id', name: 'タスク', color: '#64748b', position: 0 },
+  { id: 'type-bug', project_id: 'project-id', name: 'バグ', color: '#ef4444', position: 1 },
+  { id: 'type-feature', project_id: 'project-id', name: '機能', color: '#3b82f6', position: 2 },
+];
+
+describe('TaskDetailHub の種別', () => {
+  function mountWithTaskType(extra: Record<string, unknown> = {}) {
+    return mount(TaskDetailHub, {
+      props: {
+        task: { ...task, task_type: taskTypes[1] },
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+        projectTaskTypes: taskTypes,
+        ...extra,
+      },
+    });
+  }
+
+  function typeItems(wrapper: ReturnType<typeof mountWithTaskType>) {
+    return wrapper.get('[role="menu"][aria-label="種別"]').findAll('[role="menuitemradio"]');
+  }
+
+  it('種別があれば名前と色の点を出し、固定の「タスク」チップは出さない', () => {
+    const wrapper = mountWithTaskType();
+
+    const trigger = wrapper.get('button[aria-label="種別"]');
+    // 引き金は選んだ種別の名前だけ。以前の固定表示（アイコン + 「タスク」）ではない
+    expect(trigger.text()).toBe('バグ');
+    expect(trigger.get('span[style*="background-color"]').attributes('style')).toContain('#ef4444');
+  });
+
+  it('種別が無ければ「種別」と出す', () => {
+    const wrapper = mountWithTaskType({ task });
+
+    const trigger = wrapper.get('button[aria-label="種別"]');
+    expect(trigger.text()).toBe('種別');
+    expect(trigger.find('span[style*="background-color"]').exists()).toBe(false);
+  });
+
+  it('選択肢は「種別なし」と各種別で、選択中の種別に印が付く', () => {
+    const wrapper = mountWithTaskType();
+
+    const items = typeItems(wrapper);
+    expect(items.map((item) => item.text())).toEqual(['種別なし', 'タスク', 'バグ', '機能']);
+    expect(items.map((item) => item.attributes('aria-checked'))).toEqual([
+      'false',
+      'false',
+      'true',
+      'false',
+    ]);
+  });
+
+  it('種別が無いタスクでは「種別なし」に印が付く', () => {
+    const wrapper = mountWithTaskType({ task });
+
+    expect(typeItems(wrapper).map((item) => item.attributes('aria-checked'))).toEqual([
+      'true',
+      'false',
+      'false',
+      'false',
+    ]);
+  });
+
+  it('種別を選ぶと ID を、「種別なし」を選ぶと null を change:task_type で emit する', async () => {
+    const wrapper = mountWithTaskType();
+
+    await typeItems(wrapper)[3]!.trigger('click');
+    await typeItems(wrapper)[0]!.trigger('click');
+
+    expect(wrapper.emitted('change:task_type')).toEqual([['type-feature'], [null]]);
+  });
+
+  it('更新中は種別を触れない', () => {
+    const wrapper = mountWithTaskType({ taskTypeUpdating: true });
+
+    expect(wrapper.get('button[aria-label="種別"]').attributes('disabled')).toBeDefined();
+    expect(typeItems(wrapper).every((item) => item.attributes('aria-disabled') === 'true')).toBe(
+      true,
+    );
+  });
+
+  it('更新に失敗したら理由を出し、「保存しました」は出さない', () => {
+    const wrapper = mountWithTaskType({
+      taskTypeError: '種別の更新に失敗しました',
+      savedField: 'task_type',
+    });
+
+    expect(wrapper.text()).toContain('種別の更新に失敗しました');
+    expect(wrapper.text()).not.toContain('保存しました');
+  });
+
+  it('保存が確定したら「保存しました」を出す', () => {
+    const wrapper = mountWithTaskType({ savedField: 'task_type' });
+
+    const notices = wrapper.findAll('[role="status"]');
+    expect(notices).toHaveLength(1);
+    expect(notices[0]!.text()).toBe('保存しました');
+  });
+
+  it('候補を渡されなければメニューを出さず、種別の名前だけを表示する', () => {
+    const wrapper = mountWithTaskType({ projectTaskTypes: undefined });
+
+    expect(wrapper.find('button[aria-label="種別"]').exists()).toBe(false);
+    expect(wrapper.find('[role="menu"][aria-label="種別"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain('バグ');
+  });
+
+  it('候補が 0 件で種別も無ければ、作成ダイアログと同じくチップを出さない', () => {
+    const wrapper = mountWithTaskType({ task, projectTaskTypes: [] });
+
+    expect(wrapper.find('button[aria-label="種別"]').exists()).toBe(false);
+  });
+
+  it('候補が 0 件でも種別が付いていれば、名前だけを表示する', () => {
+    const wrapper = mountWithTaskType({ projectTaskTypes: [] });
+
+    expect(wrapper.find('button[aria-label="種別"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain('バグ');
+  });
+
+  it('候補を渡されず種別も無ければ何も出さない', () => {
+    const wrapper = mountWithTaskType({ task, projectTaskTypes: undefined });
+
+    expect(wrapper.find('button[aria-label="種別"]').exists()).toBe(false);
+  });
+});
 
 describe('TaskDetailHub', () => {
   /**
@@ -1345,5 +1477,379 @@ describe('TaskDetailHub のチェックリスト達成率', () => {
 
     expect(wrapper.get('[data-checklist-progress]').text()).toContain('2 / 5');
     expect(wrapper.text()).toContain('30%');
+  });
+});
+
+describe('TaskDetailHub の説明のチェックボックスの切り替え', () => {
+  const SOURCE = '- [x] 済み\n- [ ] 未了\n- [ ] 最後';
+  const TOGGLED = '- [x] 済み\n- [x] 未了\n- [ ] 最後';
+  let html = '';
+
+  beforeAll(async () => {
+    html = await renderDescription(SOURCE);
+  });
+
+  function mountWith(extra: Record<string, unknown> = {}) {
+    const { attachTo, ...props } = extra;
+    return mount(TaskDetailHub, {
+      attachTo: attachTo as HTMLElement | undefined,
+      props: {
+        task: { ...task, description: SOURCE },
+        descriptionHtml: html,
+        descriptionSource: SOURCE,
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+        ...props,
+      },
+    });
+  }
+
+  const FAILED = '更新に失敗しました';
+
+  const resumeButton = (wrapper: ReturnType<typeof mountWith>) =>
+    wrapper.findAll('button').find((button) => button.text() === '編集を再開');
+
+  /** 説明を編集して保存する（保存の成否は呼び出し側が props で表す） */
+  async function editAndSave(wrapper: ReturnType<typeof mountWith>, value: string) {
+    await wrapper.get('button[aria-label="説明を編集"]').trigger('click');
+    await wrapper.get('textarea[aria-label="説明"]').setValue(value);
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '保存')!
+      .trigger('click');
+  }
+
+  const boxes = (wrapper: ReturnType<typeof mountWith>) =>
+    wrapper.findAll<HTMLInputElement>('[data-task-description-html] input[type="checkbox"]');
+
+  it('マウント後、位置の属性付きのチェックボックスは有効で、項目の文字が名前になる', async () => {
+    const wrapper = mountWith();
+    await nextTick();
+
+    expect(boxes(wrapper).map((b) => b.element.disabled)).toEqual([false, false, false]);
+    expect(boxes(wrapper).map((b) => b.attributes('aria-label'))).toEqual(['済み', '未了', '最後']);
+  });
+
+  it('位置の属性が無いチェックボックスは disabled のまま', async () => {
+    const plain = '<ul><li><input type="checkbox" disabled=""> 属性なし</li></ul>';
+    const wrapper = mountWith({ descriptionHtml: plain });
+    await nextTick();
+
+    expect(boxes(wrapper)[0].element.disabled).toBe(true);
+  });
+
+  it('押すと save:description が、その項目だけ替えた本文で 1 回 emit される', async () => {
+    const wrapper = mountWith();
+    await nextTick();
+
+    await boxes(wrapper)[1].setValue(true);
+
+    expect(wrapper.emitted('save:description')).toEqual([[TOGGLED, { preserveWhitespace: true }]]);
+  });
+
+  it('チェックを外す操作は [x] を空白へ戻した本文を emit する', async () => {
+    const wrapper = mountWith();
+    await nextTick();
+
+    await boxes(wrapper)[0].setValue(false);
+
+    expect(wrapper.emitted('save:description')).toEqual([
+      ['- [ ] 済み\n- [ ] 未了\n- [ ] 最後', { preserveWhitespace: true }],
+    ]);
+  });
+
+  it('押した後に task.description が新しい本文になっても (HTML は古いまま) プレーン表示へ落ちない', async () => {
+    const wrapper = mountWith();
+    await nextTick();
+    await boxes(wrapper)[1].setValue(true);
+
+    await wrapper.setProps({ task: { ...task, description: TOGGLED } });
+
+    expect(wrapper.find('[data-task-description-html]').exists()).toBe(true);
+    expect(wrapper.find('p.whitespace-pre-wrap').exists()).toBe(false);
+    expect(boxes(wrapper).map((b) => b.element.checked)).toEqual([true, true, false]);
+    // 見出しの達成率は新しい本文に追従する
+    expect(wrapper.get('[data-checklist-progress]').text()).toContain('2 / 3');
+  });
+
+  it('サーバが描いた新しい HTML が届いても DOM は同じ (差し替わらない)', async () => {
+    const wrapper = mountWith();
+    await nextTick();
+    await boxes(wrapper)[1].setValue(true);
+    await wrapper.setProps({ task: { ...task, description: TOGGLED } });
+    const before = wrapper.get('[data-task-description-html]').element.innerHTML;
+
+    await wrapper.setProps({
+      descriptionHtml: await renderDescription(TOGGLED),
+      descriptionSource: TOGGLED,
+    });
+
+    expect(wrapper.get('[data-task-description-html]').element.innerHTML).toBe(before);
+  });
+
+  it('保存中 (fieldUpdating.description) は全部 aria-disabled で、押しても emit せず戻す。終われば元に戻る', async () => {
+    const wrapper = mountWith();
+    await nextTick();
+    await wrapper.setProps({ fieldUpdating: { description: true } });
+    // disabled にするとフォーカスを持てないので aria-disabled にする
+    expect(boxes(wrapper).map((b) => b.attributes('aria-disabled'))).toEqual([
+      'true',
+      'true',
+      'true',
+    ]);
+    expect(boxes(wrapper).map((b) => b.element.disabled)).toEqual([false, false, false]);
+
+    await boxes(wrapper)[1].setValue(true);
+    expect(wrapper.emitted('save:description')).toBeUndefined();
+    expect(boxes(wrapper)[1].element.checked).toBe(false);
+
+    await wrapper.setProps({ fieldUpdating: { description: false } });
+    expect(boxes(wrapper).map((b) => b.attributes('aria-disabled'))).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
+
+  it('文字の無い項目 (画像だけ) は alt を名前にし、alt も無ければ「チェック項目 N」', async () => {
+    const source = '- [ ] ![設計図](a.png)\n- [ ] ![](b.png)\n- [ ] 親\n  - [ ] 子';
+    const wrapper = mountWith({
+      task: { ...task, description: source },
+      descriptionHtml: await renderDescription(source),
+      descriptionSource: source,
+    });
+    await nextTick();
+
+    // 入れ子の子の字は親の名前に混ぜない
+    expect(boxes(wrapper).map((b) => b.attributes('aria-label'))).toEqual([
+      '設計図',
+      'チェック項目 2',
+      '親',
+      '子',
+    ]);
+  });
+
+  /** 実際の親と同じく、emit の中で（同期に）楽観更新して保存中にする */
+  function mountSavingOnToggle() {
+    const holder: { wrapper?: ReturnType<typeof mountWith> } = {};
+    const wrapper = mountWith({
+      attachTo: document.body,
+      'onSave:description': () => {
+        void holder.wrapper!.setProps({
+          task: { ...task, description: TOGGLED },
+          fieldUpdating: { description: true },
+        });
+      },
+    });
+    holder.wrapper = wrapper;
+    return wrapper;
+  }
+
+  it('保存中は押した項目のフォーカスを保ち、HTML が作り直されても同じ項目へ戻す', async () => {
+    const wrapper = mountSavingOnToggle();
+    await nextTick();
+    boxes(wrapper)[1].element.focus();
+    await boxes(wrapper)[1].setValue(true);
+    await nextTick();
+
+    // 作り直された input は保存中も aria-disabled なのでフォーカスを持てる
+    expect(document.activeElement).toBe(boxes(wrapper)[1].element);
+    expect(boxes(wrapper)[1].attributes('aria-disabled')).toBe('true');
+
+    await wrapper.setProps({ fieldUpdating: { description: false } });
+    expect(document.activeElement).toBe(boxes(wrapper)[1].element);
+  });
+
+  it('失敗で本文が戻って HTML が作り直されても、フォーカスは同じ項目に戻る', async () => {
+    const wrapper = mountSavingOnToggle();
+    await nextTick();
+    boxes(wrapper)[1].element.focus();
+    await boxes(wrapper)[1].setValue(true);
+    await nextTick();
+
+    await wrapper.setProps({
+      task: { ...task, description: SOURCE },
+      fieldUpdating: { description: false },
+      fieldErrors: { description: FAILED },
+    });
+
+    await nextTick(); // フォーカスは描画の直後に戻す
+    expect(document.activeElement).toBe(boxes(wrapper)[1].element);
+    expect(boxes(wrapper)[1].element.checked).toBe(false);
+  });
+
+  it('保存中に別の項目へフォーカスを移していたら、失敗で HTML が作り直されてもそちらに残る', async () => {
+    const wrapper = mountSavingOnToggle();
+    await nextTick();
+    boxes(wrapper)[1].element.focus();
+    await boxes(wrapper)[1].setValue(true);
+    await nextTick();
+    boxes(wrapper)[2].element.focus();
+
+    await wrapper.setProps({
+      task: { ...task, description: SOURCE },
+      fieldUpdating: { description: false },
+      fieldErrors: { description: FAILED },
+    });
+
+    await nextTick(); // フォーカスは描画の直後に戻す
+    expect(document.activeElement).toBe(boxes(wrapper)[2].element);
+  });
+
+  it('フォーカスが説明の外へ移っていたら、HTML が作り直されても奪わない', async () => {
+    const wrapper = mountSavingOnToggle();
+    await nextTick();
+    boxes(wrapper)[1].element.focus();
+    await boxes(wrapper)[1].setValue(true);
+    await nextTick();
+    (document.activeElement as HTMLElement).blur();
+
+    await wrapper.setProps({
+      task: { ...task, description: SOURCE },
+      fieldUpdating: { description: false },
+      fieldErrors: { description: FAILED },
+    });
+    await nextTick(); // フォーカスは描画の直後に戻す
+
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('タスクが替わったときの差し替えでは、前のタスクの項目へフォーカスを戻さない', async () => {
+    const wrapper = mountWith({ attachTo: document.body });
+    await nextTick();
+    boxes(wrapper)[1].element.focus();
+
+    await wrapper.setProps({
+      task: { ...task, id: 'other-task', description: '- [ ] 別の\n- [ ] タスク\n- [ ] です' },
+      descriptionHtml: undefined,
+      descriptionSource: undefined,
+    });
+    await nextTick();
+
+    expect(document.activeElement).not.toBeInstanceOf(HTMLInputElement);
+  });
+
+  it('失敗の戻し: description を元へ戻すとチェックも戻り、「更新に失敗しました」が出て「編集を再開」は出ない', async () => {
+    const wrapper = mountWith();
+    await nextTick();
+    await boxes(wrapper)[1].setValue(true);
+    await wrapper.setProps({
+      task: { ...task, description: TOGGLED },
+      fieldUpdating: { description: true },
+    });
+
+    await wrapper.setProps({
+      task: { ...task, description: SOURCE },
+      fieldUpdating: { description: false },
+      fieldErrors: { description: '更新に失敗しました' },
+    });
+
+    expect(boxes(wrapper).map((b) => b.element.checked)).toEqual([true, false, false]);
+    expect(wrapper.text()).toContain('更新に失敗しました');
+    expect(wrapper.text()).not.toContain('編集を再開');
+    expect(wrapper.get('[data-checklist-progress]').text()).toContain('1 / 3');
+  });
+
+  it('編集の保存に失敗して下書きを取り戻せる間は、チェックボックスを押せず、「編集を再開」が残る', async () => {
+    const wrapper = mountWith();
+    await nextTick();
+    await editAndSave(wrapper, '書きかけの説明');
+    await wrapper.setProps({ fieldErrors: { description: FAILED } });
+    expect(resumeButton(wrapper)).toBeDefined();
+    // 切り替えの保存が始まると失敗表示が消えて下書きが戻せなくなるので、押せない
+    expect(boxes(wrapper).map((b) => b.attributes('aria-disabled'))).toEqual([
+      'true',
+      'true',
+      'true',
+    ]);
+
+    await boxes(wrapper)[1].setValue(true);
+
+    expect(wrapper.emitted('save:description')).toHaveLength(1); // 編集の保存だけ
+    expect(boxes(wrapper)[1].element.checked).toBe(false);
+    expect(resumeButton(wrapper)).toBeDefined();
+    await resumeButton(wrapper)!.trigger('click');
+    expect((wrapper.get('textarea[aria-label="説明"]').element as HTMLTextAreaElement).value).toBe(
+      '書きかけの説明',
+    );
+  });
+
+  it('対照: 前に成功した編集の下書きは、切り替えの失敗で「編集を再開」に出ない', async () => {
+    const wrapper = mountWith();
+    await nextTick();
+    // 編集の保存は成功した（失敗表示は出ない。親が本文を保つ代わりに task はそのまま）
+    await editAndSave(wrapper, '成功した説明');
+    expect(resumeButton(wrapper)).toBeUndefined();
+
+    await boxes(wrapper)[1].setValue(true);
+    await wrapper.setProps({ fieldErrors: { description: FAILED } });
+
+    expect(resumeButton(wrapper)).toBeUndefined();
+  });
+
+  it('対照: descriptionSource が description と違う (他の人が更新した) と HTML を出さず、押せない', async () => {
+    const wrapper = mountWith({ descriptionSource: '- [ ] 古い本文' });
+    await nextTick();
+
+    expect(wrapper.find('[data-task-description-html]').exists()).toBe(false);
+    expect(wrapper.find('[data-task-description-html] input').exists()).toBe(false);
+    expect(wrapper.emitted('save:description')).toBeUndefined();
+  });
+
+  it('別のタスクへ移ったら、前のタスクの橋渡しの HTML を出さない', async () => {
+    const wrapper = mountWith();
+    await nextTick();
+    await boxes(wrapper)[1].setValue(true);
+    await wrapper.setProps({ task: { ...task, description: TOGGLED } });
+
+    // 別のタスクが同じ本文を持っていても、HTML はまだ届いていない
+    await wrapper.setProps({
+      task: { ...task, id: 'other-task', description: TOGGLED },
+      descriptionHtml: undefined,
+      descriptionSource: undefined,
+    });
+
+    expect(wrapper.find('[data-task-description-html]').exists()).toBe(false);
+  });
+
+  it('編集中は KFM 表示 (チェックボックス) を出さない', async () => {
+    const wrapper = mountWith();
+    await nextTick();
+
+    await wrapper.get('button[aria-label="説明を編集"]').trigger('click');
+    await nextTick();
+
+    expect(wrapper.find('[data-task-description-html]').exists()).toBe(false);
+    expect(wrapper.find('[data-task-description-html] input').exists()).toBe(false);
+  });
+});
+
+describe('TaskDetailHub のタスク参照カード', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it.each([true, false])('説明のタスクリンクの有無 %s に応じてカードを置く', async (linked) => {
+    globalThis.ResizeObserver ??= class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const wrapper = mount(TaskDetailHub, {
+      props: {
+        task: { ...task, description: 'TASK-58' },
+        descriptionSource: 'TASK-58',
+        descriptionHtml: linked
+          ? '<a class="kfm-task-ref" href="/acme/projects/TASK/tasks/TASK-58">TASK-58</a>'
+          : '<p>TASK-58</p>',
+        projectKey: 'TASK',
+        statuses: [],
+        statusId: task.status_id,
+        tenantId: 'tenant',
+        mentionTenant: 'acme',
+      },
+    });
+    await vi.waitFor(() => expect(wrapper.findAll('[role="dialog"]')).toHaveLength(linked ? 1 : 0));
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

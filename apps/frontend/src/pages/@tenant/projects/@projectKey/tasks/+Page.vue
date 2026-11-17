@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import LoadErrorState from '@/components/LoadErrorState.vue';
-import { Loader2, Search, Signal, SignalHigh, SignalLow, SignalMedium, X } from '@lucide/vue';
+import { Loader2, Signal, SignalHigh, SignalLow, SignalMedium } from '@lucide/vue';
 import type { LucideIcon } from '@lucide/vue';
 import type {
   ColumnDef,
@@ -25,8 +25,8 @@ import {
   useTable,
 } from '@tanstack/vue-table';
 import { PhRows, PhTable } from '@phosphor-icons/vue';
-import { computed, h, onMounted, onUnmounted, ref, watch, type Component } from 'vue';
-import { useQuery, keepPreviousData } from '@tanstack/vue-query';
+import { computed, h, onMounted, ref, watch, type Component } from 'vue';
+import { useQuery } from '@tanstack/vue-query';
 import { navigate } from 'vike/client/router';
 import { usePageContext } from 'vike-vue/usePageContext';
 import {
@@ -44,9 +44,7 @@ import {
   DataList,
   DataListRow,
   Dropdown,
-  Input,
   Pagination,
-  Spinner,
   SplitPane,
   type DataListColumn,
   type DataListProps,
@@ -59,20 +57,16 @@ import TaskTitleLink from '@/components/tasks/TaskTitleLink.vue';
 import { usePreference } from '@/composables/useLocalSettings';
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
-import { fetchClient, taskSearchQueryOptions, useAssignableUsersQuery } from '@/lib/api-vue-query';
+import { fetchClient, useAssignableUsersQuery } from '@/lib/api-vue-query';
 import { formatDeadline, taskDetailHref, taskSeqKey } from '@/lib/task-display';
 import type { components } from '@/generated/api';
-import {
-  buildTasksListQueryParams,
-  taskListPlaceholderData,
-  useTaskLabelFilter,
-  watchAvailableTaskLabels,
-} from './task-list-label-filter';
+import { buildTasksListQueryParams, taskListPlaceholderData } from './task-list-query';
 import { keepTaskListFocusAcrossSplit } from './task-list-split-focus';
 import { popOverlayParent, pushOverlayParent } from '@/components/tasks/overlay-parent-stack';
 import {
   parseTaskListUrlState,
   useTaskListUrlSync,
+  useLegacyLabelMigration,
   type TaskListView,
 } from './task-list-url-state';
 import TaskGroupedList from '@/components/tasks/TaskGroupedList.vue';
@@ -81,24 +75,22 @@ import type { TaskGroup } from '@/components/tasks/task-grouped-columns';
 import TaskDetailOverlay from '@/components/tasks/TaskDetailOverlay.vue';
 import { useTaskRowMutations } from '@/composables/useTaskRowMutations';
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts';
-import { taskListApiSort, type TaskListSortingState } from '@/components/tasks/task-list-sort';
+import { type TaskListSortingState } from '@/components/tasks/task-list-sort';
 
+import TaskQueryField from '@/components/tasks/query/TaskQueryField.vue';
+import TaskFilterBar from '@/components/tasks/query/TaskFilterBar.vue';
+import TaskMatchSnippets from '@/components/tasks/query/TaskMatchSnippets.vue';
+import { sortOf, setSort, hasFilter } from '@/lib/task-query/edit';
+import type { SuggestData } from '@/lib/task-query/suggest';
+import { taskQueryErrorsOf, describeTaskQueryError } from '@/lib/task-query/errors';
 // ---- 定数 ----
 const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
 const LIST_STATUSES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/statuses' as const;
 /** List 表示でステータスごとに最初に取る件数。「もっと見る」でこの単位ずつ増やす */
 const GROUP_PAGE_SIZE = 20;
 const LIST_LABELS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/labels' as const;
+const LIST_TASK_TYPES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/task-types' as const;
 const TASKS_PAGE_SIZE = 20;
-const SEARCH_PAGE_SIZE = 50;
-const SEARCH_DEBOUNCE_MS = 300;
-
-type TaskSearchQueryKeyParams = {
-  params?: {
-    path?: { tenant_id?: string; project_id?: string };
-  };
-};
-
 // ---- 型定義 ----
 type ApiPriority = components['schemas']['TaskPriority'];
 type UserSummary = components['schemas']['UserSummary'];
@@ -232,64 +224,14 @@ const isListView = computed(() => view.value === 'list');
 // 環境設定。true なら List 表示の親行を、サブタスクを開いた状態で描く
 const expandSubtasks = usePreference('expandSubtasksInList');
 
-const searchInput = ref(initialListState.q);
-const submittedSearchQuery = ref(initialListState.q);
-let searchDebounceTimer: ReturnType<typeof setTimeout> | undefined;
-
-function updateSubmittedSearchQuery() {
-  submittedSearchQuery.value = searchInput.value.trim();
-}
-
-function scheduleSearch(value: string | number) {
-  if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-  searchInput.value = String(value);
-  if (!searchInput.value.trim()) {
-    submittedSearchQuery.value = '';
-    return;
-  }
-  searchDebounceTimer = setTimeout(updateSubmittedSearchQuery, SEARCH_DEBOUNCE_MS);
-}
-
-function submitSearch() {
-  if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-  updateSubmittedSearchQuery();
-}
-
-function clearSearch() {
-  if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-  searchInput.value = '';
-  submittedSearchQuery.value = '';
-}
-
-onUnmounted(() => {
-  if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+const query = ref(initialListState.q);
+const filtering = computed(() => hasFilter(query.value));
+const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+const queryOpened = ref(false);
+watch(projectKey, () => {
+  query.value = '';
+  queryOpened.value = false;
 });
-
-const taskSearchQuery = useQuery(
-  computed(() => ({
-    ...taskSearchQueryOptions(
-      tenantId.value ?? '',
-      projectId.value ?? '',
-      submittedSearchQuery.value,
-      { limit: SEARCH_PAGE_SIZE, offset: 0 },
-    ),
-    enabled: !!tenantId.value && !!projectId.value && !!submittedSearchQuery.value,
-    placeholderData: (previousData, previousQuery) => {
-      const previousParams = previousQuery?.queryKey[2] as TaskSearchQueryKeyParams | undefined;
-      const previousPath = previousParams?.params?.path;
-      if (
-        previousPath?.tenant_id === tenantId.value &&
-        previousPath.project_id === projectId.value
-      ) {
-        return keepPreviousData(previousData);
-      }
-      return undefined;
-    },
-  })),
-);
-
-const isSearchActive = computed(() => !!submittedSearchQuery.value);
-
 // ---- サーバーサイドページネーション ----
 const pagination = ref<PaginationState>({
   // URL は 1 始まり（人が読む値）、TanStack は 0 始まり
@@ -302,20 +244,7 @@ watch(projectKey, () => {
   pagination.value = { ...pagination.value, pageIndex: 0 };
 });
 
-// ---- ラベルフィルタ ----
-// null は「すべて」。切り替え時は先頭ページへ戻す
-const { selectedLabelId } = useTaskLabelFilter(pagination, projectKey, initialListState.labelId);
-
-// ---- クエリ②: タスク一覧 ----
-/**
- * Table 表示の一覧（ページャつき）を使うか。
- *
- * List 表示はステータス別の `groupQueries` から作るので、この一覧は使わない。
- * 使わないまま取りに行くと、余分なリクエストが増えるだけでなく、ローディングと
- * エラーがこの query に紐付いているために List が出せない・List 全体が
- * エラー画面になる。検索中も表示に使わないので同じく止める。
- */
-const usesTaskList = computed(() => !isListView.value && !isSearchActive.value);
+const usesTaskList = computed(() => !isListView.value);
 
 const tasksQuery = useQuery({
   queryKey: computed(() => [
@@ -325,7 +254,8 @@ const tasksQuery = useQuery({
       tenantId.value!,
       projectId.value!,
       pagination.value,
-      selectedLabelId.value,
+      query.value,
+      timezone,
     ),
   ]),
   queryFn: async ({ signal }) => {
@@ -335,7 +265,8 @@ const tasksQuery = useQuery({
         tenantId.value!,
         projectId.value!,
         pagination.value,
-        selectedLabelId.value,
+        query.value,
+        timezone,
       ),
       signal,
     });
@@ -343,13 +274,15 @@ const tasksQuery = useQuery({
     return data;
   },
   enabled: computed(() => !!tenantId.value && !!projectId.value && usesTaskList.value),
+  retry: false,
   placeholderData: (previousData, previousQuery) => {
     // ラベルフィルタが変わったときは旧条件のデータを見せない（ページング時のみ維持）
     return taskListPlaceholderData(
       previousData,
       previousQuery,
       projectId.value,
-      selectedLabelId.value,
+      query.value,
+      timezone,
     );
   },
 });
@@ -397,6 +330,24 @@ const labelsQuery = useQuery({
   enabled: computed(() => !!tenantId.value && !!projectId.value),
 });
 
+// ---- クエリ④': 種別一覧（作成ダイアログの候補） ----
+const taskTypesQuery = useQuery({
+  queryKey: computed(() => [
+    'get',
+    LIST_TASK_TYPES_PATH,
+    { params: { path: { tenant_id: tenantId.value!, project_id: projectId.value! } } },
+  ]),
+  queryFn: async ({ signal }) => {
+    const { data, error } = await fetchClient.GET(LIST_TASK_TYPES_PATH, {
+      params: { path: { tenant_id: tenantId.value!, project_id: projectId.value! } },
+      signal,
+    });
+    if (error) throw error;
+    return data;
+  },
+  enabled: computed(() => !!tenantId.value && !!projectId.value),
+});
+
 // ラベルも未取得を null で区別する（表示用は空配列へ畳む）
 const fetchedProjectLabels = computed(() => labelsQuery.data.value ?? null);
 const projectLabels = computed(() => fetchedProjectLabels.value ?? []);
@@ -404,7 +355,9 @@ const projectLabels = computed(() => fetchedProjectLabels.value ?? []);
 // ---- クエリ④: 担当者候補（List 表示の行から割り当てる）----
 // 担当者の候補が要るのは List 表示のピッカーと作成モーダル。どちらも出ていなければ
 // 取りに行かない（Table 表示でモーダルを閉じたままなら問い合わせは発生しない）
-const needsAssignableUsers = computed(() => isListView.value || isCreateDialogOpen.value);
+const needsAssignableUsers = computed(
+  () => isListView.value || isCreateDialogOpen.value || queryOpened.value,
+);
 const membersQuery = useAssignableUsersQuery(
   () => (needsAssignableUsers.value ? tenantId.value : null),
   () => (needsAssignableUsers.value ? projectId.value : null),
@@ -526,11 +479,52 @@ function onOverlayOpenChange(open: boolean) {
   selectedTaskId.value = next;
 }
 
-watchAvailableTaskLabels(selectedLabelId, fetchedProjectLabels);
-const selectedLabelName = computed(
-  () => projectLabels.value.find((label) => label.id === selectedLabelId.value)?.name ?? null,
+const legacyLabelPending = useLegacyLabelMigration({
+  legacyLabelId: initialListState.legacyLabelId,
+  labels: fetchedProjectLabels,
+  isError: labelsQuery.isError,
+  query,
+});
+const facetsQuery = useQuery({
+  queryKey: computed(() => [
+    'get',
+    '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/facets',
+    { params: { path: { tenant_id: tenantId.value!, project_id: projectId.value! } } },
+  ]),
+  queryFn: async () => {
+    const { data, error } = await fetchClient.GET(
+      '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/facets',
+      { params: { path: { tenant_id: tenantId.value!, project_id: projectId.value! } } },
+    );
+    if (error) throw error;
+    return data;
+  },
+  enabled: computed(() => queryOpened.value && !!tenantId.value && !!projectId.value),
+  staleTime: 30_000,
+  retry: false,
+});
+// 補完の元データ。テンプレートにオブジェクトリテラルで書くと再描画のたびに作り直され、
+// 補完欄が選択中の候補を見失う。元が変わったときだけ作り直す。
+const suggestData = computed<SuggestData>(() => ({
+  statuses: workflowStatuses.value,
+  labels: projectLabels.value,
+  members: projectMembers.value,
+  facets: facetsQuery.data.value,
+}));
+const matches = computed(() => tasksQuery.data.value?.matches ?? {});
+const queryErrors = computed(() =>
+  isListView.value
+    ? (taskGroups.value.find((g) => g.queryErrors)?.queryErrors ?? null)
+    : taskQueryErrorsOf(tasksQuery.error.value),
 );
-
+const filteredTotal = computed(() =>
+  isListView.value
+    ? taskGroups.value.length === workflowStatuses.value.length &&
+      !taskGroups.value.some((g) => g.isLoading || g.isError)
+      ? taskGroups.value.reduce((n, g) => n + g.total, 0)
+      : null
+    : fetchedTaskTotal.value,
+);
 /** status_id → { name, color, is_done_state } 解決用 Map */
 const statusMap = computed(() => {
   const statuses = statusesQuery.data.value ?? [];
@@ -689,15 +683,20 @@ const columns: ColumnDef<TaskTableFeatures, TaskRow>[] = [
         projectKey: projectKey.value,
         seqId: task.seq_id,
         title: task.title,
+        segments: matches.value[task.id]?.title ?? undefined,
         lines: isNarrow.value ? 2 : 1,
         onSelect: onSelectRow,
       });
       const icon = h(pc.icon, { class: 'size-4 shrink-0', style: { color: pc.color } });
       if (!isNarrow.value)
-        return h('div', { class: 'flex items-center gap-2 min-w-0' }, [icon, link]);
+        return h('div', { class: 'min-w-0' }, [
+          h('div', { class: 'flex items-center gap-2 min-w-0' }, [icon, link]),
+          h(TaskMatchSnippets, { snippets: matches.value[task.id]?.snippets ?? [] }),
+        ]);
       // 狭い幅は ID の列を畳み、タイトルの下へ移す
       return h('div', { class: 'min-w-0 py-1' }, [
         link,
+        h(TaskMatchSnippets, { snippets: matches.value[task.id]?.snippets ?? [] }),
         h('div', { class: 'mt-0.5 flex items-center gap-1.5' }, [
           h('span', { class: 'font-mono text-xs text-muted-foreground' }, taskKey(task)),
           icon,
@@ -805,8 +804,12 @@ const columns: ColumnDef<TaskTableFeatures, TaskRow>[] = [
 ];
 
 // ---- テーブル状態 ----
-const sorting = ref<SortingState>(initialListState.sorting);
-const taskGroupApiSort = computed(() => taskListApiSort(sorting.value));
+const sorting = computed<SortingState>({
+  get: () => sortOf(query.value),
+  set: (value) => {
+    query.value = setSort(query.value, value);
+  },
+});
 
 function onListSortingChange(next: TaskListSortingState) {
   sorting.value = next;
@@ -814,17 +817,25 @@ function onListSortingChange(next: TaskListSortingState) {
 const columnFilters = ref<ColumnFiltersState>([]);
 const columnVisibility = ref<ColumnVisibilityState>({});
 const rowSelection = ref({});
+watch(
+  query,
+  () => {
+    if (legacyLabelPending.value) return;
+    pagination.value = { ...pagination.value, pageIndex: 0 };
+    rowSelection.value = {};
+  },
+  { flush: 'sync' },
+);
 
 // ---- URL 同期 ----
 // 選択・ページ・検索語・ラベル・並び替えを URL へ書き戻し、件数が分かったら
 // 範囲外のページを丸める（配線ごと task-list-url-state に寄せてテストしている）。
 useTaskListUrlSync({
+  legacyLabelPending,
   selectedTaskId,
   view,
   pagination,
-  submittedSearchQuery,
-  selectedLabelId,
-  sorting,
+  query,
   taskTotal: fetchedTaskTotal,
   isPagerActive: usesTaskList,
 });
@@ -837,6 +848,7 @@ const table = useTable({
   columns,
   getRowId: (row: TaskRow) => row.id,
   manualPagination: true,
+  manualSorting: true,
   get rowCount() {
     return taskTotal.value;
   },
@@ -922,25 +934,6 @@ const isSomePageRowsSelected = computed(
   () => table.getIsSomePageRowsSelected() && !table.getIsAllPageRowsSelected(),
 );
 
-const SEARCH_COLUMNS: DataListColumn[] = [
-  { id: 'key', label: 'ID', width: '6rem' },
-  { id: 'title', label: 'タイトル' },
-  { id: 'highlight', label: '一致箇所' },
-];
-/** 狭い幅の検索結果は列を 1 つにして、一致箇所と ID をタイトルの下へ積む */
-const NARROW_SEARCH_COLUMNS: DataListColumn[] = [{ id: 'title', label: 'タイトル' }];
-
-/** ラベルでの絞り込み。「すべて」は value を空にして選択なしに戻す */
-const labelFilterItems = computed<DropdownItem[]>(() => [
-  { value: '', label: 'すべて', kind: 'radio', checked: !selectedLabelId.value },
-  ...projectLabels.value.map((label) => ({
-    value: label.id,
-    label: label.name,
-    kind: 'radio' as const,
-    checked: label.id === selectedLabelId.value,
-  })),
-]);
-
 /** 外せる列の表示切り替え。checkbox なので選んでもメニューは閉じない */
 const columnItems = computed<DropdownItem[]>(() =>
   table
@@ -986,75 +979,33 @@ const columnItems = computed<DropdownItem[]>(() =>
     <template v-else-if="canCreate">
       <DefineTaskList>
         <div ref="taskListEl" class="@container flex h-full min-h-0 flex-col gap-3">
-          <!-- サーバー側検索ツールバー。狭い幅は検索と操作の 2 段に分ける -->
-          <div class="flex flex-wrap items-center gap-2 @3xl:flex-nowrap">
-            <form
-              class="flex w-full items-center gap-2 @3xl:max-w-md"
-              role="search"
-              @submit.prevent="submitSearch"
-            >
-              <!-- 消去は suffix のボタンだけにする（ブラウザの検索欄の × は隠す） -->
-              <Input
-                type="search"
-                class="min-w-0 flex-1 [&_input::-webkit-search-cancel-button]:hidden"
-                placeholder="タスクを検索..."
-                aria-label="タスクを検索"
-                :value="searchInput"
-                :on-value-change="scheduleSearch"
-              >
-                <template #prefix><Search class="size-4" /></template>
-                <template #suffix>
-                  <Button
-                    v-if="searchInput"
-                    type="button"
-                    variant="ghost"
-                    ariaLabel="検索をクリア"
-                    @click="clearSearch"
-                  >
-                    <template #icon><X class="size-4" /></template>
-                  </Button>
-                </template>
-              </Input>
-              <!-- 入力すると検索が走り、狭い幅ではキーボードの確定でも送れるので畳む -->
-              <Button
-                type="submit"
-                variant="tertiary"
-                class="@max-3xl:hidden"
-                :disabled="!searchInput.trim()"
-                :label="taskSearchQuery.isFetching.value && isSearchActive ? '検索中…' : '検索'"
-              >
-                <template #icon>
-                  <Spinner v-if="taskSearchQuery.isFetching.value && isSearchActive" hide-label />
-                  <Search v-else class="size-4" />
-                </template>
-              </Button>
-            </form>
-            <Button class="@3xl:ml-auto" label="新規タスク" @click="isCreateDialogOpen = true" />
-            <!-- ラベル取得失敗はタスク一覧をブロックせず、ツールバー内で再試行を出す -->
-            <div
-              v-if="!isSearchActive && labelsQuery.isError.value && !projectLabels.length"
-              class="flex items-center gap-1.5 text-xs text-destructive"
-            >
-              <span>ラベルの取得に失敗しました</span>
-              <Button variant="tertiary" label="再試行" @click="labelsQuery.refetch()" />
-            </div>
-            <Dropdown
-              v-if="!isSearchActive && projectLabels.length"
-              variant="tertiary"
-              :class="selectedLabelId ? '[&>button]:text-link' : ''"
-              :label="selectedLabelName ?? 'ラベル'"
-              :items="labelFilterItems"
-              :on-select="(value: string) => (selectedLabelId = value || null)"
+          <div class="flex items-center gap-2">
+            <TaskQueryField
+              v-model="query"
+              :suggest-data="suggestData"
+              @focus="queryOpened = true"
             />
+            <Button label="新規タスク" @click="isCreateDialogOpen = true" />
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <TaskFilterBar
+              v-model="query"
+              :statuses="workflowStatuses"
+              :labels="projectLabels"
+              :members="projectMembers"
+              :members-state="projectMembersState"
+              @open:assignee="queryOpened = true"
+            />
+            <span v-if="labelsQuery.isError.value" class="text-xs text-destructive"
+              >ラベルの取得に失敗しました
+              <Button variant="tertiary" label="再試行" @click="labelsQuery.refetch()"
+            /></span>
             <TaskListSortMenu
-              v-if="!isSearchActive && isListView"
-              class="@3xl:hidden"
+              class="ml-auto"
               :sorting="sorting"
               @update:sorting="onListSortingChange"
             />
-            <!-- 列を並べない狭い幅の List では意味がない -->
             <Dropdown
-              v-if="!isSearchActive"
               :class="isListView && '@max-3xl:hidden'"
               variant="tertiary"
               label="列"
@@ -1085,6 +1036,15 @@ const columnItems = computed<DropdownItem[]>(() =>
             </button>
           </div>
 
+          <div v-if="filtering" class="flex items-center gap-2 text-xs text-muted-foreground">
+            <span v-if="filteredTotal !== null">{{ filteredTotal }} 件</span
+            ><Button
+              v-if="!queryErrors"
+              variant="ghost"
+              label="条件をすべて消す"
+              @click="query = ''"
+            />
+          </div>
           <CreateTaskDialog
             v-if="tenantId && projectId"
             v-model:open="isCreateDialogOpen"
@@ -1095,11 +1055,15 @@ const columnItems = computed<DropdownItem[]>(() =>
             :labels="labelsQuery.data.value"
             :labels-loading="labelsQuery.isLoading.value"
             :labels-error="labelsQuery.isError.value && !projectLabels.length"
+            :task-types="taskTypesQuery.data.value"
+            :task-types-loading="taskTypesQuery.isLoading.value"
+            :task-types-error="taskTypesQuery.isError.value && !taskTypesQuery.data.value"
             :members="membersQuery.data.value"
             :members-loading="membersQuery.isLoading.value"
             :members-error="membersQuery.isError.value && !projectMembers.length"
             @created="onTaskCreated"
             @retry-labels="labelsQuery.refetch()"
+            @retry-task-types="taskTypesQuery.refetch()"
             @retry-members="membersQuery.refetch()"
           />
 
@@ -1115,90 +1079,29 @@ const columnItems = computed<DropdownItem[]>(() =>
             :status="status"
             :tenant-id="tenantId"
             :project-id="projectId"
-            :label-id="selectedLabelId"
-            :sort="taskGroupApiSort"
+            :q="query"
+            :timezone="timezone"
+            :root-only="!filtering"
+            :oldest-first="sorting.length === 0"
             :page-size="GROUP_PAGE_SIZE"
-            :enabled="!isSearchActive"
+            :enabled="true"
             @update:group="setTaskGroup"
           />
 
           <!-- スクロールするテーブル領域（ツールバーとページネーションは固定） -->
           <div ref="taskListScroller" class="min-h-0 flex-1 overflow-y-auto">
-            <!-- 検索結果。API は検索ヒットの最小情報のみ返すため、虚偽の状態値は補完しない。 -->
-            <div
-              v-if="
-                isSearchActive && taskSearchQuery.isLoading.value && !taskSearchQuery.data.value
-              "
-              class="flex justify-center py-8"
-            >
-              <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />
+            <div v-if="queryErrors" role="alert" class="p-4 text-sm">
+              <p v-for="(error, index) in queryErrors" :key="index">
+                {{ describeTaskQueryError(error) }}
+              </p>
+              <Button variant="ghost" label="条件をすべて消す" @click="query = ''" />
             </div>
-            <div
-              v-else-if="isSearchActive && taskSearchQuery.isError.value"
-              class="flex flex-col items-center gap-2 py-8 text-sm text-destructive"
+            <p
+              v-else-if="filtering && filteredTotal === 0"
+              class="py-8 text-center text-sm text-muted-foreground"
             >
-              <span>検索に失敗しました</span>
-              <Button variant="tertiary" label="再試行" @click="taskSearchQuery.refetch()" />
-            </div>
-            <template v-else-if="isSearchActive">
-              <DataList
-                id="task-search-results"
-                label="検索結果"
-                tabindex="-1"
-                :class="isNarrow && '[--koyori-data-list-min-width:0]'"
-                :heading-level="2"
-                :columns="isNarrow ? NARROW_SEARCH_COLUMNS : SEARCH_COLUMNS"
-                :count="taskSearchQuery.data.value?.total ?? 0"
-                :status="taskSearchQuery.data.value?.tasks.length ? 'ready' : 'empty'"
-                message="検索結果がありません"
-              >
-                <DataListRow
-                  v-for="task in taskSearchQuery.data.value?.tasks ?? []"
-                  :key="task.id"
-                  :class="isRowActive(task.seq_id) && 'bg-muted'"
-                >
-                  <!-- highlight は backend の ilike/tsvector/no-match 全経路で動的文字列を
-                     html_escape 済み。唯一 backend が付与する <em> のみ HTML として描画する。 -->
-                  <td v-if="isNarrow" class="py-1">
-                    <TaskTitleLink
-                      :tenant-display-id="tenantDisplayId"
-                      :project-key="projectKey"
-                      :seq-id="task.seq_id"
-                      :title="task.title"
-                      lines="all"
-                      @select="onSelectRow"
-                    />
-                    <p
-                      class="mt-1 text-xs break-words text-muted-foreground"
-                      v-html="task.highlight"
-                    />
-                    <p class="mt-0.5 font-mono text-xs text-muted-foreground">
-                      {{ projectKey }}-{{ task.seq_id }}
-                    </p>
-                  </td>
-                  <template v-else>
-                    <td class="font-mono text-xs text-muted-foreground">
-                      {{ projectKey }}-{{ task.seq_id }}
-                    </td>
-                    <td>
-                      <TaskTitleLink
-                        :tenant-display-id="tenantDisplayId"
-                        :project-key="projectKey"
-                        :seq-id="task.seq_id"
-                        :title="task.title"
-                        @select="onSelectRow"
-                      />
-                    </td>
-                    <td class="truncate text-xs text-muted-foreground" v-html="task.highlight" />
-                  </template>
-                </DataListRow>
-              </DataList>
-              <div class="text-xs text-muted-foreground">
-                上位 {{ taskSearchQuery.data.value?.tasks.length ?? 0 }} 件 / 全
-                {{ taskSearchQuery.data.value?.total ?? 0 }} 件
-              </div>
-            </template>
-
+              条件に合うタスクはありません
+            </p>
             <!-- List 表示: ステータスごとに並べる（既定） -->
             <TaskGroupedList
               v-else-if="isListView"
@@ -1206,7 +1109,9 @@ const columnItems = computed<DropdownItem[]>(() =>
               :groups="taskGroups"
               :tenant-id="tenantId"
               :project-id="projectId"
-              :label-id="selectedLabelId"
+              :subtask-filters="{ q: query || undefined, timezone }"
+              :flat="filtering"
+              :hide-empty-groups="filtering"
               :statuses="workflowStatuses"
               :project-labels="projectLabels"
               :members="projectMembers"
@@ -1250,7 +1155,13 @@ const columnItems = computed<DropdownItem[]>(() =>
               :columns="taskListColumns"
               :count="fetchedTaskTotal ?? undefined"
               :status="taskListStatus"
-              :message="taskListStatus === 'empty' ? 'タスクが見つかりません' : undefined"
+              :message="
+                taskListStatus === 'empty'
+                  ? filtering
+                    ? '条件に合うタスクはありません'
+                    : 'タスクが見つかりません'
+                  : undefined
+              "
               :on-retry="() => void tasksQuery.refetch()"
               :sort="taskListSort"
               :on-sort-change="onTaskListSortChange"
@@ -1276,7 +1187,7 @@ const columnItems = computed<DropdownItem[]>(() =>
           <!-- ページネーション（API total 連動のサーバーサイド）。
                List 表示はステータスごとに「もっと見る」で伸ばすのでページャは出さない -->
           <div
-            v-if="!isSearchActive && !isListView"
+            v-if="!isListView"
             class="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"
           >
             <div class="flex items-center gap-2">

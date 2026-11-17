@@ -101,24 +101,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+          release_version=""
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             version="${GITHUB_REF_NAME#v}"
             if [ -z "$version" ] || [ "$version" = "${GITHUB_REF_NAME}" ]; then
               echo "::error::タグ ${GITHUB_REF_NAME} から版を取り出せません（v<version> の形にしてください）"
               exit 1
             fi
+            release_version="$version"
           else
             version=$(awk -F'"' '/^\[package\]/ { in_package = 1 }
                                  in_package && /^version = / { print $2; exit }' \
                       apps/backend/crates/cli/Cargo.toml)
           fi
           echo "value=$version" >> "$GITHUB_OUTPUT"
+          echo "release_value=$release_version" >> "$GITHUB_OUTPUT"
           echo "version: $version"
 
       - name: Build
         shell: bash
         env:
-          TASK_CLI_VERSION: ${{ steps.version.outputs.value }}
+          TASK_CLI_VERSION: ${{ steps.version.outputs.release_value }}
         run: cargo build --release --locked -p task-cli --bin task --target ${{ matrix.target }}
         working-directory: apps/backend
 
@@ -172,9 +175,11 @@ jobs:
           if-no-files-found: error
 
   release:
-    # 全ての target がビルドできたときだけ公開する（壊れた配布物を出さない）
+    # 全ての target がビルドできたときだけ公開する（壊れた配布物を出さない）。
+    # 版を名乗るのはタグの push だけ（Derive the version from the tag）なので、
+    # タグを指定した手動実行のビルド（版 0.1.0）は公開しない
     needs: build
-    if: github.ref_type == 'tag'
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 

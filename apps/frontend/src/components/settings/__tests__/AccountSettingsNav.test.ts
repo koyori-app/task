@@ -48,6 +48,17 @@ describe('AccountSettingsNav の環境設定と実験的機能', () => {
     expect(link.attributes('aria-current')).toBe('page');
   });
 
+  it('未実装の「通知」はリンク先を持たず、押せない項目として並ぶ', async () => {
+    const { wrapper } = mountNav();
+    await flushPromises();
+
+    const item = wrapper.findAll('nav > a').find((a) => a.text() === '通知');
+    expect(item?.attributes('href')).toBeUndefined();
+    expect(item?.attributes('aria-disabled')).toBe('true');
+    expect(item?.attributes('title')).toBe('未実装です');
+    expect(item?.attributes('aria-current')).toBeUndefined();
+  });
+
   it('表示が無効（既定）なら「実験的機能」の項目も区切り線も無い', async () => {
     const { wrapper } = mountNav();
     await flushPromises();

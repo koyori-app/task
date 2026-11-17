@@ -2,7 +2,7 @@
 import { useQueryClient } from '@tanstack/vue-query';
 import { ref, watch } from 'vue';
 import { Button, Dialog } from '@koyori-app/ui-vue';
-import { apiClient } from '@/lib/api-vue-query';
+import { apiClient, queryErrorStatus } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
 
 type ProjectResponse = components['schemas']['ProjectResponse'];
@@ -50,8 +50,11 @@ async function confirmDelete() {
     await queryClient.invalidateQueries({ queryKey: ['get', LIST_PROJECTS_PATH] });
     emit('update:open', false);
     emit('deleted', target);
-  } catch {
-    deleteError.value = 'プロジェクトを削除できませんでした';
+  } catch (error) {
+    deleteError.value =
+      queryErrorStatus(error) === 403
+        ? 'プロジェクトを削除できるのは、テナントのオーナーと Admin だけです。'
+        : 'プロジェクトを削除できませんでした';
   }
 }
 </script>

@@ -5,6 +5,7 @@ import {
   Flag,
   Folder,
   Percent,
+  Shapes,
   Tag,
   Timer,
   User,
@@ -44,6 +45,7 @@ const CREATE_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' a
 type Priority = components['schemas']['TaskPriority'];
 type Status = components['schemas']['ProjectStatusResponse'];
 type LabelOption = components['schemas']['LabelResponse'];
+type TaskTypeOption = components['schemas']['TaskTypeResponse'];
 /** 担当者の候補。`assignable-users` が返すのはメンバー行ではなく利用者そのもの */
 type MemberOption = components['schemas']['AssignableUserResponse'];
 type CreatedTask = components['schemas']['TaskDetailResponse'];
@@ -85,6 +87,11 @@ const props = defineProps<{
   labelsLoading?: boolean;
   /** ラベル一覧が手元に無いときだけ true にすること（使えるキャッシュがあれば false） */
   labelsError?: boolean;
+  /** 種別の候補。undefined は未取得（ロード中・エラー）。正常な 0 件は空配列で渡すこと（0 件ならチップを出さない） */
+  taskTypes?: TaskTypeOption[];
+  taskTypesLoading?: boolean;
+  /** 種別の一覧が手元に無いときだけ true にすること（labelsError と同じ約束） */
+  taskTypesError?: boolean;
   /**
    * 担当者に選べる利用者。undefined は未取得（ロード中・エラー）。正常な 0 人は空配列で渡すこと。
    *
@@ -110,6 +117,7 @@ const emit = defineEmits<{
   'update:open': [value: boolean];
   created: [task: CreatedTask];
   retryLabels: [];
+  retryTaskTypes: [];
   retryMembers: [];
 }>();
 
@@ -125,6 +133,8 @@ const estimate = ref('');
 /** 進捗（%）。見積もりと同じく文字列で持つ。空は未入力（送らず、サーバーの既定 0 に任せる） */
 const progress = ref('');
 const priority = ref<Priority>('Medium');
+/** 選んだ種別の ID。空は種別なし（送らない） */
+const taskTypeId = ref('');
 const selectedLabelIds = ref<string[]>([]);
 const selectedAssigneeIds = ref<string[]>([]);
 /** 候補と照合して入れた初期担当者。dirty の基準で、候補が届くまでは空 */
@@ -163,6 +173,20 @@ const statusItems = computed(() =>
 );
 const selectedStatus = computed(() =>
   props.statuses.find((status) => status.id === statusId.value),
+);
+
+/** 種別の Picker で「種別なし」を選ぶ項目の値。種別の ID（UUID）とは重ならない */
+const NO_TASK_TYPE = 'none';
+const taskTypeItems = computed(() => [
+  { value: NO_TASK_TYPE, label: '種別なし' },
+  ...(props.taskTypes ?? []).map((taskType) => ({
+    value: taskType.id,
+    label: taskType.name,
+    color: taskType.color,
+  })),
+]);
+const selectedTaskType = computed(() =>
+  (props.taskTypes ?? []).find((taskType) => taskType.id === taskTypeId.value),
 );
 
 const selectedLabels = computed(() =>
@@ -265,6 +289,16 @@ watch(
   },
 );
 
+// 種別の一覧の正常取得後、消された種別を選択から外す（選んだままだと作成が 404 になる）。
+// undefined はロード中・エラー（一覧が不明）なので選択を保持する
+watch(
+  () => props.taskTypes,
+  (taskTypes) => {
+    if (!taskTypes) return;
+    if (!taskTypes.some((taskType) => taskType.id === taskTypeId.value)) taskTypeId.value = '';
+  },
+);
+
 // 候補の正常取得後、初期担当者を入れ（触っていなければ入れ直し）、外れた ID を選択から落とす（ラベルと同じ理由）
 watch(
   () => props.members,
@@ -303,6 +337,7 @@ const dirty = computed(
     estimate.value !== '' ||
     progress.value !== '' ||
     priority.value !== 'Medium' ||
+    taskTypeId.value !== '' ||
     selectedLabelIds.value.length > 0 ||
     !sameIds(selectedAssigneeIds.value, appliedAssigneeIds.value),
 );
@@ -358,6 +393,7 @@ function resetForm() {
   estimate.value = '';
   progress.value = '';
   priority.value = 'Medium';
+  taskTypeId.value = '';
   selectedLabelIds.value = [];
   selectedAssigneeIds.value = [];
   appliedAssigneeIds.value = [];
@@ -427,6 +463,7 @@ async function submit(event: SubmitEvent) {
   if (estimatedMinutes !== undefined) body.estimated_minutes = estimatedMinutes;
   // 0 も送る。未入力は送らず、サーバーの既定（0）に任せる
   if (progressPct !== undefined) body.progress_pct = progressPct;
+  if (taskTypeId.value) body.task_type_id = taskTypeId.value;
   if (selectedLabelIds.value.length) body.label_ids = selectedLabelIds.value;
   // role は仕様書が使っている primary に揃える（役割を使い分ける UI はまだ無い）
   if (selectedAssigneeIds.value.length) {
@@ -544,6 +581,55 @@ async function submit(event: SubmitEvent) {
             data-task-chips
             class="flex items-center gap-1.5 px-4 py-2.5 max-md:overflow-x-auto max-md:pr-10 max-md:[scrollbar-width:none] md:flex-wrap md:px-6 md:pt-0 md:pb-4"
           >
+            <div
+              v-if="taskTypesLoading || taskTypesError || taskTypes?.length"
+              role="group"
+              aria-labelledby="task-type-label"
+              class="flex shrink-0 items-center gap-2"
+            >
+              <span id="task-type-label" class="sr-only">種別</span>
+              <p v-if="taskTypesLoading" class="text-xs text-muted-foreground">
+                種別を読み込み中...
+              </p>
+              <div v-else-if="taskTypesError" class="flex items-center gap-2">
+                <p role="alert" class="text-xs text-destructive">種別の取得に失敗しました</p>
+                <Button
+                  type="button"
+                  variant="tertiary"
+                  label="再試行"
+                  @click="emit('retryTaskTypes')"
+                />
+              </div>
+              <Picker
+                v-else
+                top-layer
+                label="種別"
+                :icon="null"
+                :searchable="false"
+                :items="taskTypeItems"
+                :selected-values="[taskTypeId || NO_TASK_TYPE]"
+                :on-selection-change="
+                  (values: string[]) =>
+                    (taskTypeId = values[0] && values[0] !== NO_TASK_TYPE ? values[0] : '')
+                "
+                :class="chipTrigger(!selectedTaskType)"
+              >
+                <template #trigger>
+                  <span class="flex items-center gap-1.5">
+                    <span
+                      v-if="selectedTaskType"
+                      class="inline-block size-2 shrink-0 rounded-full"
+                      :style="{ backgroundColor: selectedTaskType.color }"
+                      aria-hidden="true"
+                    />
+                    <Shapes v-else class="size-3.5 shrink-0" aria-hidden="true" />
+                    {{ selectedTaskType?.name ?? '種別' }}
+                  </span>
+                </template>
+              </Picker>
+              <input type="hidden" name="task_type_id" :value="taskTypeId" />
+            </div>
+
             <Picker
               top-layer
               label="ステータス"

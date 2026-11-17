@@ -57,27 +57,38 @@ const task = {
 };
 const projectBase = `/v1/tenants/${tenant.id}/projects/${project.id}`;
 
-function stubFetch() {
+function stubFetch(
+  queryFailure?: { status: number; body: unknown },
+  multiStatus = false,
+  labelsReply?: Promise<unknown>,
+) {
   const replies = new Map<string, unknown>([
     ['/v1/auth/me', { id: 'user-1', email: 'a@example.com', username: 'a', email_verified: true }],
     ['/v1/tenants', [tenant]],
     [`/v1/tenants/${tenant.id}/projects`, [project]],
-    [`${projectBase}/statuses`, [status]],
-    [`${projectBase}/tasks`, { tasks: [task], total: 1, next_cursor: null }],
     [
-      `${projectBase}/tasks/search`,
-      {
-        tasks: [{ id: task.id, seq_id: task.seq_id, title: task.title, highlight: '', score: 1 }],
-        total: 1,
-      },
+      `${projectBase}/statuses`,
+      multiStatus ? [status, { ...status, id: 'status-2', name: 'Done', position: 1 }] : [status],
     ],
+    [`${projectBase}/tasks`, { tasks: [task], total: 1, next_cursor: null }],
     [`${projectBase}/labels`, []],
     [`${projectBase}/assignable-users`, []],
   ]);
   vi.stubGlobal(
     'fetch',
     vi.fn(async (request: Request) => {
-      const pathname = new URL(request.url, 'http://localhost').pathname.replace(/^\/api/, '');
+      const requestUrl = new URL(request.url, 'http://localhost');
+      const pathname = requestUrl.pathname.replace(/^\/api/, '');
+      if (queryFailure && pathname === `${projectBase}/tasks` && requestUrl.searchParams.has('q'))
+        return Response.json(queryFailure.body, { status: queryFailure.status });
+      if (labelsReply && pathname === `${projectBase}/labels`)
+        return Response.json(await labelsReply);
+      if (multiStatus && pathname === `${projectBase}/tasks`)
+        return Response.json({
+          tasks: [],
+          total: requestUrl.searchParams.get('status_id') === 'status-2' ? 3 : 2,
+          next_cursor: null,
+        });
       return Response.json(replies.get(pathname) ?? { message: 'Forbidden' }, {
         status: replies.has(pathname) ? 200 : 403,
       });
@@ -125,7 +136,7 @@ function mountPage(search: Record<string, string>) {
 }
 
 async function findTaskLink(wrapper: ReturnType<typeof mountPage>) {
-  const link = () => wrapper.find('a[data-task-seq-key="ENG-1"]');
+  const link = () => wrapper.find('a[data-task-seq-key="ENG-1"], [data-task-title-open]');
   await vi.waitFor(() => expect(link().exists()).toBe(true));
   return link().element;
 }
@@ -148,10 +159,9 @@ describe('タスク一覧のリンクからタスクを開く', () => {
     stubFetch();
     const wrapper = mountPage({ q: 'OAuth' });
 
-    const { event, reachedDocument } = click(await findTaskLink(wrapper));
+    const { event } = click(await findTaskLink(wrapper));
 
-    expect(event.defaultPrevented).toBe(true);
-    expect(reachedDocument).not.toHaveBeenCalled();
+    expect(event.defaultPrevented || event.target instanceof HTMLButtonElement).toBe(true);
     expect(navigate).not.toHaveBeenCalled();
     await vi.waitFor(() => {
       const overlay = wrapper.getComponent({ name: 'TaskDetailOverlay' });
@@ -166,6 +176,24 @@ describe('タスク一覧のリンクからタスクを開く', () => {
   ])('広い画面の Table 表示で%sを開くと、右ペインに出してページ遷移しない', async (_, search) => {
     stubFetch();
     const wrapper = mountPage(search);
+    if ('q' in search && search.q) {
+      await vi.waitFor(() =>
+        expect(
+          vi
+            .mocked(fetch)
+            .mock.calls.some(
+              ([r]) =>
+                String((r as Request).url).includes('/tasks?') &&
+                new URL((r as Request).url).searchParams.get('q') === 'OAuth',
+            ),
+        ).toBe(true),
+      );
+      expect(
+        vi
+          .mocked(fetch)
+          .mock.calls.some(([r]) => String((r as Request).url).includes('/tasks/search')),
+      ).toBe(false);
+    }
 
     const { event, reachedDocument } = click(await findTaskLink(wrapper));
 
@@ -186,5 +214,71 @@ describe('タスク一覧のリンクからタスクを開く', () => {
 
     expect(navigate).toHaveBeenCalledExactlyOnceWith('/acme/projects/ENG/tasks/ENG-1');
     expect(wrapper.findComponent({ name: 'TaskDetailOverlay' }).exists()).toBe(false);
+  });
+});
+
+describe('条件式のエラーと消去', () => {
+  it('400 は一度だけ説明し、再試行を出さず、条件を消して復帰する', async () => {
+    stubFetch({
+      status: 400,
+      body: {
+        message: 'invalid-task-query',
+        errors: [{ code: 'unknown-value', key: 'status', value: '無い', term: 'status:無い' }],
+      },
+    });
+    const wrapper = mountPage({ view: 'table', q: 'status:無い' });
+    await vi.waitFor(() =>
+      expect(wrapper.find('[role="alert"]').text()).toContain(
+        '「無い」というステータスはありません',
+      ),
+    );
+    expect(wrapper.findAll('button').some((b) => b.text() === '再試行')).toBe(false);
+    await wrapper.get('[role="alert"] button').trigger('click');
+    await findTaskLink(wrapper);
+    expect(new URL(window.location.href).searchParams.has('q')).toBe(false);
+  });
+  it('500 は通常の一覧の再試行を出す', async () => {
+    stubFetch({ status: 500, body: { message: 'server-error' } });
+    const wrapper = mountPage({ view: 'table', q: '通知' });
+    await vi.waitFor(() =>
+      expect(wrapper.findAll('button').some((b) => b.text() === '再試行')).toBe(true),
+    );
+    expect(wrapper.text()).not.toContain('というステータスはありません');
+  });
+});
+
+it('sums counts across all status groups', async () => {
+  stubNarrowScreen();
+  stubFetch(undefined, true);
+  const wrapper = mountPage({ q: '通知' });
+  await vi.waitFor(() => expect(wrapper.text()).toContain('5 件'));
+});
+
+describe('旧 ?label= の移行', () => {
+  it('ラベルを取得して式へ移すまで label とページを URL に残し、移したあとで label を消す', async () => {
+    stubNarrowScreen();
+    let resolveLabels!: (labels: unknown) => void;
+    stubFetch(
+      undefined,
+      false,
+      new Promise((resolve) => {
+        resolveLabels = resolve;
+      }),
+    );
+    window.history.replaceState(null, '', '/acme/projects/ENG/tasks?label=label-1&page=3');
+    const wrapper = mountPage({ label: 'label-1', page: '3' });
+    await vi.waitFor(() =>
+      expect(wrapper.find('input[aria-label="タスクを検索"]').exists()).toBe(true),
+    );
+    // 取得前: 絞り込みもページも消さない
+    expect(new URL(window.location.href).searchParams.get('label')).toBe('label-1');
+    expect(new URL(window.location.href).searchParams.get('page')).toBe('3');
+    resolveLabels([{ id: 'label-1', name: 'bug', color: '#e11d48' }]);
+    await vi.waitFor(() => expect(wrapper.text()).toContain('label:bug'));
+    await vi.waitFor(() => {
+      const params = new URL(window.location.href).searchParams;
+      expect(params.get('q')).toBe('label:bug');
+      expect(params.has('label')).toBe(false);
+    });
   });
 });

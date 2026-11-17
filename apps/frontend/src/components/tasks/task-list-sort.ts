@@ -1,4 +1,4 @@
-export type TaskListSortColumn = 'title' | 'assignee' | 'due_date' | 'priority';
+export type TaskListSortColumn = 'key' | 'status' | 'title' | 'assignee' | 'due_date' | 'priority';
 
 export type TaskListSortEntry = {
   id: string;
@@ -15,6 +15,13 @@ export type TaskListSortColumnOption = {
 };
 
 export const TASK_LIST_SORT_COLUMNS: readonly TaskListSortColumnOption[] = [
+  { id: 'key', label: 'ID', ascendingLabel: 'ID の昇順', descendingLabel: 'ID の降順' },
+  {
+    id: 'status',
+    label: 'ステータス',
+    ascendingLabel: 'ステータスの昇順',
+    descendingLabel: 'ステータスの降順',
+  },
   {
     id: 'title',
     label: 'タスク',
@@ -41,13 +48,6 @@ export const TASK_LIST_SORT_COLUMNS: readonly TaskListSortColumnOption[] = [
   },
 ] as const;
 
-const API_SORT_BY_COLUMN: Record<TaskListSortColumn, string> = {
-  title: 'title',
-  assignee: 'assignee',
-  due_date: 'deadline',
-  priority: 'priority',
-};
-
 const SORTABLE_COLUMNS = new Set<TaskListSortColumn>(
   TASK_LIST_SORT_COLUMNS.map((column) => column.id),
 );
@@ -58,11 +58,4 @@ export function activeTaskListSort(
   const first = sorting[0];
   if (!first || !SORTABLE_COLUMNS.has(first.id as TaskListSortColumn)) return null;
   return { id: first.id as TaskListSortColumn, desc: first.desc };
-}
-
-/** List API の既定順は作成日時の新しい順。解除時も明示してクエリキーを安定させる。 */
-export function taskListApiSort(sorting: readonly TaskListSortEntry[]): string {
-  const active = activeTaskListSort(sorting);
-  if (!active) return 'created_at_desc';
-  return `${API_SORT_BY_COLUMN[active.id]}_${active.desc ? 'desc' : 'asc'}`;
 }

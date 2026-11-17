@@ -88,6 +88,14 @@ export const projectLabelsQueryOptions = (
     params: { path: { tenant_id: tenantId ?? '', project_id: projectId ?? '' } },
   });
 
+export const projectTaskTypesQueryOptions = (
+  tenantId: TenantUuid | null | undefined,
+  projectId: ProjectUuid | null | undefined,
+) =>
+  apiClient.queryOptions('get', '/v1/tenants/{tenant_id}/projects/{project_id}/task-types', {
+    params: { path: { tenant_id: tenantId ?? '', project_id: projectId ?? '' } },
+  });
+
 export const projectsQueryOptions = (tenantId: TenantUuid | null | undefined) =>
   apiClient.queryOptions(
     'get',

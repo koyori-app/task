@@ -84,7 +84,13 @@ function findButton(label: string, by: 'aria-label' | 'text') {
   return button as HTMLButtonElement;
 }
 
-const ACME = { id: 'tenant-1', display_id: 'acme', name: 'Acme' };
+const ACME = {
+  id: 'tenant-1',
+  display_id: 'acme',
+  name: 'Acme',
+  membership: 'Owner',
+  member_role: null,
+};
 
 const ALPHA_PROJECT = {
   id: 'project-1',
@@ -179,6 +185,32 @@ describe('AppSidebar のナビリンク', () => {
  * 狭い画面のサイドバーに覆われたままになっていた。導線は 2 か所ある。
  */
 describe('AppSidebar のプロジェクト作成導線', () => {
+  it.each([
+    ['テナントの Member', { membership: 'Member', member_role: 'Member' }],
+    ['テナントの Viewer', { membership: 'Member', member_role: 'Viewer' }],
+    ['ゲスト', { membership: 'Guest', member_role: null }],
+  ])('%s には作成ボタンを出さない（空状態も一覧ありも）', (_label, view) => {
+    tenantStoreStub.tenants = [{ ...ACME, ...view }];
+    mountSidebar(vi.fn());
+    expect(() => findButton('プロジェクトを作成', 'text')).toThrow();
+    expect(() => findButton('プロジェクトを作成', 'aria-label')).toThrow();
+    expect(document.body.querySelector('nav')?.textContent).toContain(
+      'プロジェクトはまだありません',
+    );
+
+    document.body.innerHTML = '';
+    projectsControl.data = [ALPHA_PROJECT];
+    mountSidebar(vi.fn());
+    expect(() => findButton('プロジェクトを作成', 'aria-label')).toThrow();
+  });
+
+  it('テナントの Admin には作成ボタンを出す', () => {
+    tenantStoreStub.tenants = [{ ...ACME, membership: 'Member', member_role: 'Admin' }];
+    mountSidebar(vi.fn());
+    findButton('プロジェクトを作成', 'aria-label');
+    findButton('プロジェクトを作成', 'text');
+  });
+
   it('空状態の作成ボタンで、遷移してサイドバーを閉じる', async () => {
     const onClose = vi.fn();
     mountSidebar(onClose);

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watchEffect } from 'vue';
 
+import TaskRefHoverCard from '@/components/tasks/TaskRefHoverCard.vue';
+import { hasTaskRefCards } from '@/lib/task-ref-card';
 import MentionHoverCard from '@/components/tasks/MentionHoverCard.vue';
 import type { MentionTable } from '@/lib/comment-mention';
 import { lookup, toPlainText } from '@/lib/comment-mention';
@@ -27,7 +29,7 @@ const props = defineProps<{
   /** 印の id から引ける表示情報（コメント一覧 API の `mentions`） */
   mentions?: MentionTable;
   currentUserId?: string | null;
-  /** 渡せば、いま入れる者の札をそのテナントのプロフィールへの link にする（表示用 id） */
+  /** 札のリンクと KEY-N のリンクのテナント（表示用 id） */
   mentionTenant?: string;
   /** プロフィールのカードがプロフィール API を引くテナント（UUID）。無ければカードは名前と画像だけ */
   tenantId?: string | null;
@@ -66,6 +68,7 @@ watchEffect(async () => {
       mentions,
       currentUserId,
       mentionTenant,
+      ...(mentionTenant ? { taskRef: { tenant: mentionTenant } } : {}),
     });
     if (version === renderVersion) html.value = rendered;
   } catch {
@@ -93,6 +96,12 @@ watchEffect(async () => {
     :current-user-id="currentUserId"
     :tenant-id="tenantId"
     :mention-tenant="mentionTenant"
+  />
+  <TaskRefHoverCard
+    v-if="html !== null && bodyEl && tenantId && mentionTenant && hasTaskRefCards(html)"
+    :container="bodyEl"
+    :tenant-id="tenantId"
+    :tenant-display-id="mentionTenant"
   />
 </template>
 

@@ -77,12 +77,14 @@ mod task_search_mentions_integration;
 mod task_search_trgm_integration;
 mod task_similar_integration;
 mod task_subtask_schedule_integration;
+mod task_types_integration;
 mod task_update_concurrency_integration;
 mod tenant_bots_integration;
 mod tenant_invitations_integration;
 mod tenant_member_role_integration;
 mod tenant_members_integration;
 mod tenant_require_2fa_integration;
+mod tenant_token_unbind_concurrency_integration;
 mod tenants_integration;
 mod test_env_guard_integration;
 mod time_tracking_integration;
@@ -112,3 +114,5 @@ fn every_integration_file_is_declared() {
     missing.sort();
     assert!(missing.is_empty(), "main.rs に mod 宣言が無い: {missing:?}");
 }
+
+mod task_query_integration;

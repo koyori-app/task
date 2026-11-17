@@ -87,7 +87,7 @@ sidebar:
 
 | URL | 説明 |
 |-----|------|
-| `/{tenant}/projects/{key}/tasks` | タスク一覧。`?view=table`（既定は List）、`?page=`、`?q=`、`?label=`、`?sort=列:asc,列:desc`、`?selected=KEY-N`（分割ビューで選択中のタスク）を持ち、既定値は URL から省く。URL は replaceState で書く |
+| `/{tenant}/projects/{key}/tasks` | タスク一覧。`?view=table`（既定は List）、`?page=`、`?q=条件式`、`?selected=KEY-N`（分割ビューで選択中のタスク）を持ち、既定値は URL から省く。URL は replaceState で書く |
 | `/{tenant}/projects/{key}/tasks/{KEY-N}` | タスク詳細 |
 | `/{tenant}/projects/{key}/docs` | ドキュメント一覧（[Drive](/dev/features/drive)のドキュメント画面）。`?q=` でタイトル検索 |
 | `/{tenant}/projects/{key}/docs/{file_id}` | ドキュメント詳細。`{file_id}` は Drive ファイルの UUID。`?edit=1` で編集モード |

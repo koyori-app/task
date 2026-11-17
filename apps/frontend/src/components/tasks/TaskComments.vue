@@ -64,6 +64,8 @@ const props = defineProps<{
   lookups?: ActivityLookups;
   /** ログイン中ユーザーの ID。編集ボタンの出し分けに使う（TaskCommentItem 参照） */
   currentUserId?: string | null;
+  /** 見ている人がテナントオーナーか。他人のコメントの削除を出すかに使う（TaskCommentItem 参照） */
+  isTenantOwner?: boolean;
   /** 投稿者のプロフィール画面の URL（TaskCommentItem 参照） */
   profileHref?: (userId: string) => string;
   /** 本文の札をプロフィールへの link にするテナント（表示用 id。CommentBody 参照） */
@@ -321,6 +323,7 @@ async function deleteThread(threadId: string) {
           <TaskCommentItem
             :comment="openThread"
             :current-user-id="currentUserId"
+            :is-tenant-owner="isTenantOwner"
             :mentions="mentions"
             :mention-candidates="mentionCandidates"
             :profile-href="profileHref"
@@ -349,6 +352,7 @@ async function deleteThread(threadId: string) {
             :key="reply.id"
             :comment="reply"
             :current-user-id="currentUserId"
+            :is-tenant-owner="isTenantOwner"
             :mentions="mentions"
             :mention-candidates="mentionCandidates"
             :profile-href="profileHref"
@@ -436,6 +440,7 @@ async function deleteThread(threadId: string) {
                   time-only
                   :comment="entry.thread"
                   :current-user-id="currentUserId"
+                  :is-tenant-owner="isTenantOwner"
                   :mentions="mentions"
                   :mention-candidates="mentionCandidates"
                   :profile-href="profileHref"

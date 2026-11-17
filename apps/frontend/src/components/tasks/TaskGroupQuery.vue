@@ -27,8 +27,10 @@ const props = defineProps<{
   status: StatusResponse;
   tenantId: string | null | undefined;
   projectId: string | null | undefined;
-  labelId?: string | null;
-  sort: string;
+  q: string;
+  timezone: string;
+  rootOnly: boolean;
+  oldestFirst: boolean;
   pageSize: number;
   enabled: boolean;
 }>();
@@ -40,10 +42,10 @@ const query = useInfiniteQuery(
     const path = { tenant_id: props.tenantId!, project_id: props.projectId! };
     const query = {
       status_id: props.status.id,
-      label_id: props.labelId ?? undefined,
-      sort: props.sort,
+      q: props.q || undefined,
+      timezone: props.q ? props.timezone : undefined,
       is_archived: false,
-      root_only: true,
+      root_only: props.rootOnly,
       limit: props.pageSize,
     };
     return {
@@ -62,6 +64,7 @@ const query = useInfiniteQuery(
       },
       getNextPageParam: (lastPage: { next_cursor?: string | null }) =>
         lastPage.next_cursor ?? undefined,
+      retry: false,
       enabled: props.enabled && !!props.tenantId && !!props.projectId,
     };
   }),
@@ -75,11 +78,12 @@ const group = computed(() =>
       isLoading: query.isLoading.value,
       isFetchingNextPage: query.isFetchingNextPage.value,
       isError: query.isError.value,
+      error: query.error.value,
       hasNextPage: query.hasNextPage.value,
       refetch: () => query.refetch(),
       fetchNextPage: () => query.fetchNextPage(),
     },
-    props.sort === 'created_at_desc',
+    props.oldestFirst,
   ),
 );
 

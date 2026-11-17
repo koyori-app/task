@@ -39,6 +39,7 @@ pub mod task_activities;
 pub mod task_attachments;
 pub mod task_completion;
 pub mod task_responses;
+pub mod task_types;
 pub mod tasks;
 pub mod tenant_invitations;
 pub mod timezone;
@@ -52,3 +53,5 @@ pub use common::system_settings;
 pub use common::validation;
 
 pub mod bots;
+
+pub mod task_query;

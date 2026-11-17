@@ -23,7 +23,10 @@ const mockContext = {
 
 const TENANT_UUID = '11111111-1111-1111-1111-111111111111';
 
-const sampleTenants = (displayId: string) => [
+/** 見ている人のテナントでの関わり方。他人のコメント・添付の操作を出すかが変わる */
+type Viewer = 'Owner' | 'Member';
+
+const sampleTenants = (displayId: string, viewer: Viewer = 'Member') => [
   {
     id: TENANT_UUID,
     display_id: displayId,
@@ -32,6 +35,8 @@ const sampleTenants = (displayId: string) => [
     icon_url: '',
     owner_id: '00000000-0000-0000-0000-000000000002',
     require_2fa: false,
+    membership: viewer,
+    member_role: viewer === 'Owner' ? null : 'Member',
   },
 ];
 
@@ -110,6 +115,12 @@ const sampleStatuses = [
   },
 ];
 
+const sampleTaskTypes = [
+  { id: 'type-task', project_id: 'proj-eng', name: 'タスク', color: '#64748b', position: 0 },
+  { id: 'type-bug', project_id: 'proj-eng', name: 'バグ', color: '#ef4444', position: 1 },
+  { id: 'type-feature', project_id: 'proj-eng', name: '機能', color: '#3b82f6', position: 2 },
+];
+
 const sampleTaskDetail = {
   id: 'task-1',
   seq_id: 1,
@@ -147,6 +158,8 @@ const sampleTaskDetail = {
   ],
   custom_field_values: [],
   reactions: [] as ReactionSummary[],
+  /** 種別は任意。既定は未設定（引き金は「種別」） */
+  task_type: null as (typeof sampleTaskTypes)[number] | null,
 };
 
 const sampleSubtask = {
@@ -206,7 +219,11 @@ const sampleComments: MockComment[] = [
 ];
 
 type MockOptions = {
+  /** 既定は Member（他人のコメントの削除・他人が付けた添付の解除は出ない） */
+  viewer?: Viewer;
   task?: typeof sampleTaskDetail | null;
+  /** 最初に付いている種別。`task` と違い GET で固定せず、PUT の結果を返す */
+  taskType?: (typeof sampleTaskTypes)[number] | null;
   rejectAll?: boolean;
   rejectTenantsList?: boolean;
   rejectPut?: number;
@@ -232,6 +249,8 @@ type MockOptions = {
     size: number;
     url: string;
     created_at: string;
+    /** 添付した人。解除を出すかの判定に使う */
+    created_by?: string;
   }[];
   /** タスク本体のリアクション */
   taskReactions?: ReactionSummary[];
@@ -268,6 +287,11 @@ function applyPutBody(
     }
   }
 
+  if (body.clear_task_type_id) next.task_type = null;
+  else if (typeof body.task_type_id === 'string') {
+    next.task_type = sampleTaskTypes.find((type) => type.id === body.task_type_id) ?? null;
+  }
+
   if (Array.isArray(body.label_ids)) {
     next.labels = sampleLabels.filter((label) => (body.label_ids as string[]).includes(label.id));
   }
@@ -281,6 +305,7 @@ let mutableComments: MockComment[] = [];
 function createMockFetch(overrides: MockOptions = {}) {
   mutableTaskDetail = { ...(overrides.task ?? sampleTaskDetail) };
   if (overrides.taskReactions) mutableTaskDetail.reactions = overrides.taskReactions;
+  if (overrides.taskType !== undefined) mutableTaskDetail.task_type = overrides.taskType;
   mutableComments = (overrides.comments ?? []).map((thread) => ({
     ...thread,
     replies: thread.replies.map((reply) => ({ ...reply })),
@@ -309,7 +334,7 @@ function createMockFetch(overrides: MockOptions = {}) {
       if (overrides.rejectTenantsList) {
         return jsonResponse({ message: 'server error' }, 500);
       }
-      return jsonResponse(sampleTenants(mockContext.routeParams.tenant));
+      return jsonResponse(sampleTenants(mockContext.routeParams.tenant, overrides.viewer));
     }
     if (overrides.rejectAll) throw new TypeError('Failed to fetch');
     if (overrides.hang) return new Promise(() => {});
@@ -320,6 +345,9 @@ function createMockFetch(overrides: MockOptions = {}) {
     }
     if (url.includes('/labels')) {
       return jsonResponse(sampleLabels);
+    }
+    if (url.includes('/task-types')) {
+      return jsonResponse(sampleTaskTypes);
     }
     // 担当者候補はメンバー一覧とは別の口（管理者でなくても読める）
     if (url.includes('/assignable-users')) {
@@ -587,6 +615,8 @@ export const Default: Story = {
       canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
     ).resolves.toBeInTheDocument();
     await expect(canvas.findByText('ENG-1')).resolves.toBeInTheDocument();
+    // 種別が無いタスクの引き金は「種別」（以前の固定の「タスク」ではない）
+    await expect(canvas.findByRole('button', { name: '種別' })).resolves.toHaveTextContent('種別');
     await expect(
       canvas.findByText('OIDC フローとセッション管理を実装する。'),
     ).resolves.toBeInTheDocument();
@@ -624,6 +654,7 @@ export const WithAttachments: Story = {
           size: 131072,
           url: '/v1/drive/files/file-1/content',
           created_at: '2026-10-01T00:00:00Z',
+          created_by: mockUsers.alpha.id,
         },
         {
           id: 'attachment-2',
@@ -633,12 +664,61 @@ export const WithAttachments: Story = {
           size: 46080,
           url: '/v1/drive/files/file-2/content',
           created_at: '2026-10-01T00:00:00Z',
+          created_by: mockUsers.beta.id,
         },
       ],
     }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.findByText('仕様書.pdf')).resolves.toBeInTheDocument();
+    // 解除を出すのは自分が付けた添付だけ（見ている人は alpha・オーナーでない）
+    await expect(
+      canvas.findByRole('button', { name: '仕様書.pdf の添付を解除' }),
+    ).resolves.toBeInTheDocument();
+    await expect(canvas.queryByRole('button', { name: '画面案.png の添付を解除' })).toBeNull();
+  },
+};
+
+/** 自分が付けた添付の × を押すと、確認を挟む。キャンセルなら DELETE を送らない */
+export const AttachmentDetachConfirm: Story = {
+  name: '添付の解除（確認ダイアログ）',
+  beforeEach: () =>
+    createMockFetch({
+      attachments: [
+        {
+          id: 'attachment-1',
+          drive_file_id: 'file-1',
+          name: '仕様書.pdf',
+          mime_type: 'application/pdf',
+          size: 131072,
+          url: '/v1/drive/files/file-1/content',
+          created_at: '2026-10-01T00:00:00Z',
+          created_by: mockUsers.alpha.id,
+        },
+        {
+          id: 'attachment-2',
+          drive_file_id: 'file-2',
+          name: '画面案.png',
+          mime_type: 'image/png',
+          size: 46080,
+          url: '/v1/drive/files/file-2/content',
+          created_at: '2026-10-01T00:00:00Z',
+          created_by: mockUsers.beta.id,
+        },
+      ],
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const page = within(canvasElement.ownerDocument.body);
+    const user = userEvent.setup();
+    await user.click(await canvas.findByRole('button', { name: '仕様書.pdf の添付を解除' }));
+    await expect(
+      page.findByRole('heading', { name: '添付を解除しますか？' }),
+    ).resolves.toBeInTheDocument();
+    await expect(
+      page.findByText('「仕様書.pdf」をこのタスクから外します。ファイルは Drive に残ります。'),
+    ).resolves.toBeInTheDocument();
+    await expect(page.getByRole('button', { name: '解除する' })).toBeInTheDocument();
   },
 };
 
@@ -837,6 +917,8 @@ export const DescriptionKfmRendered: Story = {
 };
 
 const CHECKLIST_DESCRIPTION = KFM_STORY_INPUTS['gfm-task-list'];
+/** DescriptionChecklistToggle が PUT の本文を受け取る箱（beforeEach が差し替える） */
+let putBodies: Record<string, unknown>[] = [];
 
 export const DescriptionChecklistProgress: Story = {
   name: '説明のチェックリスト達成率',
@@ -856,6 +938,117 @@ export const DescriptionChecklistProgress: Story = {
     await expect(description?.querySelectorAll('input[type="checkbox"]')).toHaveLength(5);
     // 「進捗」行（progress_pct）は別の値のまま
     await expect(canvas.findByText('30%')).resolves.toBeInTheDocument();
+  },
+};
+
+export const DescriptionChecklistToggle: Story = {
+  name: '説明のチェックボックスを閲覧表示のまま切り替える',
+  decorators: [
+    storyDecorator(mockContext, {
+      descriptionHtml: kfmChecklistHtml,
+      descriptionSource: CHECKLIST_DESCRIPTION,
+    }),
+  ],
+  beforeEach: () => {
+    const puts: Record<string, unknown>[] = [];
+    const restore = createMockFetch({
+      task: { ...sampleTaskDetail, description: CHECKLIST_DESCRIPTION },
+      onPut: (body) => puts.push(body as Record<string, unknown>),
+    });
+    putBodies = puts;
+    return restore;
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await canvas.findByText('2 / 5');
+    const description = canvasElement.querySelector('[data-task-description-html]');
+    const checkbox = await canvas.findByRole('checkbox', { name: '未了タスク' });
+    await expect(checkbox).toBeEnabled();
+    await expect(checkbox).not.toBeChecked();
+
+    await user.click(checkbox);
+
+    await expect(canvas.findByText('3 / 5')).resolves.toBeInTheDocument();
+    // 保存が終わると、説明は KFM 表示のまま、チェックが残り、全項目が押せる
+    await waitFor(() => expect(putBodies).toHaveLength(1));
+    await expect(String(putBodies[0].description)).toContain('- [x] 未了タスク');
+    await expect(
+      canvasElement.querySelector('[data-task-description-html] input[type="checkbox"]'),
+    ).not.toBeNull();
+    await expect(canvas.findByRole('checkbox', { name: '未了タスク' })).resolves.toBeChecked();
+    await waitFor(() =>
+      expect(
+        [
+          ...(description?.querySelectorAll<HTMLInputElement>('input[type="checkbox"]') ?? []),
+        ].every((input) => !input.disabled),
+      ).toBe(true),
+    );
+    await expect(canvasElement.querySelector('p.whitespace-pre-wrap')).toBeNull();
+  },
+};
+
+export const DescriptionChecklistToggleKeyboard: Story = {
+  name: '説明のチェックボックスをキーボードで続けて切り替える',
+  decorators: [
+    storyDecorator(mockContext, {
+      descriptionHtml: kfmChecklistHtml,
+      descriptionSource: CHECKLIST_DESCRIPTION,
+    }),
+  ],
+  beforeEach: () =>
+    createMockFetch({ task: { ...sampleTaskDetail, description: CHECKLIST_DESCRIPTION } }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await canvas.findByText('2 / 5');
+    (await canvas.findByRole('checkbox', { name: '未了タスク' })).focus();
+
+    await user.keyboard(' ');
+
+    // 保存中に説明の表示が作り直されても、フォーカスは同じ項目にあり、保存が終わると押せる
+    await waitFor(async () => {
+      const box = await canvas.findByRole('checkbox', { name: '未了タスク' });
+      await expect(box).toBeChecked();
+      await expect(box).toHaveFocus();
+      await expect(box).not.toHaveAttribute('aria-disabled');
+    });
+    await expect(canvas.findByText('3 / 5')).resolves.toBeInTheDocument();
+
+    // そのまま次の項目へ移って切り替えられる
+    await user.tab();
+    await expect(canvas.findByRole('checkbox', { name: '親タスク' })).resolves.toHaveFocus();
+    await user.keyboard(' ');
+    await expect(canvas.findByText('4 / 5')).resolves.toBeInTheDocument();
+  },
+};
+
+export const DescriptionChecklistToggleFailure: Story = {
+  name: '説明のチェックボックスの切り替えに失敗',
+  decorators: [
+    storyDecorator(mockContext, {
+      descriptionHtml: kfmChecklistHtml,
+      descriptionSource: CHECKLIST_DESCRIPTION,
+    }),
+  ],
+  beforeEach: () =>
+    createMockFetch({
+      task: { ...sampleTaskDetail, description: CHECKLIST_DESCRIPTION },
+      rejectPut: 500,
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await canvas.findByText('2 / 5');
+    const checkbox = await canvas.findByRole('checkbox', { name: '未了タスク' });
+
+    await user.click(checkbox);
+
+    await expect(canvas.findByText('更新に失敗しました')).resolves.toBeInTheDocument();
+    // 失敗したらチェックも達成率も元へ戻る。書き直せる下書きは無いので「編集を再開」は出さない
+    await expect(canvas.findByRole('checkbox', { name: '未了タスク' })).resolves.not.toBeChecked();
+    await expect(canvas.findByText('2 / 5')).resolves.toBeInTheDocument();
+    await expect(canvas.queryByText('編集を再開')).toBeNull();
   },
 };
 
@@ -983,6 +1176,70 @@ export const RequireAllBlocked: Story = {
       'aria-disabled',
       'true',
     );
+  },
+};
+
+/** 種別があるタスク（バグ）。引き金に色の点と名前を出す */
+const bugType = sampleTaskTypes[1];
+
+export const TaskTypeSet: Story = {
+  name: '種別あり',
+  beforeEach: () => createMockFetch({ taskType: bugType }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const trigger = await canvas.findByRole('button', { name: '種別' });
+    await expect(trigger).toHaveTextContent('バグ');
+    await expect(trigger.querySelector('[style*="background-color"]')).not.toBeNull();
+  },
+};
+
+export const TaskTypeMenuOpen: Story = {
+  name: '種別のメニューを開いた状態',
+  beforeEach: () => createMockFetch({ taskType: bugType }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await user.click(await canvas.findByRole('button', { name: '種別' }));
+    // 「種別なし」と各種別が並び、選択中の種別だけに印が付く
+    await expect(await screen.findByRole('menuitemradio', { name: '種別なし' })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+    await expect(screen.getByRole('menuitemradio', { name: 'バグ' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await expect(screen.getByRole('menuitemradio', { name: '機能' })).toBeInTheDocument();
+  },
+};
+
+export const TaskTypeChange: Story = {
+  name: '種別の付け替え',
+  beforeEach: () => createMockFetch({ taskType: bugType }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    const trigger = await canvas.findByRole('button', { name: '種別' });
+    await expect(trigger).toHaveTextContent('バグ');
+    await user.click(trigger);
+    await user.click(await screen.findByRole('menuitemradio', { name: '機能' }));
+    await expect(trigger).toHaveTextContent('機能');
+    await expect(canvas.findByText('保存しました')).resolves.toBeInTheDocument();
+  },
+};
+
+export const TaskTypeChangeFailure: Story = {
+  name: '種別の保存失敗',
+  beforeEach: () => createMockFetch({ taskType: bugType, rejectPut: 500 }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    const trigger = await canvas.findByRole('button', { name: '種別' });
+    await user.click(trigger);
+    await user.click(await screen.findByRole('menuitemradio', { name: '機能' }));
+    await expect(canvas.findByText('種別の更新に失敗しました')).resolves.toBeInTheDocument();
+    // 失敗したら元の表示へ戻る
+    await expect(trigger).toHaveTextContent('バグ');
   },
 };
 
@@ -1778,6 +2035,58 @@ export const CommentsKfmRendered: Story = {
     await expect(body.textContent).toContain('<script>alert(1)</script>');
     await expect(within(body).getByText('危険なリンク')).not.toHaveAttribute('href');
     await expect(body.innerHTML).not.toContain('javascript:');
+  },
+};
+
+const commentsByMeAndOthers: MockComment[] = [
+  {
+    id: 'comment-mine',
+    body: '自分のコメントです。',
+    is_deleted: false,
+    created_at: '2026-06-10T00:00:00Z',
+    updated_at: '2026-06-10T00:00:00Z',
+    user: { id: mockUsers.alpha.id, name: mockUsers.alpha.username },
+    replies: [],
+  },
+  {
+    id: 'comment-others',
+    body: '他の人のコメントです。',
+    is_deleted: false,
+    created_at: '2026-06-10T01:00:00Z',
+    updated_at: '2026-06-10T01:00:00Z',
+    user: { id: mockUsers.beta.id, name: mockUsers.beta.username },
+    replies: [],
+  },
+];
+
+/** Member は自分のコメントにだけ ⋯（編集・削除）が出る。他人のコメントには出ない */
+export const CommentMenuByOthers: Story = {
+  name: '他人のコメントの操作（Member は出ない）',
+  beforeEach: () => createMockFetch({ comments: commentsByMeAndOthers }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByText('他の人のコメントです。')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('自分のコメントです。')).resolves.toBeInTheDocument();
+    await expect(await canvas.findAllByRole('button', { name: 'コメントの操作' })).toHaveLength(1);
+  },
+};
+
+/** テナントオーナーは、他人のコメントにも ⋯（削除だけ）が出る */
+export const CommentMenuByOthersAsOwner: Story = {
+  name: '他人のコメントの操作（オーナーは削除だけ出る）',
+  beforeEach: () => createMockFetch({ comments: commentsByMeAndOthers, viewer: 'Owner' }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await expect(canvas.findByText('他の人のコメントです。')).resolves.toBeInTheDocument();
+    const menus = await canvas.findAllByRole('button', { name: 'コメントの操作' });
+    await expect(menus).toHaveLength(2);
+    await user.click(menus[1]!);
+    const page = within(canvasElement.ownerDocument.body);
+    await expect(
+      page.findByRole('menuitem', { name: 'コメントを削除' }),
+    ).resolves.toBeInTheDocument();
+    await expect(page.queryByRole('menuitem', { name: 'コメントを編集' })).toBeNull();
   },
 };
 

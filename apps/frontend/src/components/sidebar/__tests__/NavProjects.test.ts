@@ -43,6 +43,7 @@ function mountNavProjects(props: {
   tenantSlug?: string;
   currentPath?: string;
   showGantt?: boolean;
+  canCreate?: boolean;
 }) {
   return mount(
     {
@@ -55,6 +56,7 @@ function mountNavProjects(props: {
           :loading="loading"
           :error="error"
           :show-gantt="showGantt"
+          :can-create="canCreate"
           @retry="onRetry"
           @create="onCreate"
         />
@@ -67,6 +69,7 @@ function mountNavProjects(props: {
           loading: props.loading ?? false,
           error: props.error ?? false,
           showGantt: props.showGantt ?? false,
+          canCreate: props.canCreate ?? false,
           retried: false,
           created: false,
         };
@@ -178,7 +181,7 @@ describe('NavProjects', () => {
   });
 
   it('空状態は破線カードで、作成ボタンが create を emit する', async () => {
-    const wrapper = mountNavProjects({ projects: [] });
+    const wrapper = mountNavProjects({ projects: [], canCreate: true });
     expect(wrapper.text()).toContain('プロジェクトはまだありません');
     // 見出し横の作成ボタンはアイコンだけ（aria-label）なので、文字を持つのはカードのボタン
     const createButton = wrapper
@@ -198,7 +201,7 @@ describe('NavProjects', () => {
   });
 
   it('emits create when the heading button is clicked', async () => {
-    const wrapper = mountNavProjects({});
+    const wrapper = mountNavProjects({ canCreate: true });
     const createButton = wrapper.find('button[aria-label="プロジェクトを作成"]');
     expect(createButton.exists()).toBe(true);
     await createButton.trigger('click');
@@ -206,7 +209,22 @@ describe('NavProjects', () => {
   });
 
   it('hides the create action when tenant slug is empty', () => {
-    const wrapper = mountNavProjects({ tenantSlug: '' });
+    const wrapper = mountNavProjects({ tenantSlug: '', canCreate: true });
+    expect(wrapper.find('button[aria-label="プロジェクトを作成"]').exists()).toBe(false);
+  });
+
+  it('プロジェクトを作れない人には、見出し横の作成ボタンを出さない', () => {
+    const wrapper = mountNavProjects({ canCreate: false });
+    expect(wrapper.find('button[aria-label="プロジェクトを作成"]').exists()).toBe(false);
+    // 対照: 作れる人には出る
+    const allowed = mountNavProjects({ canCreate: true });
+    expect(allowed.find('button[aria-label="プロジェクトを作成"]').exists()).toBe(true);
+  });
+
+  it('プロジェクトを作れない人の空状態は、文言だけを出してボタンを出さない', () => {
+    const wrapper = mountNavProjects({ projects: [], canCreate: false });
+    expect(wrapper.text()).toContain('プロジェクトはまだありません');
+    expect(findRowButton(wrapper, 'プロジェクトを作成')).toBeUndefined();
     expect(wrapper.find('button[aria-label="プロジェクトを作成"]').exists()).toBe(false);
   });
 

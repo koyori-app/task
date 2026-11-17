@@ -3,7 +3,7 @@ import { Download, Paperclip, X } from '@lucide/vue';
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
-import { Button } from '@koyori-app/ui-vue';
+import { Button, Dialog } from '@koyori-app/ui-vue';
 import type { components } from '@/generated/api';
 import { fetchClient } from '@/lib/api-vue-query';
 
@@ -25,11 +25,45 @@ const props = defineProps<{
   tenantId: string | null;
   projectId: string | null;
   taskId: string;
+  /** ログイン中ユーザーの ID（/v1/auth/me）。未取得なら null */
+  currentUserId?: string | null;
+  /** 見ている人がテナントオーナーか。他人が付けた添付の解除を出すかに使う */
+  isTenantOwner?: boolean;
 }>();
 
 const queryClient = useQueryClient();
 const input = ref<HTMLInputElement | null>(null);
 const removingId = ref<string | null>(null);
+// 解除の確認待ちの添付。確認で「解除する」を押すまで DELETE は送らない
+const detachTarget = ref<Attachment | null>(null);
+
+/** 解除できるのは添付の作成者とテナントオーナー（backend の detach と同じ）。作成者の分からない行はオーナーだけ */
+function canDetach(attachment: Attachment) {
+  return (
+    !!props.isTenantOwner ||
+    (!!props.currentUserId && attachment.created_by === props.currentUserId)
+  );
+}
+
+// 解除の応答を待っているのが、いま確認している添付か。別の添付（切り替える前のタスクのもの）の
+// 応答待ちなら、この確認は閉じられる。解除は同時に 1 件だけなので、「解除する」は塞いだままにする
+const isDetachingTarget = computed(
+  () => !!removingId.value && removingId.value === detachTarget.value?.id,
+);
+
+function closeDetachConfirm() {
+  // 解除リクエストの進行中は閉じない（結果の見逃し防止）
+  if (isDetachingTarget.value) return;
+  detachTarget.value = null;
+}
+
+async function confirmDetach() {
+  const target = detachTarget.value;
+  if (!target) return;
+  await removeAttachment(target.id);
+  // 解除を待つ間に別の添付の確認へ移っていたら、そちらの確認は閉じない
+  if (detachTarget.value === target) detachTarget.value = null;
+}
 type TaskRef = { tenantId: string; projectId: string; taskId: string };
 type PendingFile = TaskRef & { id: string; name: string };
 const taskKey = (task: TaskRef) => `${task.tenantId}/${task.projectId}/${task.taskId}`;
@@ -169,7 +203,10 @@ const attachmentsQuery = useQuery({
   retry: false,
 });
 
-watch(currentKey, closePreview);
+watch(currentKey, () => {
+  closePreview();
+  detachTarget.value = null;
+});
 
 async function attach(file: PendingFile) {
   const path = { tenant_id: file.tenantId, project_id: file.projectId, id: file.taskId };
@@ -285,7 +322,7 @@ async function removeAttachment(attachmentId: string) {
     if (error) {
       throw new Error(
         response.status === 403
-          ? '添付を解除できませんでした。作成者またはテナントオーナーのみ解除できます'
+          ? '添付を解除できるのは、添付した人とテナントオーナーだけです。'
           : '添付を解除できませんでした',
       );
     }
@@ -373,12 +410,13 @@ async function removeAttachment(attachmentId: string) {
           <Download class="size-4" aria-hidden="true" />
         </a>
         <Button
+          v-if="canDetach(attachment)"
           type="button"
           variant="ghost"
           class="shrink-0"
           :ariaLabel="`${attachment.name} の添付を解除`"
           :disabled="removingId === attachment.id"
-          @click="removeAttachment(attachment.id)"
+          @click="detachTarget = attachment"
         >
           <template #icon><X class="size-4" aria-hidden="true" /></template>
         </Button>
@@ -435,5 +473,29 @@ async function removeAttachment(attachmentId: string) {
         class="max-h-[75vh] overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-3 text-sm"
         >{{ previewText }}</pre>
     </dialog>
+
+    <Dialog
+      :open="!!detachTarget"
+      title="添付を解除しますか？"
+      :description="`「${detachTarget?.name}」をこのタスクから外します。ファイルは Drive に残ります。`"
+      :on-close="closeDetachConfirm"
+    >
+      <template #actions>
+        <Button
+          type="button"
+          variant="tertiary"
+          :disabled="isDetachingTarget"
+          label="キャンセル"
+          @click="closeDetachConfirm"
+        />
+        <Button
+          type="button"
+          variant="danger"
+          :disabled="!!removingId"
+          :label="isDetachingTarget ? '解除中…' : '解除する'"
+          @click="confirmDetach"
+        />
+      </template>
+    </Dialog>
   </section>
 </template>

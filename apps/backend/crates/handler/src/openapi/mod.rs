@@ -54,6 +54,10 @@ fn register_tags(openapi: &mut OpenApi) {
             .description(Some("ラベル一覧"))
             .build(),
         TagBuilder::new()
+            .name("Task Types")
+            .description(Some("タスク種別の定義"))
+            .build(),
+        TagBuilder::new()
             .name("Custom Fields")
             .description(Some("プロジェクトカスタムフィールド定義"))
             .build(),
