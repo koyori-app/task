@@ -16,6 +16,9 @@
 //   利用者の取得回数も数えない。止める時間が過ぎれば取れる
 // - その要求に固有の失敗（レート制限でない 403・422・451）は 404 として覚え、インストールは止めない
 // - 一次レート制限（403 + `x-ratelimit-remaining: 0`）は `x-ratelimit-reset` まで止める
+// - 印（`Retry-After`・残り 0）の無い 403 でも、本文が二次レート制限を知らせていれば 503 で止める
+//   （対照: 本文がレート制限でない 403 は 404 で、止めない）
+// - 覚えたタイムアウトの `Retry-After` は残りの秒数。遅れて届いたタイムアウトは、先に置かれた抜粋を上書きしない
 // - 並行した取得の失敗が届く順がどちらでも、止める期限は長いほうになる（短い失敗で縮まない）
 // - タイムアウトはその抜粋だけを短く 503 にし、インストールは止めない
 // - インストールが GitHub 側から消えている（トークンの取得が 404）と 404 で、2 回目はトークンを取りに行かない
@@ -980,13 +983,18 @@ async fn pause_is_extended_but_never_shortened() {
     let mock_server = github_mock().await;
     let mut app = TestApp::new_with_github().await;
     let fx = setup(&app).await;
-    let delay = Duration::from_millis(700);
+    // 先に届く側も少し遅らせる。すぐ返すと、もう片方が「止めているか」を見る前に停止が置かれ、
+    // 並行にならないことがある（片方が GitHub へ進まない）
+    let early = Duration::from_millis(500);
+    let delay = Duration::from_millis(1500);
     // 長い停止（120 秒）と短い停止（既定の 60 秒）を、届く順を入れ替えて 2 組
     mount_failure(
         &mock_server,
         &fx.repo,
         "long-first.txt",
-        ResponseTemplate::new(429).insert_header("retry-after", "120"),
+        ResponseTemplate::new(429)
+            .insert_header("retry-after", "120")
+            .set_delay(early),
     )
     .await;
     mount_failure(
@@ -1000,7 +1008,7 @@ async fn pause_is_extended_but_never_shortened() {
         &mock_server,
         &fx.repo,
         "short-first.txt",
-        ResponseTemplate::new(500),
+        ResponseTemplate::new(500).set_delay(early),
     )
     .await;
     mount_failure(
@@ -1070,10 +1078,13 @@ async fn timeout_is_remembered_for_the_snippet_without_pausing() {
     // インストールは止めず、ほかの抜粋は取れる
     assert_eq!(redis_ttl(&app, pause_key).await, -2);
     assert_eq!(app.get(&url("ok.txt")).await.status(), StatusCode::OK);
-    // 同じ抜粋は短く覚えていて、すぐには取り直さない
+    // 同じ抜粋は短く覚えていて、すぐには取り直さない。Retry-After は置いた時の 60 ではなく残り
+    tokio::time::sleep(Duration::from_secs(3)).await;
     let before = contents_requests(&mock_server, &fx.repo).await.len();
     let res = app.get(&url("slow.txt")).await;
     assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let secs = retry_after(&res);
+    assert!((50..=57).contains(&secs), "retry-after {secs}");
     assert_eq!(
         contents_requests(&mock_server, &fx.repo).await.len(),
         before
@@ -1128,6 +1139,120 @@ async fn removed_installation_is_not_found_and_remembered() {
     assert_eq!(app.get(&url).await.status(), StatusCode::NOT_FOUND);
     assert_eq!(token_requests().await, 1);
     assert!(contents_requests(&mock_server, &fx.repo).await.is_empty());
+
+    forget_github_mock();
+}
+
+#[serial_test::serial]
+#[tokio::test]
+async fn secondary_rate_limit_without_headers_pauses_the_installation() {
+    let mock_server = github_mock().await;
+    let mut app = TestApp::new_with_github().await;
+    let fx = setup(&app).await;
+    // 二次レート制限は Retry-After も x-ratelimit-remaining: 0 も付けない 403 で返ることがある
+    mount_failure(
+        &mock_server,
+        &fx.repo,
+        "secondary.txt",
+        ResponseTemplate::new(403)
+            .insert_header("x-ratelimit-remaining", "4000")
+            .set_body_json(serde_json::json!({
+                "message": "You have exceeded a secondary rate limit. Please wait a few minutes before you try again.",
+                "documentation_url": "https://docs.github.com/rest/overview/rate-limits-for-the-rest-api"
+            })),
+    )
+    .await;
+    // 対照: 本文がレート制限でない 403
+    mount_failure(
+        &mock_server,
+        &fx.repo,
+        "blocked.txt",
+        ResponseTemplate::new(403).set_body_json(serde_json::json!({
+            "message": "Repository access blocked",
+            "block": { "reason": "tos" }
+        })),
+    )
+    .await;
+    mount_file(&mock_server, &fx.repo, "ok.txt", file_body(b"one\ntwo\n")).await;
+    login(&mut app, &fx.owner).await;
+    let pause_key = format!("{PAUSE_KEY_PREFIX}{}", fx.installation_id);
+    let url = |file: &str| snippet_url(REPO_OWNER, &fx.repo, SHA, file, "start=1");
+
+    // 対照を先に: レート制限でない 403 は 404 で、インストールは止めない
+    assert_eq!(
+        app.get(&url("blocked.txt")).await.status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(redis_ttl(&app, pause_key.clone()).await, -2);
+
+    // 二次レート制限は「無い」ではなく 503 で、インストールを止める
+    let res = app.get(&url("secondary.txt")).await;
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(retry_after(&res), DEFAULT_PAUSE_SECS as i64);
+    let before = contents_requests(&mock_server, &fx.repo).await.len();
+    assert_eq!(
+        app.get(&url("ok.txt")).await.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    assert_eq!(
+        contents_requests(&mock_server, &fx.repo).await.len(),
+        before
+    );
+
+    // 止める時間が過ぎれば取り直す（「無い」として覚えていない）
+    redis_del(&app, pause_key.clone()).await;
+    let res = app.get(&url("secondary.txt")).await;
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        contents_requests(&mock_server, &fx.repo).await.len(),
+        before + 1
+    );
+
+    redis_del(&app, pause_key).await;
+    forget_github_mock();
+}
+
+#[serial_test::serial]
+#[tokio::test]
+async fn late_timeout_does_not_replace_a_stored_snippet() {
+    let mock_server = github_mock().await;
+    let mut app = TestApp::new_with_github().await;
+    let fx = setup(&app).await;
+    // 同じ抜粋への 2 つの取得のうち、1 つ目は少し遅れて成功し、2 つ目はタイムアウトする。
+    // 成功を遅らせるのは、2 つとも「まだ覚えていない」のを見てから GitHub へ進ませるため
+    Mock::given(method("GET"))
+        .and(path(contents_path(&fx.repo, "race.txt")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(file_body(b"one\n"))
+                .set_delay(Duration::from_millis(700)),
+        )
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&mock_server)
+        .await;
+    mount_failure(
+        &mock_server,
+        &fx.repo,
+        "race.txt",
+        ResponseTemplate::new(200)
+            .set_body_json(file_body(b"one\n"))
+            .set_delay(Duration::from_secs(12)),
+    )
+    .await;
+    login(&mut app, &fx.owner).await;
+    let url = snippet_url(REPO_OWNER, &fx.repo, SHA, "race.txt", "start=1");
+
+    let (a, b) = tokio::join!(app.get(&url), app.get(&url));
+    let mut statuses = [a.status().as_u16(), b.status().as_u16()];
+    statuses.sort_unstable();
+    assert_eq!(statuses, [200, 503], "片方は取れ、片方はタイムアウトする");
+    assert_eq!(contents_requests(&mock_server, &fx.repo).await.len(), 2);
+
+    // 後から届いたタイムアウトが、先に置かれた抜粋を消していない
+    let res = app.get(&url).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(contents_requests(&mock_server, &fx.repo).await.len(), 2);
 
     forget_github_mock();
 }

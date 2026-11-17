@@ -2,14 +2,15 @@
 //!
 //! 本文に貼った GitHub のパーマリンク（コミット SHA と行範囲つきの blob URL）を、画面が
 //! コードの抜粋として出すための取得口。GitHub App の Contents: Read で読み、SHA 指定で
-//! 中身が変わらないので Redis に置く。Installation Access Token の取得は 1 回につき
-//! GitHub へ 2 リクエスト出るため、閲覧のたびには取りに行かない。
+//! 中身が変わらないので Redis に置く。取りに行くと Installation Access Token の発行と
+//! Contents API で GitHub へ 2 リクエスト出るため、閲覧のたびには取りに行かない。
 //!
 //! GitHub へのリクエストはインストールのレート制限を Issue・PR・コミットの同期と分け合う。
 //! 閲覧がそれを食い潰さないよう、取れなかった結果も覚える:
 //! - ファイルが無い・行として出せない: 抜粋と同じキーに短い TTL で置く（壊れたパーマリンクを
 //!   開くたびに取りに行かない）
 //! - インストール全体に及ぶ GitHub 側の失敗（レート制限の 403 / 429・5xx・接続の失敗）:
+//!   レート制限の 403 は `Retry-After`、`x-ratelimit-remaining: 0`、本文の `message` で見分ける。
 //!   インストール単位で止める（レート制限に当たった後も各利用者の枠が残る限り叩き続ける、
 //!   ということをしない）。止める期限は延ばすだけで、後から来た短い失敗では縮めない
 //! - その要求に固有の失敗（400 / 422 / 451、レート制限でない 403）: 「無い」と同じに覚える。
@@ -355,13 +356,14 @@ fn header_number(headers: &reqwest::header::HeaderMap, name: &str) -> Option<u64
     headers.get(name)?.to_str().ok()?.trim().parse().ok()
 }
 
-/// 一次レート制限を使い切った応答なら、窓が明けるまでの秒数（最低 1 秒）。
-/// GitHub は一次制限に `Retry-After` を付けず、`x-ratelimit-remaining: 0` と
-/// `x-ratelimit-reset`（Unix 秒）で知らせる。
+/// 一次レート制限を使い切った応答か。GitHub は一次制限に `Retry-After` を付けず、
+/// `x-ratelimit-remaining: 0` と `x-ratelimit-reset`（Unix 秒）で知らせる。
+fn rate_limit_exhausted(headers: &reqwest::header::HeaderMap) -> bool {
+    header_number(headers, "x-ratelimit-remaining") == Some(0)
+}
+
+/// 一次レート制限の窓が明けるまでの秒数（最低 1 秒）。reset が読めなければ `None`。
 fn rate_limit_reset_secs(headers: &reqwest::header::HeaderMap, now_unix: u64) -> Option<u64> {
-    if header_number(headers, "x-ratelimit-remaining")? != 0 {
-        return None;
-    }
     let reset = header_number(headers, "x-ratelimit-reset")?;
     Some(Ord::max(reset.saturating_sub(now_unix), 1))
 }
@@ -370,23 +372,63 @@ fn rate_limit_reset_secs(headers: &reqwest::header::HeaderMap, now_unix: u64) ->
 ///
 /// 返すのは `Some(止める秒数。読めなければ None)` か、止めないなら `None`。
 /// - 429 と 5xx: 止める
-/// - 403: レート制限（`Retry-After` があるか、一次制限を使い切っている）のときだけ止める。
-///   それ以外の 403 はそのリポジトリやファイルに固有の拒否（GitHub 側でブロックされた
-///   リポジトリなど）で、待っても戻らず、ほかのリポジトリには関係しない
+/// - 403: レート制限の印（`Retry-After` があるか、一次制限を使い切っている）があれば止める。
+///   印が無い 403 は、呼び出し側が本文を見て決める（[`is_rate_limit_body`]）
 /// - それ以外（400 / 401 / 422 / 451 など）: その要求に固有なので止めない
+///
+/// 秒数は `Retry-After`、無ければ一次制限を使い切っているときの reset までの秒数。
+/// 残りが 0 で reset が読めない応答（中継が片方を落とした場合）も止め、秒数は既定にする。
 fn pause_for_status(
     status: StatusCode,
     headers: &reqwest::header::HeaderMap,
     now_unix: u64,
 ) -> Option<Option<u64>> {
-    let hinted = retry_after_secs(headers).or_else(|| rate_limit_reset_secs(headers, now_unix));
+    let retry_after = retry_after_secs(headers);
+    let exhausted = rate_limit_exhausted(headers);
+    let hinted = retry_after.or_else(|| {
+        exhausted
+            .then(|| rate_limit_reset_secs(headers, now_unix))
+            .flatten()
+    });
     if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
         return Some(hinted);
     }
-    if status == StatusCode::FORBIDDEN && hinted.is_some() {
+    if status == StatusCode::FORBIDDEN && (retry_after.is_some() || exhausted) {
         return Some(hinted);
     }
     None
+}
+
+/// 失敗の応答の本文として読む量の上限（`message` を見るだけなので小さくてよい）。
+const MAX_ERROR_BODY_BYTES: usize = 16 * 1024;
+
+/// 403 の本文がレート制限を知らせているか。
+///
+/// GitHub の二次レート制限は、`Retry-After` も `x-ratelimit-remaining: 0` も付けない 403 で
+/// 返ることがある（本文の `message` は `You have exceeded a secondary rate limit…`）。
+/// これを「その要求に固有の拒否」と読むと、実在する抜粋を「無い」と覚え、制限中も
+/// 取りに行き続ける。
+fn is_rate_limit_body(body: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|json| {
+            json.get("message")
+                .and_then(|message| message.as_str())
+                .map(|message| message.to_ascii_lowercase().contains("rate limit"))
+        })
+        .unwrap_or(false)
+}
+
+/// 失敗の応答の本文を [`MAX_ERROR_BODY_BYTES`] まで読む。読めない・大きすぎるなら空。
+async fn read_error_body(res: &mut reqwest::Response) -> Vec<u8> {
+    let mut body = Vec::new();
+    while let Ok(Some(chunk)) = res.chunk().await {
+        if body.len() + chunk.len() > MAX_ERROR_BODY_BYTES {
+            return Vec::new();
+        }
+        body.extend_from_slice(&chunk);
+    }
+    body
 }
 
 /// 止める期限を延ばす（縮めない）。返すのは、延ばした後に残っている秒数。
@@ -494,11 +536,15 @@ async fn fetch_file(
     if !status.is_success() {
         tracing::warn!(%status, "github contents responded with an error");
         let now_unix = u64::try_from(chrono::Utc::now().timestamp()).unwrap_or(0);
-        return Ok(match pause_for_status(status, res.headers(), now_unix) {
-            Some(secs) => Fetched::Pause { secs },
-            // その要求に固有の拒否。取り直しても変わらないので「無い」と同じに覚える
-            None => Fetched::NotFound,
-        });
+        if let Some(secs) = pause_for_status(status, res.headers(), now_unix) {
+            return Ok(Fetched::Pause { secs });
+        }
+        // 印の無い 403 は、本文がレート制限を知らせていれば止める（二次レート制限）
+        if status == StatusCode::FORBIDDEN && is_rate_limit_body(&read_error_body(&mut res).await) {
+            return Ok(Fetched::Pause { secs: None });
+        }
+        // その要求に固有の拒否。取り直しても変わらないので「無い」と同じに覚える
+        return Ok(Fetched::NotFound);
     }
     if res
         .content_length()
@@ -571,11 +617,24 @@ pub async fn snippet_for(
         .query_async(&mut conn)
         .await
         .map_err(|e| anyhow::anyhow!("redis GET snippet: {e}"))?;
-    if let Some(cached) = cached
+    match cached
         .as_deref()
         .and_then(|raw| serde_json::from_str::<Cached>(raw).ok())
     {
-        return Ok(cached.into());
+        // 覚えた一時的な失敗は、あと何秒で取り直せるかを返す（置いた時の秒数ではなく残り）
+        Some(Cached::Unavailable) => {
+            let remaining: i64 = redis::cmd("TTL")
+                .arg(&key)
+                .query_async(&mut conn)
+                .await
+                .map_err(|e| anyhow::anyhow!("redis TTL snippet: {e}"))?;
+            // GET と TTL の間に期限が切れたら、取りに行く
+            if let Ok(retry_after_secs @ 1..) = u64::try_from(remaining) {
+                return Ok(SnippetOutcome::Unavailable { retry_after_secs });
+            }
+        }
+        Some(cached) => return Ok(cached.into()),
+        None => {}
     }
 
     // GitHub 側の失敗の後は、そのインストールではしばらく取りに行かない（利用者の枠も数えない）
@@ -600,11 +659,18 @@ pub async fn snippet_for(
             return Ok(SnippetOutcome::Unavailable { retry_after_secs });
         }
     };
-    let _: () = redis::cmd("SET")
-        .arg(&key)
+    let mut set = redis::cmd("SET");
+    set.arg(&key)
         .arg(serde_json::to_string(&resolved)?)
         .arg("EX")
-        .arg(resolved.ttl_secs())
+        .arg(resolved.ttl_secs());
+    // 一時的な失敗は、既にある結果を消さない。同じ抜粋を並行して取った別の要求が先に
+    // 取れた抜粋（24 時間）を置いていたら、遅れて届いたタイムアウトで 60 秒の失敗に
+    // 置き換えない
+    if matches!(resolved, Cached::Unavailable) {
+        set.arg("NX");
+    }
+    let _: Option<String> = set
         .query_async(&mut conn)
         .await
         .map_err(|e| anyhow::anyhow!("redis SET snippet: {e}"))?;
@@ -943,6 +1009,17 @@ mod tests {
         ]);
         assert_eq!(pause(403, &stale), Some(Some(1)));
 
+        // 残り 0 だけで reset が読めない 403 も止める（秒数は既定）
+        let no_reset = headers(&[("x-ratelimit-remaining", "0")]);
+        assert_eq!(pause(403, &no_reset), Some(None));
+        assert_eq!(pause(429, &no_reset), Some(None));
+        // 枠が残っている応答の reset は秒数に使わない
+        let quota_left = headers(&[
+            ("x-ratelimit-remaining", "4000"),
+            ("x-ratelimit-reset", "1800000900"),
+        ]);
+        assert_eq!(pause(500, &quota_left), Some(None));
+
         // 止めない: レート制限でない 403（枠が残っている）と、その要求に固有の 4xx
         let has_quota = headers(&[
             ("x-ratelimit-remaining", "4000"),
@@ -954,6 +1031,24 @@ mod tests {
             assert_eq!(pause(status, &none), None, "{status}");
             assert_eq!(pause(status, &exhausted), None, "{status}");
         }
+    }
+
+    #[test]
+    fn rate_limit_is_recognised_from_the_error_body() {
+        // 二次レート制限（Retry-After も残り 0 も付かないことがある）
+        assert!(is_rate_limit_body(
+            br#"{"message":"You have exceeded a secondary rate limit. Please wait a few minutes before you try again.","documentation_url":"https://docs.github.com/"}"#
+        ));
+        assert!(is_rate_limit_body(
+            br#"{"message":"API rate limit exceeded for installation ID 1."}"#
+        ));
+        // レート制限でない拒否・本文なし・JSON でない本文は止めない
+        assert!(!is_rate_limit_body(
+            br#"{"message":"Repository access blocked","block":{"reason":"tos"}}"#
+        ));
+        assert!(!is_rate_limit_body(br#"{"message":42}"#));
+        assert!(!is_rate_limit_body(b""));
+        assert!(!is_rate_limit_body(b"rate limit"));
     }
 
     #[test]
