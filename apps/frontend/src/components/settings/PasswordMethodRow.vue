@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { PhLockKey, PhWarning } from '@phosphor-icons/vue';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { Button, Field, PasswordInput } from '@koyori-app/ui-vue';
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
 import PasswordStrengthBar from '@/components/auth/PasswordStrengthBar.vue';
 import { usePasswordStrength } from '@/composables/usePasswordStrength';
+import { requireRecentAuth } from '@/composables/useReauthGate';
 import { usePasswordChangeMutation, useSetPasswordMutation } from '@/lib/api-vue-query';
 import {
   hasPasswordFormError,
@@ -13,7 +14,12 @@ import {
 } from '@/lib/auth-methods';
 import { markNotice, PASSWORD_CHANGED_NOTICE } from '@/lib/one-time-notice';
 
-const props = defineProps<{ hasPassword: boolean; email: string }>();
+const props = defineProps<{
+  hasPassword: boolean;
+  email: string;
+  /** 本人確認のために連携の画面へ移って戻った時、初回のパスワードの欄を開く。 */
+  resumeOpen?: boolean;
+}>();
 
 const emit = defineEmits<{ set: [] }>();
 
@@ -25,6 +31,7 @@ const next = ref('');
 const confirm = ref('');
 const touched = ref(false);
 const submitError = ref<string | null>(null);
+const gateError = ref<string | null>(null);
 
 const { strength } = usePasswordStrength(next);
 
@@ -64,19 +71,44 @@ function reset() {
   submitError.value = null;
 }
 
-function toggle() {
+/** 初回のパスワードの設定は、直近の本人確認が要る。要れば dialog で確かめる。 */
+async function gate(): Promise<boolean> {
+  gateError.value = null;
+  try {
+    return await requireRecentAuth({ kind: 'set-password' });
+  } catch {
+    gateError.value = '本人確認の状態を確かめられませんでした。時間をおいて再度お試しください。';
+    return false;
+  }
+}
+
+async function toggle() {
   if (isOpen.value) {
     reset();
     return;
   }
+  // 打ち始める前に確かめる。連携で確かめに移っても、打った字を失わない
+  if (mode.value === 'set' && !(await gate())) return;
   isOpen.value = true;
 }
+
+watch(
+  () => props.resumeOpen,
+  (resume) => {
+    if (resume && !props.hasPassword) isOpen.value = true;
+  },
+  { immediate: true },
+);
 
 function messageOf(e: unknown): string | undefined {
   return (e as { error?: { message?: string } }).error?.message;
 }
 
-async function onSubmit() {
+function onSubmit() {
+  return submit(false);
+}
+
+async function submit(retried: boolean): Promise<void> {
   touched.value = true;
   submitError.value = null;
   if (hasPasswordFormError(errors.value)) return;
@@ -99,6 +131,11 @@ async function onSubmit() {
     window.location.assign('/signin');
   } catch (e) {
     const message = messageOf(e);
+    // 打っている間に本人確認の期間が切れた。確かめ直し、打った字のまま一度だけ撃ち直す
+    if (message === 'reauth-required' && mode.value === 'set' && !retried) {
+      if (await gate()) await submit(true);
+      return;
+    }
     if (message === 'invalid-current-password') {
       submitError.value = '現在のパスワードが違います。';
     } else if (message === 'password-already-set') {
@@ -138,6 +175,9 @@ async function onSubmit() {
       </div>
       <Button type="button" variant="tertiary" :label="actionLabel" @click="toggle" />
     </div>
+    <p v-if="gateError" role="alert" class="text-destructive px-4 pb-4 text-sm md:pl-16">
+      {{ gateError }}
+    </p>
 
     <div v-if="isOpen" class="px-4 pb-4 md:pl-16">
       <div class="bg-secondary mb-4 flex items-start gap-2 rounded-md border p-3">
