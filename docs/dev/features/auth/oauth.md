@@ -208,7 +208,7 @@ flowchart TD
 
 ログイン済みの利用者は次の順に OAuth を接続する。
 
-1. ログイン済みで `GET /v1/auth/oauth/{provider}` をリクエストする。直近 300 秒以内の本人確認（[再認証](/dev/features/auth/passkeys#再認証)）が要り、満たさなければ `403`（`reauth-required`）を返す。開始者の `link_user_id` を state に保存する
+1. ログイン済みで `GET /v1/auth/oauth/{provider}` をリクエストする。直近 300 秒以内の本人確認（[再認証](/dev/features/auth/passkeys#再認証)）が要り、満たさなければ `403`（`reauth-required`）を返す。連携専用の `github_app` は、ログインにも再認証にも使えず、足しても再認証の手段が増えないので要らない。開始者の `link_user_id` を state に保存する
 2. コールバックは、セッションの利用者が `link_user_id` と同じかを確かめる。違えば `400 invalid-oauth-state` を返す
 3. 現在のセッションの利用者に `oauth_connections` の行を追加する
 
@@ -227,7 +227,7 @@ flowchart TD
 `GET /v1/auth/oauth/{provider}?reauth=true` は、ログイン済みの利用者が、既に結んだ連携で本人確認する。パスキーの追加と削除の前に求める再認証の一手段である（[パスキー認証](/dev/features/auth/passkeys#再認証)）。
 
 - ログインしていない、半認証、ログインに使えないプロバイダー（`github_app`）は `401`。
-- コールバックは、プロバイダーの利用者が、本人に結んだ連携と一致した時だけ、セッションに本人確認の時刻を残す。一致しなければ `403`（`oauth-reauth-mismatch`）で、利用者も連携も作らない。
+- コールバックは、プロバイダーの利用者が、本人に結んだ連携と一致した時だけ、セッションに本人確認の時刻を残す。一致しなければ時刻を残さず、`error_redirect_after` へ `?oauth_error=` を付けて戻す（JSON の頁で止めない）。利用者も連携も作らない。
 - 連携は足さず、セッションも作り直さない。`gitlab`・`gitlab_selfhosted`・`oidc` の認可 URL には `prompt=login` を付ける。
 - 連携の追加（`link`）は、再認証として数えない。連携の追加自体にも再認証を求める（[連携の追加](#連携の追加)）。連携が再認証の手段なので、cookie だけで足せると、盗んだ者が自分の連携で再認証を満たしてしまう。
 

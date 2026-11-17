@@ -51,6 +51,24 @@ async fn passkey_ids(app: &TestApp) -> Vec<String> {
         .collect()
 }
 
+/// 連携での再認証の照合が違った。印を立てず、JSON の頁で止めずに、元の画面へ `?oauth_error=` を付けて戻す。
+fn assert_reauth_bounced(callback: &reqwest::Response, what: &str) {
+    assert!(
+        is_redirect(callback.status()),
+        "{what}: status {}",
+        callback.status()
+    );
+    let location = callback
+        .headers()
+        .get("location")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    assert!(
+        location.contains("/settings") && location.contains("oauth_error"),
+        "{what}: unexpected redirect {location}"
+    );
+}
+
 async fn assert_reauth_required(res: reqwest::Response, what: &str) {
     assert_eq!(res.status(), StatusCode::FORBIDDEN, "{what}");
     let body = body_of(res).await;
@@ -390,8 +408,7 @@ async fn oauth_reauth_needs_a_session_and_the_users_own_connection() {
     app.set_mock_user(other);
     let reauth = app.oauth_start_reauth().await;
     let callback = app.follow_oauth_start(reauth).await;
-    assert_eq!(callback.status(), StatusCode::FORBIDDEN);
-    assert!(body_of(callback).await.contains("oauth-reauth-mismatch"));
+    assert_reauth_bounced(&callback, "reauth by another user's connection");
     assert_eq!(app.count_connections_for_user(user_id).await, 1);
     assert_eq!(app.count_connections_for_user(other_id).await, 1);
     let start = app
@@ -410,7 +427,7 @@ async fn oauth_reauth_needs_a_session_and_the_users_own_connection() {
     });
     let reauth = app.oauth_start_reauth().await;
     let callback = app.follow_oauth_start(reauth).await;
-    assert_eq!(callback.status(), StatusCode::FORBIDDEN);
+    assert_reauth_bounced(&callback, "reauth by a stranger");
     assert_eq!(app.count_connections_for_user(user_id).await, 1);
 
     // セッションが無ければ、再認証は始められぬ
@@ -498,8 +515,7 @@ async fn linking_an_oauth_account_needs_a_recent_authentication() {
     // 連携が無ければ、連携での再認証もできぬ。盗んだ cookie では、再認証を満たす手段が足せぬ
     let reauth = app.oauth_start_reauth().await;
     let callback = app.follow_oauth_start(reauth).await;
-    assert_eq!(callback.status(), StatusCode::FORBIDDEN);
-    assert!(body_of(callback).await.contains("oauth-reauth-mismatch"));
+    assert_reauth_bounced(&callback, "reauth by an unlinked account");
     assert_eq!(app.count_connections_for_user(user.id).await, 0);
     let start = app
         .post_json_with_session(
@@ -621,6 +637,138 @@ async fn totp_setup_does_not_satisfy_reauth() {
         )
         .await;
     assert_reauth_required(start, "registration start after enabling TOTP").await;
+
+    app.cleanup_user(user.id).await;
+}
+
+async fn reauth_status(app: &TestApp) -> serde_json::Value {
+    let res = app.get_with_session("/v1/auth/reauth").await;
+    assert_eq!(res.status(), StatusCode::OK);
+    res.json().await.expect("reauth status json")
+}
+
+#[tokio::test]
+async fn reauth_status_reports_freshness_and_the_usable_methods() {
+    let mut app = TestApp::new_with_reauth_window(WINDOW_SECS).await;
+
+    // ログインしていなければ問えない
+    let anonymous = app.get("/v1/auth/reauth").await;
+    assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+
+    let user = app
+        .insert_passkey_user(true, Some("TestPassword123!"))
+        .await;
+    app.login_session_no_content(&user.email, &user.password)
+        .await;
+
+    // ログインの直後は印が立っており、切れる時刻と手段を返す
+    let status = reauth_status(&app).await;
+    assert_eq!(status["fresh"], serde_json::json!(true));
+    assert_eq!(status["window_secs"], serde_json::json!(WINDOW_SECS));
+    let expires_at =
+        chrono::DateTime::parse_from_rfc3339(status["expires_at"].as_str().expect("expires_at"))
+            .expect("rfc3339");
+    let left = expires_at.timestamp_millis() - chrono::Utc::now().timestamp_millis();
+    assert!(
+        left > 0 && left <= (WINDOW_SECS as i64) * 1000,
+        "expires in {left} ms"
+    );
+    assert_eq!(
+        status["methods"],
+        serde_json::json!({ "password": true, "passkey": false, "oauth": [] })
+    );
+
+    // 期限が切れたら、印は無く、切れる時刻も無い
+    let_the_window_pass().await;
+    let status = reauth_status(&app).await;
+    assert_eq!(status["fresh"], serde_json::json!(false));
+    assert_eq!(status["expires_at"], serde_json::Value::Null);
+
+    // 問うだけでは印は立たない（問うた後の操作は断られる）
+    let start = app
+        .post_json_with_session(
+            "/v1/auth/passkeys/registration/start",
+            serde_json::json!({}),
+        )
+        .await;
+    assert_reauth_required(start, "registration start after a status query").await;
+
+    // 再認証の後は、また印が立つ
+    let ok = app
+        .post_json_with_session(
+            "/v1/auth/reauth/password",
+            serde_json::json!({ "password": user.password }),
+        )
+        .await;
+    assert_eq!(ok.status(), StatusCode::NO_CONTENT);
+    assert_eq!(reauth_status(&app).await["fresh"], serde_json::json!(true));
+
+    app.cleanup_user(user.id).await;
+}
+
+#[tokio::test]
+async fn reauth_status_lists_the_users_sign_in_connections_and_passkeys() {
+    let mut app = TestApp::new_with_reauth_window(WINDOW_SECS).await;
+    let unique = uuid::Uuid::new_v4();
+    app.set_mock_user(MockGitLabUser {
+        id: 410_020,
+        username: format!("status_{unique}"),
+        email: Some(format!("status-{unique}@example.com")),
+    });
+    app.reset_session_client();
+    let start = app.oauth_start(false).await;
+    let callback = app.follow_oauth_start(start).await;
+    assert!(is_redirect(callback.status()), "oauth login redirect");
+    let me: serde_json::Value = app.get_me().await.json().await.expect("me json");
+    let user_id: uuid::Uuid = me["id"].as_str().expect("id").parse().expect("uuid");
+
+    // パスワードを持たず、結んだ連携（開始用の slug と instance）で確かめられる
+    let status = reauth_status(&app).await;
+    assert_eq!(status["methods"]["password"], serde_json::json!(false));
+    assert_eq!(status["methods"]["passkey"], serde_json::json!(false));
+    let oauth = status["methods"]["oauth"].as_array().expect("oauth array");
+    assert_eq!(oauth.len(), 1, "{oauth:?}");
+    assert_eq!(oauth[0]["provider"], serde_json::json!("gitlab_selfhosted"));
+    assert_eq!(
+        oauth[0]["connection_provider"],
+        serde_json::json!("gitlab_selfhosted")
+    );
+    assert!(
+        oauth[0]["instance_url"]
+            .as_str()
+            .is_some_and(|url| !url.is_empty()),
+        "{oauth:?}"
+    );
+
+    // パスキーを足すと、パスキーでも確かめられる
+    verify_email(&app, user_id).await;
+    let (soft, _) = SoftToken::new(true).expect("softtoken");
+    let mut wa = WebauthnAuthenticator::new(soft);
+    soft_register_finish(&app, &mut wa, "first").await;
+    assert_eq!(
+        reauth_status(&app).await["methods"]["passkey"],
+        serde_json::json!(true)
+    );
+
+    app.cleanup_user(user_id).await;
+}
+
+#[tokio::test]
+async fn linking_the_github_app_does_not_need_a_recent_authentication() {
+    let mut app = TestApp::new_with_reauth_window(WINDOW_SECS).await;
+    let user = app
+        .insert_passkey_user(true, Some("TestPassword123!"))
+        .await;
+    app.login_session_no_content(&user.email, &user.password)
+        .await;
+    let_the_window_pass().await;
+
+    // GitHub App はログインにも再認証にも使えず、足しても手段は増えないので、期限が切れていても始められる
+    let start = app.get_with_session("/v1/auth/oauth/github_app").await;
+    assert!(is_redirect(start.status()), "status: {}", start.status());
+    // 対照: ログインに使える連携の追加は、同じ時点で断られる
+    let link = app.oauth_start(true).await;
+    assert_reauth_required(link, "sign-in provider link start after the window").await;
 
     app.cleanup_user(user.id).await;
 }

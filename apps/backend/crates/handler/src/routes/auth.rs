@@ -39,6 +39,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(crate::handlers::passkeys::list_passkeys))
         .routes(routes!(crate::handlers::passkeys::rename_passkey))
         .routes(routes!(crate::handlers::passkeys::delete_passkey))
+        .routes(routes!(crate::handlers::reauth::reauth_status))
         .routes(routes!(crate::handlers::reauth::reauth_password))
         .routes(routes!(crate::handlers::reauth::reauth_passkey_start))
         .routes(routes!(crate::handlers::reauth::reauth_passkey_finish))

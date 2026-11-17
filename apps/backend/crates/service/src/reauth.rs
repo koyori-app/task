@@ -50,6 +50,26 @@ pub fn require_recent_auth(
     }
 }
 
+/// 印が有効期間の内なら、期間の切れる時刻（ミリ秒）。内でなければ `None`。
+pub fn fresh_until(reauthed_at_ms: Option<i64>, now_ms: i64, window_secs: u64) -> Option<i64> {
+    if !is_fresh(reauthed_at_ms, now_ms, window_secs) {
+        return None;
+    }
+    let window_ms = i64::try_from(window_secs)
+        .unwrap_or(i64::MAX)
+        .saturating_mul(1000);
+    reauthed_at_ms.map(|at| at.saturating_add(window_ms))
+}
+
+/// セッションの印が有効期間の内なら、期間の切れる時刻（ミリ秒）。画面が操作の前に再認証の要否を問うために使う。
+pub fn recent_auth_until(session: &Session<SessionRedisPool>, window_secs: u64) -> Option<i64> {
+    fresh_until(
+        session.get::<i64>(REAUTH_SESSION_KEY),
+        Utc::now().timestamp_millis(),
+        window_secs,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -89,5 +109,26 @@ mod tests {
     #[test]
     fn huge_window_does_not_overflow() {
         assert!(is_fresh(Some(NOW - 1_000_000), NOW, u64::MAX));
+    }
+
+    #[test]
+    fn fresh_until_is_the_mark_plus_the_window() {
+        assert_eq!(fresh_until(Some(NOW), NOW, 300), Some(NOW + 300_000));
+        assert_eq!(
+            fresh_until(Some(NOW - 120_000), NOW, 300),
+            Some(NOW + 180_000)
+        );
+    }
+
+    #[test]
+    fn fresh_until_is_none_without_a_fresh_mark() {
+        assert_eq!(fresh_until(None, NOW, 300), None);
+        assert_eq!(fresh_until(Some(NOW - 300_001), NOW, 300), None);
+        assert_eq!(fresh_until(Some(NOW + 6_000), NOW, 300), None);
+    }
+
+    #[test]
+    fn fresh_until_saturates_with_a_huge_window() {
+        assert_eq!(fresh_until(Some(NOW), NOW, u64::MAX), Some(i64::MAX));
     }
 }

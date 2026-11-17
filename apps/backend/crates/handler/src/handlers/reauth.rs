@@ -8,19 +8,74 @@ use axum::{Json, extract::State, http::StatusCode};
 use axum_session::Session;
 use axum_session_redispool::SessionRedisPool;
 use axum_valid::Valid;
+use chrono::DateTime;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use webauthn_rs::prelude::{PublicKeyCredential, WebauthnError};
 
 use crate::AppState;
 use crate::extractors::CurrentUser;
 use crate::handlers::passkeys::finish_passkey_authentication;
 use crate::openapi::SessionAuthErrors;
+use entity::oauth_connections;
 use payload::reauth::*;
 use service::auth::{AuthError, verify_password};
 use service::passkey_challenges;
-use service::passkeys::{client_data_is_same_origin, find_by_credential_id, load_user_passkeys};
-use service::reauth::mark_reauthed;
+use service::passkeys::{
+    client_data_is_same_origin, count_user_passkeys, find_by_credential_id, load_user_passkeys,
+};
+use service::reauth::{mark_reauthed, recent_auth_until};
 
 type AppSession = Session<SessionRedisPool>;
+
+#[axum::debug_handler]
+#[utoipa::path(
+    get,
+    path = "/reauth",
+    tag = "Auth",
+    summary = "再認証の要否と手段",
+    description = "直近の本人確認が有効期間の内か（内なら切れる時刻）と、再認証に使える手段を返す。画面は、再認証を求める操作（連携の追加・初回のパスワードの設定・パスキーの追加と削除）の前にこれを引き、要れば先に本人確認を求める。",
+    responses(
+        (status = 200, description = "再認証の要否と手段", body = ReauthStatusResponse),
+        SessionAuthErrors,
+    )
+)]
+pub async fn reauth_status(
+    session: AppSession,
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> Result<Json<ReauthStatusResponse>, AuthError> {
+    let expires_at = recent_auth_until(&session, state.settings.reauth_window_secs)
+        .and_then(DateTime::from_timestamp_millis)
+        .map(|at| at.to_rfc3339());
+    let passkey = count_user_passkeys(&state.db, user.id).await? > 0;
+    let connections = oauth_connections::Entity::find()
+        .filter(oauth_connections::Column::UserId.eq(user.id))
+        .all(&state.db)
+        .await?;
+    let oauth = connections
+        .into_iter()
+        .filter_map(|row| {
+            let slug = state
+                .oauth_settings
+                .reauth_provider_slug(&row.provider, row.instance_url.as_deref())?;
+            Some(ReauthOAuthMethod {
+                provider: slug.to_string(),
+                connection_provider: row.provider,
+                instance_url: row.instance_url,
+            })
+        })
+        .collect();
+    Ok(Json(ReauthStatusResponse {
+        fresh: expires_at.is_some(),
+        expires_at,
+        window_secs: state.settings.reauth_window_secs,
+        methods: ReauthMethods {
+            password: user.password_hash.is_some(),
+            passkey,
+            oauth,
+        },
+    }))
+}
 
 #[axum::debug_handler]
 #[utoipa::path(

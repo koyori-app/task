@@ -4091,6 +4091,80 @@
         }
       }
     },
+    "/v1/auth/reauth": {
+      "get": {
+        "tags": ["Auth"],
+        "summary": "再認証の要否と手段",
+        "description": "直近の本人確認が有効期間の内か（内なら切れる時刻）と、再認証に使える手段を返す。画面は、再認証を求める操作（連携の追加・初回のパスワードの設定・パスキーの追加と削除）の前にこれを引き、要れば先に本人確認を求める。",
+        "operationId": "reauth_status",
+        "responses": {
+          "200": {
+            "description": "再認証の要否と手段",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReauthStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/auth/reauth/passkey/finish": {
       "post": {
         "tags": ["Auth"],
@@ -30655,6 +30729,47 @@
           }
         }
       },
+      "ReauthMethods": {
+        "type": "object",
+        "description": "再認証に使える手段。",
+        "required": ["password", "passkey", "oauth"],
+        "properties": {
+          "oauth": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReauthOAuthMethod"
+            },
+            "description": "再認証に使える連携（`GET /v1/auth/oauth/{provider}?reauth=true`）。ログインに使えぬ連携と、\n設定から外したプロバイダーの連携は含まない"
+          },
+          "passkey": {
+            "type": "boolean",
+            "description": "パスキーを持つか（`POST /v1/auth/reauth/passkey/start`）"
+          },
+          "password": {
+            "type": "boolean",
+            "description": "パスワードを持つか（`POST /v1/auth/reauth/password`）"
+          }
+        }
+      },
+      "ReauthOAuthMethod": {
+        "type": "object",
+        "description": "再認証に使える連携。",
+        "required": ["provider", "connection_provider"],
+        "properties": {
+          "connection_provider": {
+            "type": "string",
+            "description": "連携一覧（`GET /v1/auth/oauth/connections`）の provider と同じ、DB の provider キー"
+          },
+          "instance_url": {
+            "type": ["string", "null"],
+            "description": "GitLab self-hosted の instance URL。開始に `instance_url` として渡す"
+          },
+          "provider": {
+            "type": "string",
+            "description": "開始用の slug（`GET /v1/auth/oauth/{provider}` の provider）"
+          }
+        }
+      },
       "ReauthPasskeyFinishRequest": {
         "type": "object",
         "required": ["credential"],
@@ -30670,6 +30785,30 @@
         "properties": {
           "password": {
             "type": "string"
+          }
+        }
+      },
+      "ReauthStatusResponse": {
+        "type": "object",
+        "description": "再認証の要否と、使える手段。",
+        "required": ["fresh", "window_secs", "methods"],
+        "properties": {
+          "expires_at": {
+            "type": ["string", "null"],
+            "description": "有効期間の切れる時刻（RFC 3339）。`fresh` でなければ null"
+          },
+          "fresh": {
+            "type": "boolean",
+            "description": "直近の本人確認が有効期間の内か。内なら、再認証を求める操作をそのまま撃てる"
+          },
+          "methods": {
+            "$ref": "#/components/schemas/ReauthMethods"
+          },
+          "window_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "有効期間の長さ（秒）。本人確認をした後、この間は再認証を求めない",
+            "minimum": 0
           }
         }
       },

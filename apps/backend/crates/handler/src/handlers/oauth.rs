@@ -280,8 +280,9 @@ pub async fn oauth_start(
         return Err(OAuthError::Unauthorized);
     }
     // ログイン中の開始は、連携を足す操作になる。cookie だけで通すと、盗んだ者が自分の外部アカウントを
-    // 結び、その連携で再認証を満たせてしまう（再認証の手段を足す操作なので、再認証を要する）
-    if !reauth && optional_auth.0.is_some() {
+    // 結び、その連携で再認証を満たせてしまう（再認証の手段を足す操作なので、再認証を要する）。
+    // 連携専用のプロバイダー（github_app）は、ログインにも再認証にも使えず、足しても手段は増えないので求めない
+    if !reauth && optional_auth.0.is_some() && OAuthSettings::is_sign_in_provider(&provider) {
         require_recent_auth(&session, state.settings.reauth_window_secs)?;
     }
 
@@ -508,7 +509,7 @@ pub async fn oauth_callback(
         .ok_or(OAuthError::ProviderNotConfigured)?;
 
     if payload.reauth {
-        return finish_oauth_reauth(
+        let result = finish_oauth_reauth(
             &state,
             &session,
             &payload,
@@ -517,6 +518,19 @@ pub async fn oauth_callback(
             &provider_info,
         )
         .await;
+        // 照合が違えば、印を立てずに元の画面へ戻す（JSON の頁で止めない）。画面は戻った後に本人確認を出し直す
+        if matches!(result, Err(OAuthError::ReauthMismatch)) {
+            let frontend_redirect = build_frontend_oauth_error_redirect(
+                &state.settings.email_verification_app_url,
+                &payload.error_redirect_after,
+            )
+            .map_err(|e| {
+                warn!("oauth reauth error redirect build failed: {e}");
+                OAuthError::SecurityViolation
+            })?;
+            return Ok(Redirect::temporary(&frontend_redirect));
+        }
+        return result;
     }
 
     let user_id = resolve_user_and_connection(
