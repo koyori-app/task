@@ -2,8 +2,11 @@
 //
 // 有効期間は `reauth_window_secs`。試験では 5 秒にして、6 秒余り待って期限を切らす（1 秒では、負荷の下で再認証の直後の操作が窓を越える）。
 // 印を立てる手段（パスワード・パスキー・OAuth の連携・2FA の検証）と、立てぬ手段（連携の追加）を縛る。
+// 連携の追加と初回のパスワードの設定は、再認証の手段を足す操作なので、それ自体が直近の本人確認を要する。
 
-use crate::common::{MockGitLabUser, TestApp, is_redirect};
+use crate::common::{
+    MockGitLabUser, TestApp, current_totp_code, is_redirect, secret_from_otpauth_uri,
+};
 use crate::webauthn_integration::{soft_register_finish, webauthn_origin};
 use axum::http::StatusCode;
 use entity::users;
@@ -314,10 +317,16 @@ async fn oauth_login_satisfies_reauth_but_linking_does_not() {
     assert_eq!(by_password.status(), StatusCode::BAD_REQUEST);
     assert!(body_of(by_password).await.contains("password-not-set"));
 
-    // 連携の追加（link）は印を立てぬ。盗まれたセッションで自分の連携を足しても、再認証にならぬ
+    // 連携の追加は、期限が切れておれば通らぬ（下の試験で縛る）。印を立てぬことは、結んだ連携での再認証の
+    // 直後に追加し、窓の半ばで足した連携が、元の印を延ばさぬことで見る
+    let reauth = app.oauth_start_reauth().await;
+    let callback = app.follow_oauth_start(reauth).await;
+    assert!(is_redirect(callback.status()), "oauth reauth redirect");
+    tokio::time::sleep(Duration::from_millis(3000)).await;
     let link = app.oauth_start(true).await;
     let callback = app.follow_oauth_start(link).await;
     assert!(is_redirect(callback.status()), "oauth link redirect");
+    tokio::time::sleep(Duration::from_millis(3500)).await;
     let start = app
         .post_json_with_session(
             "/v1/auth/passkeys/registration/start",
@@ -460,6 +469,158 @@ async fn passkey_login_satisfies_reauth() {
 
     // このログインが印を立てるので、すぐ追加できる
     soft_register_finish(&app, &mut wa, "second").await;
+
+    app.cleanup_user(user.id).await;
+}
+
+#[tokio::test]
+async fn linking_an_oauth_account_needs_a_recent_authentication() {
+    let mut app = TestApp::new_with_reauth_window(WINDOW_SECS).await;
+    let user = app
+        .insert_passkey_user(true, Some("TestPassword123!"))
+        .await;
+    app.login_session_no_content(&user.email, &user.password)
+        .await;
+    let unique = uuid::Uuid::new_v4();
+    app.set_mock_user(MockGitLabUser {
+        id: 410_010,
+        username: format!("attacker_{unique}"),
+        email: Some(format!("attacker-{unique}@example.com")),
+    });
+
+    let_the_window_pass().await;
+
+    // 期限が切れた cookie だけでは、自分の外部アカウントを連携として結べぬ（開始で断る）
+    let start = app.oauth_start(true).await;
+    assert_reauth_required(start, "oauth link start after the window").await;
+    assert_eq!(app.count_connections_for_user(user.id).await, 0);
+
+    // 連携が無ければ、連携での再認証もできぬ。盗んだ cookie では、再認証を満たす手段が足せぬ
+    let reauth = app.oauth_start_reauth().await;
+    let callback = app.follow_oauth_start(reauth).await;
+    assert_eq!(callback.status(), StatusCode::FORBIDDEN);
+    assert!(body_of(callback).await.contains("oauth-reauth-mismatch"));
+    assert_eq!(app.count_connections_for_user(user.id).await, 0);
+    let start = app
+        .post_json_with_session(
+            "/v1/auth/passkeys/registration/start",
+            serde_json::json!({}),
+        )
+        .await;
+    assert_reauth_required(
+        start,
+        "registration start after a reauth by an unlinked account",
+    )
+    .await;
+
+    // 正しい利用者の流れ: 既存の手段（パスワード）で再認証してから、連携を足す
+    let ok = app
+        .post_json_with_session(
+            "/v1/auth/reauth/password",
+            serde_json::json!({ "password": user.password }),
+        )
+        .await;
+    assert_eq!(ok.status(), StatusCode::NO_CONTENT);
+    let link = app.oauth_start(true).await;
+    let callback = app.follow_oauth_start(link).await;
+    assert!(is_redirect(callback.status()), "oauth link redirect");
+    assert_eq!(app.count_connections_for_user(user.id).await, 1);
+
+    app.cleanup_user(user.id).await;
+}
+
+#[tokio::test]
+async fn setting_the_initial_password_needs_a_recent_authentication() {
+    let mut app = TestApp::new_with_reauth_window(WINDOW_SECS).await;
+    let unique = uuid::Uuid::new_v4();
+    app.set_mock_user(MockGitLabUser {
+        id: 410_011,
+        username: format!("pwless_{unique}"),
+        email: Some(format!("pwless-{unique}@example.com")),
+    });
+    app.reset_session_client();
+    let start = app.oauth_start(false).await;
+    let callback = app.follow_oauth_start(start).await;
+    assert!(is_redirect(callback.status()), "oauth login redirect");
+    let me: serde_json::Value = app.get_me().await.json().await.expect("me json");
+    let user_id: uuid::Uuid = me["id"].as_str().expect("id").parse().expect("uuid");
+    assert_eq!(me["has_password"], serde_json::json!(false));
+
+    let_the_window_pass().await;
+
+    // 期限が切れた cookie だけでは、パスワードを付けられぬ
+    let set = app
+        .post_json_with_session(
+            "/v1/auth/password",
+            serde_json::json!({ "password": "AttackerPassword123!" }),
+        )
+        .await;
+    assert_reauth_required(set, "initial password after the window").await;
+    let me: serde_json::Value = app.get_me().await.json().await.expect("me json");
+    assert_eq!(me["has_password"], serde_json::json!(false));
+
+    // 付けられておらぬので、そのパスワードでの再認証もできぬ
+    let by_password = app
+        .post_json_with_session(
+            "/v1/auth/reauth/password",
+            serde_json::json!({ "password": "AttackerPassword123!" }),
+        )
+        .await;
+    assert_eq!(by_password.status(), StatusCode::BAD_REQUEST);
+    assert!(body_of(by_password).await.contains("password-not-set"));
+
+    // 正しい利用者の流れ: 既存の手段（結んだ連携）で再認証してから、初回のパスワードを付ける
+    let reauth = app.oauth_start_reauth().await;
+    let callback = app.follow_oauth_start(reauth).await;
+    assert!(is_redirect(callback.status()), "oauth reauth redirect");
+    let set = app
+        .post_json_with_session(
+            "/v1/auth/password",
+            serde_json::json!({ "password": "FirstPassword123!" }),
+        )
+        .await;
+    assert_eq!(set.status(), StatusCode::NO_CONTENT);
+    let me: serde_json::Value = app.get_me().await.json().await.expect("me json");
+    assert_eq!(me["has_password"], serde_json::json!(true));
+
+    app.cleanup_user(user_id).await;
+}
+
+#[tokio::test]
+async fn totp_setup_does_not_satisfy_reauth() {
+    let mut app = TestApp::new_with_reauth_window(WINDOW_SECS).await;
+    let user = app
+        .insert_passkey_user(true, Some("TestPassword123!"))
+        .await;
+    app.login_session_no_content(&user.email, &user.password)
+        .await;
+
+    let_the_window_pass().await;
+
+    // TOTP の登録は、期限が切れた後でも通る（再認証の手段にならぬので、ここでは縛らぬ）。
+    // ただし、登録して有効にしても、再認証の印は立たぬ
+    let setup = app
+        .post_json_with_session("/v1/auth/2fa/totp/setup", serde_json::json!({}))
+        .await;
+    assert_eq!(setup.status(), StatusCode::OK);
+    let body: serde_json::Value = setup.json().await.expect("setup json");
+    let secret = secret_from_otpauth_uri(body["otpauth_uri"].as_str().expect("otpauth_uri"));
+    let code = current_totp_code(&secret, &app.state.settings.totp_issuer, &user.email);
+    let verify = app
+        .post_json_with_session(
+            "/v1/auth/2fa/totp/verify-setup",
+            serde_json::json!({ "code": code }),
+        )
+        .await;
+    assert_eq!(verify.status(), StatusCode::OK);
+
+    let start = app
+        .post_json_with_session(
+            "/v1/auth/passkeys/registration/start",
+            serde_json::json!({}),
+        )
+        .await;
+    assert_reauth_required(start, "registration start after enabling TOTP").await;
 
     app.cleanup_user(user.id).await;
 }

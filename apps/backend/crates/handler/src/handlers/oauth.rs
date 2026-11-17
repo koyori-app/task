@@ -38,7 +38,7 @@ use service::oauth::{
     resolve_provider, store_state,
 };
 use service::passkeys::count_user_passkeys;
-use service::reauth::mark_reauthed;
+use service::reauth::{mark_reauthed, require_recent_auth};
 
 use payload::oauth::*;
 
@@ -81,6 +81,8 @@ pub enum OAuthError {
     RegistrationDisabled,
     #[error("reauth identity mismatch")]
     ReauthMismatch,
+    #[error("recent authentication required")]
+    ReauthRequired,
 }
 
 impl From<sea_orm::DbErr> for OAuthError {
@@ -93,6 +95,7 @@ impl From<AuthError> for OAuthError {
     fn from(err: AuthError) -> Self {
         match err {
             AuthError::Unauthorized => OAuthError::Unauthorized,
+            AuthError::ReauthRequired => OAuthError::ReauthRequired,
             other => OAuthError::Internal(anyhow::anyhow!("{other}")),
         }
     }
@@ -203,6 +206,13 @@ impl IntoResponse for OAuthError {
                 }),
             )
                 .into_response(),
+            OAuthError::ReauthRequired => (
+                StatusCode::FORBIDDEN,
+                Json(ServerError {
+                    message: "reauth-required".into(),
+                }),
+            )
+                .into_response(),
             OAuthError::SecurityViolation => {
                 warn!("oauth security validation failed");
                 (
@@ -268,6 +278,11 @@ pub async fn oauth_start(
             || session.get::<bool>("half_authed").unwrap_or(false))
     {
         return Err(OAuthError::Unauthorized);
+    }
+    // ログイン中の開始は、連携を足す操作になる。cookie だけで通すと、盗んだ者が自分の外部アカウントを
+    // 結び、その連携で再認証を満たせてしまう（再認証の手段を足す操作なので、再認証を要する）
+    if !reauth && optional_auth.0.is_some() {
+        require_recent_auth(&session, state.settings.reauth_window_secs)?;
     }
 
     let instance_url = match provider.as_str() {
@@ -777,11 +792,15 @@ pub async fn disconnect_connection(
 )]
 pub async fn set_initial_password(
     State(state): State<AppState>,
+    session: Session<SessionRedisPool>,
     auth: AuthUser,
     Valid(Json(payload)): Valid<Json<SetPasswordRequest>>,
 ) -> Result<StatusCode, OAuthError> {
     auth.require_session()
         .map_err(|_| OAuthError::Unauthorized)?;
+    // 初回のパスワードは、パスワードでの再認証の手段になる。cookie だけで通すと、盗んだ者が自分の
+    // パスワードを付けて、そのパスワードで再認証を満たせてしまう
+    require_recent_auth(&session, state.settings.reauth_window_secs)?;
 
     let user = users::Entity::find_by_id(auth.user_id)
         .one(&state.db)
