@@ -68,6 +68,14 @@ pub fn new_task<Args>(args: Args) -> Task<Args> {
         .build()
 }
 
+/// [`new_task`] の、実行を `delay` だけ後ろへずらす版。
+pub fn new_task_after<Args>(args: Args, delay: Duration) -> Task<Args> {
+    TaskBuilder::new(args)
+        .max_attempts(DEFAULT_MAX_ATTEMPTS)
+        .run_after(delay)
+        .build()
+}
+
 /// ワーカーの backend の型。storage に、INSERT の通知と定期の poll を束ねた戦略を足したもの。
 pub type WorkerBackend<Args> = PollWith<PostgresStorage<Args>, Strategy>;
 
@@ -143,4 +151,21 @@ pub async fn setup_tenant_invitation_email_storage(
     settings: &Settings,
 ) -> Result<Arc<TenantInvitationEmailStorage>, anyhow::Error> {
     tenant_invitation_email::setup(pool, settings).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_task_caps_attempts() {
+        let task = new_task("job");
+        assert_eq!(task.ctx().max_attempts(), Some(DEFAULT_MAX_ATTEMPTS));
+    }
+
+    #[test]
+    fn delayed_task_caps_attempts() {
+        let task = new_task_after("job", Duration::from_secs(30));
+        assert_eq!(task.ctx().max_attempts(), Some(DEFAULT_MAX_ATTEMPTS));
+    }
 }

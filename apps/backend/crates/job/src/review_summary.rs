@@ -22,7 +22,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use apalis::prelude::{BoxDynError, Data, TaskBuilder, TaskSink};
+use apalis::prelude::{BoxDynError, Data, TaskSink};
 use apalis_postgres::{Config, PgPool, PostgresStorage};
 use sea_orm::{ConnectionTrait, EntityTrait, QuerySelect, TransactionTrait};
 use serde::{Deserialize, Serialize};
@@ -135,9 +135,8 @@ async fn enqueue_after(
         return Ok(());
     }
 
-    let task = TaskBuilder::new(job).run_after(delay).build();
     storage
-        .push_task(task)
+        .push_task(crate::new_task_after(job, delay))
         .await
         .map_err(|e| anyhow::anyhow!("push review summary job: {e}"))?;
     Ok(())
