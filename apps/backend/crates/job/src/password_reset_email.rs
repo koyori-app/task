@@ -13,7 +13,6 @@ use service::{password_reset, password_reset_email_delivery, password_reset_log}
 use crate::JobState;
 
 pub const QUEUE_NAME: &str = "password_reset_email";
-pub const MAX_RETRIES: usize = 8;
 
 /// パスワードリセットメール送信ジョブ（トークンは Redis のみに保持）。
 #[derive(Clone, Serialize, Deserialize)]

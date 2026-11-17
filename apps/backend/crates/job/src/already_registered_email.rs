@@ -17,7 +17,6 @@ use service::already_registered_email_delivery;
 use crate::JobState;
 
 pub const QUEUE_NAME: &str = "already_registered_email";
-pub const MAX_RETRIES: usize = 8;
 
 /// 既に登録済みのメールアドレス宛に送る通知ジョブのペイロード。
 /// トークン等の機微情報は含めない（`job::verification_email` と同様の規約）。

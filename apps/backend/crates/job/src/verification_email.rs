@@ -15,7 +15,6 @@ use service::{email_verification, verification_email_delivery};
 use crate::JobState;
 
 pub const QUEUE_NAME: &str = "verification_email";
-pub const MAX_RETRIES: usize = 8;
 
 /// 認証メール送信ワーカーが処理する Apalis ジョブペイロード（トークンは Redis のみに保持）。
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -10,6 +10,7 @@ use apalis::layers::retry::RetryPolicy;
 use apalis::prelude::{BoxDynError, TaskBuilder, TaskSink, WorkerBuilder};
 use apalis_postgres::{Config, PostgresStorage};
 use backend::observability;
+use job::AttemptLimit;
 use job::failure_report::JobFailureReportLayer;
 use sea_orm::{ConnectionTrait, DatabaseBackend, DatabaseConnection, Statement};
 use sentry::protocol::Event;
@@ -102,8 +103,11 @@ fn runtime() -> tokio::runtime::Runtime {
         .expect("runtime")
 }
 
-/// 失敗し続けるジョブを `retries` のリトライで最後まで動かし、送られたイベントを返す
-fn events_of_failing_job(retries: usize, max_attempts: usize) -> Vec<Event<'static>> {
+/// 失敗し続けるジョブを `policy` のリトライで最後まで動かし、送られたイベントを返す
+fn events_of_failing_job(
+    policy: AttemptLimit<RetryPolicy>,
+    max_attempts: usize,
+) -> Vec<Event<'static>> {
     sentry::test::with_captured_events(|| {
         let subscriber = tracing_subscriber::registry().with(observability::tracing_layer());
         tracing::subscriber::with_default(subscriber, || {
@@ -122,7 +126,7 @@ fn events_of_failing_job(retries: usize, max_attempts: usize) -> Vec<Event<'stat
 
                 let worker = WorkerBuilder::new(format!("{queue}-worker"))
                     .backend(job::worker_backend(&storage, Duration::from_millis(100)))
-                    .retry(RetryPolicy::retries(retries))
+                    .retry(policy)
                     .layer(JobFailureReportLayer::new(QUEUE_LABEL))
                     .enable_tracing()
                     .build(always_fails);
@@ -150,12 +154,14 @@ fn assert_single_failure_report(events: &[Event<'static>]) {
     assert!(!rendered.contains(VICTIM), "{rendered}");
 }
 
-/// リトライが max_attempts 以上のキュー: 使い切った後もリトライが終わらないので、
-/// レイヤーをリトライの外に置くと 1 件も届かない
+/// 再試行の回数に上限を置かない方針（認証メールなど）: 試行を使い切る最後の試行の失敗を 1 件だけ送る
 #[test]
 fn exhausted_retries_report_once() {
-    // 本番のジョブと同じ上限（`job::DEFAULT_MAX_ATTEMPTS`）で、リトライはそれ以上
-    assert_single_failure_report(&events_of_failing_job(8, job::DEFAULT_MAX_ATTEMPTS));
+    // 本番のジョブと同じ上限（`job::DEFAULT_MAX_ATTEMPTS`）
+    assert_single_failure_report(&events_of_failing_job(
+        job::retry_policy(),
+        job::DEFAULT_MAX_ATTEMPTS,
+    ));
 }
 
 /// リトライが max_attempts に満たないキュー: 使い切っても Failed で再取得されるので、
@@ -163,7 +169,7 @@ fn exhausted_retries_report_once() {
 #[test]
 fn refetched_job_reports_only_when_killed() {
     // 1 回の取得で 2 回試し、2 回目の取得で 3 回目の試行が最後になる
-    assert_single_failure_report(&events_of_failing_job(1, 3));
+    assert_single_failure_report(&events_of_failing_job(job::retry_policy_within(1), 3));
 }
 
 #[test]
@@ -180,7 +186,7 @@ fn successful_job_reports_nothing() {
 
             let worker = WorkerBuilder::new(format!("{queue}-worker"))
                 .backend(job::worker_backend(&storage, Duration::from_millis(100)))
-                .retry(RetryPolicy::retries(1))
+                .retry(job::retry_policy_within(1))
                 .layer(JobFailureReportLayer::new(QUEUE_LABEL))
                 .build(succeeds);
             let handle = tokio::spawn(worker.run());

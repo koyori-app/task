@@ -1,5 +1,4 @@
 use apalis::layers::WorkerBuilderExt;
-use apalis::layers::retry::RetryPolicy;
 use apalis::prelude::WorkerBuilder;
 use apalis_board::axum::{
     framework::{ApiBuilder, RegisterRoute},
@@ -26,25 +25,19 @@ use handler::AppState;
 use handler::middlewares::logging::logging_middleware;
 use job::{
     JobState,
-    already_registered_email::{
-        self, MAX_RETRIES as ALREADY_REGISTERED_MAX_RETRIES, QUEUE_NAME as ALREADY_REGISTERED_QUEUE,
-    },
+    already_registered_email::{self, QUEUE_NAME as ALREADY_REGISTERED_QUEUE},
     deadline_soon,
     failure_report::JobFailureReportLayer,
     github_issue_sync::{self, QUEUE_NAME as GITHUB_ISSUE_SYNC_QUEUE},
     github_webhook::{self, QUEUE_NAME as GITHUB_WEBHOOK_QUEUE},
     notification_email, notification_retention,
-    password_reset_email::{
-        self, MAX_RETRIES as PW_RESET_MAX_RETRIES, QUEUE_NAME as PW_RESET_QUEUE,
-    },
+    password_reset_email::{self, QUEUE_NAME as PW_RESET_QUEUE},
     review_summary::{
         self, MAX_RETRIES as REVIEW_SUMMARY_MAX_RETRIES, QUEUE_NAME as REVIEW_SUMMARY_QUEUE,
     },
     supervise::supervise,
-    tenant_invitation_email::{
-        self, MAX_RETRIES as TENANT_INVITATION_MAX_RETRIES, QUEUE_NAME as TENANT_INVITATION_QUEUE,
-    },
-    verification_email::{self, MAX_RETRIES, QUEUE_NAME},
+    tenant_invitation_email::{self, QUEUE_NAME as TENANT_INVITATION_QUEUE},
+    verification_email::{self, QUEUE_NAME},
     webhook_delivery,
 };
 
@@ -131,7 +124,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
             let worker = WorkerBuilder::new(ctx)
                 .backend(verification_email::worker_backend(&email_worker_storage))
                 .concurrency(email_worker_concurrency)
-                .retry(RetryPolicy::retries(MAX_RETRIES))
+                .retry(job::retry_policy())
                 .layer(JobFailureReportLayer::new(QUEUE_NAME))
                 .enable_tracing()
                 .data(email_worker_state.clone())
@@ -152,7 +145,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
                     &pw_reset_worker_storage,
                 ))
                 .concurrency(pw_reset_worker_concurrency)
-                .retry(RetryPolicy::retries(PW_RESET_MAX_RETRIES))
+                .retry(job::retry_policy())
                 .layer(JobFailureReportLayer::new(PW_RESET_QUEUE))
                 .enable_tracing()
                 .data(pw_reset_worker_state.clone())
@@ -174,7 +167,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
                     &already_registered_worker_storage,
                 ))
                 .concurrency(already_registered_worker_concurrency)
-                .retry(RetryPolicy::retries(ALREADY_REGISTERED_MAX_RETRIES))
+                .retry(job::retry_policy())
                 .layer(JobFailureReportLayer::new(ALREADY_REGISTERED_QUEUE))
                 .enable_tracing()
                 .data(already_registered_worker_state.clone())
@@ -193,7 +186,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
                 .backend(tenant_invitation_email::worker_backend(
                     &tenant_invitation_worker_storage,
                 ))
-                .retry(RetryPolicy::retries(TENANT_INVITATION_MAX_RETRIES))
+                .retry(job::retry_policy())
                 .layer(JobFailureReportLayer::new(TENANT_INVITATION_QUEUE))
                 .enable_tracing()
                 .data(tenant_invitation_worker_state.clone())
@@ -212,7 +205,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
             let worker = WorkerBuilder::new(ctx)
                 .backend(github_webhook::worker_backend(&github_worker_storage))
                 .concurrency(github_worker_concurrency)
-                .retry(RetryPolicy::retries(github_webhook::MAX_RETRIES))
+                .retry(job::retry_policy())
                 .layer(JobFailureReportLayer::new(GITHUB_WEBHOOK_QUEUE))
                 .enable_tracing()
                 .data(github_worker_state.clone())
@@ -233,7 +226,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
                     &review_summary_worker_storage,
                 ))
                 .concurrency(review_summary_worker_concurrency)
-                .retry(RetryPolicy::retries(REVIEW_SUMMARY_MAX_RETRIES))
+                .retry(job::retry_policy_within(REVIEW_SUMMARY_MAX_RETRIES))
                 .layer(JobFailureReportLayer::new(REVIEW_SUMMARY_QUEUE))
                 .enable_tracing()
                 .data(review_summary_worker_state.clone())
@@ -255,7 +248,7 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
                     &issue_sync_worker_storage,
                 ))
                 .concurrency(issue_sync_worker_concurrency)
-                .retry(RetryPolicy::retries(github_issue_sync::MAX_RETRIES))
+                .retry(job::retry_policy())
                 .layer(JobFailureReportLayer::new(GITHUB_ISSUE_SYNC_QUEUE))
                 .enable_tracing()
                 .data(issue_sync_worker_state.clone())

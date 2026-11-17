@@ -17,6 +17,7 @@ pub mod webhook_delivery;
 use std::sync::Arc;
 use std::time::Duration;
 
+use apalis::layers::retry::{Policy, RetryPolicy};
 use apalis::prelude::{BackendExt, BackoffConfig, PollWith, Strategy, Task, TaskBuilder};
 use apalis_postgres::{PgPool, PostgresStorage, Pubsub};
 
@@ -28,9 +29,7 @@ pub use github_webhook::{GithubWebhookJob, GithubWebhookStorage};
 pub use password_reset_email::{PasswordResetEmailJob, PasswordResetEmailStorage};
 pub use review_summary::{ReviewSummaryJob, ReviewSummaryStorage};
 pub use tenant_invitation_email::{TenantInvitationEmailJob, TenantInvitationEmailStorage};
-pub use verification_email::{
-    MAX_RETRIES, QUEUE_NAME, VerificationEmailJob, VerificationEmailStorage,
-};
+pub use verification_email::{QUEUE_NAME, VerificationEmailJob, VerificationEmailStorage};
 
 /// ワーカーが必要とする依存の束。
 /// AppState（handler クレート）を受け取ると job → handler の循環になるため、
@@ -74,6 +73,45 @@ pub fn new_task_after<Args>(args: Args, delay: Duration) -> Task<Args> {
         .max_attempts(DEFAULT_MAX_ATTEMPTS)
         .run_after(delay)
         .build()
+}
+
+/// `max_attempts` を試行の上限として守る再試行の方針。
+///
+/// apalis 1.x の `max_attempts` は、DB から行を取り直す条件にしか使われない。`RetryPolicy` は
+/// これを見ず、1.0.0-rc.8 までの「各試行の後に上限へ達した行を Killed にして止める」処理も無い。
+/// 包まなければ、`retries(n)` の n が許す回数（n + 1 回）まで、上限を越えて走る。
+/// 失敗した試行の番号が `max_attempts` に達したら、内側の方針に関わらず再試行しない。
+#[derive(Clone, Debug)]
+pub struct AttemptLimit<P>(P);
+
+impl<P, T, Res, Err> Policy<Task<T>, Res, Err> for AttemptLimit<P>
+where
+    P: Policy<Task<T>, Res, Err>,
+{
+    type Future = P::Future;
+
+    fn retry(&mut self, req: &mut Task<T>, result: &mut Result<Res, Err>) -> Option<Self::Future> {
+        let max_attempts = req.ctx().max_attempts().unwrap_or(DEFAULT_MAX_ATTEMPTS);
+        if result.is_err() && max_attempts <= req.attempt() {
+            return None;
+        }
+        self.0.retry(req, result)
+    }
+
+    fn clone_request(&mut self, req: &Task<T>) -> Option<Task<T>> {
+        self.0.clone_request(req)
+    }
+}
+
+/// 失敗した試行を、`max_attempts` に達するまで続けて再試行する。
+pub fn retry_policy() -> AttemptLimit<RetryPolicy> {
+    retry_policy_within(usize::MAX)
+}
+
+/// [`retry_policy`] のうち、1 回の取得で再試行する回数を `max_retries` 以下に絞ったもの。
+/// 使い切っていなければ、行は取り直されて続きが走る（それでも `max_attempts` は越えない）。
+pub fn retry_policy_within(max_retries: usize) -> AttemptLimit<RetryPolicy> {
+    AttemptLimit(RetryPolicy::retries(max_retries))
 }
 
 /// ワーカーの backend の型。storage に、INSERT の通知と定期の poll を束ねた戦略を足したもの。

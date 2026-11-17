@@ -16,7 +16,6 @@ use common::settings::Settings;
 use crate::JobState;
 
 pub const QUEUE_NAME: &str = "github_issue_sync";
-pub const MAX_RETRIES: usize = 5;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]

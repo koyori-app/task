@@ -15,7 +15,6 @@ use service::forge::pull_requests::PullRequestSnapshot;
 use crate::JobState;
 
 pub const QUEUE_NAME: &str = "github_webhook";
-pub const MAX_RETRIES: usize = 5;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GithubWebhookJob {

@@ -23,7 +23,6 @@ use service::tenant_invitations::{self, InvitationMail};
 use crate::JobState;
 
 pub const QUEUE_NAME: &str = "tenant_invitation_email";
-pub const MAX_RETRIES: usize = 8;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TenantInvitationEmailJob {
