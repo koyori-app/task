@@ -460,7 +460,7 @@ function retryFailed() {
             background: linear-gradient(
               to right,
               var(--koyori-color-accent) 40%,
-              var(--koyori-color-accent-subtle) 40%
+              var(--koyori-color-border-strong) 40%
             );
           "
           aria-hidden="true"
@@ -489,7 +489,7 @@ function retryFailed() {
       <span class="inline-flex items-center gap-1">
         <span
           class="inline-block h-3 w-0.5"
-          style="background: var(--koyori-color-text)"
+          style="background: var(--koyori-color-info)"
           aria-hidden="true"
         />
         今日
