@@ -61,6 +61,7 @@ import {
   chartHeight,
   chartProps,
   chartRows,
+  GANTT_PALETTE,
   GROUP_H,
   HEADER_H,
   rowHeight,
@@ -376,6 +377,10 @@ function retryFailed() {
   if (scheduleQuery.isError.value) void scheduleQuery.refetch();
   if (unscheduledQuery.isError.value) void unscheduledQuery.refetch();
 }
+
+// 凡例の見本と左の一覧の群れの見出しは、図と同じ色の名から引く（token を書き写すと、palette を
+// 直した時に食い違う）
+const LEGEND_BAR = `linear-gradient(to right, ${GANTT_PALETTE.TierLow} 40%, ${GANTT_PALETTE.BarBg} 40%)`;
 </script>
 
 <template>
@@ -456,41 +461,36 @@ function retryFailed() {
       <span class="inline-flex items-center gap-1">
         <span
           class="inline-block h-2.5 w-6 rounded-sm"
-          style="
-            background: linear-gradient(
-              to right,
-              var(--koyori-color-accent) 40%,
-              var(--koyori-color-border-strong) 40%
-            );
-          "
+          :style="{ background: LEGEND_BAR }"
           aria-hidden="true"
+          data-testid="gantt-legend-bar"
         />
         予定開始〜目安の期限（濃い所が進み）
       </span>
       <span class="inline-flex items-center gap-1">
         <span
           class="inline-block size-2 rotate-45"
-          style="background: var(--koyori-color-danger)"
+          :style="{ background: GANTT_PALETTE.HardDeadline }"
           aria-hidden="true"
+          data-testid="gantt-legend-hard"
         />
         厳守の期限
       </span>
       <span class="inline-flex items-center gap-1">
         <span
           class="inline-block h-2.5 w-6 rounded-sm border"
-          style="
-            background: var(--koyori-color-danger-subtle);
-            border-color: var(--koyori-color-danger);
-          "
+          :style="{ background: GANTT_PALETTE.WarnBg, borderColor: GANTT_PALETTE.WarnStroke }"
           aria-hidden="true"
+          data-testid="gantt-legend-overdue"
         />
         目安を過ぎた
       </span>
       <span class="inline-flex items-center gap-1">
         <span
           class="inline-block h-3 w-0.5"
-          style="background: var(--koyori-color-info)"
+          :style="{ background: GANTT_PALETTE.Today }"
           aria-hidden="true"
+          data-testid="gantt-legend-today"
         />
         今日
       </span>
@@ -560,7 +560,7 @@ function retryFailed() {
           <button
             type="button"
             class="flex w-full items-center gap-1 px-2 text-left text-sm font-semibold"
-            :style="{ height: `${GROUP_H}px`, background: 'var(--koyori-color-surface-disabled)' }"
+            :style="{ height: `${GROUP_H}px`, background: GANTT_PALETTE.GroupRow }"
             :aria-expanded="!group.collapsed"
             :data-testid="`gantt-group-${group.key}`"
             @click="toggleGroup(group.key)"
