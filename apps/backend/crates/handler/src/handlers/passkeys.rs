@@ -194,6 +194,14 @@ pub async fn registration_finish(
         let _ = passkey_challenges::release_registration_lock(&state.redis_client, user.id).await;
     };
 
+    // 応答の形と clientData の検めは、challenge を取り出す前に行う。ここで断る間は challenge とロックを
+    // 残し、client が start を呼び直さずに、正しい応答を送り直せるようにする（認証の finish と同じ順）。
+    let credential: RegisterPublicKeyCredential =
+        serde_json::from_value(payload.credential).map_err(|_| AuthError::BadRequest)?;
+    if !client_data_is_same_origin(&credential.response.client_data_json) {
+        return Err(WebauthnError::CredentialCrossOrigin.into());
+    }
+
     let reg_state = match passkey_challenges::take_registration(&state.redis_client, user.id).await
     {
         Ok(Some(s)) => s,
@@ -206,18 +214,6 @@ pub async fn registration_finish(
             return Err(AuthError::Internal(e));
         }
     };
-
-    let credential: RegisterPublicKeyCredential = match serde_json::from_value(payload.credential) {
-        Ok(c) => c,
-        Err(_) => {
-            release_lock().await;
-            return Err(AuthError::BadRequest);
-        }
-    };
-    if !client_data_is_same_origin(&credential.response.client_data_json) {
-        release_lock().await;
-        return Err(WebauthnError::CredentialCrossOrigin.into());
-    }
     let passkey = match state
         .webauthn
         .finish_passkey_registration(&credential, &reg_state)

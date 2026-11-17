@@ -106,7 +106,7 @@ WebAuthn の設定と検証の規則は次のとおりである。
 | residentKey | `webauthn-rs` の `start_passkey_registration` の既定で `discouraged`。discoverable な credential を作るかは認証器による |
 | sign_count | 応答のカウンターが 0 より大きければ、DB の値より大きいことを必須とする。カウンターが 0 の場合、DB の値も 0 なら「非対応の認証器」として許容し、DB の値が 0 より大きければクローンの疑いとして拒否する |
 | challenge の TTL | Redis で 5 分。`GETDEL` で取り出すので使い捨てである |
-| crossOrigin と topOrigin | 登録と認証の応答の `clientDataJSON` が `crossOrigin: true` か `topOrigin` を持つか、JSON として読めなければ `400`（`webauthn-error`）。`webauthn-rs` 0.5.5 は登録でしか見ないので、認証の分は task が検める。frame の中から呼ばれた操作を断る |
+| crossOrigin と topOrigin | 登録と認証の応答の `clientDataJSON` が `crossOrigin: true` か `topOrigin` を持つか、JSON として読めなければ `400`（`webauthn-error`）。`webauthn-rs` 0.5.5 は登録でしか見ないので、認証の分は task が検める。frame の中から呼ばれた操作を断る。断る時は challenge を取り出す前なので、challenge は消えず（登録ではロックも残る）、同じ challenge に正しい応答を送り直せる |
 | credential ID の長さ | 1023 byte を超える credential ID の登録は `400`（`bad-request`）（WebAuthn Level 3 の [Registering a New Credential](https://www.w3.org/TR/webauthn-3/#sctn-registering-a-new-credential) の検証の手順） |
 | 最後の認証手段の削除 | パスキーが 1 件で、`password_hash IS NULL` で、ログイン用の `oauth_connections` が 0 件なら `403`（`last-auth-method`）。`github_app` の連携はログインに使えないので数えない |
 | メール未確認 | 未確認の利用者は登録できず（`403`）、認証も通らない（`401`） |

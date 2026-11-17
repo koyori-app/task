@@ -1,6 +1,7 @@
 use crate::common::{TestApp, insert_passkey_user};
 use axum::http::StatusCode;
 use backend::utils::auth::AuthError;
+use backend::utils::passkey_challenges;
 use backend::utils::passkeys::{
     MAX_PASSKEYS_PER_USER, count_user_passkeys, insert_passkey_under_user_lock,
 };
@@ -495,6 +496,13 @@ fn crafted_registration(
     })
 }
 
+/// 断られた finish が残したロックを放す（試験の続きで、新しく start できるように）。
+async fn release_registration_lock(app: &TestApp, user_id: Uuid) {
+    passkey_challenges::release_registration_lock(&app.state.redis_client, user_id)
+        .await
+        .expect("release lock");
+}
+
 /// 登録の start → 組んだ応答の finish。応答の状態と本文を返す。
 async fn crafted_register(
     app: &TestApp,
@@ -561,6 +569,8 @@ async fn registration_finish_rejects_cross_origin_marks_and_long_credential_ids(
     assert_eq!(status, StatusCode::BAD_REQUEST, "topOrigin: {body}");
     assert!(body.contains("webauthn-error"), "{body}");
     assert_eq!(count().await, 2);
+    // 断った finish は challenge とロックを残す（次の試験で縛る）ので、続きのために放す
+    release_registration_lock(&app, user.id).await;
 
     // crossOrigin: true も断る
     let (status, body) = crafted_register(
@@ -571,8 +581,9 @@ async fn registration_finish_rejects_cross_origin_marks_and_long_credential_ids(
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "crossOrigin: {body}");
     assert_eq!(count().await, 2);
+    release_registration_lock(&app, user.id).await;
 
-    // 断った後も、正しい形はまた通る（ロックを放し、状態を壊しておらぬ）
+    // 断った後も、正しい形はまた通る（状態を壊しておらぬ）
     let (status, body) = crafted_register(&app, &[12u8; 32], None).await;
     assert_eq!(status, StatusCode::CREATED, "after the rejections: {body}");
     assert_eq!(count().await, 3);
@@ -657,6 +668,74 @@ async fn authentication_finish_rejects_cross_origin_marks_before_consuming_the_c
         StatusCode::NO_CONTENT,
         "genuine assertion after the rejected ones: {}",
         finish.text().await.unwrap_or_default()
+    );
+
+    app.cleanup_user(user.id).await;
+}
+
+#[tokio::test]
+async fn registration_finish_rejects_cross_origin_marks_before_consuming_the_challenge() {
+    let mut app = TestApp::new().await;
+    let user = app
+        .insert_passkey_user(true, Some("TestPassword123!"))
+        .await;
+    app.login_session_no_content(&user.email, &user.password)
+        .await;
+
+    let start = app
+        .post_json_with_session(
+            "/v1/auth/passkeys/registration/start",
+            serde_json::json!({}),
+        )
+        .await;
+    assert_eq!(start.status(), StatusCode::OK, "registration start");
+    let options: serde_json::Value = start.json().await.expect("start json");
+    let rp_id = options["publicKey"]["rp"]["id"].as_str().expect("rp id");
+    let origin = webauthn_origin(&app.state.settings.email_verification_app_url).to_string();
+    let origin = origin.trim_end_matches('/');
+    let finish = |credential: serde_json::Value| {
+        app.post_json_with_session(
+            "/v1/auth/passkeys/registration/finish",
+            serde_json::json!({ "name": "crafted", "credential": credential }),
+        )
+    };
+
+    // crossOrigin と topOrigin の応答は 400。handler が challenge を取り出す前に断るので、
+    // challenge もロックも残る（webauthn-rs まで進んでから失敗すると、どちらも先に消える）
+    for (title, extra) in [
+        ("crossOrigin", ("crossOrigin", serde_json::json!(true))),
+        (
+            "topOrigin",
+            ("topOrigin", serde_json::json!("http://evil.example")),
+        ),
+    ] {
+        let credential = crafted_registration(&options, rp_id, origin, &[21u8; 32], Some(extra));
+        let res = finish(credential).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST, "{title}");
+        let body = res.text().await.unwrap_or_default();
+        assert!(body.contains("webauthn-error"), "{title}: {body}");
+    }
+    assert!(
+        passkey_challenges::registration_lock_held(&app.state.redis_client, user.id)
+            .await
+            .expect("lock state"),
+        "the registration lock stays after a rejected response"
+    );
+
+    // start を呼び直さず、同じ challenge に対する正しい応答が通る
+    let genuine = crafted_registration(&options, rp_id, origin, &[21u8; 32], None);
+    let res = finish(genuine).await;
+    assert_eq!(
+        res.status(),
+        StatusCode::CREATED,
+        "genuine response after the rejected ones: {}",
+        res.text().await.unwrap_or_default()
+    );
+    assert_eq!(
+        count_user_passkeys(&app.state.db, user.id)
+            .await
+            .expect("count passkeys"),
+        1
     );
 
     app.cleanup_user(user.id).await;
