@@ -25,17 +25,23 @@ SKIPPED = frozenset({
 BREAKS = frozenset({
     "p", "div", "br", "hr", "li", "ul", "ol", "table", "tr", "td", "th", "details", "summary",
     "h1", "h2", "h3", "h4", "h5", "h6", "dl", "dt", "dd", "pre", "blockquote",
+    # 脚注の番号（Closes TASK-3[^1] の 1）と上付き・下付きは、参照の数字と別のもの
+    "sup", "sub",
 })
 # 読まない要素の前後に置く文字。空白でも英数字でもないので、語と参照の間の [ \t]+ も、
 # 参照の前後の境界も越えられない。中身を捨てただけだと「Closes <code>#1</code> #2」が
 # 「Closes  #2」に、「Closes TASK-12<code>x</code>3」が「Closes TASK-123」になり、無い宣言ができる
 GAP = "\ufffc"
+# 中を読むそのほかの要素（a・strong・em・span など）の前後に置く文字。語と参照の間には
+# あってよい（「**Closes** <a>#12</a>」を拾う）が、参照の数字の後ろの境界はこれを越えて見る。
+# 置かないと「Fixes TASK-5**6**」が「TASK-56」になる
+MARK = "\u2060"
 # 語と参照の境界は ASCII の英数字（と GAP）だけで見る（re の \b は日本語の文字も語の一部と見るので、
 # 「これでCloses TASK-5」「Closes TASK-123の対応」を拾えない）
-BEFORE = r"(?<![A-Za-z0-9_\ufffc])"
-AFTER = r"(?![A-Za-z0-9_\ufffc])"
+BEFORE = r"(?<![A-Za-z0-9_\ufffc])(?<![A-Za-z0-9_\ufffc]\u2060)"
+AFTER = r"(?!\u2060*[A-Za-z0-9_\ufffc])"
 # GitHub が Issue を閉じる語として解釈するものと同じ。語と参照は同じ行に書く
-KEYWORD = BEFORE + r"(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?[ \t]+"
+KEYWORD = BEFORE + r"(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\u2060*:?\u2060*[ \t][ \t\u2060]*"
 
 
 class _Prose(HTMLParser):
@@ -48,12 +54,16 @@ class _Prose(HTMLParser):
         if tag in SKIPPED:
             self.parts.append(GAP)
             self.depth += 1
+        elif tag not in BREAKS:
+            self.parts.append(MARK)
         if tag in BREAKS:
             self.parts.append("\n")
 
     def handle_endtag(self, tag):
         if tag in BREAKS:
             self.parts.append("\n")
+        elif tag not in SKIPPED:
+            self.parts.append(MARK)
         if tag in SKIPPED:
             self.parts.append(GAP)
             if self.depth:
@@ -69,7 +79,8 @@ def prose(html):
     parser = _Prose()
     parser.feed(html or "")
     parser.close()
-    return "".join(parser.parts)
+    # 入れ子の要素で続いた MARK を 1 つにする（BEFORE は MARK 1 つ分しか戻って見ない）
+    return re.sub(MARK + "+", MARK, "".join(parser.parts))
 
 
 def closes(html, prefix):

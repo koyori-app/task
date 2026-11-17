@@ -46,6 +46,10 @@ Closes
 
 discloses #16, prefix TASK-17 only mention, Closes [TASK-18](https://example.com), closes #19, #20
 
+Closes TASK-34[^1], Closes #34[^1], Fixes TASK-35**6**, **Closes:** #36, x**Closes** TASK-37
+
+[^1]: 脚注
+
 Closes `#22` #23, Closes `TASK-22` TASK-23, Closes TASK-2`x`4
 
 `code` Fixes TASK-24

@@ -15,8 +15,8 @@ import changelog_pr_map as pr_map  # noqa: E402
 
 FIXTURES = pathlib.Path(__file__).parent / "changelog-fixtures"
 # closes.md で地の文に書いた宣言だけ
-EXPECTED_ISSUES = [1, 11, 19]
-EXPECTED_TASKS = [1, 8, 10, 12, 18, 24, 25]
+EXPECTED_ISSUES = [1, 11, 19, 34, 36]
+EXPECTED_TASKS = [1, 8, 10, 12, 18, 24, 25, 34]
 
 
 class ClosesTest(unittest.TestCase):
@@ -60,6 +60,27 @@ class ClosesTest(unittest.TestCase):
         html = "<p>Closes <code>TASK-123</code> TASK-456. Fixes TASK-789</p><p><code>x</code> fixes #790</p>"
         self.assertEqual(pr_map.closes(html, "TASK-"), [789])
         self.assertEqual(pr_map.closes(html, "#"), [790])
+
+    def test_does_not_join_the_reference_with_the_text_of_a_following_element(self):
+        # 脚注（Closes TASK-3[^1] / Closes #4[^1]）を GitHub が描画した形。番号を 31・41 にしない
+        footnote = '<sup><a href="#user-content-fn-1" data-footnote-ref="">1</a></sup>'
+        self.assertEqual(pr_map.closes(f"<p>Closes TASK-3{footnote}</p>", "TASK-"), [3])
+        self.assertEqual(pr_map.closes(f'<p>Closes <a class="issue-link">#4</a>{footnote}</p>', "#"), [4])
+        self.assertEqual(pr_map.closes("<p>Closes TASK-7<sup>2</sup>, Closes #8<sub>9</sub></p>", "TASK-"), [7])
+        self.assertEqual(pr_map.closes("<p>Closes TASK-7<sup>2</sup>, Closes #8<sub>9</sub></p>", "#"), [8])
+        # 中を読む要素で数字が続くものは、別の番号を作らずに拾わない
+        self.assertEqual(pr_map.closes("<p>Fixes TASK-5<strong>6</strong>, Fixes <em>#1</em>2</p>", "TASK-"), [])
+        self.assertEqual(pr_map.closes("<p>Fixes TASK-5<strong>6</strong>, Fixes <em>#1</em>2</p>", "#"), [])
+
+    def test_takes_declarations_wrapped_in_inline_elements(self):
+        html = (
+            '<p><strong>Closes:</strong> <a class="issue-link">#36</a>, '
+            '<span class="issue-keyword">Fixes</span> <a>#7</a>, <em><strong>Resolves</strong></em> TASK-8</p>'
+        )
+        self.assertEqual(pr_map.closes(html, "#"), [7, 36])
+        self.assertEqual(pr_map.closes(html, "TASK-"), [8])
+        # 語の前に英数字が要素をまたいで続くものは閉じる語でない
+        self.assertEqual(pr_map.closes("<p>x<strong><em>Closes</em></strong> TASK-37</p>", "TASK-"), [])
 
     def test_takes_declarations_next_to_japanese_text(self):
         # 語と参照の境界は ASCII の英数字で見る（日本語の文字は語の一部と見ない）
