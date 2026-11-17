@@ -9,12 +9,17 @@
 //! 閲覧がそれを食い潰さないよう、取れなかった結果も覚える:
 //! - ファイルが無い・行として出せない: 抜粋と同じキーに短い TTL で置く（壊れたパーマリンクを
 //!   開くたびに取りに行かない）
-//! - GitHub 側の失敗（403 / 429 / 5xx・タイムアウト）: インストール単位で短く止める（レート制限に
-//!   当たった後も各利用者の枠が残る限り叩き続ける、ということをしない）
+//! - インストール全体に及ぶ GitHub 側の失敗（レート制限の 403 / 429・5xx・接続の失敗）:
+//!   インストール単位で止める（レート制限に当たった後も各利用者の枠が残る限り叩き続ける、
+//!   ということをしない）。止める期限は延ばすだけで、後から来た短い失敗では縮めない
+//! - その要求に固有の失敗（400 / 422 / 451、レート制限でない 403）: 「無い」と同じに覚える。
+//!   インストールは止めない（1 つのリポジトリの失敗で、ほかのリポジトリの抜粋を止めない）
+//! - その要求の一時的な失敗（タイムアウト・本文の読み取りの失敗）: 抜粋のキーに短く覚える
 //!
 //! 誰に見せてよいかはここでは決めない。呼び出し側（handler）が、連携行のプロジェクトに
 //! 入れる利用者かを確かめてから [`snippet_for`] を呼ぶ。
 
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use base64::Engine;
@@ -52,8 +57,10 @@ pub const CACHE_TTL_SECS: u64 = 86_400;
 pub const NEGATIVE_CACHE_TTL_SECS: u64 = 600;
 /// GitHub 側の失敗の後、そのインストールで取りに行くのを止めるキー。
 pub const PAUSE_KEY_PREFIX: &str = "github:snippet:pause:";
-/// `Retry-After` が無いときに止める秒数。
+/// 止める秒数が応答から読めないときに止める秒数。
 pub const DEFAULT_PAUSE_SECS: u64 = 60;
+/// タイムアウトなど、その要求の一時的な失敗を覚える秒数。
+pub const TRANSIENT_CACHE_TTL_SECS: u64 = 60;
 /// `Retry-After` を受け入れる上限（GitHub のレート制限の窓は 1 時間）。
 pub const MAX_PAUSE_SECS: u64 = 3600;
 pub const RATE_LIMIT_KEY_PREFIX: &str = "github:snippet:rl:";
@@ -95,13 +102,17 @@ pub enum SnippetOutcome {
     },
 }
 
-/// Redis に置く結果。取れた抜粋と、取り直しても変わらない「無い」「出せない」。
+/// Redis に置く結果。取れた抜粋と、取り直しても変わらない「無い」「出せない」、
+/// その要求の一時的な失敗（短く覚える）。
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum Cached {
     Found(GithubSnippetResponse),
     NotFound,
     NotDisplayable,
+    /// タイムアウト・本文の読み取りの失敗。インストール全体の失敗とは限らないので、
+    /// インストールは止めずにこの抜粋だけ短く止める
+    Unavailable,
 }
 
 impl Cached {
@@ -109,6 +120,7 @@ impl Cached {
         match self {
             Cached::Found(_) => CACHE_TTL_SECS,
             Cached::NotFound | Cached::NotDisplayable => NEGATIVE_CACHE_TTL_SECS,
+            Cached::Unavailable => TRANSIENT_CACHE_TTL_SECS,
         }
     }
 }
@@ -119,6 +131,9 @@ impl From<Cached> for SnippetOutcome {
             Cached::Found(found) => SnippetOutcome::Found(found),
             Cached::NotFound => SnippetOutcome::NotFound,
             Cached::NotDisplayable => SnippetOutcome::NotDisplayable,
+            Cached::Unavailable => SnippetOutcome::Unavailable {
+                retry_after_secs: TRANSIENT_CACHE_TTL_SECS,
+            },
         }
     }
 }
@@ -323,21 +338,89 @@ enum Fetched {
     Text(String),
     NotFound,
     NotDisplayable,
-    /// GitHub 側の失敗。`Retry-After` があればその秒数
-    Upstream {
-        retry_after_secs: Option<u64>,
+    /// その要求の一時的な失敗（タイムアウト・本文の読み取りの失敗）
+    Transient,
+    /// インストール全体に及ぶ失敗。止める秒数が応答から読めればその値
+    Pause {
+        secs: Option<u64>,
     },
 }
 
 /// `Retry-After` の秒数（日付の形は読まない）。
 fn retry_after_secs(headers: &reqwest::header::HeaderMap) -> Option<u64> {
-    headers
-        .get(reqwest::header::RETRY_AFTER)?
-        .to_str()
-        .ok()?
-        .trim()
-        .parse()
-        .ok()
+    header_number(headers, reqwest::header::RETRY_AFTER.as_str())
+}
+
+fn header_number(headers: &reqwest::header::HeaderMap, name: &str) -> Option<u64> {
+    headers.get(name)?.to_str().ok()?.trim().parse().ok()
+}
+
+/// 一次レート制限を使い切った応答なら、窓が明けるまでの秒数（最低 1 秒）。
+/// GitHub は一次制限に `Retry-After` を付けず、`x-ratelimit-remaining: 0` と
+/// `x-ratelimit-reset`（Unix 秒）で知らせる。
+fn rate_limit_reset_secs(headers: &reqwest::header::HeaderMap, now_unix: u64) -> Option<u64> {
+    if header_number(headers, "x-ratelimit-remaining")? != 0 {
+        return None;
+    }
+    let reset = header_number(headers, "x-ratelimit-reset")?;
+    Some(Ord::max(reset.saturating_sub(now_unix), 1))
+}
+
+/// Contents API の 404 以外の非 2xx を、インストールを止める失敗かどうかに分ける。
+///
+/// 返すのは `Some(止める秒数。読めなければ None)` か、止めないなら `None`。
+/// - 429 と 5xx: 止める
+/// - 403: レート制限（`Retry-After` があるか、一次制限を使い切っている）のときだけ止める。
+///   それ以外の 403 はそのリポジトリやファイルに固有の拒否（GitHub 側でブロックされた
+///   リポジトリなど）で、待っても戻らず、ほかのリポジトリには関係しない
+/// - それ以外（400 / 401 / 422 / 451 など）: その要求に固有なので止めない
+fn pause_for_status(
+    status: StatusCode,
+    headers: &reqwest::header::HeaderMap,
+    now_unix: u64,
+) -> Option<Option<u64>> {
+    let hinted = retry_after_secs(headers).or_else(|| rate_limit_reset_secs(headers, now_unix));
+    if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+        return Some(hinted);
+    }
+    if status == StatusCode::FORBIDDEN && hinted.is_some() {
+        return Some(hinted);
+    }
+    None
+}
+
+/// 止める期限を延ばす（縮めない）。返すのは、延ばした後に残っている秒数。
+///
+/// 止めているかの確認から GitHub の応答までの間に、同じインストールの取得が並行して進む。
+/// 無条件に上書きすると、後から届いた短い失敗（既定の 60 秒）が、先に届いた長い
+/// `Retry-After` を消す。`SET NX` では逆順（短い → 長い）に届いたときに長いほうが入らない。
+static EXTEND_PAUSE_SCRIPT: LazyLock<redis::Script> = LazyLock::new(|| {
+    redis::Script::new(
+        r#"
+        local remaining = redis.call('TTL', KEYS[1])
+        local wanted = tonumber(ARGV[1])
+        if remaining < wanted then
+            redis.call('SET', KEYS[1], '1', 'EX', wanted)
+            return wanted
+        end
+        return remaining
+        "#,
+    )
+});
+
+async fn extend_pause(
+    conn: &mut impl redis::aio::ConnectionLike,
+    pause_key: &str,
+    secs: Option<u64>,
+) -> Result<u64, anyhow::Error> {
+    let wanted = secs.unwrap_or(DEFAULT_PAUSE_SECS).clamp(1, MAX_PAUSE_SECS);
+    let remaining: u64 = EXTEND_PAUSE_SCRIPT
+        .key(pause_key)
+        .arg(wanted)
+        .invoke_async(conn)
+        .await
+        .map_err(|e| anyhow::anyhow!("redis extend snippet pause: {e}"))?;
+    Ok(remaining)
 }
 
 /// Installation Access Token の取得の失敗が「インストールが GitHub 側から消えている」か。
@@ -347,6 +430,20 @@ fn retry_after_secs(headers: &reqwest::header::HeaderMap) -> Option<u64> {
 fn is_installation_gone(error: &anyhow::Error) -> bool {
     let message = error.to_string();
     message.contains("failed: 404") || message.contains("failed: 410")
+}
+
+/// Installation Access Token の取得の失敗が GitHub とのやり取りで起きたものか。
+/// そうでない失敗（App の秘密鍵で JWT に署名できない、など）はこちら側の不具合なので、
+/// GitHub 側の失敗（503）に混ぜずに内部エラーとして返す。
+///
+/// ponytail: `is_installation_gone` と同じく、forge-github が失敗の種類を型で返さないので、
+/// HTTP の応答があったことを文言（`parse_ok` の `… failed: {status} …`）で、送信の失敗を
+/// 原因の `reqwest::Error` で見分けている。
+fn is_github_exchange_failure(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.downcast_ref::<reqwest::Error>().is_some())
+        || error.to_string().contains(" failed: ")
 }
 
 fn contents_url(
@@ -379,11 +476,15 @@ async fn fetch_file(
         .await;
     let mut res = match sent {
         Ok(res) => res,
+        // 応答が時間内に来ないのはそのファイルに固有のこともあるので、インストールは止めない
+        Err(error) if error.is_timeout() => {
+            tracing::warn!(%error, "github contents request timed out");
+            return Ok(Fetched::Transient);
+        }
+        // つながらないのは GitHub（または経路）の障害
         Err(error) => {
             tracing::warn!(%error, "github contents request failed");
-            return Ok(Fetched::Upstream {
-                retry_after_secs: None,
-            });
+            return Ok(Fetched::Pause { secs: None });
         }
     };
     let status = res.status();
@@ -391,10 +492,12 @@ async fn fetch_file(
         return Ok(Fetched::NotFound);
     }
     if !status.is_success() {
-        // 403 / 429 はレート制限、5xx は障害。どれもこちらの不具合ではなく、待てば戻る
         tracing::warn!(%status, "github contents responded with an error");
-        return Ok(Fetched::Upstream {
-            retry_after_secs: retry_after_secs(res.headers()),
+        let now_unix = u64::try_from(chrono::Utc::now().timestamp()).unwrap_or(0);
+        return Ok(match pause_for_status(status, res.headers(), now_unix) {
+            Some(secs) => Fetched::Pause { secs },
+            // その要求に固有の拒否。取り直しても変わらないので「無い」と同じに覚える
+            None => Fetched::NotFound,
         });
     }
     if res
@@ -410,9 +513,7 @@ async fn fetch_file(
             Ok(None) => break,
             Err(error) => {
                 tracing::warn!(%error, "github contents body could not be read");
-                return Ok(Fetched::Upstream {
-                    retry_after_secs: None,
-                });
+                return Ok(Fetched::Transient);
             }
         };
         if body.len() + chunk.len() > MAX_RESPONSE_BYTES {
@@ -494,18 +595,8 @@ pub async fn snippet_for(
 
     let resolved = match resolve(http, settings, integration, request).await? {
         Resolved::Settled(cached) => cached,
-        Resolved::Upstream { retry_after_secs } => {
-            let retry_after_secs = retry_after_secs
-                .unwrap_or(DEFAULT_PAUSE_SECS)
-                .clamp(1, MAX_PAUSE_SECS);
-            let _: () = redis::cmd("SET")
-                .arg(&pause_key)
-                .arg(1)
-                .arg("EX")
-                .arg(retry_after_secs)
-                .query_async(&mut conn)
-                .await
-                .map_err(|e| anyhow::anyhow!("redis SET snippet pause: {e}"))?;
+        Resolved::Pause { secs } => {
+            let retry_after_secs = extend_pause(&mut conn, &pause_key, secs).await?;
             return Ok(SnippetOutcome::Unavailable { retry_after_secs });
         }
     };
@@ -524,8 +615,8 @@ pub async fn snippet_for(
 enum Resolved {
     /// 取り直しても変わらない結果（Redis に置く）
     Settled(Cached),
-    /// GitHub 側の失敗（置かず、インストール単位で止める）
-    Upstream { retry_after_secs: Option<u64> },
+    /// インストール全体に及ぶ GitHub 側の失敗（置かず、インストール単位で止める）
+    Pause { secs: Option<u64> },
 }
 
 async fn resolve(
@@ -540,20 +631,18 @@ async fn resolve(
         Err(error) if is_installation_gone(&error) => {
             return Ok(Resolved::Settled(Cached::NotFound));
         }
-        Err(error) => {
+        Err(error) if is_github_exchange_failure(&error) => {
             tracing::warn!(%error, "github installation token could not be issued");
-            return Ok(Resolved::Upstream {
-                retry_after_secs: None,
-            });
+            return Ok(Resolved::Pause { secs: None });
         }
+        Err(error) => return Err(error),
     };
     let text = match fetch_file(http, &token, contents_url(integration, request)?).await? {
         Fetched::Text(text) => text,
         Fetched::NotFound => return Ok(Resolved::Settled(Cached::NotFound)),
         Fetched::NotDisplayable => return Ok(Resolved::Settled(Cached::NotDisplayable)),
-        Fetched::Upstream { retry_after_secs } => {
-            return Ok(Resolved::Upstream { retry_after_secs });
-        }
+        Fetched::Transient => return Ok(Resolved::Settled(Cached::Unavailable)),
+        Fetched::Pause { secs } => return Ok(Resolved::Pause { secs }),
     };
     let Some((lines, end_line, truncated)) = slice_lines(&text, request.start, request.end) else {
         return Ok(Resolved::Settled(Cached::NotFound));
@@ -777,6 +866,14 @@ mod tests {
         assert_eq!(found.ttl_secs(), CACHE_TTL_SECS);
         assert_eq!(Cached::NotFound.ttl_secs(), NEGATIVE_CACHE_TTL_SECS);
         assert_eq!(Cached::NotDisplayable.ttl_secs(), NEGATIVE_CACHE_TTL_SECS);
+        // その要求の一時的な失敗はもっと短く、503 として返す
+        assert_eq!(Cached::Unavailable.ttl_secs(), TRANSIENT_CACHE_TTL_SECS);
+        assert_eq!(
+            round_trip(&Cached::Unavailable),
+            SnippetOutcome::Unavailable {
+                retry_after_secs: TRANSIENT_CACHE_TTL_SECS
+            }
+        );
         const { assert!(NEGATIVE_CACHE_TTL_SECS < CACHE_TTL_SECS) };
     }
 
@@ -796,6 +893,80 @@ mod tests {
         );
         assert_eq!(retry_after_secs(&headers("-1")), None);
         assert_eq!(retry_after_secs(&reqwest::header::HeaderMap::new()), None);
+    }
+
+    fn headers(pairs: &[(&'static str, &str)]) -> reqwest::header::HeaderMap {
+        let mut map = reqwest::header::HeaderMap::new();
+        for (name, value) in pairs {
+            map.insert(*name, value.parse().expect("header"));
+        }
+        map
+    }
+
+    #[test]
+    fn only_installation_wide_failures_pause() {
+        const NOW: u64 = 1_800_000_000;
+        let none = headers(&[]);
+        let pause = |status: u16, map: &reqwest::header::HeaderMap| {
+            pause_for_status(StatusCode::from_u16(status).expect("status"), map, NOW)
+        };
+
+        // 止める: 429 と 5xx（秒数が読めなければ既定の秒数）
+        assert_eq!(pause(429, &none), Some(None));
+        assert_eq!(pause(500, &none), Some(None));
+        assert_eq!(
+            pause(503, &headers(&[("retry-after", "30")])),
+            Some(Some(30))
+        );
+        // 止める: レート制限の 403（二次制限は Retry-After、一次制限は残り 0 と reset）
+        assert_eq!(
+            pause(403, &headers(&[("retry-after", "120")])),
+            Some(Some(120))
+        );
+        let exhausted = headers(&[
+            ("x-ratelimit-remaining", "0"),
+            ("x-ratelimit-reset", "1800000900"),
+        ]);
+        assert_eq!(pause(403, &exhausted), Some(Some(900)));
+        assert_eq!(pause(429, &exhausted), Some(Some(900)));
+        // Retry-After があればそちらを使う
+        let both = headers(&[
+            ("retry-after", "45"),
+            ("x-ratelimit-remaining", "0"),
+            ("x-ratelimit-reset", "1800000900"),
+        ]);
+        assert_eq!(pause(403, &both), Some(Some(45)));
+        // reset が過去でも 0 秒にはしない
+        let stale = headers(&[
+            ("x-ratelimit-remaining", "0"),
+            ("x-ratelimit-reset", "1799999000"),
+        ]);
+        assert_eq!(pause(403, &stale), Some(Some(1)));
+
+        // 止めない: レート制限でない 403（枠が残っている）と、その要求に固有の 4xx
+        let has_quota = headers(&[
+            ("x-ratelimit-remaining", "4000"),
+            ("x-ratelimit-reset", "1800000900"),
+        ]);
+        assert_eq!(pause(403, &none), None);
+        assert_eq!(pause(403, &has_quota), None);
+        for status in [400, 401, 409, 422, 451] {
+            assert_eq!(pause(status, &none), None, "{status}");
+            assert_eq!(pause(status, &exhausted), None, "{status}");
+        }
+    }
+
+    #[test]
+    fn token_failures_inside_this_process_are_not_upstream_failures() {
+        // forge-github の parse_ok の文言（HTTP の応答があった）
+        let http = anyhow::anyhow!("github installation token failed: 500 Internal Server Error x");
+        assert!(is_github_exchange_failure(&http));
+        assert!(!is_installation_gone(&http));
+        let gone = anyhow::anyhow!("github installation token failed: 404 Not Found");
+        assert!(is_installation_gone(&gone));
+        // JWT の署名の失敗など、GitHub へ届く前の失敗は内部エラーのまま
+        let local = anyhow::anyhow!("InvalidKeyFormat").context("sign github app jwt");
+        assert!(!is_github_exchange_failure(&local));
     }
 
     #[test]

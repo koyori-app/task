@@ -467,8 +467,11 @@ describe('KfmPermalinkElement (client 層)', () => {
   });
 
   it('覚えた抜粋は 5 分で期限が切れ、次の表示は backend の認可を通り直す', async () => {
-    // 期限は取得を始めた時刻から数え、覚えた抜粋を使うかは接続の時点で決まる
-    const clock = vi.spyOn(performance, 'now');
+    // 期限は取得を始めた時刻から壁時計で数え、覚えた抜粋を使うかは接続の時点で決まる。
+    // 時刻は絶対値で据える (偽の時計の下では vi.waitFor が待つたびに時計を進める)
+    vi.useFakeTimers({ toFake: ['Date'] });
+    // 単調な時計は止めておく (スリープの間に進まない環境と同じ)。これに頼る実装は期限が切れない
+    const monotonic = vi.spyOn(performance, 'now').mockReturnValue(1_000);
     try {
       const sha = nextSha();
       let allowed = true;
@@ -478,27 +481,48 @@ describe('KfmPermalinkElement (client 層)', () => {
       );
       const href = permalinkUrl(sha, '#L1');
       const snippetCalls = () => calls.filter((url) => url.startsWith('/api/v1/github/snippet?'));
-      const startedAt = 1_000;
-      clock.mockReturnValue(startedAt);
+      const startedAt = new Date('2026-11-17T00:00:00Z').getTime();
+      vi.setSystemTime(startedAt);
       const first = mount(href);
       await vi.waitFor(() => expect(first.dataset.kfmPermalink).toBe('rendered'));
 
       // 権限を外された後も、期限の内側の新しい表示は覚えた抜粋を使う (取りに行かない)
       allowed = false;
-      clock.mockReturnValue(startedAt + SNIPPET_CACHE_TTL_MS - 1);
+      vi.setSystemTime(startedAt + SNIPPET_CACHE_TTL_MS - 1);
       const within = mount(href);
       await vi.waitFor(() => expect(within.dataset.kfmPermalink).toBe('rendered'));
       expect(snippetCalls()).toHaveLength(1);
 
       // 期限を過ぎた新しい表示は取り直し、404 ならリンクのままになる
-      clock.mockReturnValue(startedAt + SNIPPET_CACHE_TTL_MS);
+      vi.setSystemTime(startedAt + SNIPPET_CACHE_TTL_MS);
       const after = mount(href);
       await vi.waitFor(() => expect(after.dataset.kfmPermalink).toBe('unavailable'));
       expect(snippetCalls()).toHaveLength(2);
       expect(after.querySelector(':scope > a')?.getAttribute('href')).toBe(href);
       expect(after.querySelector('kfm-code')).toBeNull();
     } finally {
-      clock.mockRestore();
+      monotonic.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('壁時計が取得の開始より前へ巻き戻ったら、覚えた抜粋を使わず取り直す', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const sha = nextSha();
+      const calls = stubFetch(() => json(200, snippetBody(sha, 1, ['x'])), renderHighlight);
+      const href = permalinkUrl(sha, '#L1');
+      const startedAt = new Date('2026-11-17T00:00:00Z').getTime();
+      vi.setSystemTime(startedAt);
+      const first = mount(href);
+      await vi.waitFor(() => expect(first.dataset.kfmPermalink).toBe('rendered'));
+
+      vi.setSystemTime(startedAt - 60 * 60 * 1000);
+      const rewound = mount(href);
+      await vi.waitFor(() => expect(rewound.dataset.kfmPermalink).toBe('rendered'));
+      expect(calls.filter((url) => url.startsWith('/api/v1/github/snippet?'))).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
     }
   });
 

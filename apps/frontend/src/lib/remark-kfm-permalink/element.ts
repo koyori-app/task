@@ -52,7 +52,11 @@ const SNIPPET_CACHE_MAX = 200;
  */
 export const SNIPPET_CACHE_TTL_MS = 5 * 60 * 1000;
 
-type CacheEntry = { readonly pending: Promise<LoadedSnippet>; readonly expiresAt: number };
+type CacheEntry = {
+  readonly pending: Promise<LoadedSnippet>;
+  /** 取得を始めた時刻 (壁時計の ms) */
+  readonly startedAt: number;
+};
 
 /** 同じ抜粋の取得を 1 回にまとめる (同じリンクが本文とコメントに並ぶことがある) */
 const snippetCache = new Map<string, CacheEntry>();
@@ -125,13 +129,21 @@ async function highlight(
 
 function loadSnippet(target: GithubPermalink): Promise<LoadedSnippet> {
   const key = cacheKey(target);
-  // 経過時間なので単調な時計で測る (壁時計の巻き戻しで期限が延びない)
-  const now = performance.now();
+  // 壁時計で測る。performance.now() は端末のスリープの間に進まない環境があり
+  // (macOS / Linux の Chromium)、開いたままのタブで期限がスリープの分だけ延びる。
+  // 壁時計が巻き戻って取得の開始より前になったときは、期限切れとして取り直す
+  const now = new Date().getTime();
   const cached = snippetCache.get(key);
-  if (cached !== undefined && cached.expiresAt > now) return cached.pending;
+  if (
+    cached !== undefined &&
+    now >= cached.startedAt &&
+    now - cached.startedAt < SNIPPET_CACHE_TTL_MS
+  ) {
+    return cached.pending;
+  }
   if (snippetCache.size >= SNIPPET_CACHE_MAX) snippetCache.clear();
   const pending = fetchSnippet(target);
-  snippetCache.set(key, { pending, expiresAt: now + SNIPPET_CACHE_TTL_MS });
+  snippetCache.set(key, { pending, startedAt: now });
   // 失敗は覚えない (権限が付いた後・通信が戻った後に、次の表示で取り直せるようにする)
   pending.catch(() => {
     if (snippetCache.get(key)?.pending === pending) snippetCache.delete(key);

@@ -14,6 +14,11 @@
 // - 取れなかった結果（404・422）も覚え、2 回目は GitHub へ取りに行かない
 // - GitHub の 500 / 429 は 503 + `Retry-After`。その間は同じインストールの別の抜粋も取りに行かず、
 //   利用者の取得回数も数えない。止める時間が過ぎれば取れる
+// - その要求に固有の失敗（レート制限でない 403・422・451）は 404 として覚え、インストールは止めない
+// - 一次レート制限（403 + `x-ratelimit-remaining: 0`）は `x-ratelimit-reset` まで止める
+// - 並行した取得の失敗が届く順がどちらでも、止める期限は長いほうになる（短い失敗で縮まない）
+// - タイムアウトはその抜粋だけを短く 503 にし、インストールは止めない
+// - インストールが GitHub 側から消えている（トークンの取得が 404）と 404 で、2 回目はトークンを取りに行かない
 // - プロジェクトだけのゲストは 200、別プロジェクトのゲストは 404
 // - 同じリポジトリを連携した 2 つのプロジェクトのうち、2 件目にだけ入れる利用者は 200（1 件目の拒否で止まらない）
 // - 同じリポジトリを他のテナントが 21 件連携していても、自分のプロジェクトの連携で 200（上限 20 件に埋もれない）
@@ -35,6 +40,7 @@ use service::github::snippets::{
     DEFAULT_PAUSE_SECS, FETCH_RATE_LIMIT, MAX_SNIPPET_LINES, PAUSE_KEY_PREFIX,
     RATE_LIMIT_KEY_PREFIX,
 };
+use std::time::Duration;
 use uuid::Uuid;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -827,6 +833,301 @@ async fn device_token_is_accepted() {
         )
         .await;
     assert_eq!(res.status(), StatusCode::OK);
+
+    forget_github_mock();
+}
+
+async fn redis_ttl(app: &TestApp, key: String) -> i64 {
+    let mut conn = app.state.redis_client.conn.acquire().await.unwrap();
+    redis::cmd("TTL")
+        .arg(key)
+        .query_async(&mut conn)
+        .await
+        .unwrap()
+}
+
+async fn mount_failure(
+    mock_server: &MockServer,
+    repo: &str,
+    file: &str,
+    template: ResponseTemplate,
+) {
+    Mock::given(method("GET"))
+        .and(path(contents_path(repo, file)))
+        .respond_with(template)
+        .mount(mock_server)
+        .await;
+}
+
+fn retry_after(res: &reqwest::Response) -> i64 {
+    res.headers()[header::RETRY_AFTER]
+        .to_str()
+        .expect("ascii")
+        .parse()
+        .expect("seconds")
+}
+
+#[serial_test::serial]
+#[tokio::test]
+async fn request_specific_failures_do_not_pause_the_installation() {
+    let mock_server = github_mock().await;
+    let mut app = TestApp::new_with_github().await;
+    let fx = setup(&app).await;
+    // GitHub 側でブロックされたリポジトリやファイルの 403（レート制限の印が無い）。
+    // 枠が残っている 403 も同じ
+    mount_failure(
+        &mock_server,
+        &fx.repo,
+        "blocked.txt",
+        ResponseTemplate::new(403),
+    )
+    .await;
+    mount_failure(
+        &mock_server,
+        &fx.repo,
+        "quota.txt",
+        ResponseTemplate::new(403)
+            .insert_header("x-ratelimit-remaining", "4000")
+            .insert_header("x-ratelimit-reset", "4102444800"),
+    )
+    .await;
+    mount_failure(
+        &mock_server,
+        &fx.repo,
+        "invalid.txt",
+        ResponseTemplate::new(422),
+    )
+    .await;
+    mount_failure(
+        &mock_server,
+        &fx.repo,
+        "legal.txt",
+        ResponseTemplate::new(451),
+    )
+    .await;
+    mount_file(&mock_server, &fx.repo, "ok.txt", file_body(b"one\ntwo\n")).await;
+    login(&mut app, &fx.owner).await;
+    let pause_key = format!("{PAUSE_KEY_PREFIX}{}", fx.installation_id);
+    let url = |file: &str| snippet_url(REPO_OWNER, &fx.repo, SHA, file, "start=1");
+
+    for file in ["blocked.txt", "quota.txt", "invalid.txt", "legal.txt"] {
+        let before = contents_requests(&mock_server, &fx.repo).await.len();
+        for round in 0..2 {
+            let res = app.get(&url(file)).await;
+            assert_eq!(res.status(), StatusCode::NOT_FOUND, "{file} round {round}");
+        }
+        // 取り直しても変わらないので覚える（2 回読んで GitHub へは 1 回）
+        assert_eq!(
+            contents_requests(&mock_server, &fx.repo).await.len(),
+            before + 1,
+            "{file}"
+        );
+        // インストールは止めない
+        assert_eq!(redis_ttl(&app, pause_key.clone()).await, -2, "{file}");
+    }
+    // 同じインストールのほかの抜粋はそのまま取れる
+    assert_eq!(app.get(&url("ok.txt")).await.status(), StatusCode::OK);
+
+    forget_github_mock();
+}
+
+#[serial_test::serial]
+#[tokio::test]
+async fn primary_rate_limit_pauses_until_the_reset() {
+    let mock_server = github_mock().await;
+    let mut app = TestApp::new_with_github().await;
+    let fx = setup(&app).await;
+    // 一次レート制限は Retry-After を付けず、残り 0 と窓が明ける時刻（Unix 秒）で知らせる
+    let reset = chrono::Utc::now().timestamp() + 300;
+    mount_failure(
+        &mock_server,
+        &fx.repo,
+        "limited.txt",
+        ResponseTemplate::new(403)
+            .insert_header("x-ratelimit-remaining", "0")
+            .insert_header("x-ratelimit-reset", reset.to_string().as_str()),
+    )
+    .await;
+    mount_file(&mock_server, &fx.repo, "ok.txt", file_body(b"one\ntwo\n")).await;
+    login(&mut app, &fx.owner).await;
+    let pause_key = format!("{PAUSE_KEY_PREFIX}{}", fx.installation_id);
+    let url = |file: &str| snippet_url(REPO_OWNER, &fx.repo, SHA, file, "start=1");
+
+    let res = app.get(&url("limited.txt")).await;
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    // 既定の 60 秒ではなく、窓が明けるまで
+    let secs = retry_after(&res);
+    assert!((290..=300).contains(&secs), "retry-after {secs}");
+    let ttl = redis_ttl(&app, pause_key.clone()).await;
+    assert!((285..=300).contains(&ttl), "ttl {ttl}");
+
+    // その間は同じインストールの読めるファイルも取りに行かない
+    let before = contents_requests(&mock_server, &fx.repo).await.len();
+    let res = app.get(&url("ok.txt")).await;
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        contents_requests(&mock_server, &fx.repo).await.len(),
+        before
+    );
+
+    redis_del(&app, pause_key).await;
+    forget_github_mock();
+}
+
+#[serial_test::serial]
+#[tokio::test]
+async fn pause_is_extended_but_never_shortened() {
+    let mock_server = github_mock().await;
+    let mut app = TestApp::new_with_github().await;
+    let fx = setup(&app).await;
+    let delay = Duration::from_millis(700);
+    // 長い停止（120 秒）と短い停止（既定の 60 秒）を、届く順を入れ替えて 2 組
+    mount_failure(
+        &mock_server,
+        &fx.repo,
+        "long-first.txt",
+        ResponseTemplate::new(429).insert_header("retry-after", "120"),
+    )
+    .await;
+    mount_failure(
+        &mock_server,
+        &fx.repo,
+        "short-second.txt",
+        ResponseTemplate::new(500).set_delay(delay),
+    )
+    .await;
+    mount_failure(
+        &mock_server,
+        &fx.repo,
+        "short-first.txt",
+        ResponseTemplate::new(500),
+    )
+    .await;
+    mount_failure(
+        &mock_server,
+        &fx.repo,
+        "long-second.txt",
+        ResponseTemplate::new(429)
+            .insert_header("retry-after", "120")
+            .set_delay(delay),
+    )
+    .await;
+    login(&mut app, &fx.owner).await;
+    let pause_key = format!("{PAUSE_KEY_PREFIX}{}", fx.installation_id);
+    let url = |file: &str| snippet_url(REPO_OWNER, &fx.repo, SHA, file, "start=1");
+
+    for (first, second) in [
+        ("long-first.txt", "short-second.txt"),
+        ("short-first.txt", "long-second.txt"),
+    ] {
+        // 2 つとも「止めていない」のを見てから GitHub へ進む
+        let before = contents_requests(&mock_server, &fx.repo).await.len();
+        let (first_url, second_url) = (url(first), url(second));
+        let (early, late) = tokio::join!(app.get(&first_url), app.get(&second_url));
+        assert_eq!(early.status(), StatusCode::SERVICE_UNAVAILABLE, "{first}");
+        assert_eq!(late.status(), StatusCode::SERVICE_UNAVAILABLE, "{second}");
+        assert_eq!(
+            contents_requests(&mock_server, &fx.repo).await.len(),
+            before + 2,
+            "両方の取得が GitHub まで進んでいる（{first} / {second}）"
+        );
+        // 後から届いた失敗が短くても、期限は長いほう（120 秒）のまま
+        let ttl = redis_ttl(&app, pause_key.clone()).await;
+        assert!((110..=120).contains(&ttl), "{first} → {second}: ttl {ttl}");
+        // 後から届いた側の応答も、実際に残っている秒数を返す
+        let secs = retry_after(&late);
+        assert!((110..=120).contains(&secs), "{second}: retry-after {secs}");
+        redis_del(&app, pause_key.clone()).await;
+    }
+
+    forget_github_mock();
+}
+
+#[serial_test::serial]
+#[tokio::test]
+async fn timeout_is_remembered_for_the_snippet_without_pausing() {
+    let mock_server = github_mock().await;
+    let mut app = TestApp::new_with_github().await;
+    let fx = setup(&app).await;
+    // 取得のタイムアウト（10 秒）を越えて返す
+    mount_failure(
+        &mock_server,
+        &fx.repo,
+        "slow.txt",
+        ResponseTemplate::new(200)
+            .set_body_json(file_body(b"one\n"))
+            .set_delay(Duration::from_secs(12)),
+    )
+    .await;
+    mount_file(&mock_server, &fx.repo, "ok.txt", file_body(b"one\ntwo\n")).await;
+    login(&mut app, &fx.owner).await;
+    let pause_key = format!("{PAUSE_KEY_PREFIX}{}", fx.installation_id);
+    let url = |file: &str| snippet_url(REPO_OWNER, &fx.repo, SHA, file, "start=1");
+
+    let res = app.get(&url("slow.txt")).await;
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(retry_after(&res), 60);
+    // インストールは止めず、ほかの抜粋は取れる
+    assert_eq!(redis_ttl(&app, pause_key).await, -2);
+    assert_eq!(app.get(&url("ok.txt")).await.status(), StatusCode::OK);
+    // 同じ抜粋は短く覚えていて、すぐには取り直さない
+    let before = contents_requests(&mock_server, &fx.repo).await.len();
+    let res = app.get(&url("slow.txt")).await;
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        contents_requests(&mock_server, &fx.repo).await.len(),
+        before
+    );
+
+    forget_github_mock();
+}
+
+#[serial_test::serial]
+#[tokio::test]
+async fn removed_installation_is_not_found_and_remembered() {
+    let mock_server = github_mock().await;
+    let mut app = TestApp::new_with_github().await;
+    let fx = setup(&app).await;
+    // アンインストール済み: トークンの発行が 404（既定のモックより優先する）
+    let token_path = format!("/app/installations/{}/access_tokens", fx.installation_id);
+    Mock::given(method("POST"))
+        .and(path(token_path.clone()))
+        .respond_with(
+            ResponseTemplate::new(404).set_body_json(serde_json::json!({ "message": "Not Found" })),
+        )
+        .with_priority(1)
+        .mount(&mock_server)
+        .await;
+    mount_file(
+        &mock_server,
+        &fx.repo,
+        FILE_PATH,
+        file_body(file_text().as_bytes()),
+    )
+    .await;
+    login(&mut app, &fx.owner).await;
+    let url = snippet_url(REPO_OWNER, &fx.repo, SHA, FILE_PATH, "start=1");
+    let token_requests = || async {
+        mock_server
+            .received_requests()
+            .await
+            .expect("request recording")
+            .into_iter()
+            .filter(|req| req.url.path() == token_path)
+            .count()
+    };
+
+    // 503（GitHub の不調）でも 500 でもなく 404。インストールも止めない
+    assert_eq!(app.get(&url).await.status(), StatusCode::NOT_FOUND);
+    assert_eq!(token_requests().await, 1);
+    assert_eq!(
+        redis_ttl(&app, format!("{PAUSE_KEY_PREFIX}{}", fx.installation_id)).await,
+        -2
+    );
+    // 2 回目はトークンを取りに行かない
+    assert_eq!(app.get(&url).await.status(), StatusCode::NOT_FOUND);
+    assert_eq!(token_requests().await, 1);
+    assert!(contents_requests(&mock_server, &fx.repo).await.is_empty());
 
     forget_github_mock();
 }
