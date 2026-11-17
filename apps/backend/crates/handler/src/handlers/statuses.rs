@@ -314,6 +314,11 @@ pub async fn reorder_statuses(
     auth.require_scope(entity::scopes::Scope::WriteTask)?;
     auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
         .await?;
+    // 並べ替えは全件の並びを渡す。ステータスを 1 件も持たないプロジェクトでも空の入力は受けない
+    // （0 件同士で件数の検査を通り、WHEN の無い CASE が構文エラーになって 500 だった）。
+    if payload.ids.is_empty() {
+        return Err(AppError::BadRequest);
+    }
 
     let txn = state.db.begin().await?;
     // Same lock order as create_status / update_status: take the stable project
