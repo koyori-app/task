@@ -4,6 +4,7 @@ import { usePageContext } from 'vike-vue/usePageContext';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import HomeDashboard from '@/components/dashboard/HomeDashboard.vue';
 import { Button } from '@koyori-app/ui-vue';
+import { parseHomeDashboardUrlState } from '@/lib/home-dashboard-url-state';
 
 const pageContext = usePageContext();
 const slug = computed(() => String(pageContext.routeParams.tenant ?? ''));
@@ -14,6 +15,8 @@ const canCreateProject = computed(() => {
   const tenant = resolvedTenant.value;
   return !!tenant && (tenant.membership === 'Owner' || tenant.member_role === 'Admin');
 });
+// タスクの絞り込みとページは URL に持ち、タスクを開いて戻っても同じ画面に戻す
+const initialUrlState = computed(() => parseHomeDashboardUrlState(pageContext.urlParsed?.search));
 </script>
 
 <template>
@@ -30,6 +33,7 @@ const canCreateProject = computed(() => {
     :tenant-id="tenantId"
     :tenant-slug="slug"
     :can-create-project="canCreateProject"
+    :initial-url-state="initialUrlState"
   />
   <p v-else role="status" class="p-6 text-sm text-muted-foreground">読み込み中…</p>
 </template>

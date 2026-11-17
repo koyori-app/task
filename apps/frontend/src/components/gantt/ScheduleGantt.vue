@@ -119,6 +119,8 @@ const memberIds = ref<string[]>(initial.memberIds);
 const scale = ref<GanttScale>(initial.scale);
 const groupBy = ref<GanttGroupBy>(initial.groupBy);
 const urlProgressLine = ref<boolean | null>(initial.progressLine);
+// オーバーレイで開いているタスク（seq key）。カレンダーと同じく `?selected=` に持つ
+const selectedTaskId = ref<string | null>(initial.selected);
 const viewFrom = computed(() => from.value ?? defaultFrom(today, scale.value, compact.value));
 const to = computed(() => viewTo(viewFrom.value, scale.value, compact.value));
 
@@ -131,7 +133,7 @@ function setProgressLine(on: boolean) {
   preferences.set('ganttProgressLine', on);
 }
 
-watch([from, memberIds, scale, groupBy, urlProgressLine], () => {
+watch([from, memberIds, scale, groupBy, urlProgressLine, selectedTaskId], () => {
   if (typeof window === 'undefined') return;
   const url = applyGanttUrlState(
     new URL(window.location.href),
@@ -141,6 +143,7 @@ watch([from, memberIds, scale, groupBy, urlProgressLine], () => {
       scale: scale.value,
       groupBy: groupBy.value,
       progressLine: urlProgressLine.value,
+      selected: selectedTaskId.value,
     },
     today,
   );
@@ -316,7 +319,6 @@ watch(
 
 // ---- 棒を押した時: カレンダーと同じオーバーレイと戻り先の積み ----
 const canInline = wide;
-const selectedTaskId = ref<string | null>(null);
 const overlayParentStack = ref<string[]>([]);
 const overlayOpenSeqKey = computed(() => (canInline.value ? selectedTaskId.value : null));
 const overlayTaskSeqKey = ref<string | null>(null);

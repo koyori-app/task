@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { PhFiles, PhGear, PhGitPullRequest, PhListChecks, PhPlus } from '@phosphor-icons/vue';
 import { ChartGantt } from '@lucide/vue';
-import { type Component, computed } from 'vue';
+import { type Component, computed, ref, watch } from 'vue';
 import type { components } from '@/generated/api';
 
 import { Accordion, Button, SidebarLink, Skeleton } from '@koyori-app/ui-vue';
@@ -11,7 +11,7 @@ export type ProjectNavItem = components['schemas']['ProjectResponse'];
 const props = defineProps<{
   tenantSlug: string;
   projects: components['schemas']['ProjectResponse'][];
-  /** 現在の URL パス。active 強調と初期展開の判定に使う */
+  /** 現在の URL パス。active 強調と展開の判定に使う */
   currentPath?: string;
   loading?: boolean;
   error?: boolean;
@@ -41,6 +41,30 @@ function projectBaseUrl(project: ProjectNavItem) {
 function isProjectActive(project: ProjectNavItem) {
   return !!props.currentPath && props.currentPath.startsWith(`${projectBaseUrl(project)}/`);
 }
+
+/**
+ * 開いているプロジェクト。サイドバーはクライアント遷移で作り直されないので、`defaultOpen`
+ * （マウント時に 1 回だけ読まれる）ではなくこちらで持ち、現在の URL に追従させる
+ */
+const openIds = ref<Set<string>>(new Set());
+
+function setOpen(id: string, open: boolean) {
+  const next = new Set(openIds.value);
+  if (open) next.add(id);
+  else next.delete(id);
+  openIds.value = next;
+}
+
+// 別のプロジェクトへ移ったらそのプロジェクトを開く。見るのはプロジェクトの切り替わりだけで、
+// 同じプロジェクトの中を移っても手で畳んだものは開き直さない。他のプロジェクトは閉じない
+const activeProjectId = computed(() => sortedProjects.value.find(isProjectActive)?.id ?? null);
+watch(
+  activeProjectId,
+  (id) => {
+    if (id) setOpen(id, true);
+  },
+  { immediate: true },
+);
 
 interface ProjectChild {
   label: string;
@@ -134,7 +158,12 @@ function isChildActive(child: ProjectChild) {
         data-project-group
         class="rounded-xl border border-transparent in-data-[sidebar-rail=true]:has-[[aria-expanded=true]]:border-border in-data-[sidebar-rail=true]:has-[[aria-expanded=true]]:bg-sidebar-accent/50 in-data-[sidebar-rail=true]:has-[[aria-expanded=true]]:-mx-1 in-data-[sidebar-rail=true]:has-[[aria-expanded=true]]:p-1"
       >
-        <Accordion :id="project.id" :label="project.name" :default-open="isProjectActive(project)">
+        <Accordion
+          :id="project.id"
+          :label="project.name"
+          :open="openIds.has(project.id)"
+          :on-open-change="(open: boolean) => setOpen(project.id, open)"
+        >
           <template #icon>
             <img
               v-if="project.icon_url"

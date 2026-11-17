@@ -1,4 +1,8 @@
 import { SEVERITIES, STATES, type FindingSeverity, type FindingState } from '@/lib/review-findings';
+import { PR_STATE_FILTERS, type PrStateFilter } from '@/lib/review-pr-rail';
+
+/** PR 一覧の検索語を URL から読むときの上限。超えた分は黙って切る */
+export const PR_QUERY_MAX_LENGTH = 200;
 
 export type ReviewFindingsUrlState = {
   pr: number | null;
@@ -10,6 +14,13 @@ export type ReviewFindingsUrlState = {
   mine: boolean;
   /** PR 一覧のページ（1 始まり）。null は「表示中の PR が載っているページ」で、URL に載せない。 */
   page: number | null;
+  /** PR 一覧の検索語（`q`）。空は URL に載せない。 */
+  q: string;
+  /**
+   * PR 一覧の状態の絞り込み（`pr_state`）。null は「選んでいない」で、一覧が届いてから
+   * 既定の決め方（`initialPrStateFilter`）に任せる。選んだ状態は `open` でも載せる。
+   */
+  prState: PrStateFilter | null;
 };
 
 export type ParsedReviewFindingsUrlState = {
@@ -25,6 +36,8 @@ export const DEFAULT_REVIEW_FINDINGS_URL_STATE: ReviewFindingsUrlState = {
   finding: null,
   mine: false,
   page: null,
+  q: '',
+  prState: null,
 };
 
 type SearchSource = URLSearchParams | Record<string, string | undefined> | undefined;
@@ -91,6 +104,8 @@ export function parseReviewFindingsUrlState(search: SearchSource): ParsedReviewF
       finding: findingId(read(search, 'finding'), warnings),
       mine: mineFlag(read(search, 'mine'), warnings),
       page: positiveInteger(read(search, 'page'), 'ページ', warnings),
+      q: (read(search, 'q') ?? '').slice(0, PR_QUERY_MAX_LENGTH),
+      prState: knownValue(read(search, 'pr_state'), 'PR の状態', PR_STATE_FILTERS, warnings),
     },
     warnings,
   };
@@ -99,7 +114,17 @@ export function parseReviewFindingsUrlState(search: SearchSource): ParsedReviewF
 /** この画面が所有する query だけを書き換え、既定値は URL へ載せない。 */
 export function applyReviewFindingsUrlState(url: URL, state: ReviewFindingsUrlState): URL {
   const next = new URL(url.href);
-  for (const key of ['pr', 'round', 'severity', 'state', 'finding', 'mine', 'page']) {
+  for (const key of [
+    'pr',
+    'round',
+    'severity',
+    'state',
+    'finding',
+    'mine',
+    'page',
+    'q',
+    'pr_state',
+  ]) {
     next.searchParams.delete(key);
   }
   if (state.pr !== null) next.searchParams.set('pr', String(state.pr));
@@ -111,6 +136,10 @@ export function applyReviewFindingsUrlState(url: URL, state: ReviewFindingsUrlSt
   // 1 ページ目も明示されたなら残す。page が無い URL は「表示中の PR が載るページ」を指すため、
   // 省くと 2 ページ目の PR を選んだまま 1 ページ目に戻した状態を再表示で復元できない
   if (state.page !== null) next.searchParams.set('page', String(state.page));
+  if (state.q !== '') next.searchParams.set('q', state.q);
+  // 選んだ状態は `open` でも書く。Open が 1 件も無い一覧の既定は「すべて」なので、
+  // 省くと明示した Open が再表示で「すべて」になる
+  if (state.prState !== null) next.searchParams.set('pr_state', state.prState);
   return next;
 }
 

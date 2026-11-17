@@ -32,6 +32,8 @@ describe('review findings URL state', () => {
         finding: '4f20d810-3851-4cd0-95b1-bf17bdaf715c',
         mine: false,
         page: null,
+        q: '',
+        prState: null,
       },
       warnings: [],
     });
@@ -77,6 +79,8 @@ describe('review findings URL state', () => {
         finding: null,
         mine: false,
         page: null,
+        q: '',
+        prState: null,
       },
       'finding-2',
     );
@@ -97,6 +101,8 @@ describe('review findings URL state', () => {
       finding: null,
       mine: false,
       page: null,
+      q: '',
+      prState: null,
     } as const;
     const ssr = relativeReviewFindingHref(
       new URL('/acme/projects/APP/reviews?pr=738&tab=activity', 'http://ssr.local'),
@@ -149,5 +155,45 @@ describe('review findings URL state', () => {
     expect(parsed.warnings).toHaveLength(2);
     expect(parsed.warnings.join(' ')).toContain('自分の PR だけ');
     expect(parsed.warnings.join(' ')).toContain('ページ');
+  });
+
+  it('PR 一覧の検索語と状態を復元し、空・未選択は載せない（TASK-474）', () => {
+    expect(parseReviewFindingsUrlState({ q: 'fix', pr_state: 'merged' })).toEqual({
+      state: { ...DEFAULT_REVIEW_FINDINGS_URL_STATE, q: 'fix', prState: 'merged' },
+      warnings: [],
+    });
+
+    const base = new URL('https://app.example.com/acme/projects/APP/reviews?q=old&pr_state=all');
+    const unset = applyReviewFindingsUrlState(base, DEFAULT_REVIEW_FINDINGS_URL_STATE);
+    expect(unset.searchParams.has('q')).toBe(false);
+    expect(unset.searchParams.has('pr_state')).toBe(false);
+
+    const set = applyReviewFindingsUrlState(base, {
+      ...DEFAULT_REVIEW_FINDINGS_URL_STATE,
+      q: '検索 語',
+      prState: 'closed',
+    });
+    expect(set.searchParams.get('q')).toBe('検索 語');
+    expect(set.searchParams.get('pr_state')).toBe('closed');
+    expect(parseReviewFindingsUrlState(set.searchParams).state).toMatchObject({
+      q: '検索 語',
+      prState: 'closed',
+    });
+  });
+
+  it('選んだ PR の状態は既定と同じ open でも載せる', () => {
+    const url = applyReviewFindingsUrlState(
+      new URL('https://app.example.com/acme/projects/APP/reviews'),
+      { ...DEFAULT_REVIEW_FINDINGS_URL_STATE, prState: 'open' },
+    );
+    expect(url.searchParams.get('pr_state')).toBe('open');
+  });
+
+  it('知らない pr_state は理由を残して無視し、q は 200 文字で黙って切る', () => {
+    const parsed = parseReviewFindingsUrlState({ pr_state: 'draft', q: 'a'.repeat(250) });
+    expect(parsed.state.prState).toBeNull();
+    expect(parsed.state.q).toBe('a'.repeat(200));
+    expect(parsed.warnings).toHaveLength(1);
+    expect(parsed.warnings[0]).toContain('PR の状態');
   });
 });
