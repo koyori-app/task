@@ -567,6 +567,12 @@ describe('ReviewFindingsView', () => {
       expect((wrapper.get('#draft-title').element as HTMLInputElement).value).toBe('認可漏れ');
     });
 
+    // 時間切れの上限は 30 秒にする（vitest の既定は 5 秒）。
+    // 何のために: 単独で撃つと約 0.9 秒で通るが、frontend の全単体試験を並べて撃つと（pre-push の hook と同じ形）、
+    // load average が 18 まで上がった中で 5.1 秒（5118ms）かかり、既定の上限で落ちた。
+    // 試験の誤りではなく負荷で延びるので、上限だけを上げる。
+    // なぜ 30 秒か: kfm-task-offset の重い試験と同じく、並び撃ちで見た値に十分な余裕を持たせる。
+    // 何が起きたら解くか: 並び撃ちでも 5 秒を十分下回るようになったら、既定に戻す。
     it('履歴を戻ると確認し、やめると今の URL に戻って下書きが残る', async () => {
       window.history.replaceState({}, '', '/acme/projects/APP/reviews?pr=618');
       const wrapper = await openComposer();
@@ -587,7 +593,7 @@ describe('ReviewFindingsView', () => {
       expect(new URL(window.location.href).searchParams.get('pr')).toBe('618');
       expect(prButton(wrapper, 618).attributes('aria-current')).toBe('true');
       expect((wrapper.get('#draft-title').element as HTMLInputElement).value).toBe('認可漏れ');
-    });
+    }, 30_000);
 
     it('戻るで下書きを破棄したあと起票欄を開き直しても、空なら確認なしで切り替わる', async () => {
       window.history.replaceState({}, '', '/acme/projects/APP/reviews?pr=618');
