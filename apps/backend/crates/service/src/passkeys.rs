@@ -14,6 +14,34 @@ use entity::passkeys::{self, Entity as PasskeyEntity};
 
 pub const MAX_PASSKEYS_PER_USER: u64 = 20;
 
+/// credential ID の長さの上限（WebAuthn Level 3 §7.1 の 25）。
+pub const MAX_CREDENTIAL_ID_BYTES: usize = 1023;
+
+/// credential ID の長さが仕様の上限に収まっているか。
+pub fn credential_id_len_ok(credential_id: &[u8]) -> bool {
+    credential_id.len() <= MAX_CREDENTIAL_ID_BYTES
+}
+
+/// `clientDataJSON` が別の origin の frame から来た印（`crossOrigin: true` か `topOrigin`）を
+/// 持たず、読めるか。
+///
+/// webauthn-rs 0.5.5 は `crossOrigin` を登録でしか検めず、認証では見ない（仕様の §7.2 の 13・14 は
+/// 認証でも検めるよう求める）。task は自前の frame の中で WebAuthn を呼ばないので、
+/// この印が付いた応答はすべて断る。読めない JSON も断る。
+pub fn client_data_is_same_origin(client_data_json: &[u8]) -> bool {
+    let Ok(serde_json::Value::Object(client_data)) = serde_json::from_slice(client_data_json)
+    else {
+        return false;
+    };
+    if client_data.contains_key("topOrigin") {
+        return false;
+    }
+    matches!(
+        client_data.get("crossOrigin"),
+        None | Some(serde_json::Value::Bool(false))
+    )
+}
+
 /// `Passkey` の attestation メタデータから AAGUID（16 バイト）を抽出する。
 /// 取得不可・ゼロ AAGUID の場合は `None`。
 pub fn extract_aaguid(passkey: &Passkey) -> Option<Vec<u8>> {
@@ -224,6 +252,47 @@ async fn oauth_connection_count<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn credential_id_up_to_1023_bytes_is_accepted() {
+        assert!(credential_id_len_ok(&[0u8; 16]));
+        assert!(credential_id_len_ok(&vec![0u8; MAX_CREDENTIAL_ID_BYTES]));
+    }
+
+    #[test]
+    fn credential_id_over_1023_bytes_is_rejected() {
+        assert!(!credential_id_len_ok(&vec![
+            0u8;
+            MAX_CREDENTIAL_ID_BYTES + 1
+        ]));
+    }
+
+    #[test]
+    fn client_data_without_cross_origin_marks_is_accepted() {
+        let plain =
+            br#"{"type":"webauthn.get","challenge":"x","origin":"https://task.example.com"}"#;
+        assert!(client_data_is_same_origin(plain));
+        let explicit_false = br#"{"type":"webauthn.get","challenge":"x","origin":"https://task.example.com","crossOrigin":false}"#;
+        assert!(client_data_is_same_origin(explicit_false));
+    }
+
+    #[test]
+    fn client_data_with_cross_origin_true_is_rejected() {
+        let framed = br#"{"type":"webauthn.get","challenge":"x","origin":"https://task.example.com","crossOrigin":true}"#;
+        assert!(!client_data_is_same_origin(framed));
+    }
+
+    #[test]
+    fn client_data_with_top_origin_is_rejected() {
+        let top = br#"{"type":"webauthn.get","challenge":"x","origin":"https://task.example.com","crossOrigin":false,"topOrigin":"https://evil.example"}"#;
+        assert!(!client_data_is_same_origin(top));
+    }
+
+    #[test]
+    fn client_data_that_is_not_json_is_rejected() {
+        assert!(!client_data_is_same_origin(b"not json"));
+        assert!(!client_data_is_same_origin(b"[]"));
+    }
 
     #[test]
     fn sign_counter_rejects_replay_when_counter_increments_normally() {
