@@ -213,15 +213,16 @@ http / https の絶対 URL を持つリンクの先頭に、リンク先サイ�
 
 - 対象は `https://github.com/{owner}/{repo}/blob/{sha}/{path}#L{start}-L{end}` の形の URL である。`sha` は 40 桁のコミット SHA に限り、ブランチ名と短縮 SHA は対象にしない。`?plain=1` と列の指定（`L3C1`）は受け、列は使わない。行の指定が無い URL は対象にしない
 - 素の URL と `<URL>` の autolink が段落の唯一の中身であるときだけ替える。`[文字](URL)` と文中の URL はリンクのまま残す。文の途中にコードのブロックを差し込まないためである
+- タスクリストの項目の先頭の段落（`- [ ] URL`）は替えない。チェックボックスは先頭の `<p>` の中に入るので、替えるとチェックボックスだけの行とコードのブロックに分かれる
 - GFM が素の URL を link にした後の段落を見るので、remark 層の remark-gfm の後ろに置く。段落の `<p>` を `<kfm-permalink>` に替えるだけで、中のリンクは触らない
 - サーバーはコードを HTML に入れない。描画結果は L1 キャッシュに本文をキーとして載り、全利用者で共有されるので、見る人の権限で変わる中身を入れられない
 - URL の解釈は `_parse.ts` の `parseGithubPermalink` が持ち、remark 層と custom element の両方が同じ関数で読む。backend の `service::github::snippets::parse_request` も同じ規則で検査する
 - custom element は `GET /v1/github/snippet` で行を取る（[GitHub App 基盤](/dev/features/tasks/github-app)）。取れた行をコードフェンスに包んで `POST /internal/render-description` に送り、返った HTML の `<kfm-code>` を差し込む。着色を client に持たないためである。フェンスは行の中の最長のバッククォートの連続より 1 本長くする
-- 着色に失敗したときは、行を `textContent` で入れた無着色の `<kfm-code>` を DOM で組む
+- 着色に失敗したとき、または着色後の行数が抜粋の行数と合わないとき（行の途中に `\r` があると Markdown が改行と読み、行番号がずれる）は、行を `textContent` で入れた無着色の `<kfm-code>` を DOM で組む
 - 行番号は抜粋の最初の行から振る。`rehype-kfm-code/style.css` の counter を CSSOM で上書きし、`style` 属性は HTML に出さない
 - 取れないとき（未連携、権限なし、ファイルなし、通信の失敗）は中のリンクをそのまま残し、理由は表示しない。JS が無効のときも同じ表示になる
 - 完了シグナルは `data-kfm-permalink` の二値（`rendered` / `unavailable`）で、属性なしは未処理である
-- 同じ抜粋の取得は client の中で 1 回にまとめ、失敗した取得は覚えない
+- 取れた抜粋は client のメモリに、取得の開始から 5 分だけ覚える。同じ抜粋の取得はその間 1 回にまとまり、期限を過ぎた表示は backend の認可を通り直す。失敗した取得は覚えない。ブラウザーの HTTP キャッシュは使わない（fetch は `cache: 'no-store'`、backend の応答も `no-store`）。理由は [GitHub App 基盤](/dev/features/tasks/github-app)のコードの抜粋に書く
 
 ## Mermaid の図（remark-kfm-mermaid）
 

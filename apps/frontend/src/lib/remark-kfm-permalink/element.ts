@@ -12,6 +12,13 @@
  *   行を textContent で入れた無着色の `<kfm-code>` を DOM で組む (HTML として解釈させない)。
  * - 取れないとき (未連携・権限なし・ファイルなし・通信の失敗) は中のリンクをそのまま残す。
  *   理由は出さない (連携の有無を画面から推し量らせない。backend も 404 にまとめている)。
+ * - 抜粋を覚える場所と長さ (見せてよいかは backend の認可が決めるので、認可を通らずに返る経路を短く保つ):
+ *   - ブラウザーの HTTP キャッシュ: 使わない。backend が `no-store` を返し、fetch も `cache: 'no-store'`。
+ *     URL が同じでも利用者で結果が変わるので、残すと同じブラウザーの次の利用者に渡る
+ *   - この module の Map: 取れた抜粋を取得の開始から 5 分だけ。期限を過ぎた表示は backend の認可を
+ *     通り直す (権限を外された後、開いたままのタブが古い抜粋を出し続けない)。失敗は覚えない。
+ *     ページの読み直し (ログアウトを含む) で消える
+ *   - backend の Redis: 認可の後ろにあるので、取り直しは安い
  * - constructor は factory で遅延 (_client-registry 契約)。静的 import は _tag と _parse だけ。
  *
  * VRT / E2E 向けの完了シグナル (時間待ち不要の口):
@@ -39,8 +46,16 @@ type LoadedSnippet = {
 /** 覚えておく抜粋の件数。超えたら全部捨てる (長く開いた画面で膨らませない) */
 const SNIPPET_CACHE_MAX = 200;
 
+/**
+ * 取れた抜粋を覚えておく時間。これが「権限を外された後も新しい表示に抜粋が出る時間」の上限になる
+ * (HTTP キャッシュは使わないので、ほかの期限と足し合わされない)。
+ */
+export const SNIPPET_CACHE_TTL_MS = 5 * 60 * 1000;
+
+type CacheEntry = { readonly pending: Promise<LoadedSnippet>; readonly expiresAt: number };
+
 /** 同じ抜粋の取得を 1 回にまとめる (同じリンクが本文とコメントに並ぶことがある) */
-const snippetCache = new Map<string, Promise<LoadedSnippet>>();
+const snippetCache = new Map<string, CacheEntry>();
 
 function cacheKey(target: GithubPermalink): string {
   const repo = `${target.owner}/${target.repo}`.toLowerCase();
@@ -56,7 +71,10 @@ async function fetchSnippet(target: GithubPermalink): Promise<LoadedSnippet> {
     start: String(target.start),
     end: String(target.end),
   });
-  const response = await fetch(`/api/v1/github/snippet?${query.toString()}`);
+  // HTTP キャッシュを使わせない (応答は利用者で変わる。backend の no-store と二重にする)
+  const response = await fetch(`/api/v1/github/snippet?${query.toString()}`, {
+    cache: 'no-store',
+  });
   if (response.status !== 200) throw new Error(`snippet responded ${response.status}`);
   const body: unknown = await response.json();
   if (typeof body !== 'object' || body === null) throw new Error('snippet body is not an object');
@@ -107,14 +125,16 @@ async function highlight(
 
 function loadSnippet(target: GithubPermalink): Promise<LoadedSnippet> {
   const key = cacheKey(target);
+  // 経過時間なので単調な時計で測る (壁時計の巻き戻しで期限が延びない)
+  const now = performance.now();
   const cached = snippetCache.get(key);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined && cached.expiresAt > now) return cached.pending;
   if (snippetCache.size >= SNIPPET_CACHE_MAX) snippetCache.clear();
   const pending = fetchSnippet(target);
-  snippetCache.set(key, pending);
+  snippetCache.set(key, { pending, expiresAt: now + SNIPPET_CACHE_TTL_MS });
   // 失敗は覚えない (権限が付いた後・通信が戻った後に、次の表示で取り直せるようにする)
   pending.catch(() => {
-    if (snippetCache.get(key) === pending) snippetCache.delete(key);
+    if (snippetCache.get(key)?.pending === pending) snippetCache.delete(key);
   });
   return pending;
 }
@@ -135,12 +155,18 @@ function buildPlainCode(lines: readonly string[]): HTMLElement {
   return wrapper;
 }
 
-/** 着色済み HTML から `<kfm-code>` を取り出す。形が違えば null */
-function extractHighlightedCode(html: string): HTMLElement | null {
+/**
+ * 着色済み HTML から `<kfm-code>` を取り出す。形が違えば null。
+ * 行数が抜粋と合わないときも null にする: Markdown は行の途中の `\r` も改行と読むので、
+ * そういう行を含む抜粋は着色後の行が増え、行番号がファイルとずれる。
+ */
+function extractHighlightedCode(html: string, lineCount: number): HTMLElement | null {
   const template = document.createElement('template');
   template.innerHTML = html;
   const wrapper = template.content.querySelector<HTMLElement>('kfm-code');
-  return wrapper?.querySelector('pre > code') ? wrapper : null;
+  const code = wrapper?.querySelector('pre > code');
+  if (!wrapper || !code) return null;
+  return code.querySelectorAll(':scope > .pl-line').length === lineCount ? wrapper : null;
 }
 
 function rangeLabel(target: GithubPermalink, snippet: LoadedSnippet): string {
@@ -201,7 +227,9 @@ export function createKfmPermalinkElement(): CustomElementConstructor {
       header.append(path, range);
 
       const body =
-        (snippet.html === null ? null : extractHighlightedCode(snippet.html)) ??
+        (snippet.html === null
+          ? null
+          : extractHighlightedCode(snippet.html, snippet.lines.length)) ??
         buildPlainCode(snippet.lines);
       // 行番号を抜粋の最初の行から振る。rehype-kfm-code/style.css の counter を CSSOM で
       // 上書きする (style 属性を HTML として出さない)

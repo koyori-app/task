@@ -34,7 +34,10 @@ declare module 'mdast' {
 
 export function remarkKfmPermalink() {
   return (tree: Root): void => {
-    visit(tree, 'paragraph', (node) => {
+    visit(tree, 'paragraph', (node, index, parent) => {
+      // タスクリストの項目 (`- [ ] URL`) の先頭の段落は対象にしない。チェックボックスは先頭の <p> の
+      // 中に入る約束で、<p> を替えるとチェックボックスだけの行とコードのブロックに分かれる
+      if (parent?.type === 'listItem' && typeof parent.checked === 'boolean' && index === 0) return;
       const [link] = node.children;
       if (node.children.length !== 1 || link?.type !== 'link') return;
       const [text] = link.children;

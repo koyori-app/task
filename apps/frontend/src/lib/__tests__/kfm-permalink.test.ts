@@ -8,7 +8,7 @@ import {
   languageFlagForPath,
   parseGithubPermalink,
 } from '../remark-kfm-permalink';
-import { createKfmPermalinkElement } from '../remark-kfm-permalink/element';
+import { createKfmPermalinkElement, SNIPPET_CACHE_TTL_MS } from '../remark-kfm-permalink/element';
 
 const SHA = 'a3f92c1e7b81d4000000000000000000000000aa';
 const BASE = `https://github.com/acme/backend/blob/${SHA}`;
@@ -34,6 +34,13 @@ describe('parseGithubPermalink', () => {
       sha: SHA,
       ...expected,
     });
+  });
+
+  it('path の上限は UTF-8 で 1,024 バイトちょうどまで', () => {
+    // 3 バイト × 341 + 1 = 1,024
+    const path = `${'あ'.repeat(341)}a`;
+    expect(parseGithubPermalink(`${BASE}/${encodeURIComponent(path)}#L3`)?.path).toBe(path);
+    expect(parseGithubPermalink(`${BASE}/${encodeURIComponent(`${path}a`)}#L3`)).toBeNull();
   });
 
   it('SHA は小文字にそろえる', () => {
@@ -76,6 +83,8 @@ describe('parseGithubPermalink', () => {
     ['owner の字種', `https://github.com/-acme/backend/blob/${SHA}/a.rs#L3`],
     ['repo が ..', `https://github.com/acme/../blob/${SHA}/a.rs#L3`],
     ['長すぎる path', `${BASE}/${'a/'.repeat(600)}a.rs#L3`],
+    // 400 文字だが UTF-8 で 1,200 バイト (backend と同じくバイトで数える)
+    ['バイト数で長すぎる path', `${BASE}/${encodeURIComponent('あ'.repeat(400))}#L3`],
     ['URL でない', 'not a url'],
   ])('%s は null', (_label, href) => {
     expect(parseGithubPermalink(href)).toBeNull();
@@ -130,6 +139,14 @@ describe('remark-kfm-permalink (SSR / remark 層)', () => {
     expect(permalinksOf(await renderDescription(source))).toHaveLength(1);
   });
 
+  it('タスクリストの項目でも、2 つ目以降の段落は抜粋にする (チェックボックスは先頭の段落に残る)', async () => {
+    const html = await renderDescription(`- [ ] 確認する\n\n  ${url}\n`);
+    expect(permalinksOf(html)).toHaveLength(1);
+    const template = document.createElement('template');
+    template.innerHTML = html;
+    expect(template.content.querySelector('li > p > input[type="checkbox"]')).not.toBeNull();
+  });
+
   it('comment profile でも同じ', async () => {
     const html = await renderDescription(`一行目\n二行目\n\n${url}`, { profile: 'comment' });
     expect(permalinksOf(html)).toHaveLength(1);
@@ -146,6 +163,8 @@ describe('remark-kfm-permalink (SSR / remark 層)', () => {
     ['コードフェンスの中', `\`\`\`\n${url}\n\`\`\``],
     ['インラインコードの中', `\`${url}\``],
     ['見出し', `# ${url}`],
+    ['タスクリストの項目', `- [ ] ${url}`],
+    ['チェック済みのタスクリストの項目', `- [x] ${url}`],
   ])('%s は抜粋にしない (リンク・文字のまま)', async (_label, source) => {
     const html = await renderDescription(source);
     expect(html).not.toContain(KFM_PERMALINK_TAG);
@@ -302,6 +321,8 @@ describe('KfmPermalinkElement (client 層)', () => {
     const element = mount(href);
     await vi.waitFor(() => expect(element.dataset.kfmPermalink).toBe('rendered'));
 
+    // HTTP キャッシュを使わせない (応答は利用者で変わる)
+    expect(vi.mocked(fetch).mock.calls[0]?.[1]).toMatchObject({ cache: 'no-store' });
     // backend へは分解した値を送る
     const query = new URL(calls[0] ?? '', 'http://localhost').searchParams;
     expect(Object.fromEntries(query)).toEqual({
@@ -415,6 +436,71 @@ describe('KfmPermalinkElement (client 層)', () => {
       );
     },
   );
+
+  it('SSR の実出力 (リンクの先頭に favicon の img) から接続しても、ヘッダに img を残さない', async () => {
+    const sha = nextSha();
+    const href = permalinkUrl(sha, '#L1');
+    stubFetch(() => json(200, snippetBody(sha, 1, ['x'])), renderHighlight);
+    const host = document.createElement('div');
+    host.innerHTML = await renderDescription(href);
+    // 前提: SSR の出力はリンクの中に favicon を持つ
+    expect(host.querySelector(`${KFM_PERMALINK_TAG} > a > img`)).not.toBeNull();
+    document.body.append(host);
+    const element = host.querySelector<HTMLElement>(KFM_PERMALINK_TAG);
+    await vi.waitFor(() => expect(element?.dataset.kfmPermalink).toBe('rendered'));
+    expect(element?.querySelector('img')).toBeNull();
+    expect(element?.querySelector('.kfm-permalink-path')?.textContent).toBe(
+      'acme/backend/src/a.rs',
+    );
+    expect(element?.querySelector('.kfm-permalink-path')?.getAttribute('href')).toBe(href);
+  });
+
+  it('行の途中に \\r がある抜粋は、着色後の行数が合わないので無着色で出す (行番号をずらさない)', async () => {
+    const sha = nextSha();
+    const lines = ['const a = 1;\rconst b = 2;', 'const c = 3;'];
+    stubFetch(() => json(200, snippetBody(sha, 5, lines)), renderHighlight);
+    const element = mount(permalinkUrl(sha, '#L5-L6'));
+    await vi.waitFor(() => expect(element.dataset.kfmPermalink).toBe('rendered'));
+    // 行は 2 つのまま (着色した HTML は 3 行になるので使わない)
+    expect(linesOf(element)).toEqual(lines.map((line) => `${line}\n`));
+    expect(element.querySelector('.pl-k')).toBeNull();
+  });
+
+  it('覚えた抜粋は 5 分で期限が切れ、次の表示は backend の認可を通り直す', async () => {
+    // 期限は取得を始めた時刻から数え、覚えた抜粋を使うかは接続の時点で決まる
+    const clock = vi.spyOn(performance, 'now');
+    try {
+      const sha = nextSha();
+      let allowed = true;
+      const calls = stubFetch(
+        () => (allowed ? json(200, snippetBody(sha, 1, ['x'])) : json(404, {})),
+        renderHighlight,
+      );
+      const href = permalinkUrl(sha, '#L1');
+      const snippetCalls = () => calls.filter((url) => url.startsWith('/api/v1/github/snippet?'));
+      const startedAt = 1_000;
+      clock.mockReturnValue(startedAt);
+      const first = mount(href);
+      await vi.waitFor(() => expect(first.dataset.kfmPermalink).toBe('rendered'));
+
+      // 権限を外された後も、期限の内側の新しい表示は覚えた抜粋を使う (取りに行かない)
+      allowed = false;
+      clock.mockReturnValue(startedAt + SNIPPET_CACHE_TTL_MS - 1);
+      const within = mount(href);
+      await vi.waitFor(() => expect(within.dataset.kfmPermalink).toBe('rendered'));
+      expect(snippetCalls()).toHaveLength(1);
+
+      // 期限を過ぎた新しい表示は取り直し、404 ならリンクのままになる
+      clock.mockReturnValue(startedAt + SNIPPET_CACHE_TTL_MS);
+      const after = mount(href);
+      await vi.waitFor(() => expect(after.dataset.kfmPermalink).toBe('unavailable'));
+      expect(snippetCalls()).toHaveLength(2);
+      expect(after.querySelector(':scope > a')?.getAttribute('href')).toBe(href);
+      expect(after.querySelector('kfm-code')).toBeNull();
+    } finally {
+      clock.mockRestore();
+    }
+  });
 
   it('同じパーマリンクが 2 つあっても、抜粋の取得は 1 回', async () => {
     const sha = nextSha();

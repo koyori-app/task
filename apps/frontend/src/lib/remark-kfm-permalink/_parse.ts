@@ -32,7 +32,8 @@ const PERMALINK_RE =
   /^https:\/\/github\.com\/([^?#\s\\]+)(?:\?plain=1)?#L(\d{1,7})(?:C\d+)?(?:-L(\d{1,7})(?:C\d+)?)?$/;
 // eslint-disable-next-line no-control-regex -- 制御文字を含むパスを弾くための字種
 const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f]/;
-const MAX_PATH_LENGTH = 1024;
+/** path の長さの上限。backend (`MAX_PATH_BYTES`) と同じく UTF-8 のバイト数で数える */
+const MAX_PATH_BYTES = 1024;
 
 /**
  * `https://github.com/{owner}/{repo}/blob/{sha}/{path}[?plain=1]#L{start}[-L{end}]` だけを読む。
@@ -66,7 +67,7 @@ export function parseGithubPermalink(href: string): GithubPermalink | null {
     segments.push(segment);
   }
   const path = segments.join('/');
-  if (path.length > MAX_PATH_LENGTH) return null;
+  if (new TextEncoder().encode(path).length > MAX_PATH_BYTES) return null;
 
   return { owner, repo, sha: sha.toLowerCase(), path, start, end };
 }

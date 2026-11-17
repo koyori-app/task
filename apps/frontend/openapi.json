@@ -5205,6 +5205,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "GitHub から取得できない（レート制限・障害）。`Retry-After` の秒数の間は取りに行かない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
           }
         }
       }

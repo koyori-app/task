@@ -5,6 +5,13 @@
 //! 中身が変わらないので Redis に置く。Installation Access Token の取得は 1 回につき
 //! GitHub へ 2 リクエスト出るため、閲覧のたびには取りに行かない。
 //!
+//! GitHub へのリクエストはインストールのレート制限を Issue・PR・コミットの同期と分け合う。
+//! 閲覧がそれを食い潰さないよう、取れなかった結果も覚える:
+//! - ファイルが無い・行として出せない: 抜粋と同じキーに短い TTL で置く（壊れたパーマリンクを
+//!   開くたびに取りに行かない）
+//! - GitHub 側の失敗（403 / 429 / 5xx・タイムアウト）: インストール単位で短く止める（レート制限に
+//!   当たった後も各利用者の枠が残る限り叩き続ける、ということをしない）
+//!
 //! 誰に見せてよいかはここでは決めない。呼び出し側（handler）が、連携行のプロジェクトに
 //! 入れる利用者かを確かめてから [`snippet_for`] を呼ぶ。
 
@@ -12,14 +19,16 @@ use std::time::Duration;
 
 use base64::Engine;
 use reqwest::{Client, Method, StatusCode};
-use sea_orm::sea_query::{Expr, ExprTrait, Func};
+use sea_orm::sea_query::{Expr, ExprTrait, Func, Query};
 use sea_orm::{
-    DatabaseConnection, DbErr, EntityTrait, QueryFilter, QueryOrder, QuerySelect, prelude::Uuid,
+    ColumnTrait, Condition, DatabaseConnection, DbErr, EntityTrait, QueryFilter, QueryOrder,
+    QuerySelect, prelude::Uuid,
 };
+use serde::{Deserialize, Serialize};
 
 use common::cache::redis::RedisConnection;
 use common::settings::GithubAppSettings;
-use entity::{github_integrations, projects};
+use entity::{github_integrations, project_members, projects, tenant_members, tenants};
 use payload::github::{GithubSnippetQuery, GithubSnippetResponse};
 
 use super::client::api_base;
@@ -38,13 +47,22 @@ pub const MAX_FILE_BYTES: u64 = 1024 * 1024;
 pub const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 pub const CACHE_KEY_PREFIX: &str = "github:snippet:v1:";
 pub const CACHE_TTL_SECS: u64 = 86_400;
+/// 「無い」「出せない」を覚える時間。コミット SHA の指定なので結果はほぼ変わらないが、push 前の
+/// コミットやインストールの対象リポジトリの変更で後から取れるようになるので短くする。
+pub const NEGATIVE_CACHE_TTL_SECS: u64 = 600;
+/// GitHub 側の失敗の後、そのインストールで取りに行くのを止めるキー。
+pub const PAUSE_KEY_PREFIX: &str = "github:snippet:pause:";
+/// `Retry-After` が無いときに止める秒数。
+pub const DEFAULT_PAUSE_SECS: u64 = 60;
+/// `Retry-After` を受け入れる上限（GitHub のレート制限の窓は 1 時間）。
+pub const MAX_PAUSE_SECS: u64 = 3600;
 pub const RATE_LIMIT_KEY_PREFIX: &str = "github:snippet:rl:";
 /// キャッシュに無い抜粋を 1 利用者が取りに行ける回数（[`FETCH_RATE_WINDOW_SECS`] あたり）。
 pub const FETCH_RATE_LIMIT: i64 = 60;
 pub const FETCH_RATE_WINDOW_SECS: i64 = 600;
 
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
-/// 同じリポジトリを連携しているプロジェクトのうち、認可を試す件数の上限。
+/// 同じリポジトリを連携しているプロジェクト（利用者に関わりのあるもの）のうち、認可を試す件数の上限。
 const MAX_CANDIDATES: u64 = 20;
 const MAX_PATH_BYTES: usize = 1024;
 const MAX_REPO_LEN: usize = 100;
@@ -71,6 +89,38 @@ pub enum SnippetOutcome {
     NotDisplayable,
     /// 利用者の取得回数の上限を超えた
     RateLimited,
+    /// GitHub 側の失敗（レート制限・障害・タイムアウト）で今は取れない。秒数の間は取りに行かない
+    Unavailable {
+        retry_after_secs: u64,
+    },
+}
+
+/// Redis に置く結果。取れた抜粋と、取り直しても変わらない「無い」「出せない」。
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Cached {
+    Found(GithubSnippetResponse),
+    NotFound,
+    NotDisplayable,
+}
+
+impl Cached {
+    fn ttl_secs(&self) -> u64 {
+        match self {
+            Cached::Found(_) => CACHE_TTL_SECS,
+            Cached::NotFound | Cached::NotDisplayable => NEGATIVE_CACHE_TTL_SECS,
+        }
+    }
+}
+
+impl From<Cached> for SnippetOutcome {
+    fn from(cached: Cached) -> Self {
+        match cached {
+            Cached::Found(found) => SnippetOutcome::Found(found),
+            Cached::NotFound => SnippetOutcome::NotFound,
+            Cached::NotDisplayable => SnippetOutcome::NotDisplayable,
+        }
+    }
 }
 
 fn valid_owner(owner: &str) -> bool {
@@ -128,13 +178,52 @@ pub fn parse_request(query: &GithubSnippetQuery) -> Option<SnippetRequest> {
 
 /// `owner/repo` を連携しているプロジェクトの連携行を、テナントの ID と一緒に古い順で返す。
 /// GitHub は owner / repo の大文字小文字を区別しないので、小文字にそろえて比べる。
+///
+/// 返すのは `user_id` に関わりのあるプロジェクトだけ: オーナーかメンバーであるテナントの
+/// プロジェクトと、`project_members` に行があるプロジェクト。これは候補の絞り込みであって
+/// 認可ではない（入れるかどうかは呼び出し側が候補ごとに確かめる）。絞らずに件数で切ると、
+/// 同じリポジトリを多くのテナントが連携しているときに、無関係なテナントの行で枠が埋まる。
 pub async fn find_integrations(
     db: &DatabaseConnection,
+    user_id: Uuid,
     owner: &str,
     repo: &str,
 ) -> Result<Vec<(github_integrations::Model, Uuid)>, DbErr> {
+    let owned_tenants = Query::select()
+        .column(tenants::Column::Id)
+        .from(tenants::Entity)
+        .and_where(tenants::Column::OwnerId.eq(user_id))
+        .to_owned();
+    let member_tenants = Query::select()
+        .column(tenant_members::Column::TenantId)
+        .from(tenant_members::Entity)
+        .and_where(tenant_members::Column::UserId.eq(user_id))
+        .to_owned();
+    let member_projects = Query::select()
+        .column(project_members::Column::ProjectId)
+        .from(project_members::Entity)
+        .and_where(project_members::Column::UserId.eq(user_id))
+        .to_owned();
     let rows = github_integrations::Entity::find()
         .find_also_related(projects::Entity)
+        .filter(
+            Condition::any()
+                .add(
+                    Expr::col((projects::Entity, projects::Column::TenantId))
+                        .in_subquery(owned_tenants),
+                )
+                .add(
+                    Expr::col((projects::Entity, projects::Column::TenantId))
+                        .in_subquery(member_tenants),
+                )
+                .add(
+                    Expr::col((
+                        github_integrations::Entity,
+                        github_integrations::Column::ProjectId,
+                    ))
+                    .in_subquery(member_projects),
+                ),
+        )
         .filter(
             Expr::expr(Func::lower(Expr::col((
                 github_integrations::Entity,
@@ -234,6 +323,30 @@ enum Fetched {
     Text(String),
     NotFound,
     NotDisplayable,
+    /// GitHub 側の失敗。`Retry-After` があればその秒数
+    Upstream {
+        retry_after_secs: Option<u64>,
+    },
+}
+
+/// `Retry-After` の秒数（日付の形は読まない）。
+fn retry_after_secs(headers: &reqwest::header::HeaderMap) -> Option<u64> {
+    headers
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
+}
+
+/// Installation Access Token の取得の失敗が「インストールが GitHub 側から消えている」か。
+///
+/// ponytail: forge-github がステータスをエラー型に持たないため文字列で判定している
+/// （`handlers::github::is_installation_gone` と同じ判定）。型で受け取れるようになったら差し替える。
+fn is_installation_gone(error: &anyhow::Error) -> bool {
+    let message = error.to_string();
+    message.contains("failed: 404") || message.contains("failed: 410")
 }
 
 fn contents_url(
@@ -260,16 +373,29 @@ async fn fetch_file(
     token: &str,
     url: reqwest::Url,
 ) -> Result<Fetched, anyhow::Error> {
-    let mut res = request(http, Method::GET, url.as_str(), token)
+    let sent = request(http, Method::GET, url.as_str(), token)
         .timeout(FETCH_TIMEOUT)
         .send()
-        .await?;
+        .await;
+    let mut res = match sent {
+        Ok(res) => res,
+        Err(error) => {
+            tracing::warn!(%error, "github contents request failed");
+            return Ok(Fetched::Upstream {
+                retry_after_secs: None,
+            });
+        }
+    };
     let status = res.status();
     if status == StatusCode::NOT_FOUND {
         return Ok(Fetched::NotFound);
     }
     if !status.is_success() {
-        return Err(anyhow::anyhow!("get repository content failed: {status}"));
+        // 403 / 429 はレート制限、5xx は障害。どれもこちらの不具合ではなく、待てば戻る
+        tracing::warn!(%status, "github contents responded with an error");
+        return Ok(Fetched::Upstream {
+            retry_after_secs: retry_after_secs(res.headers()),
+        });
     }
     if res
         .content_length()
@@ -278,7 +404,17 @@ async fn fetch_file(
         return Ok(Fetched::NotDisplayable);
     }
     let mut body = Vec::new();
-    while let Some(chunk) = res.chunk().await? {
+    loop {
+        let chunk = match res.chunk().await {
+            Ok(Some(chunk)) => chunk,
+            Ok(None) => break,
+            Err(error) => {
+                tracing::warn!(%error, "github contents body could not be read");
+                return Ok(Fetched::Upstream {
+                    retry_after_secs: None,
+                });
+            }
+        };
         if body.len() + chunk.len() > MAX_RESPONSE_BYTES {
             return Ok(Fetched::NotDisplayable);
         }
@@ -334,30 +470,98 @@ pub async fn snippet_for(
         .query_async(&mut conn)
         .await
         .map_err(|e| anyhow::anyhow!("redis GET snippet: {e}"))?;
-    if let Some(found) = cached
+    if let Some(cached) = cached
         .as_deref()
-        .and_then(|raw| serde_json::from_str::<GithubSnippetResponse>(raw).ok())
+        .and_then(|raw| serde_json::from_str::<Cached>(raw).ok())
     {
-        return Ok(SnippetOutcome::Found(found));
+        return Ok(cached.into());
+    }
+
+    // GitHub 側の失敗の後は、そのインストールではしばらく取りに行かない（利用者の枠も数えない）
+    let pause_key = format!("{PAUSE_KEY_PREFIX}{}", integration.installation_id);
+    let paused_for: i64 = redis::cmd("TTL")
+        .arg(&pause_key)
+        .query_async(&mut conn)
+        .await
+        .map_err(|e| anyhow::anyhow!("redis TTL snippet pause: {e}"))?;
+    if let Ok(retry_after_secs @ 1..) = u64::try_from(paused_for) {
+        return Ok(SnippetOutcome::Unavailable { retry_after_secs });
     }
 
     if !try_acquire_fetch_slot(&mut conn, user_id).await? {
         return Ok(SnippetOutcome::RateLimited);
     }
 
-    let token = installation_token(http, settings, integration.installation_id).await?;
+    let resolved = match resolve(http, settings, integration, request).await? {
+        Resolved::Settled(cached) => cached,
+        Resolved::Upstream { retry_after_secs } => {
+            let retry_after_secs = retry_after_secs
+                .unwrap_or(DEFAULT_PAUSE_SECS)
+                .clamp(1, MAX_PAUSE_SECS);
+            let _: () = redis::cmd("SET")
+                .arg(&pause_key)
+                .arg(1)
+                .arg("EX")
+                .arg(retry_after_secs)
+                .query_async(&mut conn)
+                .await
+                .map_err(|e| anyhow::anyhow!("redis SET snippet pause: {e}"))?;
+            return Ok(SnippetOutcome::Unavailable { retry_after_secs });
+        }
+    };
+    let _: () = redis::cmd("SET")
+        .arg(&key)
+        .arg(serde_json::to_string(&resolved)?)
+        .arg("EX")
+        .arg(resolved.ttl_secs())
+        .query_async(&mut conn)
+        .await
+        .map_err(|e| anyhow::anyhow!("redis SET snippet: {e}"))?;
+    Ok(resolved.into())
+}
+
+/// GitHub に聞いた結果。
+enum Resolved {
+    /// 取り直しても変わらない結果（Redis に置く）
+    Settled(Cached),
+    /// GitHub 側の失敗（置かず、インストール単位で止める）
+    Upstream { retry_after_secs: Option<u64> },
+}
+
+async fn resolve(
+    http: &Client,
+    settings: &GithubAppSettings,
+    integration: &github_integrations::Model,
+    request: &SnippetRequest,
+) -> Result<Resolved, anyhow::Error> {
+    let token = match installation_token(http, settings, integration.installation_id).await {
+        Ok(token) => token,
+        // アンインストール済み。連携行だけが残っているので、ファイルが無いのと同じに扱う
+        Err(error) if is_installation_gone(&error) => {
+            return Ok(Resolved::Settled(Cached::NotFound));
+        }
+        Err(error) => {
+            tracing::warn!(%error, "github installation token could not be issued");
+            return Ok(Resolved::Upstream {
+                retry_after_secs: None,
+            });
+        }
+    };
     let text = match fetch_file(http, &token, contents_url(integration, request)?).await? {
         Fetched::Text(text) => text,
-        Fetched::NotFound => return Ok(SnippetOutcome::NotFound),
-        Fetched::NotDisplayable => return Ok(SnippetOutcome::NotDisplayable),
+        Fetched::NotFound => return Ok(Resolved::Settled(Cached::NotFound)),
+        Fetched::NotDisplayable => return Ok(Resolved::Settled(Cached::NotDisplayable)),
+        Fetched::Upstream { retry_after_secs } => {
+            return Ok(Resolved::Upstream { retry_after_secs });
+        }
     };
     let Some((lines, end_line, truncated)) = slice_lines(&text, request.start, request.end) else {
-        return Ok(SnippetOutcome::NotFound);
+        return Ok(Resolved::Settled(Cached::NotFound));
     };
     if lines.is_empty() {
-        return Ok(SnippetOutcome::NotDisplayable);
+        return Ok(Resolved::Settled(Cached::NotDisplayable));
     }
-    let found = GithubSnippetResponse {
+    Ok(Resolved::Settled(Cached::Found(GithubSnippetResponse {
         repo_owner: integration.repo_owner.clone(),
         repo_name: integration.repo_name.clone(),
         sha: request.sha.clone(),
@@ -366,16 +570,7 @@ pub async fn snippet_for(
         end_line,
         lines,
         truncated,
-    };
-    let _: () = redis::cmd("SET")
-        .arg(&key)
-        .arg(serde_json::to_string(&found)?)
-        .arg("EX")
-        .arg(CACHE_TTL_SECS)
-        .query_async(&mut conn)
-        .await
-        .map_err(|e| anyhow::anyhow!("redis SET snippet: {e}"))?;
-    Ok(SnippetOutcome::Found(found))
+    })))
 }
 
 #[cfg(test)]
@@ -550,6 +745,57 @@ mod tests {
     fn slice_lines_returns_no_lines_when_one_line_exceeds_the_limit() {
         let text = format!("{}\nshort\n", "x".repeat(MAX_SNIPPET_CHARS));
         assert_eq!(slice_lines(&text, 1, 2), Some((Vec::new(), 1, true)));
+    }
+
+    #[test]
+    fn cached_outcomes_round_trip_and_negative_ones_expire_sooner() {
+        let snippet = GithubSnippetResponse {
+            repo_owner: "acme".into(),
+            repo_name: "backend".into(),
+            sha: SHA.into(),
+            path: "src/a.rs".into(),
+            start_line: 3,
+            end_line: 3,
+            lines: vec!["x".into()],
+            truncated: false,
+        };
+        let round_trip = |cached: &Cached| -> SnippetOutcome {
+            let raw = serde_json::to_string(cached).expect("serialize");
+            serde_json::from_str::<Cached>(&raw)
+                .expect("deserialize")
+                .into()
+        };
+        let found = Cached::Found(snippet.clone());
+        assert_eq!(round_trip(&found), SnippetOutcome::Found(snippet));
+        assert_eq!(round_trip(&Cached::NotFound), SnippetOutcome::NotFound);
+        assert_eq!(
+            round_trip(&Cached::NotDisplayable),
+            SnippetOutcome::NotDisplayable
+        );
+
+        // 取れなかった結果は短く覚える（後から取れるようになることがある）
+        assert_eq!(found.ttl_secs(), CACHE_TTL_SECS);
+        assert_eq!(Cached::NotFound.ttl_secs(), NEGATIVE_CACHE_TTL_SECS);
+        assert_eq!(Cached::NotDisplayable.ttl_secs(), NEGATIVE_CACHE_TTL_SECS);
+        const { assert!(NEGATIVE_CACHE_TTL_SECS < CACHE_TTL_SECS) };
+    }
+
+    #[test]
+    fn retry_after_reads_only_plain_seconds() {
+        let headers = |value: &str| {
+            let mut map = reqwest::header::HeaderMap::new();
+            map.insert(reqwest::header::RETRY_AFTER, value.parse().expect("header"));
+            map
+        };
+        assert_eq!(retry_after_secs(&headers("120")), Some(120));
+        assert_eq!(retry_after_secs(&headers(" 7 ")), Some(7));
+        // 日付の形と負の値は読まない（既定の秒数で止める）
+        assert_eq!(
+            retry_after_secs(&headers("Wed, 21 Oct 2026 07:28:00 GMT")),
+            None
+        );
+        assert_eq!(retry_after_secs(&headers("-1")), None);
+        assert_eq!(retry_after_secs(&reqwest::header::HeaderMap::new()), None);
     }
 
     #[test]

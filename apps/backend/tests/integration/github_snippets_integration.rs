@@ -2,7 +2,7 @@
 // - 未認証は 401
 // - 連携プロジェクトに入れる利用者は 200 で行が合い、GitHub へは連携行の owner / repo・要求の SHA（`ref`）・
 //   installation token の Bearer で取りに行く。250 行のファイルに `L1-L250` を求めると 200 行 + `truncated`
-// - 同じ抜粋の 2 回目は GitHub へ取りに行かない（キャッシュ）。応答は `Cache-Control: private, max-age=300`
+// - 同じ抜粋の 2 回目は GitHub へ取りに行かない（キャッシュ）。応答は拒否も含めて `Cache-Control: no-store`
 // - 別テナントの利用者は 404。キャッシュが温まった後でも 404（対照: 入れる利用者は 200）。
 //   継承を切ったプロジェクトから外れているテナントメンバーも 404（対照: 継承中は 200）
 // - 未連携のリポジトリは 404。owner / repo の大文字小文字違いは 200
@@ -11,6 +11,13 @@
 // - PAT は 403（対照: 同じ利用者のセッションは 200）
 // - キャッシュに無い抜粋を FETCH_RATE_LIMIT 回取った次は 429。キャッシュ済みの抜粋は 200 のままで、
 //   別の利用者の枠にも影響しない
+// - 取れなかった結果（404・422）も覚え、2 回目は GitHub へ取りに行かない
+// - GitHub の 500 / 429 は 503 + `Retry-After`。その間は同じインストールの別の抜粋も取りに行かず、
+//   利用者の取得回数も数えない。止める時間が過ぎれば取れる
+// - プロジェクトだけのゲストは 200、別プロジェクトのゲストは 404
+// - 同じリポジトリを連携した 2 つのプロジェクトのうち、2 件目にだけ入れる利用者は 200（1 件目の拒否で止まらない）
+// - 同じリポジトリを他のテナントが 21 件連携していても、自分のプロジェクトの連携で 200（上限 20 件に埋もれない）
+// - Device Token は 200
 //
 //! 連携リポジトリのコードの抜粋（GET /v1/github/snippet）。
 
@@ -21,9 +28,13 @@ use crate::forge_manual_pull_request_links_integration::forget_github_mock;
 use crate::forge_pull_request_links_integration::github_mock;
 use axum::http::{StatusCode, header};
 use entity::github_integrations;
+use entity::project_members;
 use entity::scopes::Scope;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set};
-use service::github::snippets::{FETCH_RATE_LIMIT, MAX_SNIPPET_LINES, RATE_LIMIT_KEY_PREFIX};
+use service::github::snippets::{
+    DEFAULT_PAUSE_SECS, FETCH_RATE_LIMIT, MAX_SNIPPET_LINES, PAUSE_KEY_PREFIX,
+    RATE_LIMIT_KEY_PREFIX,
+};
 use uuid::Uuid;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -40,14 +51,16 @@ struct Fixture {
     project_id: Uuid,
     /// テストごとに一意なリポジトリ名。同じ DB に残る他のテストの連携行と混ざらないようにする
     repo: String,
+    installation_id: i64,
 }
 
 async fn setup(app: &TestApp) -> Fixture {
     let owner = app.insert_user(false, false).await;
     let tp = app.insert_tenant_project(owner.id).await;
     let repo = format!("repo-{}", &Uuid::new_v4().simple().to_string()[..12]);
-    insert_integration(app, tp.project_id, &repo, owner.id).await;
+    let installation_id = insert_integration(app, tp.project_id, &repo, owner.id).await;
     Fixture {
+        installation_id,
         owner,
         tenant_id: tp.tenant_id,
         project_id: tp.project_id,
@@ -55,11 +68,12 @@ async fn setup(app: &TestApp) -> Fixture {
     }
 }
 
-async fn insert_integration(app: &TestApp, project_id: Uuid, repo: &str, created_by: Uuid) {
+async fn insert_integration(app: &TestApp, project_id: Uuid, repo: &str, created_by: Uuid) -> i64 {
+    let installation_id = unique_installation_id();
     github_integrations::ActiveModel {
         id: Set(Uuid::new_v4()),
         project_id: Set(project_id),
-        installation_id: Set(unique_installation_id()),
+        installation_id: Set(installation_id),
         repo_owner: Set(REPO_OWNER.into()),
         repo_name: Set(repo.into()),
         access_token_enc: Set("unused".into()),
@@ -70,6 +84,7 @@ async fn insert_integration(app: &TestApp, project_id: Uuid, repo: &str, created
     .insert(&app.state.db)
     .await
     .expect("insert integration");
+    installation_id
 }
 
 async fn login(app: &mut TestApp, user: &TestUser) {
@@ -174,7 +189,8 @@ async fn member_gets_lines_and_second_read_is_cached() {
     let url = snippet_url(REPO_OWNER, &fx.repo, SHA, FILE_PATH, "start=3&end=5");
     let res = app.get(&url).await;
     assert_eq!(res.status(), StatusCode::OK);
-    assert_eq!(res.headers()[header::CACHE_CONTROL], "private, max-age=300");
+    // ブラウザーの HTTP キャッシュに残さない（同じブラウザーの次の利用者に、認可を通らずに渡さない）
+    assert_eq!(res.headers()[header::CACHE_CONTROL], "no-store");
     let body: serde_json::Value = res.json().await.expect("json");
     assert_eq!(
         body,
@@ -532,5 +548,285 @@ async fn uncached_fetches_are_rate_limited_per_user() {
         .query_async(&mut conn)
         .await
         .unwrap();
+    forget_github_mock();
+}
+
+async fn redis_del(app: &TestApp, key: String) {
+    let mut conn = app.state.redis_client.conn.acquire().await.unwrap();
+    let _: i64 = redis::cmd("DEL")
+        .arg(key)
+        .query_async(&mut conn)
+        .await
+        .unwrap();
+}
+
+async fn redis_get(app: &TestApp, key: String) -> Option<String> {
+    let mut conn = app.state.redis_client.conn.acquire().await.unwrap();
+    redis::cmd("GET")
+        .arg(key)
+        .query_async(&mut conn)
+        .await
+        .unwrap()
+}
+
+#[serial_test::serial]
+#[tokio::test]
+async fn failed_lookups_are_remembered() {
+    let mock_server = github_mock().await;
+    let mut app = TestApp::new_with_github().await;
+    let fx = setup(&app).await;
+    mount_file(
+        &mock_server,
+        &fx.repo,
+        "bin.dat",
+        file_body(&[0xff, 0xfe, 0x00, 0x80]),
+    )
+    .await;
+    mount_file(&mock_server, &fx.repo, "ok.txt", file_body(b"one\ntwo\n")).await;
+    login(&mut app, &fx.owner).await;
+
+    // GitHub が 404 を返すファイル、表示できないファイル、行がファイルの外
+    let cases = [
+        ("missing.txt", "start=1", StatusCode::NOT_FOUND),
+        ("bin.dat", "start=1", StatusCode::UNPROCESSABLE_ENTITY),
+        ("ok.txt", "start=9", StatusCode::NOT_FOUND),
+    ];
+    for (file, range, expected) in cases {
+        let url = snippet_url(REPO_OWNER, &fx.repo, SHA, file, range);
+        let before = contents_requests(&mock_server, &fx.repo).await.len();
+        for round in 0..3 {
+            let res = app.get(&url).await;
+            assert_eq!(res.status(), expected, "{file} round {round}");
+            assert_eq!(res.headers()[header::CACHE_CONTROL], "no-store", "{file}");
+        }
+        // 3 回読んでも GitHub へは 1 回
+        assert_eq!(
+            contents_requests(&mock_server, &fx.repo).await.len(),
+            before + 1,
+            "{file}"
+        );
+    }
+    // 取れなかった結果は利用者の取得回数を 1 回ずつしか使わない
+    assert_eq!(
+        redis_get(&app, format!("{RATE_LIMIT_KEY_PREFIX}{}", fx.owner.id)).await,
+        Some("3".into())
+    );
+    // 対照: 同じファイルの別の行は取れる
+    let res = app
+        .get(&snippet_url(REPO_OWNER, &fx.repo, SHA, "ok.txt", "start=2"))
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
+
+    forget_github_mock();
+}
+
+#[serial_test::serial]
+#[tokio::test]
+async fn upstream_failure_pauses_the_installation() {
+    let mock_server = github_mock().await;
+    let mut app = TestApp::new_with_github().await;
+    let fx = setup(&app).await;
+    Mock::given(method("GET"))
+        .and(path(contents_path(&fx.repo, "boom.txt")))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(contents_path(&fx.repo, "limited.txt")))
+        .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "120"))
+        .mount(&mock_server)
+        .await;
+    mount_file(&mock_server, &fx.repo, "ok.txt", file_body(b"one\ntwo\n")).await;
+    login(&mut app, &fx.owner).await;
+    let pause_key = format!("{PAUSE_KEY_PREFIX}{}", fx.installation_id);
+    let url = |file: &str| snippet_url(REPO_OWNER, &fx.repo, SHA, file, "start=1");
+
+    // GitHub の 500 は内部エラーではなく 503。Retry-After は既定の秒数
+    let res = app.get(&url("boom.txt")).await;
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        res.headers()[header::RETRY_AFTER],
+        DEFAULT_PAUSE_SECS.to_string().as_str()
+    );
+    assert_eq!(res.headers()[header::CACHE_CONTROL], "no-store");
+    let body: serde_json::Value = res.json().await.expect("json");
+    assert_eq!(body["message"], "github-unavailable");
+    assert_eq!(contents_requests(&mock_server, &fx.repo).await.len(), 1);
+
+    // 止めている間は、同じインストールの読めるファイルも取りに行かない
+    let res = app.get(&url("ok.txt")).await;
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(contents_requests(&mock_server, &fx.repo).await.len(), 1);
+    // 止めている間の要求は利用者の取得回数に数えない
+    assert_eq!(
+        redis_get(&app, format!("{RATE_LIMIT_KEY_PREFIX}{}", fx.owner.id)).await,
+        Some("1".into())
+    );
+
+    // 止める時間が過ぎれば取れる（失敗そのものは覚えていない）
+    redis_del(&app, pause_key.clone()).await;
+    let res = app.get(&url("ok.txt")).await;
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // GitHub の 429 は Retry-After の秒数だけ止める
+    let res = app.get(&url("limited.txt")).await;
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(res.headers()[header::RETRY_AFTER], "120");
+    let before = contents_requests(&mock_server, &fx.repo).await.len();
+    let res = app.get(&url("limited.txt")).await;
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        contents_requests(&mock_server, &fx.repo).await.len(),
+        before
+    );
+    // キャッシュ済みの抜粋は止めている間も返る
+    assert_eq!(app.get(&url("ok.txt")).await.status(), StatusCode::OK);
+
+    redis_del(&app, pause_key).await;
+    forget_github_mock();
+}
+
+async fn insert_project_member(app: &TestApp, project_id: Uuid, user_id: Uuid) {
+    project_members::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        project_id: Set(project_id),
+        user_id: Set(user_id),
+        role: Set(project_members::ProjectRole::Member),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert project member");
+}
+
+#[serial_test::serial]
+#[tokio::test]
+async fn project_guest_can_read_only_their_project() {
+    let mock_server = github_mock().await;
+    let mut app = TestApp::new_with_github().await;
+    let fx = setup(&app).await;
+    mount_file(
+        &mock_server,
+        &fx.repo,
+        FILE_PATH,
+        file_body(file_text().as_bytes()),
+    )
+    .await;
+    let url = snippet_url(REPO_OWNER, &fx.repo, SHA, FILE_PATH, "start=1");
+
+    // テナントには居らず、連携プロジェクトにだけ招かれた利用者
+    let guest = app.insert_user(false, false).await;
+    insert_project_member(&app, fx.project_id, guest.id).await;
+    login(&mut app, &guest).await;
+    assert_eq!(app.get(&url).await.status(), StatusCode::OK);
+
+    // 同じテナントの、連携していない別プロジェクトにだけ招かれた利用者は 404
+    let other_project = crate::common::insert_extra_project(&app, fx.tenant_id).await;
+    let other_guest = app.insert_user(false, false).await;
+    insert_project_member(&app, other_project, other_guest.id).await;
+    login(&mut app, &other_guest).await;
+    assert_eq!(app.get(&url).await.status(), StatusCode::NOT_FOUND);
+
+    forget_github_mock();
+}
+
+#[serial_test::serial]
+#[tokio::test]
+async fn later_candidate_is_tried_after_an_earlier_one_is_refused() {
+    let mock_server = github_mock().await;
+    let mut app = TestApp::new_with_github().await;
+    // 1 件目（古い）: 継承を切ったプロジェクト。テナントメンバーは入れない
+    let fx = setup(&app).await;
+    stop_inheriting(&app.state.db, fx.project_id).await;
+    // 2 件目: 同じテナントの、継承中の別プロジェクト。同じリポジトリを連携している
+    let open_project = crate::common::insert_extra_project(&app, fx.tenant_id).await;
+    insert_integration(&app, open_project, &fx.repo, fx.owner.id).await;
+    mount_file(
+        &mock_server,
+        &fx.repo,
+        FILE_PATH,
+        file_body(file_text().as_bytes()),
+    )
+    .await;
+    let url = snippet_url(REPO_OWNER, &fx.repo, SHA, FILE_PATH, "start=1");
+
+    let member = app.insert_user(false, false).await;
+    ensure_tenant_member_for_project(&app.state.db, fx.project_id, member.id).await;
+    login(&mut app, &member).await;
+    assert_eq!(app.get(&url).await.status(), StatusCode::OK);
+
+    // 対照: 2 件目も継承を切ると、どの候補にも入れず 404
+    stop_inheriting(&app.state.db, open_project).await;
+    assert_eq!(app.get(&url).await.status(), StatusCode::NOT_FOUND);
+
+    forget_github_mock();
+}
+
+#[serial_test::serial]
+#[tokio::test]
+async fn unrelated_integrations_do_not_crowd_out_the_users_project() {
+    let mock_server = github_mock().await;
+    let mut app = TestApp::new_with_github().await;
+    let repo = format!("repo-{}", &Uuid::new_v4().simple().to_string()[..12]);
+    // 同じリポジトリを、先に他のテナントが 21 件連携している（候補の上限 20 を越える値）
+    for _ in 0..21 {
+        let other = app.insert_user(false, false).await;
+        let tp = app.insert_tenant_project(other.id).await;
+        insert_integration(&app, tp.project_id, &repo, other.id).await;
+    }
+    let owner = app.insert_user(false, false).await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    insert_integration(&app, tp.project_id, &repo, owner.id).await;
+    mount_file(
+        &mock_server,
+        &repo,
+        FILE_PATH,
+        file_body(file_text().as_bytes()),
+    )
+    .await;
+    let url = snippet_url(REPO_OWNER, &repo, SHA, FILE_PATH, "start=1");
+
+    login(&mut app, &owner).await;
+    assert_eq!(app.get(&url).await.status(), StatusCode::OK);
+
+    // 対照: どのテナントにも関わりの無い利用者は 404 のまま
+    let outsider = app.insert_user(false, false).await;
+    login(&mut app, &outsider).await;
+    assert_eq!(app.get(&url).await.status(), StatusCode::NOT_FOUND);
+
+    forget_github_mock();
+}
+
+#[serial_test::serial]
+#[tokio::test]
+async fn device_token_is_accepted() {
+    let mock_server = github_mock().await;
+    let mut app = TestApp::new_with_github().await;
+    let fx = setup(&app).await;
+    mount_file(
+        &mock_server,
+        &fx.repo,
+        FILE_PATH,
+        file_body(file_text().as_bytes()),
+    )
+    .await;
+    let (token, _) = service::desktop_auth::create_device_token(
+        &app.state.db,
+        &app.state.settings.personal_token_secret,
+        fx.owner.id,
+        "snippet test".into(),
+        chrono::Utc::now(),
+    )
+    .await
+    .expect("device token");
+
+    app.reset_session_client();
+    let res = app
+        .get_with_bearer(
+            &snippet_url(REPO_OWNER, &fx.repo, SHA, FILE_PATH, "start=1"),
+            &token,
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
+
     forget_github_mock();
 }

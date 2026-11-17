@@ -3,8 +3,8 @@
 use axum::{
     Json,
     extract::{Query, State},
-    http::header,
-    response::IntoResponse,
+    http::{StatusCode, header},
+    response::{IntoResponse, Response},
 };
 
 use crate::AppState;
@@ -21,8 +21,12 @@ use service::github::snippets::{SnippetOutcome, find_integrations, parse_request
 // 未連携と権限なしは区別せず 404 にする（連携の有無を外へ漏らさない）。
 // PAT は通さない。テナントとプロジェクトに束縛されたトークンに、束縛の外かもしれない
 // プロジェクトの連携を横断で引かせないため。
-// `Cache-Control` を `private` にするのは認証付きの応答を共有キャッシュに置かせないためで、
-// 5 分に留めるのは、権限を失った後にブラウザーに残る時間を短くするため。
+// 応答は `Cache-Control: no-store` にする。見せてよいかは利用者で変わるのに URL は同じなので、
+// ブラウザーの HTTP キャッシュに残すと、同じブラウザーで次にログインした別の利用者がこの認可を
+// 通らずに前の利用者の抜粋を受け取る（`private` は共有キャッシュを止めるだけで、利用者は分けない）。
+// 取り直しの費用は、認可の後ろにある Redis のキャッシュが受ける。
+// GitHub 側の失敗（レート制限・障害・タイムアウト）は 500 ではなく 503 + `Retry-After` で返す。
+// こちらの不具合ではないので、エラー監視を内部エラーで埋めない。
 #[axum::debug_handler]
 #[utoipa::path(
     get,
@@ -35,6 +39,7 @@ use service::github::snippets::{SnippetOutcome, find_integrations, parse_request
         (status = 400, description = "クエリの形式が不正", body = ServerError),
         (status = 422, description = "行として表示できないファイル（バイナリ・大きすぎる）", body = ServerError),
         (status = 429, description = "取得回数の上限を超えた", body = ServerError),
+        (status = 503, description = "GitHub から取得できない（レート制限・障害）。`Retry-After` の秒数の間は取りに行かない", body = ServerError),
         CrudErrors
     )
 )]
@@ -42,17 +47,34 @@ pub async fn get_github_snippet(
     State(state): State<AppState>,
     auth: AuthUser,
     Query(query): Query<GithubSnippetQuery>,
-) -> Result<impl IntoResponse, AppError> {
+) -> Response {
+    let mut response = match snippet_response(&state, &auth, &query).await {
+        Ok(response) => response,
+        Err(error) => error.into_response(),
+    };
+    // 拒否（404 など）も含めて残させない。権限が付いた後に古い拒否が返るのも、その逆も防ぐ
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("no-store"),
+    );
+    response
+}
+
+async fn snippet_response(
+    state: &AppState,
+    auth: &AuthUser,
+    query: &GithubSnippetQuery,
+) -> Result<Response, AppError> {
     let github = state.settings.require_github_app()?;
     auth.require_session_or_device_token()?;
-    let request = parse_request(&query).ok_or(AppError::BadRequest)?;
+    let request = parse_request(query).ok_or(AppError::BadRequest)?;
 
     let mut allowed = None;
     for (integration, tenant_id) in
-        find_integrations(&state.db, &request.owner, &request.repo).await?
+        find_integrations(&state.db, auth.user_id, &request.owner, &request.repo).await?
     {
         match auth
-            .ensure_tenant_access(&state, tenant_id, Some(integration.project_id))
+            .ensure_tenant_access(state, tenant_id, Some(integration.project_id))
             .await
         {
             Ok(()) => {
@@ -76,10 +98,15 @@ pub async fn get_github_snippet(
     .await
     .map_err(AppError::Internal)?;
     match outcome {
-        SnippetOutcome::Found(snippet) => Ok((
-            [(header::CACHE_CONTROL, "private, max-age=300")],
-            Json(snippet),
-        )),
+        SnippetOutcome::Found(snippet) => Ok(Json(snippet).into_response()),
+        SnippetOutcome::Unavailable { retry_after_secs } => Ok((
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(header::RETRY_AFTER, retry_after_secs.to_string())],
+            Json(ServerError {
+                message: "github-unavailable".into(),
+            }),
+        )
+            .into_response()),
         SnippetOutcome::NotFound => Err(AppError::NotFound),
         SnippetOutcome::NotDisplayable => Err(AppError::UnprocessableEntity),
         SnippetOutcome::RateLimited => Err(AppError::TooManyRequests),
