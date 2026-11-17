@@ -34,9 +34,10 @@ describe('registerKfmCustomElements (🔴 client ガード)', () => {
     expect(second).toEqual({ skipped: false, defined: 0 });
   });
 
-  it('既定の登録タグは kfm-code / kfm-mermaid の 2 件', () => {
+  it('既定の登録タグは kfm-code / kfm-mermaid / kfm-permalink の 3 件', () => {
     const result = registerKfmCustomElements();
-    expect(result).toEqual({ skipped: false, defined: 2 });
+    expect(result).toEqual({ skipped: false, defined: 3 });
+    expect(customElements.get('kfm-permalink')).toBeTypeOf('function');
     expect(customElements.get('kfm-code')).toBeTypeOf('function');
     expect(customElements.get('kfm-mermaid')).toBeTypeOf('function');
   });

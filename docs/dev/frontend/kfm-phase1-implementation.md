@@ -1,12 +1,12 @@
 ---
 title: KFM の描画
 description: task の本文を描画するレンダラ KFM の構成、パイプライン、サニタイズ、キャッシュ、SSR との受け渡し
-updated: 2026-11-09
+updated: 2026-11-17
 sidebar:
   order: 4
 ---
 
-KFM (Koyori Flavored Markdown) は、task の本文を描画するレンダラである。Phase 1 の実体は GFM、GitHub alerts、コードブロック着色（starry-night）、サニタイズから成る、GitHub の描画を再現するレンダラ（github profile）である。これに task 固有の拡張として、タスク参照とメンションのチップ、Mermaid の図、コードブロックの枠、外部リンクの favicon を加えている。
+KFM (Koyori Flavored Markdown) は、task の本文を描画するレンダラである。Phase 1 の実体は GFM、GitHub alerts、コードブロック着色（starry-night）、サニタイズから成る、GitHub の描画を再現するレンダラ（github profile）である。これに task 固有の拡張として、タスク参照とメンションのチップ、Mermaid の図、コードブロックの枠、外部リンクの favicon、GitHub のパーマリンクが指すコードの抜粋を加えている。
 
 このページは現在の実装を説明する。設計判断の根拠は別管理の設計書を定義元とする。
 
@@ -58,6 +58,12 @@ apps/frontend/src/lib/
     element.ts                 遅延ロード・SVG 描画・再接続処理
     _tag.ts                    タグ名
     style.css                  JS 無効/描画失敗時のソース表示フォールバック
+  remark-kfm-permalink/        GitHub のパーマリンク → コードの抜粋を出す custom element
+    index.ts                   remark 変換と sanitize スキーマ
+    element.ts                 抜粋の取得・着色の依頼・差し込み
+    _parse.ts                  URL の解釈と、抜粋を包むコードフェンスの組み立て
+    _tag.ts                    タグ名
+    style.css                  サイドカー CSS（抜粋の上のヘッダ）
   remark-kfm-raw-html/         生の HTML を文字として出す（html ノード → text ノード）
   remark-kfm-task-ref/         タスク参照 KEY-N → タスク詳細へのリンク
     index.ts                   remark 変換と sanitize スキーマ
@@ -71,7 +77,7 @@ apps/frontend/src/lib/
     _schemas.ts                本番と story probe が共用する sanitize スキーマ一覧
     _cache.ts                  L1 キャッシュ（full-text キー）
     _config.ts                 多層 config 解決（Phase 1 はコード既定と system 層）
-    _client-registry.ts        カスタム要素の client 登録（kfm-code / kfm-mermaid）
+    _client-registry.ts        カスタム要素の client 登録（kfm-code / kfm-mermaid / kfm-permalink）
 apps/frontend/src/pages/
   +client.ts                   client 専用 entry（カスタム要素登録の呼び出し元）
 apps/frontend/server/middlewares/
@@ -94,7 +100,8 @@ flowchart TD
     D --> E["remark-gfm"]
     E --> F["remark-koyori-alerts"]
     F --> G["remark-kfm-mermaid"]
-    G --> H["remark-kfm-task-ref"]
+    G --> G2["remark-kfm-permalink"]
+    G2 --> H["remark-kfm-task-ref"]
     H --> I["remark-kfm-mention"]
     I --> J["remark-breaks（comment profile のみ）"]
     J --> K["remark-rehype"]
@@ -196,6 +203,26 @@ http / https の絶対 URL を持つリンクの先頭に、リンク先サイ�
 - options を持たないので、キャッシュキーと `RenderOptions` は変わらない。rehype 層へ足しただけで旧 HTML のキャッシュは失効する
 - 見た目は `rehype-kfm-link-favicon/style.css`（`img.kfm-link-favicon`）を呼び出し側が import して当てる
 
+## コードの抜粋（remark-kfm-permalink）
+
+段落が GitHub のパーマリンクだけのとき、その段落を `<kfm-permalink>` に替える。client の custom element が連携リポジトリから行を取り、リンクをコードの抜粋に差し替える。SSR の出力は次の形である。
+
+```html
+<kfm-permalink><a href="https://github.com/acme/backend/blob/{sha}/src/a.rs#L3-L10">…</a></kfm-permalink>
+```
+
+- 対象は `https://github.com/{owner}/{repo}/blob/{sha}/{path}#L{start}-L{end}` の形の URL である。`sha` は 40 桁のコミット SHA に限り、ブランチ名と短縮 SHA は対象にしない。`?plain=1` と列の指定（`L3C1`）は受け、列は使わない。行の指定が無い URL は対象にしない
+- 素の URL と `<URL>` の autolink が段落の唯一の中身であるときだけ替える。`[文字](URL)` と文中の URL はリンクのまま残す。文の途中にコードのブロックを差し込まないためである
+- GFM が素の URL を link にした後の段落を見るので、remark 層の remark-gfm の後ろに置く。段落の `<p>` を `<kfm-permalink>` に替えるだけで、中のリンクは触らない
+- サーバーはコードを HTML に入れない。描画結果は L1 キャッシュに本文をキーとして載り、全利用者で共有されるので、見る人の権限で変わる中身を入れられない
+- URL の解釈は `_parse.ts` の `parseGithubPermalink` が持ち、remark 層と custom element の両方が同じ関数で読む。backend の `service::github::snippets::parse_request` も同じ規則で検査する
+- custom element は `GET /v1/github/snippet` で行を取る（[GitHub App 基盤](/dev/features/tasks/github-app)）。取れた行をコードフェンスに包んで `POST /internal/render-description` に送り、返った HTML の `<kfm-code>` を差し込む。着色を client に持たないためである。フェンスは行の中の最長のバッククォートの連続より 1 本長くする
+- 着色に失敗したときは、行を `textContent` で入れた無着色の `<kfm-code>` を DOM で組む
+- 行番号は抜粋の最初の行から振る。`rehype-kfm-code/style.css` の counter を CSSOM で上書きし、`style` 属性は HTML に出さない
+- 取れないとき（未連携、権限なし、ファイルなし、通信の失敗）は中のリンクをそのまま残し、理由は表示しない。JS が無効のときも同じ表示になる
+- 完了シグナルは `data-kfm-permalink` の二値（`rendered` / `unavailable`）で、属性なしは未処理である
+- 同じ抜粋の取得は client の中で 1 回にまとめ、失敗した取得は覚えない
+
 ## Mermaid の図（remark-kfm-mermaid）
 
 ### client 専用の描画
@@ -239,7 +266,7 @@ DOMPurify は HTML 構造の allowlist に専念する。
 - `FORBID_ATTR: ['style']` で inline style を経路を問わず落とす
 - class は既知のトークンとの完全一致で許可する（`afterSanitizeAttributes` フック）。許可集合の定義元は、各プラグインが export する `SanitizeSchema` を `createRenderer({ sanitizeSchemas })` で合成した registry である
 - 動的な class は `SanitizeSchema.classPatterns` で明示した固定形だけを許可する。現在はコードフェンスの `language-*` と starry-night の `pl-*` に限り、任意のアプリの class を通す汎用パターンにはしない
-- `CUSTOM_ELEMENT_HANDLING` は registry への登録制である。現在は `kfm-code`（属性は `data-lang` と `data-title`）と `kfm-mermaid`（属性なし）を許可する。`allowCustomizedBuiltInElements: false` で `is=""` の経路を塞ぐ
+- `CUSTOM_ELEMENT_HANDLING` は registry への登録制である。現在は `kfm-code`（属性は `data-lang` と `data-title`）、`kfm-mermaid`（属性なし）、`kfm-permalink`（属性なし）を許可する。`allowCustomizedBuiltInElements: false` で `is=""` の経路を塞ぐ
 - `classPatterns` の正規表現に `g` / `y` フラグは使えない。`lastIndex` の状態で `.test()` の判定が呼び出し履歴により反転するので、registry の組み立て時に throw する
 
 DOMPurify を最終段に置くのは、remark プラグインの出力を含む最終 HTML 文字列を、`v-html` へ渡す直前の一か所で検査するためである。class allowlist のフックは DOMPurify のモジュール singleton を汚さないよう sanitize の呼び出し中だけ登録し、`finally` で撤去する。
@@ -343,6 +370,7 @@ import '@/lib/remark-gfm/style.css';
 import '@/lib/remark-koyori-alerts/style.css';
 import '@/lib/rehype-starry-night/style.css';
 import '@/lib/rehype-kfm-code/style.css';
+import '@/lib/remark-kfm-permalink/style.css';
 import '@/lib/rehype-kfm-link-favicon/style.css';
 import '@/lib/remark-kfm-mermaid/style.css';
 ```
@@ -368,6 +396,7 @@ import '@/lib/remark-kfm-mermaid/style.css';
 - メンションのチップは koyori の固定 class で描き、GFM CSS の `a` の規則は `:not(.koyori-mention)` でチップを外す
 - 着色 CSS は starry-night が出力する `pl-*` の名前空間クラスを直接指す。実体は upstream の light シート固定とダークブリッジで、`html` の `data-theme` が `light` でないときのダークに追従する
 - kfm-code CSS は `kfm-code` 要素と `.pl-line` を直接指し、着色 CSS と同じ場所で import する
+- permalink CSS は `kfm-permalink` 要素と、custom element が足すヘッダ（`.kfm-permalink-header`）を指す。抜粋そのものの見た目は kfm-code CSS が担う
 - link favicon CSS は `img.kfm-link-favicon` だけを指し、字の大きさ（`1em`）に合わせた正方形にする
 - mermaid CSS は JS 無効時または描画失敗時の light DOM のソースを、`white-space: pre` と横スクロールで読める状態に保つ
 
@@ -432,3 +461,6 @@ KFM の Storybook story (`stories/kfm/*`) は、本番と同じ「サーバー�
 | 2026-11-09 | リンクの favicon を backend の `GET /v1/favicons/{host}` 経由で取り、ブラウザから外部へ直接取らず、外部の favicon サービスも使わない | 本文を開くたびに閲覧者の IP と閲覧内容がリンク先や第三者へ出る。backend が取れば将来 CSP を入れても `img-src 'self'` のままで済み、同じ host の取得はキャッシュで閲覧回数から切り離せる |
 | 2026-11-09 | 取得した SVG の favicon を配信せず、SVG だけのサイトは汎用アイコンにする | 自オリジンから配信する SVG は URL を直接開くと script が動く。画像は先頭バイトで ICO / PNG / JPEG / GIF / WebP と確かめたものだけ返す |
 | 2026-11-09 | 自アプリ宛ての絶対 URL も外部リンクと同じに扱い、favicon を付ける | 除外にはアプリのオリジンを renderer に渡す必要があり、`RenderOptions`、キャッシュキー、各描画箇所に手が入る。自アプリの favicon が出るだけで害は無い |
+| 2026-11-17 | GitHub のパーマリンクが指すコードを SSR の HTML に入れず、client の custom element が backend から取る | 描画結果は L1 キャッシュに本文をキーとして載り、同じ本文を送れば誰でも同じ HTML を得る。非公開リポジトリのコードを入れると、権限の無い利用者にも渡る |
+| 2026-11-17 | 抜粋の着色を client に持たず、既存の `POST /internal/render-description` に送る | 着色を client に持つと約 417.5 KB raw が増える。着色に失敗しても無着色で表示できるので、サーバーの描画を再利用する |
+| 2026-11-17 | 抜粋にするのは段落がパーマリンクだけのときに限る | 文の途中にブロックを差し込むと文が切れる。URL だけの行に限れば、既存の本文の表示が意図せず変わる範囲も狭い |
