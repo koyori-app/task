@@ -6,8 +6,9 @@
 
 題の後ろに、PR の本文で宣言した解決の参照（Closes #N / Closes TASK-N。Fixes / Resolves も）を
 「（#N、TASK-N を解決）」として足す。本文は Markdown を自分で解釈せず、GitHub が描画した HTML
-（bodyHTML）を HTML のパーサーで読む。コード・引用・取り消し線の要素の中は地の文でないので読まない
-（HTML のコメントは GitHub が描画で落とす）。Markdown の書き方（フェンスの種類、字下げ、
+（bodyHTML）を HTML のパーサーで読む。コード・引用・取り消し線・数式の要素の中は地の文でないので
+読まず、その前後の地の文もつなげない（HTML のコメントは GitHub が描画で落とす）。
+マージコミットの無い PR は載せず、件数と番号を標準エラーへ出す。Markdown の書き方（フェンスの種類、字下げ、
 バッククォートの数など）の違いは GitHub の描画が吸収するので、ここでは扱わない。
 標準ライブラリだけを使う。
 """
@@ -16,15 +17,25 @@ import re
 import sys
 from html.parser import HTMLParser
 
-# この要素の中の文字は地の文ではない
-SKIPPED = frozenset({"pre", "code", "blockquote", "del", "s", "strike"})
+# この要素の中の文字は地の文ではない（コード・引用・取り消し線・数式）。前後の地の文もつなげない
+SKIPPED = frozenset({
+    "pre", "code", "tt", "samp", "kbd", "var", "math-renderer", "blockquote", "del", "s", "strike",
+})
 # 文字の並びが切れる要素。前後の文字をつなげない（段落の末尾の Closes と次の段落の #N を結ばない）
 BREAKS = frozenset({
     "p", "div", "br", "hr", "li", "ul", "ol", "table", "tr", "td", "th", "details", "summary",
-    "h1", "h2", "h3", "h4", "h5", "h6", "pre", "blockquote",
+    "h1", "h2", "h3", "h4", "h5", "h6", "dl", "dt", "dd", "pre", "blockquote",
 })
+# 読まない要素の前後に置く文字。空白でも英数字でもないので、語と参照の間の [ \t]+ も、
+# 参照の前後の境界も越えられない。中身を捨てただけだと「Closes <code>#1</code> #2」が
+# 「Closes  #2」に、「Closes TASK-12<code>x</code>3」が「Closes TASK-123」になり、無い宣言ができる
+GAP = "\ufffc"
+# 語と参照の境界は ASCII の英数字（と GAP）だけで見る（re の \b は日本語の文字も語の一部と見るので、
+# 「これでCloses TASK-5」「Closes TASK-123の対応」を拾えない）
+BEFORE = r"(?<![A-Za-z0-9_\ufffc])"
+AFTER = r"(?![A-Za-z0-9_\ufffc])"
 # GitHub が Issue を閉じる語として解釈するものと同じ。語と参照は同じ行に書く
-KEYWORD = r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?[ \t]+"
+KEYWORD = BEFORE + r"(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?[ \t]+"
 
 
 class _Prose(HTMLParser):
@@ -34,16 +45,19 @@ class _Prose(HTMLParser):
         self.parts = []
 
     def handle_starttag(self, tag, attrs):
+        if tag in SKIPPED:
+            self.parts.append(GAP)
+            self.depth += 1
+        if tag in BREAKS:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag):
         if tag in BREAKS:
             self.parts.append("\n")
         if tag in SKIPPED:
-            self.depth += 1
-
-    def handle_endtag(self, tag):
-        if tag in SKIPPED and self.depth:
-            self.depth -= 1
-        if tag in BREAKS:
-            self.parts.append("\n")
+            self.parts.append(GAP)
+            if self.depth:
+                self.depth -= 1
 
     def handle_data(self, data):
         if not self.depth:
@@ -60,15 +74,18 @@ def prose(html):
 
 def closes(html, prefix):
     """地の文で「解決」と宣言された prefix（"#" か "TASK-"）の番号を、昇順で重複なく返す。"""
-    found = re.findall(KEYWORD + re.escape(prefix) + r"([0-9]+)\b", prose(html), re.IGNORECASE)
+    found = re.findall(KEYWORD + re.escape(prefix) + r"([0-9]+)" + AFTER, prose(html), re.IGNORECASE)
     return sorted({int(number) for number in found})
 
 
 def title_with_closes(title, html):
     """題に、本文で宣言した解決の参照のうち題に無いものを足す。"""
     title = re.sub(r"[\t\n\r]", " ", title)
-    refs = [f"#{n}" for n in closes(html, "#") if not re.search(rf"#{n}\b", title)]
-    refs += [f"TASK-{n}" for n in closes(html, "TASK-") if not re.search(rf"TASK-{n}\b", title, re.IGNORECASE)]
+    refs = [f"#{n}" for n in closes(html, "#") if not re.search(rf"#{n}{AFTER}", title)]
+    refs += [
+        f"TASK-{n}" for n in closes(html, "TASK-")
+        if not re.search(rf"{BEFORE}TASK-{n}{AFTER}", title, re.IGNORECASE)
+    ]
     return title + (f"（{'、'.join(refs)} を解決）" if refs else "")
 
 
@@ -87,12 +104,18 @@ def read_pull_requests(stream):
 
 def main():
     rows = []
+    unplaced = []
     for pr in read_pull_requests(sys.stdin):
+        # マージコミットの無い PR は履歴のどこにも結べない。黙って落とさず、番号を知らせる
         if pr["mergeCommit"] is None:
+            unplaced.append(pr["number"])
             continue
         rows.append((pr["number"], pr["mergeCommit"]["oid"], title_with_closes(pr["title"], pr["bodyHTML"])))
     for number, sha, title in sorted(rows):
         print(sha, number, title, sep="\t")
+    if unplaced:
+        numbers = "、".join(f"#{n}" for n in sorted(unplaced))
+        print(f"マージコミットが無いので載せない PR が {len(unplaced)} 件ある: {numbers}", file=sys.stderr)
 
 
 if __name__ == "__main__":

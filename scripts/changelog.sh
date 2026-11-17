@@ -10,9 +10,11 @@
 #         scripts/changelog.sh latest          最新の版のタグを出す（GitHub へ取りに行かない）
 # 版のタグは cliff.toml の tag_pattern（vX.Y.Z）に当たるものだけ。ここと changelog.yml はそれを読む
 # 環境変数: GIT_CLIFF（git-cliff の実行ファイル。既定は PATH の git-cliff、無ければ npx で版を固定して呼ぶ）
-#           CHANGELOG_PR_MAP（PR の一覧の TSV。渡せば GitHub へ取りに行かない）
+#           CHANGELOG_PR_MAP（PR の一覧の TSV。渡せば write / notes は GitHub へ取りに行かない。
+#           check は渡しても、closes.md を GitHub に描画させるので認証とネットワークが要る）
 # マージ済みの PR の一覧を GitHub から取るので、gh と、その認証（gh auth login か GH_TOKEN）が要る。
-# 一覧を表にするのは scripts/changelog_pr_map.py（python3。標準ライブラリだけ）。
+# 要るコマンドは gh・jq（check）・python3。一覧を表にするのは scripts/changelog_pr_map.py
+# （標準ライブラリだけ）。
 set -euo pipefail
 
 # release-cli.yml と changelog.yml の tool: git-cliff@<版> と揃える
@@ -172,6 +174,10 @@ check() {
   is_version_tag v0.1.52 || fail "v0.1.52 を版のタグと見ていない"
   is_version_tag v0.1.53-rc.1 && fail "v0.1.53-rc.1 を版のタグと見ている"
   [ "$(previous_tag v0.1.52)" = v0.1.51 ] || fail "v0.1.52 の前の版が v0.1.51 でない"
+  # cliff.toml のリンクの境界は ASCII の英数字で見る（日本語に接した参照もリンクにし、色の #1e1e1e はリンクにしない）
+  out=$(cliff --strip header --unreleased --with-commit 'feat: これでTASK-5、TASK-509の対応、#12の件、色 #1e1e1e (#1)')
+  grep -qF -- '- これで[TASK-5](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-5)、[TASK-509](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-509)の対応、[#12](https://github.com/koyori-app/task/issues/12)の件、色 #1e1e1e ([#1](https://github.com/koyori-app/task/pull/1))' <<<"$out" ||
+    fail "日本語に接した TASK-N・#N のリンクが違う"
 
   # CHANGELOG.md は、先頭の版までを生成し直した結果と一致する
   [ -f "$root/CHANGELOG.md" ] || fail "CHANGELOG.md が無い: scripts/changelog.sh write"

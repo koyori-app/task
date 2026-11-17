@@ -33,10 +33,12 @@ body = """
 trim = false
 # 生成した全文（タグのメッセージを含む）にかける。PR へのリンクにした残りの #N と TASK-N をリンクにする
 postprocessors = [
+  # 語の境界は ASCII の英数字だけで見る（\w と \b は日本語の文字も語の一部と見るので、
+  # 「これでTASK-5」「TASK-509の対応」がリンクにならない）。scripts/changelog_pr_map.py と同じ規則
   # #N は Issue へのリンク（GitHub は PR の番号なら PR へ送る）
-  { pattern = '(^|[^\[\w&])#(\d+)\b', replace = "$1[#$2](https://github.com/koyori-app/task/issues/$2)" },
+  { pattern = '(^|[^\[A-Za-z0-9_&])#([0-9]+)(?-u:\b)', replace = "$1[#$2](https://github.com/koyori-app/task/issues/$2)" },
   # TASK-N は task のタスクへのリンク
-  { pattern = '(^|[^\[/\w])TASK-(\d+)\b', replace = "$1[TASK-$2](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-$2)" },
+  { pattern = '(^|[^\[/A-Za-z0-9_])TASK-([0-9]+)(?-u:\b)', replace = "$1[TASK-$2](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-$2)" },
 ]
 
 [git]
