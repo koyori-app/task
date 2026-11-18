@@ -10,6 +10,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import init, { render_canvas_commands, render_svg } from '@koyori-app/arc';
 
 import { chartProps, GROUP_H, HEADER_H, rowHeight, type ChartInput } from '../chart';
+import { dependencyEdges } from '../dependencies';
 import { layoutGantt, type GanttSource } from '../layout';
 import { viewTo } from '../view';
 
@@ -334,5 +335,26 @@ describe('依存の矢印（本物の wasm）', () => {
           [DEP_COLOR, DEP_DONE_COLOR, DEP_DELAYED_COLOR].includes(op.StrokePath.color_id),
       ),
     ).toBe(false);
+  });
+});
+
+describe('済んだ棒の「待ち」（本物の wasm）', () => {
+  it('未完了の課題が、予定開始を過ぎて済んだ課題を阻んでも、待ちの字も破線も描かない', () => {
+    // late（未完了）が done（11/9 から、済み）を阻む。done の予定開始は今日（11/11）より前
+    const base = input();
+    const { edges } = dependencyEdges({
+      relations: [{ from_task_id: 'late', to_task_id: 'done' }],
+      tasks: TASKS,
+      layout: base.layout,
+      timeZone: TZ,
+      today: TODAY,
+    });
+    const { svg, buffer } = render({ deps: edges });
+    expect(buffer.error).toBeUndefined();
+    expect(svg).not.toContain('待ち');
+    // 今日の線も 4,3 の破線なので、破線は依存の辺だけが使う canvas の StrokeDashedPath で見る
+    expect((buffer.ops as { StrokeDashedPath?: unknown }[]).some((op) => op.StrokeDashedPath)).toBe(
+      false,
+    );
   });
 });

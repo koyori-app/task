@@ -101,6 +101,13 @@ describe('dependencyState', () => {
     expect(dependencyState(byId.get('a')!, byId.get('c')!, TZ, TODAY)).toBe('normal');
   });
 
+  it('阻まれる課題が自ら済んでおれば、予定開始を過ぎていても待ちで遅れにしない', () => {
+    const doneB = { ...byId.get('b')!, status: { is_done_state: true } };
+    expect(dependencyState(byId.get('a')!, doneB, TZ, TODAY)).toBe('normal');
+    // 阻む課題が済んでおれば、阻まれる課題が済んでいても done のまま
+    expect(dependencyState(byId.get('d')!, doneB, TZ, TODAY)).toBe('done');
+  });
+
   it('予定開始の当日は遅れ（今日以前）', () => {
     const today = '2026-11-09';
     expect(dependencyState(byId.get('a')!, byId.get('b')!, TZ, today)).toBe('delayed');
@@ -212,5 +219,27 @@ describe('dependencyEdges', () => {
     expect(marks.get('b')).toEqual({ count: 2, waitingFor: ['REL-1'] });
     expect(marks.get('c')).toEqual({ count: 1, waitingFor: [] });
     expect(marks.get('m')).toBeUndefined();
+  });
+});
+
+describe('済んだ棒の「待ち」', () => {
+  it('阻まれる課題が済んでおれば、辺の添えにも行の印にも「<キー> 待ち」を付けない', () => {
+    const tasks = [byId.get('a')!, { ...byId.get('b')!, status: { is_done_state: true } }];
+    const { edges: out, marks } = dependencyEdges({
+      relations: [rel('a', 'b')],
+      tasks,
+      layout: layoutGantt(tasks, {
+        groupBy: 'project',
+        collapsed: new Set(),
+        memberIds: [],
+        members: [],
+        timeZone: TZ,
+        today: TODAY,
+      }),
+      timeZone: TZ,
+      today: TODAY,
+    });
+    expect(out).toEqual([{ blocker_task_id: 'a', blocked_task_id: 'b', state: 'normal' }]);
+    expect(marks.get('b')?.waitingFor).toEqual([]);
   });
 });

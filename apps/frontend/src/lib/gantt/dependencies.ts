@@ -40,8 +40,9 @@ export type DependencyInput = {
 };
 
 /**
- * 辺の状態を決める。阻む課題が完了なら `done`。完了しておらず、阻まれる課題の予定開始
- * （無ければ図の棒の始まり）が今日以前なら `delayed`。それ以外は `normal`。
+ * 辺の状態を決める。阻む課題が完了なら `done`。阻まれる課題が自ら完了しておれば、もう待って
+ * いないので `normal`。どちらも完了しておらず、阻まれる課題の予定開始（無ければ図の棒の始まり）が
+ * 今日以前なら `delayed`。それ以外は `normal`。
  */
 export function dependencyState(
   blocker: GanttSource,
@@ -50,6 +51,8 @@ export function dependencyState(
   today: string,
 ): DependencyState {
   if (blocker.status.is_done_state) return 'done';
+  // 済んだ棒に「待ち」を付けない
+  if (blocked.status.is_done_state) return 'normal';
   const start = taskDates(blocked, timeZone)?.start;
   return start && start <= today ? 'delayed' : 'normal';
 }
