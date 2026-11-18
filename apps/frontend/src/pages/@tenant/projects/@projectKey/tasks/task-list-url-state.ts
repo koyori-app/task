@@ -23,7 +23,7 @@ export type TaskListUrlState = {
   q: string;
 };
 
-export const DEFAULT_TASK_LIST_URL_STATE: TaskListUrlState = {
+const DEFAULT_TASK_LIST_URL_STATE: TaskListUrlState = {
   view: 'list',
   page: 1,
   q: '',

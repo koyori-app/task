@@ -24,9 +24,6 @@ import type { Element, ElementContent, Root } from 'hast';
 import { SKIP, visit } from 'unist-util-visit';
 import { KFM_MEDIA_TAG } from './_tag';
 
-export { KFM_MEDIA_TAG } from './_tag';
-export { kfmDriveUrlSanitizeSchema } from './schema';
-
 export type DriveMediaKind = 'image' | 'video' | 'audio';
 
 const DRIVE_CONTENT_RE =

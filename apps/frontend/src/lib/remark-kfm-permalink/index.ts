@@ -21,7 +21,6 @@ import { parseGithubPermalink } from './_parse';
 import { KFM_PERMALINK_TAG } from './_tag';
 
 export { KFM_PERMALINK_TAG } from './_tag';
-export type { GithubPermalink } from './_parse';
 export { buildSnippetFence, languageFlagForPath, parseGithubPermalink } from './_parse';
 
 // mdast-util-to-hast (remark-rehype 内部) と同一の Data 拡張 (remark-kfm-mermaid と同型)。

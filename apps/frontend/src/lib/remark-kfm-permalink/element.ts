@@ -30,9 +30,7 @@ import { buildSnippetFence, languageFlagForPath, parseGithubPermalink } from './
 import type { GithubPermalink } from './_parse';
 import { KFM_PERMALINK_TAG } from './_tag';
 
-export { KFM_PERMALINK_TAG } from './_tag';
-
-export type KfmPermalinkState = 'rendered' | 'unavailable';
+type KfmPermalinkState = 'rendered' | 'unavailable';
 
 type LoadedSnippet = {
   readonly startLine: number;
