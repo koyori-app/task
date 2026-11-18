@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import LoadErrorState from '@/components/LoadErrorState.vue';
 import { ChevronDown, ChevronLeft, ChevronRight, Loader2 } from '@lucide/vue';
-import { computed, onErrorCaptured, onMounted, ref, shallowRef, useTemplateRef, watch } from 'vue';
+import { computed, onErrorCaptured, ref, shallowRef, useTemplateRef, watch } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
 import { useElementSize, useMediaQuery, useWindowSize } from '@vueuse/core';
 import { navigate } from 'vike/client/router';
@@ -313,11 +313,16 @@ const backend = computed(() =>
 
 // 図の箱の幅いっぱいに範囲の日を割る
 const chartBox = useTemplateRef<HTMLElement>('chartBox');
-// 頁を縦に巻く外の域。組まれた後に図の箱から辿って決める
+// 頁を縦に巻く外の域。図の箱から辿って決める。図の箱は予定が読めるまで組まれず、読み直しで
+// 作り直されることもあるので、組まれるたびに決め直す（組まれる前に一度だけ決めると window に固まる）
 const scrollContainer = shallowRef<HTMLElement | Window | null>(null);
-onMounted(() => {
-  scrollContainer.value = scrollParentOf(chartBox.value);
-});
+watch(
+  chartBox,
+  (box) => {
+    scrollContainer.value = box ? scrollParentOf(box) : null;
+  },
+  { immediate: true, flush: 'post' },
+);
 const { width: chartBoxWidth } = useElementSize(chartBox);
 const dayWidth = computed(() => fitDayWidth(chartBoxWidth.value, scale.value, compact.value));
 
@@ -409,6 +414,7 @@ watch(
     if (next.scale !== scale.value) scale.value = next.scale;
     if (next.groupBy !== groupBy.value) groupBy.value = next.groupBy;
     if (next.progressLine !== urlProgressLine.value) urlProgressLine.value = next.progressLine;
+    if (next.dependencies !== urlDependencies.value) urlDependencies.value = next.dependencies;
     if (next.selected !== selectedTaskId.value) {
       overlayParentStack.value = [];
       selectedTaskId.value = next.selected;

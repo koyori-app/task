@@ -115,6 +115,15 @@ const manyTasks: ScheduleTask[] = Array.from({ length: 20 }, (_, i) =>
   }),
 );
 
+// 頁の main を巻く確かめ。行が main の高さを大きく越える数にする（範囲 7/13〜7/19 に収める）
+const mainScrollTasks: ScheduleTask[] = Array.from({ length: 60 }, (_, i) =>
+  task(200 + i, {
+    title: `巻いた先の確かめ ${i + 1}`,
+    planned_start_on: `2026-07-${13 + (i % 5)}`,
+    soft_deadline: `2026-07-${15 + (i % 5)}T00:00:00Z`,
+  }),
+);
+
 /**
  * arc-vue は `navigator.deviceMemory` と `hardwareConcurrency` で端末の格を判じる。
  * 物語の間だけ値を差し替え、終わったら外して元の値（Navigator.prototype の getter）に戻す。
@@ -371,5 +380,41 @@ export const DependencyToggle: Story = {
     await expect(canvas.getByText('待ちで遅れ')).toBeInTheDocument();
     await userEvent.click(canvas.getByRole('switch', { name: '依存の矢印' }));
     await waitFor(() => expect(canvas.queryByTestId('gantt-legend-dependency')).toBeNull());
+  },
+};
+
+// 頁の縦のスクロールは layout の main（overflow-y: auto）が持つ。低性能の端末（deviceMemory の無い
+// Firefox・Safari を含む）では、図は外のスクロール域に見える行だけを描くので、main を巻いた先の行も
+// 描かれねばならない（外の域を window に取り違えると、巻いた先が描かれない）
+export const LowDeviceMainScroll: Story = {
+  name: '低性能の端末で頁の main を巻く',
+  decorators: [
+    () => ({ template: '<main style="height: 480px; overflow-y: auto"><story /></main>' }),
+    withContext(),
+  ],
+  beforeEach: () => {
+    const restoreDevice = emulateDevice(undefined, 2);
+    const restoreFetch = createMockFetch({ tasks: mainScrollTasks, unscheduled: [] });
+    return () => {
+      restoreFetch();
+      restoreDevice();
+    };
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByText('巻いた先の確かめ 1')).resolves.toBeInTheDocument();
+    const first = mainScrollTasks[0]!.id;
+    const last = mainScrollTasks[mainScrollTasks.length - 1]!.id;
+    await waitFor(() =>
+      expect(canvasElement.querySelector(`[data-task-id="${first}"]`)).not.toBeNull(),
+    );
+    // 巻く前は、main の外の下の行は描かれていない（見える行だけを描く）
+    await expect(canvasElement.querySelector(`[data-task-id="${last}"]`)).toBeNull();
+    const main = canvasElement.querySelector('main')!;
+    main.scrollTop = main.scrollHeight;
+    main.dispatchEvent(new Event('scroll'));
+    await waitFor(() =>
+      expect(canvasElement.querySelector(`[data-task-id="${last}"]`)).not.toBeNull(),
+    );
   },
 };

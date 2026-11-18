@@ -49,7 +49,7 @@ vi.mock('@koyori-app/arc-vue', async () => {
   return {
     GanttChart: defineComponent({
       name: 'GanttChart',
-      props: ['tasks', 'today', 'deviceTier'],
+      props: ['tasks', 'today', 'deps', 'scrollContainer'],
       emits: ['task-click'],
       setup: () => () => h('div'),
     }),
@@ -108,7 +108,10 @@ const UNSCHEDULED = [
   { ...scheduleTask('u-ops-2', { id: 'p-ops', key: 'OPS' }), soft_deadline: null },
 ];
 
-function mountPage({ unscheduledFailures = 0 } = {}) {
+function mountPage({
+  unscheduledFailures = 0,
+  attachTo,
+}: { unscheduledFailures?: number; attachTo?: HTMLElement } = {}) {
   let failuresLeft = unscheduledFailures;
   // 本物の API と同じく、project_id があればそのプロジェクトの課題だけを返す
   GET.mockImplementation(
@@ -142,6 +145,7 @@ function mountPage({ unscheduledFailures = 0 } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return mount(Page, {
     global: { plugins: [[VueQueryPlugin, { queryClient }], createPinia()] },
+    ...(attachTo ? { attachTo } : {}),
   });
 }
 
@@ -233,6 +237,55 @@ describe('ガントで開いたタスクを URL に持つ（TASK-474）', () => 
     // 戻った URL を古い状態で上書きしない
     const params = new URL(window.location.href).searchParams;
     expect(params.get('selected')).toBe('OPS-1');
+    expect(params.get('scale')).toBe('week');
+  });
+});
+
+describe('ガントの外のスクロール域と依存の切り替えの移り', () => {
+  const relationCalls = () =>
+    GET.mock.calls.filter(([path]) => String(path).endsWith('/schedule/relations')).length;
+
+  it('頁を巻く main の中では、予定を読めた後に図の箱から辿った main を外のスクロール域に渡す', async () => {
+    media.wide = true;
+    // +Layout.vue の main と同じく縦に巻く祖先。予定を読む間は図の箱が組まれず、読めた後に組まれる
+    const main = document.createElement('main');
+    main.style.overflowY = 'auto';
+    document.body.appendChild(main);
+    try {
+      const wrapper = mountPage({ attachTo: main });
+      await flushPromises();
+
+      expect(wrapper.getComponent({ name: 'GanttChart' }).props('scrollContainer')).toBe(main);
+    } finally {
+      main.remove();
+    }
+  });
+
+  it('同じページの移りで deps が変われば、矢印の切り替えと関係の取得を合わせ、URL を古い deps で上書きしない', async () => {
+    media.wide = true;
+    window.history.replaceState(null, '', '/acme/gantt?deps=on');
+    page.ctx.urlParsed = { searchAll: { deps: ['on'] } };
+    const wrapper = mountPage();
+    await flushPromises();
+    // data-testid は switch の要素そのものか、その外に付く
+    const toggle = () => {
+      const el = wrapper.get('[data-testid="gantt-dependencies"]');
+      return el.attributes('role') === 'switch' ? el : el.get('[role="switch"]');
+    };
+    expect(toggle().attributes('aria-checked')).toBe('true');
+    const before = relationCalls();
+    expect(before).toBeGreaterThan(0);
+
+    // 「戻る」で deps=off と目盛りのある URL へ
+    window.history.replaceState(null, '', '/acme/gantt?deps=off&scale=week');
+    page.ctx.urlParsed = { searchAll: { deps: ['off'], scale: ['week'] } };
+    await flushPromises();
+
+    expect(toggle().attributes('aria-checked')).toBe('false');
+    expect(wrapper.getComponent({ name: 'GanttChart' }).props('deps')).toEqual([]);
+    expect(relationCalls()).toBe(before);
+    const params = new URL(window.location.href).searchParams;
+    expect(params.get('deps')).toBe('off');
     expect(params.get('scale')).toBe('week');
   });
 });
