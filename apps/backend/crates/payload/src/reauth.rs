@@ -21,6 +21,9 @@ pub struct ReauthStatusResponse {
     pub fresh: bool,
     /// 有効期間の切れる時刻（RFC 3339）。`fresh` でなければ null
     pub expires_at: Option<String>,
+    /// 切れるまでの残りの秒数（切り捨て）。`fresh` でなければ null。
+    /// 画面は端末の時計でなくこの値で判じる（`expires_at` は端末の時計がずれると読み違える）
+    pub remaining_secs: Option<u64>,
     /// 有効期間の長さ（秒）。本人確認をした後、この間は再認証を求めない
     pub window_secs: u64,
     pub methods: ReauthMethods,

@@ -30804,6 +30804,12 @@
           "methods": {
             "$ref": "#/components/schemas/ReauthMethods"
           },
+          "remaining_secs": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "切れるまでの残りの秒数（切り捨て）。`fresh` でなければ null。\n画面は端末の時計でなくこの値で判じる（`expires_at` は端末の時計がずれると読み違える）",
+            "minimum": 0
+          },
           "window_secs": {
             "type": "integer",
             "format": "int64",

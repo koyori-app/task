@@ -673,6 +673,9 @@ async fn reauth_status_reports_freshness_and_the_usable_methods() {
         left > 0 && left <= (WINDOW_SECS as i64) * 1000,
         "expires in {left} ms"
     );
+    // 端末の時計に依らずに判じられるよう、残りの秒数も返す
+    let remaining = status["remaining_secs"].as_u64().expect("remaining_secs");
+    assert!(remaining <= WINDOW_SECS, "{remaining}");
     assert_eq!(
         status["methods"],
         serde_json::json!({ "password": true, "passkey": false, "oauth": [] })
@@ -683,6 +686,7 @@ async fn reauth_status_reports_freshness_and_the_usable_methods() {
     let status = reauth_status(&app).await;
     assert_eq!(status["fresh"], serde_json::json!(false));
     assert_eq!(status["expires_at"], serde_json::Value::Null);
+    assert_eq!(status["remaining_secs"], serde_json::Value::Null);
 
     // 問うだけでは印は立たない（問うた後の操作は断られる）
     let start = app

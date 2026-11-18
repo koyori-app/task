@@ -61,13 +61,11 @@ pub fn fresh_until(reauthed_at_ms: Option<i64>, now_ms: i64, window_secs: u64) -
     reauthed_at_ms.map(|at| at.saturating_add(window_ms))
 }
 
-/// セッションの印が有効期間の内なら、期間の切れる時刻（ミリ秒）。画面が操作の前に再認証の要否を問うために使う。
-pub fn recent_auth_until(session: &Session<SessionRedisPool>, window_secs: u64) -> Option<i64> {
-    fresh_until(
-        session.get::<i64>(REAUTH_SESSION_KEY),
-        Utc::now().timestamp_millis(),
-        window_secs,
-    )
+/// 印が有効期間の内なら、切れるまでの残りの秒数（切り捨て）。内でなければ `None`。
+/// 画面は端末の時計でなくこの値で判じる（端末の時計がずれても、確かめた直後を切れたと見誤らない）。
+pub fn remaining_secs(reauthed_at_ms: Option<i64>, now_ms: i64, window_secs: u64) -> Option<u64> {
+    let until = fresh_until(reauthed_at_ms, now_ms, window_secs)?;
+    u64::try_from(until.saturating_sub(now_ms) / 1000).ok()
 }
 
 #[cfg(test)]
@@ -125,6 +123,15 @@ mod tests {
         assert_eq!(fresh_until(None, NOW, 300), None);
         assert_eq!(fresh_until(Some(NOW - 300_001), NOW, 300), None);
         assert_eq!(fresh_until(Some(NOW + 6_000), NOW, 300), None);
+    }
+
+    #[test]
+    fn remaining_secs_counts_down_from_the_window() {
+        assert_eq!(remaining_secs(Some(NOW), NOW, 300), Some(300));
+        assert_eq!(remaining_secs(Some(NOW - 120_500), NOW, 300), Some(179));
+        assert_eq!(remaining_secs(Some(NOW - 300_000), NOW, 300), Some(0));
+        assert_eq!(remaining_secs(Some(NOW - 300_001), NOW, 300), None);
+        assert_eq!(remaining_secs(None, NOW, 300), None);
     }
 
     #[test]

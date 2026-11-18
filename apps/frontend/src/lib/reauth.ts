@@ -10,12 +10,16 @@ export const REAUTH_PATH = '/v1/auth/reauth';
  * 切れる間際の印は、切れたとみなす。問うてから操作を撃つまでの間に切れると、連携の開始は
  * 全画面の遷移なので 403 の JSON の頁で止まる。
  */
-export const REAUTH_MARGIN_MS = 15_000;
+export const REAUTH_MARGIN_SECS = 15;
 
-/** 再認証を求めずに操作を撃てるか。 */
-export function isReauthFresh(status: ReauthStatus, nowMs: number): boolean {
-  if (!status.fresh || !status.expires_at) return false;
-  return Date.parse(status.expires_at) - nowMs > REAUTH_MARGIN_MS;
+/**
+ * 再認証を求めずに操作を撃てるか。server の返す残りの秒数で判じる。`expires_at` を端末の時計と
+ * 比べると、端末の時計が進んでいるだけで、確かめた直後でも切れたと見誤る（連携でしか確かめられない
+ * 利用者は、戻るたびに本人確認が開き直って進めない）。
+ */
+export function isReauthFresh(status: ReauthStatus): boolean {
+  if (!status.fresh || status.remaining_secs == null) return false;
+  return status.remaining_secs > REAUTH_MARGIN_SECS;
 }
 
 /**

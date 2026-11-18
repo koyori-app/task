@@ -8,7 +8,7 @@ use axum::{Json, extract::State, http::StatusCode};
 use axum_session::Session;
 use axum_session_redispool::SessionRedisPool;
 use axum_valid::Valid;
-use chrono::DateTime;
+use chrono::{DateTime, Utc};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use webauthn_rs::prelude::{PublicKeyCredential, WebauthnError};
 
@@ -23,7 +23,7 @@ use service::passkey_challenges;
 use service::passkeys::{
     client_data_is_same_origin, count_user_passkeys, find_by_credential_id, load_user_passkeys,
 };
-use service::reauth::{mark_reauthed, recent_auth_until};
+use service::reauth::{REAUTH_SESSION_KEY, fresh_until, mark_reauthed, remaining_secs};
 
 type AppSession = Session<SessionRedisPool>;
 
@@ -44,9 +44,13 @@ pub async fn reauth_status(
     State(state): State<AppState>,
     user: CurrentUser,
 ) -> Result<Json<ReauthStatusResponse>, AuthError> {
-    let expires_at = recent_auth_until(&session, state.settings.reauth_window_secs)
+    let now_ms = Utc::now().timestamp_millis();
+    let reauthed_at = session.get::<i64>(REAUTH_SESSION_KEY);
+    let window = state.settings.reauth_window_secs;
+    let expires_at = fresh_until(reauthed_at, now_ms, window)
         .and_then(DateTime::from_timestamp_millis)
         .map(|at| at.to_rfc3339());
+    let remaining_secs = remaining_secs(reauthed_at, now_ms, window);
     let passkey = count_user_passkeys(&state.db, user.id).await? > 0;
     let connections = oauth_connections::Entity::find()
         .filter(oauth_connections::Column::UserId.eq(user.id))
@@ -68,6 +72,7 @@ pub async fn reauth_status(
     Ok(Json(ReauthStatusResponse {
         fresh: expires_at.is_some(),
         expires_at,
+        remaining_secs,
         window_secs: state.settings.reauth_window_secs,
         methods: ReauthMethods {
             password: user.password_hash.is_some(),
