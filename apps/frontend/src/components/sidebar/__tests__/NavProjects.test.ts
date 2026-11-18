@@ -150,6 +150,43 @@ describe('NavProjects', () => {
     expect(visibleHrefs(wrapper)).not.toContain('/acme/projects/ME01/tasks');
   });
 
+  describe('現在の URL に追従して開く（TASK-474）', () => {
+    it('後からそのプロジェクトへ移ると開き、手で開いた他のプロジェクトは閉じない', async () => {
+      const wrapper = mountNavProjects({ currentPath: '/acme' });
+      expect(findRowButton(wrapper, 'Team Alpha')!.attributes('aria-expanded')).toBe('false');
+      await findRowButton(wrapper, 'Personal')!.trigger('click');
+      expect(findRowButton(wrapper, 'Personal')!.attributes('aria-expanded')).toBe('true');
+
+      await wrapper.setData({ currentPath: '/acme/projects/ALPHA/tasks' });
+      expect(findRowButton(wrapper, 'Team Alpha')!.attributes('aria-expanded')).toBe('true');
+      expect(findChildLink(wrapper, '/acme/projects/ALPHA/tasks')!.isVisible()).toBe(true);
+      expect(findRowButton(wrapper, 'Personal')!.attributes('aria-expanded')).toBe('true');
+    });
+
+    it('手で畳んだ後は、同じプロジェクトの中で移っても畳んだまま', async () => {
+      const wrapper = mountNavProjects({ currentPath: '/acme/projects/ALPHA/tasks' });
+      await findRowButton(wrapper, 'Team Alpha')!.trigger('click');
+      expect(findRowButton(wrapper, 'Team Alpha')!.attributes('aria-expanded')).toBe('false');
+
+      await wrapper.setData({ currentPath: '/acme/projects/ALPHA/docs' });
+      expect(findRowButton(wrapper, 'Team Alpha')!.attributes('aria-expanded')).toBe('false');
+
+      // 見出しを押せば開き直せる
+      await findRowButton(wrapper, 'Team Alpha')!.trigger('click');
+      expect(findRowButton(wrapper, 'Team Alpha')!.attributes('aria-expanded')).toBe('true');
+    });
+
+    it('プロジェクト一覧が後から届いても、現在のプロジェクトを開く', async () => {
+      const wrapper = mountNavProjects({
+        currentPath: '/acme/projects/ALPHA/tasks',
+        projects: [],
+        loading: true,
+      });
+      await wrapper.setData({ projects: sampleProjects, loading: false });
+      expect(findRowButton(wrapper, 'Team Alpha')!.attributes('aria-expanded')).toBe('true');
+    });
+  });
+
   it('子の active は境界付き前方一致（接頭辞違いの誤マッチなし・配下ページはマッチ）', () => {
     // 配下ページ（タスク詳細）でも「タスク」が active
     const detail = mountNavProjects({ currentPath: '/acme/projects/ALPHA/tasks/ALPHA-1' });

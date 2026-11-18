@@ -68,6 +68,7 @@ import {
   chartHeight,
   chartProps,
   chartRows,
+  GANTT_PALETTE,
   GROUP_H,
   HEADER_H,
   rowHeight,
@@ -127,6 +128,8 @@ const scale = ref<GanttScale>(initial.scale);
 const groupBy = ref<GanttGroupBy>(initial.groupBy);
 const urlProgressLine = ref<boolean | null>(initial.progressLine);
 const urlDependencies = ref<boolean | null>(initial.dependencies);
+// オーバーレイで開いているタスク（seq key）。カレンダーと同じく `?selected=` に持つ
+const selectedTaskId = ref<string | null>(initial.selected);
 const viewFrom = computed(() => from.value ?? defaultFrom(today, scale.value, compact.value));
 const to = computed(() => viewTo(viewFrom.value, scale.value, compact.value));
 
@@ -147,7 +150,7 @@ function setDependencies(on: boolean) {
   preferences.set('ganttDependencies', on);
 }
 
-watch([from, memberIds, scale, groupBy, urlProgressLine, urlDependencies], () => {
+watch([from, memberIds, scale, groupBy, urlProgressLine, urlDependencies, selectedTaskId], () => {
   if (typeof window === 'undefined') return;
   const url = applyGanttUrlState(
     new URL(window.location.href),
@@ -158,6 +161,7 @@ watch([from, memberIds, scale, groupBy, urlProgressLine, urlDependencies], () =>
       groupBy: groupBy.value,
       progressLine: urlProgressLine.value,
       dependencies: urlDependencies.value,
+      selected: selectedTaskId.value,
     },
     today,
   );
@@ -373,7 +377,6 @@ watch(
 
 // ---- 棒を押した時: カレンダーと同じオーバーレイと戻り先の積み ----
 const canInline = wide;
-const selectedTaskId = ref<string | null>(null);
 const overlayParentStack = ref<string[]>([]);
 const overlayOpenSeqKey = computed(() => (canInline.value ? selectedTaskId.value : null));
 const overlayTaskSeqKey = ref<string | null>(null);
@@ -385,6 +388,25 @@ watch(
   { immediate: true },
 );
 const overlayProjectKey = computed(() => overlayTaskSeqKey.value?.replace(/-\d+$/, '') ?? '');
+
+// 同じページへのクライアント遷移（サイドバーのガントを押す・戻る等）ではページが作り直されないので、
+// URL を読み直して状態を合わせる。今の状態と同じ項目は入れない（自分の replaceState は
+// pageContext を動かさないので循環しない）
+watch(
+  () => pageContext.urlParsed?.searchAll,
+  (searchAll) => {
+    const next = parseGanttUrlState(searchAll, today);
+    if (next.from !== from.value) from.value = next.from;
+    if (next.memberIds.join('\n') !== memberIds.value.join('\n')) memberIds.value = next.memberIds;
+    if (next.scale !== scale.value) scale.value = next.scale;
+    if (next.groupBy !== groupBy.value) groupBy.value = next.groupBy;
+    if (next.progressLine !== urlProgressLine.value) urlProgressLine.value = next.progressLine;
+    if (next.selected !== selectedTaskId.value) {
+      overlayParentStack.value = [];
+      selectedTaskId.value = next.selected;
+    }
+  },
+);
 
 function openTask(task: { seq_key: string; seq_id: number; project: { key: string } }) {
   if (!canInline.value) {
@@ -434,6 +456,10 @@ function retryFailed() {
   if (unscheduledQuery.isError.value) void unscheduledQuery.refetch();
   if (relationsQuery.isError.value) void relationsQuery.refetch();
 }
+
+// 凡例の見本と左の一覧の群れの見出しは、図と同じ色の名から引く（token を書き写すと、palette を
+// 直した時に食い違う）
+const LEGEND_BAR = `linear-gradient(to right, ${GANTT_PALETTE.TierLow} 40%, ${GANTT_PALETTE.BarBg} 40%)`;
 </script>
 
 <template>
@@ -514,41 +540,36 @@ function retryFailed() {
       <span class="inline-flex items-center gap-1">
         <span
           class="inline-block h-2.5 w-6 rounded-sm"
-          style="
-            background: linear-gradient(
-              to right,
-              var(--koyori-color-accent) 40%,
-              var(--koyori-color-accent-subtle) 40%
-            );
-          "
+          :style="{ background: LEGEND_BAR }"
           aria-hidden="true"
+          data-testid="gantt-legend-bar"
         />
         予定開始〜目安の期限（濃い所が進み）
       </span>
       <span class="inline-flex items-center gap-1">
         <span
           class="inline-block size-2 rotate-45"
-          style="background: var(--koyori-color-danger)"
+          :style="{ background: GANTT_PALETTE.HardDeadline }"
           aria-hidden="true"
+          data-testid="gantt-legend-hard"
         />
         厳守の期限
       </span>
       <span class="inline-flex items-center gap-1">
         <span
           class="inline-block h-2.5 w-6 rounded-sm border"
-          style="
-            background: var(--koyori-color-danger-subtle);
-            border-color: var(--koyori-color-danger);
-          "
+          :style="{ background: GANTT_PALETTE.WarnBg, borderColor: GANTT_PALETTE.WarnStroke }"
           aria-hidden="true"
+          data-testid="gantt-legend-overdue"
         />
         目安を過ぎた
       </span>
       <span class="inline-flex items-center gap-1">
         <span
           class="inline-block h-3 w-0.5"
-          style="background: var(--koyori-color-text)"
+          :style="{ background: GANTT_PALETTE.Today }"
           aria-hidden="true"
+          data-testid="gantt-legend-today"
         />
         今日
       </span>
@@ -658,7 +679,7 @@ function retryFailed() {
           <button
             type="button"
             class="flex w-full items-center gap-1 px-2 text-left text-sm font-semibold"
-            :style="{ height: `${GROUP_H}px`, background: 'var(--koyori-color-surface-disabled)' }"
+            :style="{ height: `${GROUP_H}px`, background: GANTT_PALETTE.GroupRow }"
             :aria-expanded="!group.collapsed"
             :data-testid="`gantt-group-${group.key}`"
             @click="toggleGroup(group.key)"

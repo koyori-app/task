@@ -3,10 +3,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use apalis::prelude::{
-    BackoffConfig, BoxDynError, Data, IntervalStrategy, StrategyBuilder, TaskSink,
-};
-use apalis_postgres::{Config, JsonCodec, PgPool, PgTask, PostgresStorage};
+use apalis::prelude::{BoxDynError, Data, TaskSink};
+use apalis_postgres::{Config, PgPool, PostgresStorage};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -17,7 +15,6 @@ use service::forge::pull_requests::PullRequestSnapshot;
 use crate::JobState;
 
 pub const QUEUE_NAME: &str = "github_webhook";
-pub const MAX_RETRIES: usize = 5;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GithubWebhookJob {
@@ -36,23 +33,16 @@ pub struct GithubWebhookJob {
     pub backfill_page: Option<u32>,
 }
 
-pub type GithubWebhookStorage = PostgresStorage<
-    GithubWebhookJob,
-    apalis_postgres::CompactType,
-    JsonCodec<apalis_postgres::CompactType>,
-    apalis_postgres::PgNotify,
->;
+pub type GithubWebhookStorage = PostgresStorage<GithubWebhookJob>;
 
 pub fn build_storage(pool: &PgPool, _settings: &Settings) -> GithubWebhookStorage {
-    let config = Config::new(QUEUE_NAME).with_poll_interval(
-        StrategyBuilder::new()
-            .apply(
-                IntervalStrategy::new(Duration::from_secs(2))
-                    .with_backoff(BackoffConfig::default()),
-            )
-            .build(),
-    );
-    PostgresStorage::new_with_notify(pool, &config)
+    PostgresStorage::new(pool).with_config(Config::default().queue(QUEUE_NAME))
+}
+
+/// ワーカーが使う backend。INSERT の通知（LISTEN）と、取りこぼしを拾う定期の poll を併用する。
+/// ワーカーの世代ごとに作り直す（通知の接続は世代ごとに張る）。
+pub fn worker_backend(storage: &GithubWebhookStorage) -> crate::WorkerBackend<GithubWebhookJob> {
+    crate::worker_backend(storage, Duration::from_secs(2))
 }
 
 pub async fn setup(
@@ -69,7 +59,7 @@ pub async fn enqueue(
 ) -> Result<(), anyhow::Error> {
     let mut storage = storage.clone();
     storage
-        .push(job)
+        .push_task(crate::new_task(job))
         .await
         .map_err(|e| anyhow::anyhow!("push github webhook job: {e}"))?;
     Ok(())
@@ -107,11 +97,11 @@ pub async fn enqueue_delivery(
 
     let tasks = jobs
         .iter()
-        .map(|job| serde_json::to_vec(job).map(PgTask::new))
+        .map(|job| serde_json::to_vec(job).map(crate::new_task))
         .collect::<Result<Vec<_>, _>>()?;
     if !tasks.is_empty() {
         // storage.push はプールから別接続を取るので、同じトランザクションに入れるには直接流す
-        apalis_postgres::sink::push_tasks(&mut *tx, Config::new(QUEUE_NAME), tasks).await?;
+        apalis_postgres::queries::push_tasks(&mut *tx, QUEUE_NAME, tasks).await?;
     }
     tx.commit().await?;
     Ok(true)

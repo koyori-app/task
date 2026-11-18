@@ -228,6 +228,13 @@ export default defineConfig(({ command }) => ({
         test: {
           name: 'unit',
           environment: 'happy-dom',
+          // 一つの試験の時間切れの上限を 15 秒にする（vitest の既定は 5 秒）。unit の project にだけ効く。
+          // 何のために: pre-push の hook は frontend の全単体試験を並べて撃つ。Coder の load average が 10〜18 の中では、
+          // 単独なら 1〜4 秒で通る試験が 5 秒を越えて次々に落ちた（#1209 とその後の実測: 5987ms、5118ms、6746ms）。
+          // 一本ずつ上限を足して追うのをやめ、unit の既定を上げる。#1209 で個別に 30 秒にした二本はそのまま残す。
+          // storybook と e2e の上限は変えない。
+          // 何が起きたら戻すか: 全単体試験を並べて撃っても、どの試験も 5 秒を十分下回るようになったら、既定に戻す。
+          testTimeout: 15_000,
           include: [
             'src/**/*.{test,spec}.{ts,tsx}',
             'server/**/*.{test,spec}.{ts,tsx}',

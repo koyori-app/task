@@ -12,6 +12,7 @@ function state(over: Partial<GanttUrlState> = {}): GanttUrlState {
     groupBy: 'project',
     progressLine: null,
     dependencies: null,
+    selected: null,
     ...over,
   };
 }
@@ -76,11 +77,27 @@ describe('applyGanttUrlState', () => {
       groupBy: 'assignee',
       progressLine: true,
       dependencies: false,
+      selected: 'ENG-42',
     });
     const url = urlOf(s);
     const searchAll: Record<string, string[]> = {};
     for (const [key, value] of url.searchParams) (searchAll[key] ??= []).push(value);
     expect(parseGanttUrlState(searchAll, TODAY)).toEqual(s);
+  });
+
+  it('オーバーレイで開いたタスクを selected に書き、閉じれば消す（TASK-474）', () => {
+    expect(urlOf(state({ selected: 'ENG-42' })).searchParams.get('selected')).toBe('ENG-42');
+    expect(
+      urlOf(state(), 'https://example.test/t/gantt?selected=ENG-42').searchParams.has('selected'),
+    ).toBe(false);
+  });
+
+  it('selected 付きの URL に他の状態を書いても selected を消さない（TASK-474）', () => {
+    const base = 'https://example.test/t/gantt?selected=ENG-42';
+    const searchAll = { selected: ['ENG-42'] };
+    const parsed = parseGanttUrlState(searchAll, TODAY);
+    expect(parsed.selected).toBe('ENG-42');
+    expect(urlOf({ ...parsed, scale: 'week' }, base).searchParams.get('selected')).toBe('ENG-42');
   });
 
   it('扱わないキーは触らない', () => {
