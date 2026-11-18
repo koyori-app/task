@@ -43,20 +43,26 @@ function withControls(args: Record<string, unknown>) {
       const value = ref('');
       const scope = ref('task-a');
       const uploading = ref(false);
+      const open = ref(true);
+      const disabled = ref(false);
       const { modelValue: _ignored, ...rest } = args;
-      return { args: rest, value, scope, uploading };
+      return { args: rest, value, scope, uploading, open, disabled };
     },
     template: `
       <div style="width: 480px">
         <MarkdownEditor
+          v-if="open"
           v-model="value"
           v-bind="args"
           :upload-scope="scope"
+          :disabled="disabled"
           aria-label="説明"
           @update:uploading="uploading = $event"
         />
         <button type="button" data-testid="switch" @click="scope = 'task-b'">宛先を替える</button>
         <button type="button" data-testid="replace" @click="value = '別の本文'">本文を差し替える</button>
+        <button type="button" data-testid="close" @click="open = false">入力欄を閉じる</button>
+        <button type="button" data-testid="disable" @click="disabled = true">読み取り専用にする</button>
         <pre data-testid="out" style="font-size: 11px; white-space: pre-wrap">{{ value }}</pre>
         <output data-testid="uploading">{{ uploading }}</output>
       </div>`,
@@ -146,5 +152,49 @@ export const PasteThenReplaceBody: Story = {
     pasteReplaced.calls[0].resolve({ id: FILE_ID, name: 'shot.png', mimeType: 'image/png' });
     await new Promise((resolve) => setTimeout(resolve, 100));
     await expect(out(canvasElement)).toBe('別の本文');
+  },
+};
+
+const pasteClosed = manualUpload();
+
+export const PasteThenCloseEditor: Story = {
+  args: { uploadFile: pasteClosed.uploadFile },
+  render: withControls,
+  play: async ({ canvasElement }) => {
+    pasteClosed.calls.length = 0;
+    await pasteFile(canvasElement, 'shot.png', 'image/png');
+    await waitFor(() => expect(out(canvasElement, 'uploading')).toBe('true'));
+
+    // 入力欄を閉じる（編集の確定・取り消し）と、保存の抑止を解く。解かないと次に開いた時に保存できない
+    await userEvent.click(within(canvasElement).getByTestId('close'));
+    await waitFor(() =>
+      expect(canvasElement.querySelector('[data-markdown-editor-input]')).toBeNull(),
+    );
+    await expect(out(canvasElement, 'uploading')).toBe('false');
+
+    pasteClosed.calls[0].resolve({ id: FILE_ID, name: 'shot.png', mimeType: 'image/png' });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await expect(out(canvasElement)).toBe('');
+  },
+};
+
+const pasteDisabled = manualUpload();
+
+export const PasteThenDisable: Story = {
+  args: { uploadFile: pasteDisabled.uploadFile },
+  render: withControls,
+  play: async ({ canvasElement }) => {
+    pasteDisabled.calls.length = 0;
+    await pasteFile(canvasElement, 'shot.png', 'image/png');
+    await waitFor(() => expect(out(canvasElement, 'uploading')).toBe('true'));
+
+    // 読み取り専用への切り替え（保存中）は state を作り直す。前の貼り付けは捨て、抑止を解く
+    await userEvent.click(within(canvasElement).getByTestId('disable'));
+    await waitFor(() => expect(uploadNote(canvasElement)).toBeNull());
+    await expect(out(canvasElement, 'uploading')).toBe('false');
+
+    pasteDisabled.calls[0].resolve({ id: FILE_ID, name: 'shot.png', mimeType: 'image/png' });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await expect(out(canvasElement)).toBe('');
   },
 };

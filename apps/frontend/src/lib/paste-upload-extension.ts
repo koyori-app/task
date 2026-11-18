@@ -313,6 +313,9 @@ const pasteUploadTheme = EditorView.baseTheme({
     textDecoration: 'underline',
     cursor: 'pointer',
   },
+  // 表示は文書に入らないので、本文が空の間は CodeMirror の placeholder も同じ行に出る。
+  // 「コメントを入力…アップロード中…」と並ばないよう、表示がある行では案内を隠す
+  '.cm-line:has(.cm-paste-upload) .cm-placeholder': { display: 'none' },
 });
 
 /**

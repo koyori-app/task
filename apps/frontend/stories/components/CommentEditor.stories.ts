@@ -380,6 +380,12 @@ function uploadNote(canvasElement: HTMLElement) {
   return canvasElement.querySelector<HTMLElement>('.cm-paste-upload');
 }
 
+/** 空の本文に出す案内（placeholder）が見えているか */
+function placeholderShown(canvasElement: HTMLElement) {
+  const el = canvasElement.querySelector('.cm-placeholder');
+  return el !== null && getComputedStyle(el).display !== 'none';
+}
+
 async function ready(canvasElement: HTMLElement) {
   const editor = await waitFor(async () => {
     const el = content(canvasElement);
@@ -418,13 +424,17 @@ export const PasteImage: Story = {
 const pasteFailed = manualUpload();
 
 export const PasteUploadFailed: Story = {
-  args: { candidates, uploadFile: pasteFailed.uploadFile },
+  args: { candidates, uploadFile: pasteFailed.uploadFile, placeholder: 'コメントを入力…' },
   render: withValue(''),
   play: async ({ canvasElement }) => {
     pasteFailed.calls.length = 0;
     const editor = await ready(canvasElement);
+    await expect(placeholderShown(canvasElement)).toBe(true);
     fire(editor, 'paste', fileClipboard(png('big.png')));
     await waitFor(() => expect(pasteFailed.calls).toHaveLength(1));
+    // 本文は空のままだが、案内（placeholder）は貼り付けの表示と並べない
+    await expect(uploadNote(canvasElement)).toBeTruthy();
+    await expect(placeholderShown(canvasElement)).toBe(false);
     pasteFailed.calls[0].reject(new Error('ファイルがサイズ上限または保存容量を超えています'));
 
     // 失敗は入力欄の中に理由つきで出て、本文は変わらない
@@ -437,6 +447,7 @@ export const PasteUploadFailed: Story = {
       'big.png を貼り付けできませんでした: ファイルがサイズ上限または保存容量を超えています',
     );
     await expect(out(canvasElement)).toBe('');
+    await expect(placeholderShown(canvasElement)).toBe(false);
 
     // 再試行は同じファイルをもう一度上げ、成功すれば行が入る
     await userEvent.click(
