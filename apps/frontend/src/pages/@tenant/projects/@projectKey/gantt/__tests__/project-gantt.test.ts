@@ -3,6 +3,7 @@ import { type Ref, ref } from 'vue';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import { createPinia } from 'pinia';
+import { GANTT_PALETTE } from '@/lib/gantt/chart';
 
 const { GET, project } = vi.hoisted(() => ({
   GET: vi.fn(),
@@ -164,6 +165,28 @@ describe('プロジェクトのガント', () => {
     }
     const bars = wrapper.getComponent({ name: 'GanttChart' }).props('tasks') as { id: string }[];
     expect(bars.map((bar) => bar.id)).toEqual(['t-eng']);
+  });
+
+  it('左の一覧の群れの見出しと凡例の見本を、図と同じ palette の色の名で塗る', async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+
+    // token を書き写すと、palette を直した時に図の外だけが古い色で残る（群れの見出しが土日の帯の色になった）
+    const style = (selector: string) => (wrapper.get(selector).element as HTMLElement).style;
+    const groups = wrapper.findAll('[data-testid^="gantt-group-"]');
+    expect(groups.length).toBeGreaterThan(0);
+    for (const group of groups) {
+      expect((group.element as HTMLElement).style.background).toBe(GANTT_PALETTE.GroupRow);
+    }
+    expect(style('[data-testid="gantt-legend-bar"]').background).toBe(
+      `linear-gradient(to right, ${GANTT_PALETTE.TierLow} 40%, ${GANTT_PALETTE.BarBg} 40%)`,
+    );
+    expect(style('[data-testid="gantt-legend-hard"]').background).toBe(GANTT_PALETTE.HardDeadline);
+    expect(style('[data-testid="gantt-legend-overdue"]').background).toBe(GANTT_PALETTE.WarnBg);
+    expect(style('[data-testid="gantt-legend-overdue"]').borderColor).toBe(
+      GANTT_PALETTE.WarnStroke,
+    );
+    expect(style('[data-testid="gantt-legend-today"]').background).toBe(GANTT_PALETTE.Today);
   });
 
   it('プロジェクトが見つからない時は予定を引かず、見つからない旨を出す', async () => {
