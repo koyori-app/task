@@ -44,6 +44,7 @@
 import remarkBreaks from 'remark-breaks';
 
 import { rehypeKfmCode } from '@/lib/rehype-kfm-code';
+import { rehypeKfmDriveUrl } from '@/lib/rehype-kfm-drive-url';
 import { rehypeKfmLinkFavicon } from '@/lib/rehype-kfm-link-favicon';
 import { rehypeKfmTaskOffset, remarkKfmTaskOffset } from '@/lib/rehype-kfm-task-offset';
 import { remarkGfm } from '@/lib/remark-gfm';
@@ -126,7 +127,15 @@ export const renderDescription = createRenderer({
       // rehypeKfmCode は着色済みの子を行分割して <kfm-code> で包むため、必ず
       // starry-night の後ろ (行分割は着色より後でしか成立しない)。
       // rehypeKfmLinkFavicon は `a` しか触らず他と干渉しない。最終 HTML に近い rehype 層の最後に置く。
-      rehypePlugins: [rehypeKfmTaskOffset, rehypeStarryNight, rehypeKfmCode, rehypeKfmLinkFavicon],
+      // rehypeKfmDriveUrl は Drive のファイルの URL を持つ `img` と `a` だけを触る。相対 URL なので
+      // favicon の対象と重ならない。足したリンクに favicon が付かないよう、その後ろに置く。
+      rehypePlugins: [
+        rehypeKfmTaskOffset,
+        rehypeStarryNight,
+        rehypeKfmCode,
+        rehypeKfmLinkFavicon,
+        rehypeKfmDriveUrl,
+      ],
     },
     // comment profile = github ＋ remarkBreaks。GitHub の comment 欄の流儀
     // (空行を挟まぬ単一改行を <br> として出す)。レビュー指摘の本文の消費側が使う。
@@ -142,7 +151,13 @@ export const renderDescription = createRenderer({
         remarkKfmMention,
         remarkBreaks,
       ],
-      rehypePlugins: [rehypeKfmTaskOffset, rehypeStarryNight, rehypeKfmCode, rehypeKfmLinkFavicon],
+      rehypePlugins: [
+        rehypeKfmTaskOffset,
+        rehypeStarryNight,
+        rehypeKfmCode,
+        rehypeKfmLinkFavicon,
+        rehypeKfmDriveUrl,
+      ],
     },
     // Phase 2 seam: kfm profile はここへ remark / rehype 層を足す (コアは不変)。
   },

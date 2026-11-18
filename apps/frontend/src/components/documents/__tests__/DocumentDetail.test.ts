@@ -397,6 +397,35 @@ describe('DocumentDetail 編集', () => {
     expect(wrapper.find('form').exists()).toBe(true);
   });
 
+  it('本文の入力欄が貼り付けたファイルを上げている間は保存を止め、終われば保存できる', async () => {
+    const wrapper = mountDetail({ editing: true });
+    await flushPromises();
+    await editBody(wrapper, '画像つきの本文');
+    const editor = wrapper.getComponent({ name: 'MarkdownEditorStub' });
+    expect(typeof editor.props('uploadFile')).toBe('function');
+    expect(editor.props('uploadScope')).toBe('file-1');
+    const saveButton = wrapper.get('button[type="submit"]');
+    expect(saveButton.attributes('disabled')).toBeUndefined();
+
+    editor.vm.$emit('update:uploading', true);
+    await flushPromises();
+    expect(saveButton.attributes('disabled')).toBeDefined();
+    // ボタンを押さない経路（form の submit・Cmd+S）でも保存しない
+    await wrapper.get('form').trigger('submit');
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 's', metaKey: true, cancelable: true }),
+    );
+    await flushPromises();
+    expect(puts).toEqual([]);
+
+    editor.vm.$emit('update:uploading', false);
+    await flushPromises();
+    expect(saveButton.attributes('disabled')).toBeUndefined();
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+    expect(puts).toEqual([{ ifMatch: ETAG, body: { content: '画像つきの本文' } }]);
+  });
+
   it('保存の応答を待つ間はタイトルと本文を編集できない', async () => {
     // 待つ間の追記は送った本文に入らず、成功で下書きごと閉じて失われる
     let release!: () => void;

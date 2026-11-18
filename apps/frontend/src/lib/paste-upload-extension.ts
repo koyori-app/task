@@ -1,0 +1,369 @@
+/**
+ * 貼り付けたファイルを Drive へ上げ、本文に Markdown の行として入れる CodeMirror 6 の拡張 (TASK-137)。
+ * コメントの入力欄 (CommentEditor) と説明文の入力欄 (MarkdownEditor) が同じ拡張を使う。
+ *
+ * 上げている間の表示は**文書に入れず**、widget の decoration で出す。文書に入れると v-model に載り、
+ * 途中の保存や下書きに「アップロード中…」の字が残る。
+ *
+ * 進行中のアップロードの持ち主は ViewPlugin の実体で、寿命は次のとおり (呼び出し側と揃えてある):
+ *
+ * | 起きること | 進行中のアップロード | 結果 |
+ * |---|---|---|
+ * | 入力欄の破棄 | `destroy()` で中断 | 捨てる |
+ * | `setState` (disabled / placeholder の変更) | 旧 plugin の `destroy()` で中断 | 捨てる |
+ * | 外からの本文の差し替え・宛先の切り替え | 部品が `resetPasteUploads` を呼ぶ | 捨てる |
+ * | 利用者が widget を含む範囲を消す | 続く | widget が無いので捨てる |
+ *
+ * 結果を捨てても、上げ終えたファイルは Drive に残る。送信・保存は、呼び出し側が
+ * `onUploadingChange` を見て上げている間は止める。
+ */
+import { Facet, Prec, StateEffect, StateField, type Extension } from '@codemirror/state';
+import {
+  Decoration,
+  EditorView,
+  ViewPlugin,
+  WidgetType,
+  type DecorationSet,
+} from '@codemirror/view';
+
+import type { UploadedFile } from '@/lib/drive-upload';
+import { driveMediaKind } from '@/lib/rehype-kfm-drive-url';
+
+export type PasteUploadOptions = {
+  upload: (file: File, signal: AbortSignal) => Promise<UploadedFile>;
+  /** 読み取り専用か (貼り付けでファイルを取らない) */
+  disabled: () => boolean;
+  /** 上げている最中の貼り付けが 1 つ以上あるかが変わった時だけ呼ぶ (失敗の表示は数えない) */
+  onUploadingChange: (uploading: boolean) => void;
+};
+
+const optionsFacet = Facet.define<PasteUploadOptions, PasteUploadOptions | null>({
+  combine: (values) => values[0] ?? null,
+});
+
+type BatchMark = { id: number; names: readonly string[] };
+
+const addEffect = StateEffect.define<BatchMark & { pos: number }>({
+  map: (value, changes) => ({ ...value, pos: changes.mapPos(value.pos, 1) }),
+});
+const failEffect = StateEffect.define<BatchMark & { message: string }>();
+const removeEffect = StateEffect.define<{ id: number }>();
+
+const NAME_SEPARATOR = '、';
+
+class UploadWidget extends WidgetType {
+  constructor(
+    readonly id: number,
+    readonly names: readonly string[],
+    /** 失敗の文言。上げている間は null */
+    readonly error: string | null,
+  ) {
+    super();
+  }
+
+  override eq(other: UploadWidget): boolean {
+    return (
+      other.id === this.id &&
+      other.error === this.error &&
+      other.names.join('\n') === this.names.join('\n')
+    );
+  }
+
+  override toDOM(view: EditorView): HTMLElement {
+    const root = document.createElement('span');
+    const names = this.names.join(NAME_SEPARATOR);
+    if (this.error === null) {
+      root.className = 'cm-paste-upload';
+      root.setAttribute('role', 'status');
+      root.textContent = `アップロード中… ${names}`;
+      return root;
+    }
+    root.className = 'cm-paste-upload cm-paste-upload-error';
+    const message = document.createElement('span');
+    message.setAttribute('role', 'alert');
+    message.textContent = `${names} を貼り付けできませんでした: ${this.error}`;
+    root.append(
+      message,
+      this.button('再試行', () => view.plugin(pasteUploadPlugin)?.retry(this.id)),
+      this.button('取り消し', () => view.plugin(pasteUploadPlugin)?.cancel(this.id)),
+    );
+    return root;
+  }
+
+  private button(label: string, run: () => void): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = label;
+    // 押しても入力欄からフォーカスを奪わない (blur で確定する呼び出し側がある)
+    button.addEventListener('mousedown', (event) => event.preventDefault());
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      run();
+    });
+    return button;
+  }
+
+  // widget の中の操作 (ボタン) は CodeMirror に渡さない
+  override ignoreEvent(): boolean {
+    return true;
+  }
+}
+
+function mark(id: number, names: readonly string[], error: string | null) {
+  return Decoration.widget({ widget: new UploadWidget(id, names, error), side: 1, id });
+}
+
+function positionOf(set: DecorationSet, id: number): number | null {
+  for (const iter = set.iter(); iter.value !== null; iter.next()) {
+    if (iter.value.spec.id === id) return iter.from;
+  }
+  return null;
+}
+
+/** 1 回の貼り付けにつき widget 1 つ。位置は文書の変更に追従し、widget を含む範囲が消えたら無くなる */
+const uploadField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(value, tr) {
+    let next = value.map(tr.changes);
+    for (const effect of tr.effects) {
+      if (effect.is(removeEffect)) {
+        const { id } = effect.value;
+        next = next.update({ filter: (_from, _to, deco) => deco.spec.id !== id });
+      } else if (effect.is(addEffect)) {
+        const { id, names, pos } = effect.value;
+        next = next.update({ add: [mark(id, names, null).range(pos)] });
+      } else if (effect.is(failEffect)) {
+        const { id, names, message } = effect.value;
+        const pos = positionOf(next, id);
+        if (pos === null) continue;
+        next = next.update({
+          filter: (_from, _to, deco) => deco.spec.id !== id,
+          add: [mark(id, names, message).range(pos)],
+        });
+      }
+    }
+    return next;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
+type Batch = {
+  /** これから上げる (上げている・失敗して残した) ファイル */
+  files: File[];
+  /** 上げている間だけ持つ。失敗して再試行を待つ間は null */
+  controller: AbortController | null;
+};
+
+/*
+ * 進行中のアップロードの持ち主。フィールドに `#private` を使わない: MarkdownEditor は view を Vue の
+ * ref に入れており、破棄 (`destroy`) が reactive の proxy 越しに呼ばれる。proxy 越しの `#private` は
+ * TypeError になる。
+ */
+class PasteUploadPlugin {
+  readonly batches = new Map<number, Batch>();
+  readonly options: PasteUploadOptions | null;
+  nextId = 1;
+  uploading = false;
+
+  constructor(readonly view: EditorView) {
+    // setState での破棄の時点で view.state が新旧どちらを指すかに依らないよう、作る時に取っておく
+    this.options = view.state.facet(optionsFacet);
+  }
+
+  start(files: readonly File[]): boolean {
+    if (this.options === null || this.options.disabled() || files.length === 0) return false;
+    const id = this.nextId++;
+    this.batches.set(id, { files: [...files], controller: new AbortController() });
+    this.view.dispatch({
+      effects: addEffect.of({
+        id,
+        names: files.map((file) => file.name),
+        pos: this.view.state.selection.main.head,
+      }),
+    });
+    this.notify();
+    void this.run(id);
+    return true;
+  }
+
+  retry(id: number): void {
+    const batch = this.batches.get(id);
+    const pos = positionOf(this.view.state.field(uploadField), id);
+    if (!batch || batch.controller !== null || pos === null) return;
+    batch.controller = new AbortController();
+    this.view.dispatch({
+      effects: [
+        removeEffect.of({ id }),
+        addEffect.of({ id, names: batch.files.map((file) => file.name), pos }),
+      ],
+    });
+    this.notify();
+    void this.run(id);
+  }
+
+  cancel(id: number): void {
+    this.batches.get(id)?.controller?.abort();
+    this.batches.delete(id);
+    this.view.dispatch({ effects: removeEffect.of({ id }) });
+    this.notify();
+  }
+
+  /** 全部を中断し、表示を消す */
+  reset(): void {
+    this.abortAll();
+    const effects: StateEffect<{ id: number }>[] = [];
+    for (const iter = this.view.state.field(uploadField).iter(); iter.value !== null; iter.next()) {
+      effects.push(removeEffect.of({ id: iter.value.spec.id as number }));
+    }
+    if (effects.length > 0) this.view.dispatch({ effects });
+    this.notify();
+  }
+
+  destroy(): void {
+    this.abortAll();
+    this.notify();
+  }
+
+  private abortAll(): void {
+    for (const batch of this.batches.values()) batch.controller?.abort();
+    this.batches.clear();
+  }
+
+  private notify(): void {
+    let uploading = false;
+    for (const batch of this.batches.values()) {
+      if (batch.controller !== null) uploading = true;
+    }
+    if (uploading === this.uploading) return;
+    this.uploading = uploading;
+    this.options?.onUploadingChange(uploading);
+  }
+
+  private async run(id: number): Promise<void> {
+    const batch = this.batches.get(id);
+    const options = this.options;
+    const controller = batch?.controller;
+    if (!batch || !controller || options === null) return;
+    const files = batch.files;
+    const results = await Promise.allSettled(
+      files.map(async (file) => options.upload(file, controller.signal)),
+    );
+    // 中断 (破棄・setState・reset・取り消し) の後は、この view にも文書にも触らない。
+    // batch を外す経路はどれも先に中断するので、中断の有無だけを見れば足りる
+    if (controller.signal.aborted) return;
+
+    const pos = positionOf(this.view.state.field(uploadField), id);
+    if (pos === null) {
+      // 利用者が widget を含む範囲を消した。結果は捨てる
+      this.batches.delete(id);
+      this.notify();
+      return;
+    }
+
+    const lines: string[] = [];
+    const failed: File[] = [];
+    let message = '';
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') {
+        lines.push(uploadMarkdown(result.value));
+        return;
+      }
+      if (failed.length === 0) {
+        message =
+          result.reason instanceof Error && result.reason.message
+            ? result.reason.message
+            : 'ファイルをアップロードできませんでした';
+      }
+      failed.push(files[index]);
+    });
+
+    const insert = lines.length > 0 ? `${lines.join('\n')}\n` : '';
+    const selection = this.view.state.selection.main;
+    const spec = {
+      ...(insert ? { changes: { from: pos, insert } } : {}),
+      // caret が貼り付けた位置にあれば、入れた行の後ろへ進める
+      ...(insert && selection.empty && selection.head === pos
+        ? { selection: { anchor: pos + insert.length } }
+        : {}),
+      ...(insert ? { userEvent: 'input.paste' } : {}),
+    };
+    if (failed.length === 0) {
+      this.batches.delete(id);
+      this.view.dispatch({ ...spec, effects: removeEffect.of({ id }) });
+    } else {
+      batch.files = failed;
+      batch.controller = null;
+      this.view.dispatch({
+        ...spec,
+        effects: failEffect.of({ id, names: failed.map((file) => file.name), message }),
+      });
+    }
+    this.notify();
+  }
+}
+
+const pasteUploadPlugin = ViewPlugin.fromClass(PasteUploadPlugin);
+
+const pasteUploadTheme = EditorView.baseTheme({
+  '.cm-paste-upload': { color: 'var(--muted-foreground)' },
+  '.cm-paste-upload-error': { color: 'var(--destructive)' },
+  '.cm-paste-upload button': {
+    marginLeft: '0.5em',
+    color: 'var(--link)',
+    textDecoration: 'underline',
+    cursor: 'pointer',
+  },
+});
+
+/**
+ * 貼り付けをファイルとして扱うか。ファイルがあり、`text/plain` か `text/html` の片方でも空の時だけ取る。
+ * Excel・Word のように文字と HTML と画像を同時に載せる貼り付けは文字として扱う (既存の経路に任せる)。
+ * web の画像のコピーは `text/html` (img タグ) と画像だけなので、ファイルとして取る。
+ */
+export function shouldUploadPaste(data: Pick<DataTransfer, 'files' | 'getData'> | null): boolean {
+  if (data === null || data.files.length === 0) return false;
+  return data.getData('text/plain') === '' || data.getData('text/html') === '';
+}
+
+/**
+ * 本文に入れる 1 行。画像・動画・音声は埋め込み `![名前](URL)`、それ以外はリンク `[名前](URL)`。
+ * URL は API の相対パスで、web は描画時に `/api` を足す (rehype-kfm-drive-url)。
+ * 描画側は名前の拡張子で動画・音声を見分けるので、名前はそのまま残す。
+ */
+export function uploadMarkdown(file: UploadedFile): string {
+  const name = file.name.replace(/[\r\n]+/g, ' ').replace(/[\\[\]]/g, '\\$&');
+  const mime = file.mimeType.split(';')[0].trim().toLowerCase();
+  const embed = mime.startsWith('image/') || driveMediaKind(file.name) !== undefined;
+  return `${embed ? '!' : ''}[${name}](/v1/drive/files/${file.id}/content)`;
+}
+
+/** `files` を上げ始める。拡張が無い・読み取り専用・ファイルが無いなら何もせず false */
+export function startPasteUpload(view: EditorView, files: readonly File[]): boolean {
+  return view.plugin(pasteUploadPlugin)?.start(files) ?? false;
+}
+
+/** 進行中のアップロードを全部中断し、表示を消す。拡張が無ければ何もしない */
+export function resetPasteUploads(view: EditorView): void {
+  view.plugin(pasteUploadPlugin)?.reset();
+}
+
+export function pasteUploadExtensions(options: PasteUploadOptions): Extension {
+  return [
+    optionsFacet.of(options),
+    uploadField,
+    pasteUploadPlugin,
+    pasteUploadTheme,
+    // メンションの paste (text/html の印を見る) より先に見る
+    Prec.high(
+      EditorView.domEventHandlers({
+        paste(event, view) {
+          const data = event.clipboardData;
+          if (!shouldUploadPaste(data)) return false;
+          if (!startPasteUpload(view, Array.from(data!.files))) return false;
+          event.preventDefault();
+          return true;
+        },
+      }),
+    ),
+  ];
+}

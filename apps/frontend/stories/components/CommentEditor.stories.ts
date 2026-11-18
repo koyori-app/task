@@ -3,6 +3,7 @@ import { expect, userEvent, waitFor, within } from 'storybook/test';
 import { ref } from 'vue';
 
 import CommentEditor from '@/components/tasks/CommentEditor.vue';
+import type { UploadedFile } from '@/lib/drive-upload';
 
 /**
  * コメント入力欄（CodeMirror）の実ブラウザでの挙動。単体テスト（happy-dom）では CodeMirror が
@@ -340,5 +341,169 @@ export const PlainOrForeignHtmlPastesAsText: Story = {
     }
     await waitFor(() => expect(out(canvasElement)).toBe('@alice[外][外][外]'));
     await expect(out(canvasElement)).not.toContain(`<@${ALICE}>`);
+  },
+};
+
+// ---- 貼り付けたファイルのアップロード（TASK-137） ----
+
+const FILE_ID = '0f8fad5b-d9cb-469f-a165-70867728950e';
+const FILE_URL = `/v1/drive/files/${FILE_ID}/content`;
+
+type UploadCall = {
+  file: File;
+  resolve: (value: UploadedFile) => void;
+  reject: (reason: Error) => void;
+};
+
+/** 手で解決する `uploadFile`。上げている間・失敗・再試行の各状態を play から進める */
+function manualUpload() {
+  const calls: UploadCall[] = [];
+  const uploadFile = (file: File) =>
+    new Promise<UploadedFile>((resolve, reject) => {
+      calls.push({ file, resolve, reject });
+    });
+  return { calls, uploadFile };
+}
+
+function png(name = 'shot.png') {
+  return new File(['x'], name, { type: 'image/png' });
+}
+
+/** ファイルだけを載せたクリップボード（スクリーンショットの貼り付けと同じ形） */
+function fileClipboard(...files: File[]) {
+  const data = new DataTransfer();
+  for (const file of files) data.items.add(file);
+  return data;
+}
+
+function uploadNote(canvasElement: HTMLElement) {
+  return canvasElement.querySelector<HTMLElement>('.cm-paste-upload');
+}
+
+async function ready(canvasElement: HTMLElement) {
+  const editor = await waitFor(async () => {
+    const el = content(canvasElement);
+    await expect(el).toBeTruthy();
+    return el;
+  });
+  await userEvent.click(editor);
+  return editor;
+}
+
+const pasteImage = manualUpload();
+
+export const PasteImage: Story = {
+  args: { candidates, uploadFile: pasteImage.uploadFile },
+  render: withValue('見て '),
+  play: async ({ canvasElement }) => {
+    pasteImage.calls.length = 0;
+    const editor = await ready(canvasElement);
+    await userEvent.keyboard('{Control>}{End}{/Control}');
+    fire(editor, 'paste', fileClipboard(png()));
+
+    // 上げている間は入力欄の中に表示だけが出て、本文（送る文字列）は変わらない
+    await waitFor(() =>
+      expect(uploadNote(canvasElement)?.textContent).toBe('アップロード中… shot.png'),
+    );
+    await expect(uploadNote(canvasElement)?.getAttribute('role')).toBe('status');
+    await expect(out(canvasElement)).toBe('見て ');
+    await expect(pasteImage.calls).toHaveLength(1);
+
+    pasteImage.calls[0].resolve({ id: FILE_ID, name: 'shot.png', mimeType: 'image/png' });
+    await waitFor(() => expect(out(canvasElement)).toBe(`見て ![shot.png](${FILE_URL})\n`));
+    await expect(uploadNote(canvasElement)).toBeNull();
+  },
+};
+
+const pasteFailed = manualUpload();
+
+export const PasteUploadFailed: Story = {
+  args: { candidates, uploadFile: pasteFailed.uploadFile },
+  render: withValue(''),
+  play: async ({ canvasElement }) => {
+    pasteFailed.calls.length = 0;
+    const editor = await ready(canvasElement);
+    fire(editor, 'paste', fileClipboard(png('big.png')));
+    await waitFor(() => expect(pasteFailed.calls).toHaveLength(1));
+    pasteFailed.calls[0].reject(new Error('ファイルがサイズ上限または保存容量を超えています'));
+
+    // 失敗は入力欄の中に理由つきで出て、本文は変わらない
+    const alert = await waitFor(async () => {
+      const el = canvasElement.querySelector('.cm-paste-upload [role="alert"]');
+      await expect(el).toBeTruthy();
+      return el as HTMLElement;
+    });
+    await expect(alert.textContent).toBe(
+      'big.png を貼り付けできませんでした: ファイルがサイズ上限または保存容量を超えています',
+    );
+    await expect(out(canvasElement)).toBe('');
+
+    // 再試行は同じファイルをもう一度上げ、成功すれば行が入る
+    await userEvent.click(
+      within(uploadNote(canvasElement)!).getByRole('button', { name: '再試行' }),
+    );
+    await waitFor(() => expect(pasteFailed.calls).toHaveLength(2));
+    await expect(pasteFailed.calls[1].file.name).toBe('big.png');
+    await expect(uploadNote(canvasElement)?.textContent).toBe('アップロード中… big.png');
+    pasteFailed.calls[1].resolve({ id: FILE_ID, name: 'big.png', mimeType: 'image/png' });
+    await waitFor(() => expect(out(canvasElement)).toBe(`![big.png](${FILE_URL})\n`));
+    await expect(uploadNote(canvasElement)).toBeNull();
+  },
+};
+
+const pasteText = manualUpload();
+
+export const PasteTextWithImage: Story = {
+  args: { candidates, uploadFile: pasteText.uploadFile },
+  render: withValue(''),
+  play: async ({ canvasElement }) => {
+    pasteText.calls.length = 0;
+    const editor = await ready(canvasElement);
+    // 表計算・文書のアプリは、文字と HTML と画像を同時に載せる。文字として貼り、上げない
+    const data = fileClipboard(png('cells.png'));
+    data.setData('text/plain', 'A\tB');
+    data.setData('text/html', '<table><tr><td>A</td><td>B</td></tr></table>');
+    fire(editor, 'paste', data);
+    await waitFor(() => expect(out(canvasElement)).toBe('A\tB'));
+    await expect(pasteText.calls).toHaveLength(0);
+    await expect(uploadNote(canvasElement)).toBeNull();
+  },
+};
+
+const pasteScope = manualUpload();
+
+export const PasteThenSwitchScope: Story = {
+  args: { candidates, uploadFile: pasteScope.uploadFile },
+  render: (args: Record<string, unknown>) => ({
+    components: { CommentEditor },
+    setup() {
+      const value = ref('');
+      const scope = ref('task-a/');
+      const { modelValue: _ignored, ...rest } = args;
+      return { args: rest, value, scope };
+    },
+    // 入力欄を使い回して宛先（タスク・スレッド）だけ替える所と同じ形。本文は空のまま替わる
+    template: `
+      <div style="width: 420px">
+        <CommentEditor v-model="value" v-bind="args" :upload-scope="scope" aria-label="コメントを入力" />
+        <button type="button" data-testid="switch" @click="scope = 'task-b/'">宛先を替える</button>
+        <pre data-testid="out" style="font-size: 11px; white-space: pre-wrap">{{ value }}</pre>
+      </div>`,
+  }),
+  play: async ({ canvasElement }) => {
+    pasteScope.calls.length = 0;
+    const editor = await ready(canvasElement);
+    fire(editor, 'paste', fileClipboard(png()));
+    await waitFor(() => expect(uploadNote(canvasElement)).toBeTruthy());
+
+    // 宛先が替わると、前の宛先への貼り付けは捨てる
+    await userEvent.click(within(canvasElement).getByTestId('switch'));
+    await waitFor(() => expect(uploadNote(canvasElement)).toBeNull());
+
+    // 後から上げ終わっても、今の宛先の本文には入らない
+    pasteScope.calls[0].resolve({ id: FILE_ID, name: 'shot.png', mimeType: 'image/png' });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await expect(out(canvasElement)).toBe('');
+    await expect(uploadNote(canvasElement)).toBeNull();
   },
 };

@@ -14,6 +14,7 @@ import {
 } from '@/composables/useCommentDrafts';
 import { useAuthStore } from '@/stores/auth';
 import { useNow } from '@/composables/useNow';
+import { useProjectFileUpload } from '@/composables/useProjectFileUpload';
 import type { ReactionController } from '@/composables/useReactions';
 import type { CommentThread } from '@/composables/useTaskComments';
 import { buildTimeline, type ActivityFilter, type ActivityLookups } from '@/lib/activity-timeline';
@@ -142,6 +143,17 @@ const newDraft = computed({
     setCommentDraft(userId.value, draftTaskKey.value, openThreadId.value, value),
 });
 
+// 貼り付けたファイルはプロジェクトの Drive へ上げ、本文に行として入れる
+const uploadFile = useProjectFileUpload(
+  () => props.tenantId,
+  () => props.projectId,
+);
+/** 入力欄が貼り付けたファイルを上げている最中か。その間は送信を止める（途中の本文を送らない） */
+const composerUploading = ref(false);
+// 入力欄は一覧とスレッド・タスクの間で使い回す。下書きと同じ組で分け、前の宛先への貼り付けの
+// 結果が今の下書きに入らないようにする
+const uploadScope = computed(() => `${draftTaskKey.value}/${openThreadId.value ?? ''}`);
+
 // 開いていたスレッドが消えた（削除・再取得で不在）ら一覧へ戻す
 watch(
   () => props.threads,
@@ -256,7 +268,7 @@ function onComposerFocusOut(event: FocusEvent) {
  */
 async function submitDraft() {
   const body = newDraft.value.trim();
-  if (!body || props.submitPending) return;
+  if (!body || props.submitPending || composerUploading.value) return;
   // 送信先と下書きの置き場は**開始時に固定する**。送信中も「コメント一覧へ戻る」は
   // 押せるし、スレッドが消えれば watch が一覧へ戻すので、await の後に
   // openThreadId を読み直すと別の下書きを消すことになる
@@ -329,6 +341,7 @@ async function deleteThread(threadId: string) {
             :profile-href="profileHref"
             :mention-tenant="mentionTenant"
             :tenant-id="tenantId"
+            :project-id="projectId"
             :reaction-controller="reactionController"
             :updating="updatingCommentId === openThread.id"
             :deleting="deletingCommentId === openThread.id"
@@ -358,6 +371,7 @@ async function deleteThread(threadId: string) {
             :profile-href="profileHref"
             :mention-tenant="mentionTenant"
             :tenant-id="tenantId"
+            :project-id="projectId"
             :reaction-controller="reactionController"
             :updating="updatingCommentId === reply.id"
             :deleting="deletingCommentId === reply.id"
@@ -446,6 +460,7 @@ async function deleteThread(threadId: string) {
                   :profile-href="profileHref"
                   :mention-tenant="mentionTenant"
                   :tenant-id="tenantId"
+                  :project-id="projectId"
                   :reaction-controller="reactionController"
                   :updating="updatingCommentId === entry.thread.id"
                   :deleting="deletingCommentId === entry.thread.id"
@@ -527,6 +542,9 @@ async function deleteThread(threadId: string) {
           :placeholder="openThread ? '返信を入力…' : 'コメントを入力…'"
           :candidates="mentionCandidates"
           :mentions="mentions"
+          :upload-file="uploadFile"
+          :upload-scope="uploadScope"
+          @update:uploading="composerUploading = $event"
         />
         <div v-show="composerExpanded" class="flex items-center justify-between gap-1 p-0.5">
           <Button
@@ -541,7 +559,7 @@ async function deleteThread(threadId: string) {
           <Button
             type="submit"
             :ariaLabel="submitPending ? '送信中' : openThread ? '返信する' : 'コメントする'"
-            :disabled="submitPending || !newDraft.trim()"
+            :disabled="submitPending || composerUploading || !newDraft.trim()"
           >
             <template #icon>
               <Spinner v-if="submitPending" hide-label />

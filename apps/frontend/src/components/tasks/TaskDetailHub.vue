@@ -2,6 +2,7 @@
 import LoadErrorState from '@/components/LoadErrorState.vue';
 import ReactionBar from '@/components/reactions/ReactionBar.vue';
 import { copyTaskIdLabel, useCopyTaskId } from '@/composables/useCopyTaskId';
+import { useProjectFileUpload } from '@/composables/useProjectFileUpload';
 import type { ReactionController } from '@/composables/useReactions';
 import { useQueryClient } from '@tanstack/vue-query';
 import {
@@ -299,6 +300,13 @@ const freshDescriptionHtml = computed(() => {
 const descriptionHtmlEl = ref<HTMLElement | null>(null);
 const editingField = ref<EditableField | null>(null);
 const draftValue = ref('');
+// 説明に貼り付けたファイルはプロジェクトの Drive へ上げ、本文に行として入れる
+const uploadFile = useProjectFileUpload(
+  () => props.tenantId,
+  () => props.task?.project_id,
+);
+/** 説明の入力欄が貼り付けたファイルを上げている最中か。その間は保存を止める（途中の本文を保存しない） */
+const descriptionUploading = ref(false);
 const editingControlRef = ref<HTMLElement | ComponentPublicInstance | null>(null);
 
 /**
@@ -530,6 +538,7 @@ function commitEditing(field: EditableField) {
   // 編集を閉じた後に届く確定要求は捨てる。編集器の破棄で blur が飛ぶ経路があり、
   // これが無いと取り消し (Escape) の直後に空の下書きが確定として保存される
   if (editingField.value !== field) return;
+  if (field === 'description' && descriptionUploading.value) return;
 
   switch (field) {
     case 'title': {
@@ -1415,6 +1424,9 @@ function clearDescription() {
                 placeholder="markdown で書けます"
                 :candidates="members ?? []"
                 :mentions="task.mentions"
+                :upload-file="uploadFile"
+                :upload-scope="task.id"
+                @update:uploading="descriptionUploading = $event"
                 @keydown="onEditKeydown($event, 'description')"
                 @submit="commitEditing('description')"
               />
@@ -1478,7 +1490,7 @@ function clearDescription() {
                 />
                 <Button
                   type="button"
-                  :disabled="isFieldUpdating('description')"
+                  :disabled="isFieldUpdating('description') || descriptionUploading"
                   label="保存"
                   @click="commitEditing('description')"
                 />

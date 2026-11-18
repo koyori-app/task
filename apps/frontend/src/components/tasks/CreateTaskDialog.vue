@@ -32,6 +32,7 @@ import SimilarTasksList from '@/components/tasks/SimilarTasksList.vue';
 import TaskDatesChip from '@/components/tasks/TaskDatesChip.vue';
 import TaskNumberChip from '@/components/tasks/TaskNumberChip.vue';
 import UserAvatar from '@/components/UserAvatar.vue';
+import { useProjectFileUpload } from '@/composables/useProjectFileUpload';
 import { useSimilarTasks } from '@/composables/useSimilarTasks';
 import type { components } from '@/generated/api';
 import { apiClient, TASK_SEARCH_PATH } from '@/lib/api-vue-query';
@@ -125,6 +126,14 @@ const queryClient = useQueryClient();
 const title = ref('');
 const statusId = ref('');
 const description = ref('');
+// 説明に貼り付けたファイルは、開いているプロジェクトの Drive へ上げる。タスクはまだ無いので
+// 添付にはならず、作成をやめてもファイルは Drive に残る
+const uploadFile = useProjectFileUpload(
+  () => props.tenantId,
+  () => props.projectId,
+);
+/** 説明の入力欄が貼り付けたファイルを上げている最中か。その間は作成を止める（途中の本文で作らない） */
+const descriptionUploading = ref(false);
 const plannedStartOn = ref('');
 const softDeadline = ref('');
 const hardDeadline = ref('');
@@ -404,7 +413,7 @@ function resetForm() {
 }
 
 async function submit(event: SubmitEvent) {
-  if (createMutation.isPending.value) return;
+  if (createMutation.isPending.value || descriptionUploading.value) return;
 
   const normalizedTitle = title.value.trim();
   validationMessage.value = null;
@@ -566,6 +575,9 @@ async function submit(event: SubmitEvent) {
             placeholder="説明を入力（Markdown で書けます）"
             :candidates="members ?? []"
             min-height-class="min-h-44"
+            :upload-file="uploadFile"
+            :upload-scope="projectId"
+            @update:uploading="descriptionUploading = $event"
           />
         </div>
 
@@ -858,7 +870,9 @@ async function submit(event: SubmitEvent) {
             />
             <Button
               type="submit"
-              :disabled="createMutation.isPending.value || !isHydrated || !statusId"
+              :disabled="
+                createMutation.isPending.value || descriptionUploading || !isHydrated || !statusId
+              "
               :label="createMutation.isPending.value ? '作成中...' : '作成'"
             >
               <template #icon>
