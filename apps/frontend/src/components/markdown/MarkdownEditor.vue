@@ -360,7 +360,7 @@ watch(() => props.uploadScope, resetUploads);
 
 // 引き表（API の表・候補）が替わったら札の字を引き直す
 watch(nameTable, (table) => {
-  if (view.value && props.candidates) setMentionNames(view.value as EditorViewType, table);
+  if (view.value && props.candidates) setMentionNames(view.value, table);
 });
 
 // disabled / placeholder の変更は state ごと作り直す (上のコメントの理由)。
@@ -380,7 +380,7 @@ function focus() {
 /** `@` を打って候補を開く。`candidates` を渡した時だけ効く */
 function openMentionPicker() {
   if (!view.value || props.disabled || !props.candidates) return;
-  openPicker(view.value as EditorViewType);
+  openPicker(view.value);
 }
 
 defineExpose({ focus, openMentionPicker });

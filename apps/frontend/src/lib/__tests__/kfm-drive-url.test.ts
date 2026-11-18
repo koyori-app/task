@@ -108,6 +108,8 @@ describe.each([
 describe('貼り付けで作る行（uploadMarkdown）の描画', () => {
   it.each([
     '__init__.py',
+    'a~~old~~.pdf',
+    '~draft~.pdf',
     'a*b*c.txt',
     'a`b`.txt',
     'a<b>&amp;.txt',

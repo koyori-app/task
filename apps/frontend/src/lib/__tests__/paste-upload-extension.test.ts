@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 // 貼り付けたファイルのアップロード（取るかの判定、上げている間の表示、結果の入れ方、失敗と再試行、中断）
+import { history, undo } from '@codemirror/commands';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -190,15 +191,97 @@ describe('貼り付けたファイルのアップロード', () => {
     expect(view.state.doc.toString()).toBe(`見出し\n本文続き![a.png](${url(ID_A)})\n`);
   });
 
-  it('表示を含む範囲を消すと、結果は捨てる（uploading は false に戻る）', async () => {
+  it('表示を含む範囲を消すと、その場で中断して uploading を false に戻す（上げ終わるのを待たない）', async () => {
     const { view, host, calls, uploading } = setup('あいう');
     view.dispatch({ selection: { anchor: 1 } });
     startPasteUpload(view, [file('a.png')]);
     view.dispatch({ changes: { from: 0, to: 3 } });
     expect(status(host)).toBeNull();
+    // 回線が止まっていても、消した時点で送信・保存の抑止が解ける
+    expect(calls[0].signal.aborted).toBe(true);
+    expect(uploading).toEqual([true, false]);
     calls[0].resolve(uploaded(ID_A, 'a.png'));
     await settle();
     expect(view.state.doc.toString()).toBe('');
+    expect(uploading).toEqual([true, false]);
+  });
+
+  it('表示をまたがない編集（前後への入力・表示の隣までの削除）では中断しない', async () => {
+    const { view, host, calls, uploading } = setup('あいう');
+    view.dispatch({ selection: { anchor: 1 } });
+    startPasteUpload(view, [file('a.png')]);
+    view.dispatch({ changes: { from: 0, insert: '前' } });
+    view.dispatch({ changes: { from: 0, to: 2 } });
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length } });
+    expect(calls[0].signal.aborted).toBe(false);
+    expect(status(host)).not.toBeNull();
+    expect(uploading).toEqual([true]);
+    calls[0].resolve(uploaded(ID_A, 'a.png'));
+    await settle();
+    expect(view.state.doc.toString()).toBe(`![a.png](${url(ID_A)})\n`);
+  });
+
+  it('2 つの貼り付けのうち、表示が消えた方だけを中断する', async () => {
+    const { view, calls, uploading } = setup('あいうえお');
+    view.dispatch({ selection: { anchor: 1 } });
+    startPasteUpload(view, [file('a.png')]);
+    view.dispatch({ selection: { anchor: 4 } });
+    startPasteUpload(view, [file('b.png')]);
+    view.dispatch({ changes: { from: 0, to: 2 } });
+    expect(calls.map((call) => call.signal.aborted)).toEqual([true, false]);
+    // もう片方が上げている間は、抑止を続ける
+    expect(uploading).toEqual([true]);
+    calls[1].resolve(uploaded(ID_B, 'b.png'));
+    await settle();
+    expect(view.state.doc.toString()).toBe(`うえ![b.png](${url(ID_B)})\nお`);
+    expect(uploading).toEqual([true, false]);
+  });
+
+  it('失敗の表示を含む範囲を消すと、再試行用のファイルを捨てる（次の貼り付けは通常どおり）', async () => {
+    const { view, host, calls, uploading } = setup('あいう');
+    view.dispatch({ selection: { anchor: 1 } });
+    startPasteUpload(view, [file('a.png')]);
+    calls[0].reject(new Error('x'));
+    await settle();
+    view.dispatch({ changes: { from: 0, to: 3 } });
+    expect(host.querySelector('.cm-paste-upload')).toBeNull();
+    expect(uploading).toEqual([true, false]);
+    startPasteUpload(view, [file('b.png')]);
+    calls[1].resolve(uploaded(ID_B, 'b.png'));
+    await settle();
+    expect(view.state.doc.toString()).toBe(`![b.png](${url(ID_B)})\n`);
+    expect(uploading).toEqual([true, false, true, false]);
+  });
+
+  it('undo で表示を含む範囲が消えても中断する', async () => {
+    const calls: Call[] = [];
+    const uploading: boolean[] = [];
+    const host = document.createElement('div');
+    document.body.append(host);
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: '',
+        extensions: [
+          history(),
+          pasteUploadExtensions({
+            upload: (f, signal) =>
+              new Promise<UploadedFile>((resolve, reject) => {
+                calls.push({ file: f, signal, resolve, reject });
+              }),
+            disabled: () => false,
+            onUploadingChange: (value) => uploading.push(value),
+          }),
+        ],
+      }),
+      parent: host,
+    });
+    views.push(view);
+    view.dispatch({ changes: { from: 0, insert: 'あいう' }, userEvent: 'input.type' });
+    view.dispatch({ selection: { anchor: 1 } });
+    startPasteUpload(view, [file('a.png')]);
+    undo(view);
+    expect(view.state.doc.toString()).toBe('');
+    expect(calls[0].signal.aborted).toBe(true);
     expect(uploading).toEqual([true, false]);
   });
 

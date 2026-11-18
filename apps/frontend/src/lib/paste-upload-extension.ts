@@ -12,7 +12,7 @@
  * | 入力欄の破棄 | `destroy()` で中断 | 捨てる |
  * | `setState` (disabled / placeholder の変更) | 旧 plugin の `destroy()` で中断 | 捨てる |
  * | 外からの本文の差し替え・宛先の切り替え | 部品が `resetPasteUploads` を呼ぶ | 捨てる |
- * | 利用者が widget を含む範囲を消す | 続く | widget が無いので捨てる |
+ * | 利用者が widget を含む範囲を消す (undo で消える場合も同じ) | plugin の `update` で中断 | 捨てる |
  *
  * 結果を捨てても、上げ終えたファイルは Drive に残る。送信・保存は、呼び出し側が
  * `onUploadingChange` を見て上げている間は止める。
@@ -24,6 +24,7 @@ import {
   ViewPlugin,
   WidgetType,
   type DecorationSet,
+  type ViewUpdate,
 } from '@codemirror/view';
 
 import type { UploadedFile } from '@/lib/drive-upload';
@@ -223,6 +224,22 @@ class PasteUploadPlugin {
     this.notify();
   }
 
+  /**
+   * 表示を含む範囲が消えたら、その貼り付けを取り消す。利用者が消した = 要らないと見なす。
+   * 表示が無いと「取り消し」も無く、回線が止まっていると送信・保存の抑止から抜けられなくなる。
+   * 失敗して再試行を待っていたものも、表示が無ければ再試行できないので捨てる。
+   */
+  update(update: ViewUpdate): void {
+    if (!update.docChanged || this.batches.size === 0) return;
+    const marks = update.state.field(uploadField);
+    for (const [id, batch] of [...this.batches]) {
+      if (positionOf(marks, id) !== null) continue;
+      batch.controller?.abort();
+      this.batches.delete(id);
+    }
+    this.notify();
+  }
+
   destroy(): void {
     this.abortAll();
     this.notify();
@@ -258,7 +275,8 @@ class PasteUploadPlugin {
 
     const pos = positionOf(this.view.state.field(uploadField), id);
     if (pos === null) {
-      // 利用者が widget を含む範囲を消した。結果は捨てる
+      // 表示が無い。範囲の削除は `update` が先に中断するので通常ここへは来ないが、
+      // 表示が無いまま本文へ入れないよう、結果は捨てる
       this.batches.delete(id);
       this.notify();
       return;
@@ -342,7 +360,7 @@ export function uploadMarkdown(file: UploadedFile): string {
   // 語の中の `_` は強調にならないので逃がさない (`IMG_0001.HEIC` を本文でそのまま読めるようにする)
   const name = file.name
     .replace(/[\r\n]+/g, ' ')
-    .replace(/[\\[\]*`<&]/g, '\\$&')
+    .replace(/[\\[\]*`<&~]/g, '\\$&')
     .replace(/(?<![\p{L}\p{N}])_|_(?![\p{L}\p{N}])/gu, '\\_');
   const mime = file.mimeType.split(';')[0].trim().toLowerCase();
   const embed = mime.startsWith('image/') || driveMediaKind(file.name) !== undefined;
