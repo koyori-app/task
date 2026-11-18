@@ -2,6 +2,27 @@
 
 このファイルは git-cliff（cliff.toml）が生成する。手で編集しない。
 
+## [0.1.53](https://github.com/koyori-app/task/compare/v0.1.52...v0.1.53) - 2026-11-19
+
+MCP サーバーのエンドポイントと、入力欄へのファイルの貼り付けで Drive へ上げて本文にメディアを表示する機能、本文の GitHub パーマリンクのコード抜粋表示、git-cliff による CHANGELOG とリリースノートの生成を足し、My Tasks のタブや絞り込みを URL に残し、プロフィールのアバターの URL 入力欄を消し、ステータスの並べ替えで空の一覧を 400 にし、passkey の認証の検証を強め、ガントの暗い表示の色と依存の脆弱性を直した
+
+### 機能追加
+
+- **release**: git-cliff で CHANGELOG.md とリリースノートを作る ([TASK-554](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-554)) ([#1216](https://github.com/koyori-app/task/pull/1216))
+- **github**: 本文の GitHub パーマリンクをコードの抜粋として表示する ([TASK-482](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-482)) ([#1217](https://github.com/koyori-app/task/pull/1217))
+- **backend**: MCP サーバーのエンドポイントを足す ([TASK-550](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-550)) ([#1218](https://github.com/koyori-app/task/pull/1218))
+- **frontend**: 入力欄にファイルを貼り付けて Drive へ上げ、メディアを本文に表示する ([TASK-137](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-137)) ([#1219](https://github.com/koyori-app/task/pull/1219))
+
+### 修正
+
+- **auth**: passkey の認証で crossOrigin と topOrigin を検め、credential ID の長さを縛る ([TASK-545](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-545), [TASK-546](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-546)) ([#1204](https://github.com/koyori-app/task/pull/1204))
+- **frontend**: ガントの暗い表示の色を見分けられるようにする ([TASK-510](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-510)) ([#1211](https://github.com/koyori-app/task/pull/1211))
+- **frontend**: My Tasks のタブやレビューの絞り込みを URL に残す ([TASK-474](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-474)) ([#1214](https://github.com/koyori-app/task/pull/1214))
+- **backend**: ステータスの並べ替えで空の一覧を 400 にする ([TASK-542](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-542)) ([#1215](https://github.com/koyori-app/task/pull/1215))
+
+### リファクタリング
+
+- **frontend**: プロフィールのアバターの URL 入力欄を削除する ([TASK-551](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-551)) ([#1213](https://github.com/koyori-app/task/pull/1213))
 ## [0.1.52](https://github.com/koyori-app/task/compare/v0.1.51...v0.1.52) - 2026-11-17
 
 タスクに種別を持たせ、一覧の検索を条件式の絞り込みにまとめ、アカウント設定にテーマのページを、予定の API に期間の無いタスクを引く口を、CLI に作成時のキーと URL・一覧の項目選択・テナントの名前指定・更新の通知・コメントの読み出しを足し、畳んだサイドバーで開いているプロジェクトとその中の項目を帯で囲み、アカウント設定のナビをサイドバーと同じ部品に揃え、テナント削除と一括失効・利用者単位の取り消しのロック順とガントの日の段の読みにくさを直した
