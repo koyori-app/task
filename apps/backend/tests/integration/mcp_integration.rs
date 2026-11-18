@@ -1,0 +1,1045 @@
+//! MCP の入口（`POST /mcp`）。規則は docs/dev/features/mcp.md。
+//!
+//! - 入口と認証: PAT の Bearer だけを通す。資格なし・でたらめな Bearer・Cookie だけは 401、
+//!   Device Token は 403、許可していない `Origin` は 403
+//! - ツール: REST API を内向きに呼び直すので、scope・テナント束縛・プロジェクト束縛の拒否が
+//!   そのまま `isError: true` の結果になる。拒否と対照の成功を組で確かめる
+
+use crate::common::{TestApp, TestTenantProject, TestUser, create_status, insert_tenant};
+use axum::http::StatusCode;
+use backend::utils::desktop_auth::s256_challenge;
+use entity::scopes::Scope;
+use entity::{projects, tasks};
+use reqwest::{Client, Response, header};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use serde_json::{Value, json};
+use uuid::Uuid;
+
+const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+
+/// docs/dev/features/mcp.md の API の表にある 12 ツール。増減したら `tools_list_returns_the_twelve_tools` が落ちる
+const TOOL_NAMES: [&str; 12] = [
+    "add_task_comment",
+    "create_task",
+    "get_task",
+    "link_pull_request",
+    "list_project_options",
+    "list_projects",
+    "list_task_comments",
+    "list_task_pull_requests",
+    "list_tasks",
+    "search_tasks",
+    "update_task",
+    "whoami",
+];
+
+fn initialize_body() -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {},
+            "clientInfo": { "name": "mcp-integration-test", "version": "0.0.0" },
+        },
+    })
+}
+
+fn tools_list_body() -> Value {
+    json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" })
+}
+
+fn tool_call_body(name: &str, arguments: Value) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": { "name": name, "arguments": arguments },
+    })
+}
+
+/// 指定のクライアントとヘッダーで `/mcp` へ送る（Cookie・`Origin`・別の版の要求に使う）。
+async fn mcp_with(
+    app: &TestApp,
+    client: &Client,
+    token: Option<&str>,
+    headers: &[(&str, &str)],
+    body: Value,
+) -> Response {
+    let mut request = client
+        .post(format!("{}/mcp", app.base_url()))
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::ACCEPT, "application/json, text/event-stream");
+    if !headers
+        .iter()
+        .any(|(name, _)| name.eq_ignore_ascii_case("MCP-Protocol-Version"))
+    {
+        request = request.header("MCP-Protocol-Version", "2025-11-25");
+    }
+    for (name, value) in headers {
+        request = request.header(*name, *value);
+    }
+    if let Some(token) = token {
+        request = request.header(header::AUTHORIZATION, format!("Bearer {token}"));
+    }
+    request
+        .body(body.to_string())
+        .send()
+        .await
+        .expect("mcp request")
+}
+
+/// ツールの結果。`is_error` と、本文の文字列（成功は API の JSON、失敗はエラー文）。
+struct ToolOutcome {
+    is_error: bool,
+    text: String,
+}
+
+impl ToolOutcome {
+    fn json(&self) -> Value {
+        assert!(!self.is_error, "ツールが失敗した: {}", self.text);
+        serde_json::from_str(&self.text).expect("tool result json")
+    }
+
+    fn error(&self) -> &str {
+        assert!(self.is_error, "ツールが成功した: {}", self.text);
+        &self.text
+    }
+}
+
+async fn outcome_of(response: Response) -> ToolOutcome {
+    let status = response.status();
+    let body: Value = response.json().await.expect("mcp json");
+    assert_eq!(status, StatusCode::OK, "tools/call: {body}");
+    let result = &body["result"];
+    assert!(result.is_object(), "tools/call に result が無い: {body}");
+    ToolOutcome {
+        is_error: result["isError"].as_bool().unwrap_or(false),
+        text: result["content"][0]["text"]
+            .as_str()
+            .unwrap_or_else(|| panic!("content[0].text が無い: {body}"))
+            .to_string(),
+    }
+}
+
+async fn call(app: &TestApp, token: &str, name: &str, arguments: Value) -> ToolOutcome {
+    outcome_of(app.mcp(Some(token), tool_call_body(name, arguments)).await).await
+}
+
+struct Fixture {
+    user: TestUser,
+    tp: TestTenantProject,
+    project_key: String,
+    todo: Uuid,
+    done: Uuid,
+}
+
+/// ユーザー・テナント・プロジェクトと状態 2 つ（`Todo` が既定、`Done` が完了）を作る。
+/// 状態の作成にセッションが要るので、`app` のクライアントはログイン済みになる。
+async fn fixture(app: &mut TestApp) -> Fixture {
+    let user = app.insert_user_default().await;
+    let tp = app.insert_tenant_project(user.id).await;
+    app.login_session_no_content(&user.email, &user.password)
+        .await;
+    let todo = create_status(app, &tp, "Todo", false).await;
+    let done = create_status(app, &tp, "Done", true).await;
+    let project_key = project_key(app, tp.project_id).await;
+    Fixture {
+        user,
+        tp,
+        project_key,
+        todo,
+        done,
+    }
+}
+
+async fn project_key(app: &TestApp, project_id: Uuid) -> String {
+    projects::Entity::find_by_id(project_id)
+        .one(&app.state.db)
+        .await
+        .expect("find project")
+        .expect("project")
+        .key
+}
+
+async fn api_pat(app: &TestApp, fx: &Fixture) -> String {
+    app.insert_pat(fx.user.id, fx.tp.tenant_id, vec![Scope::Api], None)
+        .await
+}
+
+/// `create_task` で 1 件作り、(`KEY-N`, UUID) を返す。
+async fn create_task(app: &TestApp, token: &str, fx: &Fixture, title: &str) -> (String, String) {
+    let created = call(
+        app,
+        token,
+        "create_task",
+        json!({ "project": fx.project_key, "title": title }),
+    )
+    .await
+    .json();
+    let id = created["id"].as_str().expect("task id").to_string();
+    let seq = created["seq_id"].as_i64().expect("seq_id");
+    (format!("{}-{seq}", fx.project_key), id)
+}
+
+/// ログインから交換まで通し、Device Token の平文を返す（desktop_auth_integration.rs と同じ流れ）。
+async fn device_token(app: &mut TestApp, user: &TestUser) -> String {
+    app.reset_session_client();
+    app.login_session_no_content(&user.email, &user.password)
+        .await;
+    let res = app
+        .post_json_with_session(
+            "/v1/desktop/auth/codes",
+            json!({ "code_challenge": s256_challenge(VERIFIER), "name": "laptop" }),
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::CREATED, "認可コードを発行できる");
+    let code = res.json::<Value>().await.expect("code body")["code"]
+        .as_str()
+        .expect("code")
+        .to_string();
+    let res = Client::new()
+        .post(format!("{}/v1/desktop/auth/token", app.base_url()))
+        .header("x-forwarded-for", Uuid::new_v4().to_string())
+        .json(&json!({ "code": code, "code_verifier": VERIFIER }))
+        .send()
+        .await
+        .expect("token request");
+    assert_eq!(res.status(), StatusCode::CREATED, "交換できる");
+    res.json::<Value>().await.expect("token body")["token"]
+        .as_str()
+        .expect("token")
+        .to_string()
+}
+
+// ---- 入口と認証 ----
+
+#[tokio::test]
+async fn request_without_credentials_is_401_with_www_authenticate() {
+    let app = TestApp::new().await;
+
+    let res = app.mcp(None, initialize_body()).await;
+
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        res.headers()
+            .get(header::WWW_AUTHENTICATE)
+            .and_then(|value| value.to_str().ok()),
+        Some("Bearer")
+    );
+    let body: Value = res.json().await.expect("json");
+    assert_eq!(body, json!({ "message": "unauthorized" }));
+}
+
+#[tokio::test]
+async fn unknown_bearer_is_401() {
+    let app = TestApp::new().await;
+
+    let res = app.mcp(Some("not-a-real-token"), initialize_body()).await;
+
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        res.headers()
+            .get(header::WWW_AUTHENTICATE)
+            .and_then(|value| value.to_str().ok()),
+        Some("Bearer")
+    );
+    let body: Value = res.json().await.expect("json");
+    assert_eq!(body, json!({ "message": "unauthorized" }));
+}
+
+#[tokio::test]
+async fn session_cookie_alone_is_401() {
+    let mut app = TestApp::new().await;
+    let user = app.insert_user_default().await;
+    app.login_session_no_content(&user.email, &user.password)
+        .await;
+
+    // 対照: 同じ Cookie は REST API では通る
+    let rest = app.get_with_session("/v1/tenants").await;
+    assert_eq!(rest.status(), StatusCode::OK);
+
+    let res = mcp_with(&app, &app.session_client(), None, &[], initialize_body()).await;
+
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    let body: Value = res.json().await.expect("json");
+    assert_eq!(body, json!({ "message": "unauthorized" }));
+}
+
+#[tokio::test]
+async fn device_token_is_403() {
+    let mut app = TestApp::new().await;
+    let user = app.insert_user_default().await;
+    let token = device_token(&mut app, &user).await;
+
+    // 対照: 同じ Device Token は REST API では通る
+    let rest = app.get_with_bearer("/v1/auth/me", &token).await;
+    assert_eq!(rest.status(), StatusCode::OK);
+
+    let res = app.mcp(Some(&token), initialize_body()).await;
+
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    let body: Value = res.json().await.expect("json");
+    assert_eq!(body, json!({ "message": "forbidden" }));
+}
+
+#[tokio::test]
+async fn initialize_with_pat_names_the_server_and_accepts_the_initialized_notification() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+
+    let res = app.mcp(Some(&token), initialize_body()).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        res.headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("application/json")
+    );
+    let body: Value = res.json().await.expect("json");
+    assert_eq!(body["result"]["serverInfo"]["name"], "task", "{body}");
+    assert!(
+        body["result"]["capabilities"]["tools"].is_object(),
+        "{body}"
+    );
+
+    let res = app
+        .mcp(
+            Some(&token),
+            json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::ACCEPTED);
+}
+
+#[tokio::test]
+async fn get_and_delete_are_405() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+    let url = format!("{}/mcp", app.base_url());
+
+    let res = Client::new()
+        .get(&url)
+        .header(header::ACCEPT, "text/event-stream")
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .send()
+        .await
+        .expect("get mcp");
+    assert_eq!(res.status(), StatusCode::METHOD_NOT_ALLOWED);
+
+    let res = Client::new()
+        .delete(&url)
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .send()
+        .await
+        .expect("delete mcp");
+    assert_eq!(res.status(), StatusCode::METHOD_NOT_ALLOWED);
+}
+
+#[tokio::test]
+async fn tools_list_returns_the_twelve_tools() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+
+    let res = app.mcp(Some(&token), tools_list_body()).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.expect("json");
+    let tools = body["result"]["tools"].as_array().expect("tools");
+    let mut names: Vec<&str> = tools
+        .iter()
+        .map(|tool| tool["name"].as_str().expect("tool name"))
+        .collect();
+    names.sort_unstable();
+    assert_eq!(names, TOOL_NAMES);
+
+    // 読み取りのツールには readOnlyHint が付き、書き込みのツールには付かない
+    let read_only = |name: &str| {
+        tools
+            .iter()
+            .find(|tool| tool["name"] == name)
+            .expect("tool")["annotations"]["readOnlyHint"]
+            .as_bool()
+    };
+    assert_eq!(read_only("get_task"), Some(true));
+    assert_ne!(read_only("create_task"), Some(true));
+}
+
+#[tokio::test]
+async fn foreign_origin_is_403_and_the_frontend_origin_is_allowed() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+    let client = Client::new();
+
+    let res = mcp_with(
+        &app,
+        &client,
+        Some(&token),
+        &[("Origin", "https://evil.example")],
+        tools_list_body(),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    let allowed = app.state.settings.allow_origin.clone();
+    let res = mcp_with(
+        &app,
+        &client,
+        Some(&token),
+        &[("Origin", &allowed)],
+        tools_list_body(),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn tools_list_works_in_the_2026_07_28_form() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+
+    let res = mcp_with(
+        &app,
+        &Client::new(),
+        Some(&token),
+        &[
+            ("MCP-Protocol-Version", "2026-07-28"),
+            ("Mcp-Method", "tools/list"),
+        ],
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/list",
+            "params": {
+                "_meta": {
+                    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                    "io.modelcontextprotocol/clientCapabilities": {},
+                    "io.modelcontextprotocol/clientInfo": {
+                        "name": "mcp-integration-test",
+                        "version": "0.0.0",
+                    },
+                },
+            },
+        }),
+    )
+    .await;
+
+    let status = res.status();
+    let body: Value = res.json().await.expect("json");
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["result"]["tools"].as_array().map(Vec::len),
+        Some(TOOL_NAMES.len()),
+        "{body}"
+    );
+}
+
+// ---- ツール ----
+
+#[tokio::test]
+async fn whoami_returns_the_token_identity() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+
+    let identity = call(&app, &token, "whoami", json!({})).await.json();
+
+    assert_eq!(identity["user_id"], fx.user.id.to_string());
+    assert_eq!(identity["tenant_ids"], json!([fx.tp.tenant_id.to_string()]));
+}
+
+#[tokio::test]
+async fn create_task_uses_the_default_status_and_get_task_reads_it_back() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+
+    let created = call(
+        &app,
+        &token,
+        "create_task",
+        json!({
+            "project": fx.project_key,
+            "title": "MCP から作る",
+            "description": "本文",
+            "priority": "High",
+            "soft_deadline": "2026-12-01",
+        }),
+    )
+    .await
+    .json();
+    assert_eq!(created["status_id"], fx.todo.to_string());
+    assert_eq!(created["priority"], "High");
+    let id: Uuid = created["id"].as_str().expect("id").parse().expect("uuid");
+    let reference = format!("{}-{}", fx.project_key, created["seq_id"]);
+
+    let row = tasks::Entity::find_by_id(id)
+        .one(&app.state.db)
+        .await
+        .expect("find task")
+        .expect("task row");
+    assert_eq!(row.title, "MCP から作る");
+    assert_eq!(row.status_id, fx.todo);
+    assert_eq!(row.project_id, fx.tp.project_id);
+
+    let fetched = call(&app, &token, "get_task", json!({ "task": reference }))
+        .await
+        .json();
+    assert_eq!(fetched["id"], id.to_string());
+    assert_eq!(fetched["title"], "MCP から作る");
+
+    // UUID でも、プロジェクトを添えれば引ける
+    let by_uuid = call(
+        &app,
+        &token,
+        "get_task",
+        json!({ "task": id.to_string(), "project": fx.project_key }),
+    )
+    .await
+    .json();
+    assert_eq!(by_uuid["id"], id.to_string());
+}
+
+#[tokio::test]
+async fn create_task_rejects_malformed_arguments_without_creating() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+
+    let outcome = call(
+        &app,
+        &token,
+        "create_task",
+        json!({ "project": fx.project_key, "title": "x", "label_ids": ["bug"] }),
+    )
+    .await;
+    assert_eq!(outcome.error(), "label_ids must be a UUID");
+
+    // priority の検証は API に任せる。API の拒否がそのまま返る
+    let outcome = call(
+        &app,
+        &token,
+        "create_task",
+        json!({ "project": fx.project_key, "title": "x", "priority": "urgent" }),
+    )
+    .await;
+    assert!(outcome.error().starts_with("4"), "{}", outcome.error());
+
+    let count = tasks::Entity::find()
+        .filter(tasks::Column::ProjectId.eq(fx.tp.project_id))
+        .all(&app.state.db)
+        .await
+        .expect("tasks")
+        .len();
+    assert_eq!(count, 0);
+}
+
+#[tokio::test]
+async fn update_task_resolves_the_status_by_name() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+    let (reference, id) = create_task(&app, &token, &fx, "状態を変える").await;
+
+    let updated = call(
+        &app,
+        &token,
+        "update_task",
+        json!({ "task": reference, "status": "done", "title": "状態を変えた" }),
+    )
+    .await
+    .json();
+    assert_eq!(updated["status_id"], fx.done.to_string());
+    assert_eq!(updated["title"], "状態を変えた");
+    let row = tasks::Entity::find_by_id(id.parse::<Uuid>().expect("uuid"))
+        .one(&app.state.db)
+        .await
+        .expect("find task")
+        .expect("task row");
+    assert_eq!(row.status_id, fx.done);
+
+    // 存在しない名前は、候補の名前を添えて断る
+    let outcome = call(
+        &app,
+        &token,
+        "update_task",
+        json!({ "task": reference, "status": "Nope" }),
+    )
+    .await;
+    assert_eq!(
+        outcome.error(),
+        "Status not found: Nope (this project has Todo, Done)"
+    );
+}
+
+#[tokio::test]
+async fn add_task_comment_shows_up_in_list_task_comments() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+    let (reference, _) = create_task(&app, &token, &fx, "コメントする").await;
+
+    let comment = call(
+        &app,
+        &token,
+        "add_task_comment",
+        json!({ "task": reference, "body": "MCP からのコメント" }),
+    )
+    .await
+    .json();
+    assert_eq!(comment["body"], "MCP からのコメント");
+
+    let listed = call(
+        &app,
+        &token,
+        "list_task_comments",
+        json!({ "task": reference }),
+    )
+    .await
+    .json();
+    let comments = listed["comments"].as_array().expect("comments");
+    assert_eq!(comments.len(), 1, "{listed}");
+    assert!(
+        listed.to_string().contains("MCP からのコメント"),
+        "{listed}"
+    );
+}
+
+#[tokio::test]
+async fn list_tasks_and_search_tasks_return_the_created_task() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+    let (_, first) = create_task(&app, &token, &fx, "OAuth login flow").await;
+    let (_, second) = create_task(&app, &token, &fx, "Billing export").await;
+
+    let listed = call(
+        &app,
+        &token,
+        "list_tasks",
+        json!({ "project": fx.project_key }),
+    )
+    .await
+    .json();
+    assert_eq!(listed["total"], 2, "{listed}");
+    let mut ids: Vec<&str> = listed["tasks"]
+        .as_array()
+        .expect("tasks")
+        .iter()
+        .map(|task| task["id"].as_str().expect("id"))
+        .collect();
+    ids.sort_unstable();
+    let mut expected = [first.as_str(), second.as_str()];
+    expected.sort_unstable();
+    assert_eq!(ids, expected);
+
+    // limit と offset はクエリへそのまま渡る
+    let page = call(
+        &app,
+        &token,
+        "list_tasks",
+        json!({ "project": fx.project_key, "limit": 1, "offset": 1 }),
+    )
+    .await
+    .json();
+    assert_eq!(page["tasks"].as_array().map(Vec::len), Some(1), "{page}");
+    assert_eq!(page["total"], 2, "{page}");
+
+    let hits = call(
+        &app,
+        &token,
+        "search_tasks",
+        json!({ "project": fx.project_key, "q": "OAuth" }),
+    )
+    .await
+    .json();
+    let hit_ids: Vec<&str> = hits["tasks"]
+        .as_array()
+        .expect("hits")
+        .iter()
+        .map(|task| task["id"].as_str().expect("id"))
+        .collect();
+    assert_eq!(hit_ids, [first.as_str()], "{hits}");
+}
+
+#[tokio::test]
+async fn list_project_options_returns_every_kind() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+
+    for kind in [
+        "statuses",
+        "labels",
+        "task_types",
+        "milestones",
+        "sprints",
+        "assignable_users",
+    ] {
+        let options = call(
+            &app,
+            &token,
+            "list_project_options",
+            json!({ "project": fx.project_key, "kind": kind }),
+        )
+        .await
+        .json();
+        assert!(options.is_array(), "{kind}: {options}");
+    }
+
+    let statuses = call(
+        &app,
+        &token,
+        "list_project_options",
+        json!({ "project": fx.project_key, "kind": "statuses" }),
+    )
+    .await
+    .json();
+    let names: Vec<&str> = statuses
+        .as_array()
+        .expect("statuses")
+        .iter()
+        .map(|status| status["name"].as_str().expect("name"))
+        .collect();
+    assert_eq!(names, ["Todo", "Done"]);
+
+    // 未知の kind は引数の誤りとして返る
+    let outcome = call(
+        &app,
+        &token,
+        "list_project_options",
+        json!({ "project": fx.project_key, "kind": "nope" }),
+    )
+    .await;
+    assert!(outcome.is_error, "{}", outcome.text);
+}
+
+#[tokio::test]
+async fn write_tool_is_403_without_the_write_scope() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let writer = api_pat(&app, &fx).await;
+    let (reference, id) = create_task(&app, &writer, &fx, "読むだけ").await;
+    let reader = app
+        .insert_pat(
+            fx.user.id,
+            fx.tp.tenant_id,
+            vec![Scope::ReadProject, Scope::ReadTask],
+            None,
+        )
+        .await;
+
+    let outcome = call(
+        &app,
+        &reader,
+        "create_task",
+        json!({ "project": fx.project_key, "title": "書けない" }),
+    )
+    .await;
+    assert_eq!(outcome.error(), "403 forbidden");
+
+    // 対照: 同じ PAT で読み取りは通る
+    let fetched = call(&app, &reader, "get_task", json!({ "task": reference }))
+        .await
+        .json();
+    assert_eq!(fetched["id"], id);
+}
+
+#[tokio::test]
+async fn resolving_a_key_needs_read_project_and_uuids_do_not() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let writer = api_pat(&app, &fx).await;
+    let (reference, id) = create_task(&app, &writer, &fx, "UUID で読む").await;
+    let reader = app
+        .insert_pat(fx.user.id, fx.tp.tenant_id, vec![Scope::ReadTask], None)
+        .await;
+
+    let outcome = call(&app, &reader, "get_task", json!({ "task": reference })).await;
+    assert_eq!(
+        outcome.error(),
+        format!(
+            "403 forbidden (resolving project key \"{}\" needs the read:project scope; pass the project UUID instead)",
+            fx.project_key
+        )
+    );
+
+    let fetched = call(
+        &app,
+        &reader,
+        "get_task",
+        json!({ "task": id, "project": fx.tp.project_id.to_string() }),
+    )
+    .await
+    .json();
+    assert_eq!(fetched["id"], id);
+}
+
+#[tokio::test]
+async fn tenant_outside_the_token_binding_is_403() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+    // 持ち主は同じ。束縛していないテナントは、所属していても PAT では触れない
+    let other_tenant = insert_tenant(&app.state.db, fx.user.id).await;
+
+    let outcome = call(
+        &app,
+        &token,
+        "list_projects",
+        json!({ "tenant": other_tenant.to_string() }),
+    )
+    .await;
+    assert_eq!(outcome.error(), "403 forbidden");
+
+    let projects = call(
+        &app,
+        &token,
+        "list_projects",
+        json!({ "tenant": fx.tp.tenant_id.to_string() }),
+    )
+    .await
+    .json();
+    let keys: Vec<&str> = projects
+        .as_array()
+        .expect("projects")
+        .iter()
+        .map(|project| project["key"].as_str().expect("key"))
+        .collect();
+    assert_eq!(keys, [fx.project_key.as_str()]);
+}
+
+#[tokio::test]
+async fn project_outside_allowed_project_ids_is_denied() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let writer = api_pat(&app, &fx).await;
+    let (_, allowed_task) = create_task(&app, &writer, &fx, "許可した側").await;
+    let other_project = crate::common::insert_extra_project(&app, fx.tp.tenant_id).await;
+    let other = TestTenantProject {
+        tenant_id: fx.tp.tenant_id,
+        project_id: other_project,
+    };
+    let other_status = create_status(&app, &other, "Todo", false).await;
+    let other_task = call(
+        &app,
+        &writer,
+        "create_task",
+        json!({
+            "project": other_project.to_string(),
+            "title": "許可していない側",
+            "status": other_status.to_string(),
+        }),
+    )
+    .await
+    .json();
+    let other_task = other_task["id"].as_str().expect("id").to_string();
+    let scoped = app
+        .insert_pat(
+            fx.user.id,
+            fx.tp.tenant_id,
+            vec![Scope::Api],
+            Some(vec![fx.tp.project_id]),
+        )
+        .await;
+
+    let outcome = call(
+        &app,
+        &scoped,
+        "get_task",
+        json!({ "task": other_task, "project": other_project.to_string() }),
+    )
+    .await;
+    assert_eq!(outcome.error(), "403 forbidden");
+
+    let fetched = call(
+        &app,
+        &scoped,
+        "get_task",
+        json!({ "task": allowed_task, "project": fx.tp.project_id.to_string() }),
+    )
+    .await
+    .json();
+    assert_eq!(fetched["id"], allowed_task);
+}
+
+#[tokio::test]
+async fn token_bound_to_several_tenants_must_pass_tenant() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let second_tenant = insert_tenant(&app.state.db, fx.user.id).await;
+    let token = app
+        .insert_pat_in_tenants(
+            fx.user.id,
+            &[fx.tp.tenant_id, second_tenant],
+            vec![Scope::Api],
+            None,
+        )
+        .await;
+
+    let outcome = call(&app, &token, "list_projects", json!({})).await;
+    let message = outcome.error();
+    assert!(
+        message.starts_with("This token can be used in 2 tenants: "),
+        "{message}"
+    );
+    assert!(message.ends_with("Pass `tenant`."), "{message}");
+    for tenant in [fx.tp.tenant_id, second_tenant] {
+        assert!(message.contains(&tenant.to_string()), "{message}");
+    }
+
+    let projects = call(
+        &app,
+        &token,
+        "list_projects",
+        json!({ "tenant": fx.tp.tenant_id.to_string() }),
+    )
+    .await
+    .json();
+    assert_eq!(projects.as_array().map(Vec::len), Some(1), "{projects}");
+}
+
+#[tokio::test]
+async fn tenant_can_be_passed_by_name() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+    let display_id = entity::tenants::Entity::find_by_id(fx.tp.tenant_id)
+        .one(&app.state.db)
+        .await
+        .expect("find tenant")
+        .expect("tenant")
+        .display_id;
+
+    let projects = call(
+        &app,
+        &token,
+        "list_projects",
+        json!({ "tenant": display_id }),
+    )
+    .await
+    .json();
+    assert_eq!(projects.as_array().map(Vec::len), Some(1), "{projects}");
+
+    // 名前を引くには read:tenant が要る。無ければ原因を添えて断る
+    let narrow = app
+        .insert_pat(fx.user.id, fx.tp.tenant_id, vec![Scope::ReadProject], None)
+        .await;
+    let outcome = call(
+        &app,
+        &narrow,
+        "list_projects",
+        json!({ "tenant": display_id }),
+    )
+    .await;
+    assert_eq!(
+        outcome.error(),
+        format!(
+            "403 forbidden (resolving tenant \"{display_id}\" needs the read:tenant scope; pass the tenant UUID instead)"
+        )
+    );
+}
+
+#[tokio::test]
+async fn task_uuid_without_project_is_rejected() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+    let (_, id) = create_task(&app, &token, &fx, "UUID だけ").await;
+
+    let outcome = call(&app, &token, "get_task", json!({ "task": id })).await;
+
+    assert_eq!(outcome.error(), "project is required when task is a UUID");
+}
+
+#[tokio::test]
+async fn link_pull_request_without_github_integration_is_409() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+    let (reference, _) = create_task(&app, &token, &fx, "PR をつなぐ").await;
+
+    let outcome = call(
+        &app,
+        &token,
+        "link_pull_request",
+        json!({ "task": reference, "number": 12 }),
+    )
+    .await;
+    assert_eq!(outcome.error(), "409 github-integration-missing");
+
+    // 対照: 連携が無くても、リンクの一覧は読める
+    let forge = call(
+        &app,
+        &token,
+        "list_task_pull_requests",
+        json!({ "task": reference }),
+    )
+    .await
+    .json();
+    assert!(forge.is_object(), "{forge}");
+}
+
+#[tokio::test]
+async fn missing_task_is_404() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+
+    let outcome = call(
+        &app,
+        &token,
+        "get_task",
+        json!({ "task": format!("{}-99999", fx.project_key) }),
+    )
+    .await;
+
+    assert_eq!(outcome.error(), "404 not-found");
+}
+
+/// 内向きの呼び出しに Cookie を渡さない。渡すと、PAT に無い権限がセッションで通る
+#[tokio::test]
+async fn session_cookie_does_not_widen_the_token_scope() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let reader = app
+        .insert_pat(
+            fx.user.id,
+            fx.tp.tenant_id,
+            vec![Scope::ReadProject, Scope::ReadTask],
+            None,
+        )
+        .await;
+    let arguments = json!({ "project": fx.project_key, "title": "Cookie では書けない" });
+
+    // 対照: 同じ Cookie は REST API ではタスクを作れる
+    let rest = app
+        .post_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{}/tasks",
+                fx.tp.tenant_id, fx.tp.project_id
+            ),
+            json!({ "title": "セッションで作る", "status_id": fx.todo }),
+        )
+        .await;
+    assert_eq!(rest.status(), StatusCode::CREATED);
+
+    let outcome = outcome_of(
+        mcp_with(
+            &app,
+            &app.session_client(),
+            Some(&reader),
+            &[],
+            tool_call_body("create_task", arguments),
+        )
+        .await,
+    )
+    .await;
+
+    assert_eq!(outcome.error(), "403 forbidden");
+}

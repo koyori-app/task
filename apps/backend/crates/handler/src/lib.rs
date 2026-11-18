@@ -23,6 +23,7 @@ pub use common::{error, settings};
 pub mod auth_helpers;
 pub mod extractors;
 pub mod handlers;
+pub mod mcp;
 pub mod middlewares;
 pub mod openapi;
 pub mod routes;

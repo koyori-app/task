@@ -786,6 +786,7 @@ impl TestApp {
             .layer(Extension(state.redis_client.clone()))
             .layer(Extension(shutdown_rx))
             .layer(SessionLayer::new(session_store));
+        let router = handler::mcp::mount(router, state.clone());
 
         let app_router = router.clone();
         tokio::spawn(async move {
@@ -1255,6 +1256,26 @@ impl TestApp {
 
     pub fn client(&self) -> &Client {
         &self.client
+    }
+
+    /// MCP の入口（`POST /mcp`）へ JSON-RPC を 1 件送る。
+    ///
+    /// セッション Cookie を持たない新しいクライアントで送る（`self.client` は Cookie を覚えている）。
+    /// Cookie や別のヘッダーを付けた要求は、テスト側で `session_client()` から組み立てる。
+    pub async fn mcp(&self, token: Option<&str>, body: serde_json::Value) -> Response {
+        let mut request = Client::new()
+            .post(format!("{}/mcp", self.base_url))
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::ACCEPT, "application/json, text/event-stream")
+            .header("MCP-Protocol-Version", "2025-11-25");
+        if let Some(token) = token {
+            request = request.header(header::AUTHORIZATION, format!("Bearer {token}"));
+        }
+        request
+            .body(body.to_string())
+            .send()
+            .await
+            .expect("mcp request")
     }
 
     pub async fn delete_json_with_session(&self, path: &str, body: serde_json::Value) -> Response {

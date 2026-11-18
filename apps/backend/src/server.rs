@@ -308,21 +308,22 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         shutdown_rx.clone(),
     ));
 
-    let api = observability::with_request_tracking(
-        router
-            .merge(Scalar::with_url("/scalar", openapi.clone()))
-            .with_state(state.clone())
-            // タスク変更の発行レイヤーと SSE の終了に使う
-            .layer(Extension(state.redis_client.clone()))
-            .layer(Extension(shutdown_rx.clone()))
-            .layer(cors)
-            .layer(middleware::from_fn_with_state(
-                state.clone(),
-                handler::middlewares::csrf::csrf_origin_check,
-            ))
-            .layer(middleware::from_fn(logging_middleware))
-            .layer(SessionLayer::new(session_store.clone())),
-    );
+    let api_inner = router
+        .merge(Scalar::with_url("/scalar", openapi.clone()))
+        .with_state(state.clone())
+        // タスク変更の発行レイヤーと SSE の終了に使う
+        .layer(Extension(state.redis_client.clone()))
+        .layer(Extension(shutdown_rx.clone()))
+        .layer(cors)
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            handler::middlewares::csrf::csrf_origin_check,
+        ))
+        .layer(middleware::from_fn(logging_middleware))
+        .layer(SessionLayer::new(session_store.clone()));
+    // `/mcp` は Bearer 必須で Cookie を見ないので、CORS・CSRF・セッションの外に足す。
+    // ツールは `api_inner` を内向きに呼び直すので、Sentry の追跡は外側の 1 回だけになる
+    let api = observability::with_request_tracking(handler::mcp::mount(api_inner, state.clone()));
 
     // apalis-board の UI はビルド時に API=/api/v1・静的ファイル=/ 直下を前提とする。
     // /jobs にネストすると JS/WASM が 404 になり真っ白になる。
