@@ -22,10 +22,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use apalis::prelude::{
-    BackoffConfig, BoxDynError, Data, IntervalStrategy, StrategyBuilder, Task, TaskSink,
-};
-use apalis_postgres::{Config, JsonCodec, PgPool, PostgresStorage};
+use apalis::prelude::{BoxDynError, Data, TaskSink};
+use apalis_postgres::{Config, PgPool, PostgresStorage};
 use sea_orm::{ConnectionTrait, EntityTrait, QuerySelect, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -95,23 +93,16 @@ impl ReviewSummaryJob {
     }
 }
 
-pub type ReviewSummaryStorage = PostgresStorage<
-    ReviewSummaryJob,
-    apalis_postgres::CompactType,
-    JsonCodec<apalis_postgres::CompactType>,
-    apalis_postgres::PgNotify,
->;
+pub type ReviewSummaryStorage = PostgresStorage<ReviewSummaryJob>;
 
 pub fn build_storage(pool: &PgPool, _settings: &Settings) -> ReviewSummaryStorage {
-    let config = Config::new(QUEUE_NAME).with_poll_interval(
-        StrategyBuilder::new()
-            .apply(
-                IntervalStrategy::new(Duration::from_secs(POLL_INTERVAL_SECS))
-                    .with_backoff(BackoffConfig::default()),
-            )
-            .build(),
-    );
-    PostgresStorage::new_with_notify(pool, &config)
+    PostgresStorage::new(pool).with_config(Config::default().queue(QUEUE_NAME))
+}
+
+/// ワーカーが使う backend。INSERT の通知（LISTEN）と、取りこぼしを拾う定期の poll を併用する。
+/// ワーカーの世代ごとに作り直す（通知の接続は世代ごとに張る）。
+pub fn worker_backend(storage: &ReviewSummaryStorage) -> crate::WorkerBackend<ReviewSummaryJob> {
+    crate::worker_backend(storage, Duration::from_secs(POLL_INTERVAL_SECS))
 }
 
 pub async fn setup(
@@ -138,20 +129,14 @@ async fn enqueue_after(
     let mut storage = storage.clone();
     if delay.is_zero() {
         storage
-            .push(job)
+            .push_task(crate::new_task(job))
             .await
             .map_err(|e| anyhow::anyhow!("push review summary job: {e}"))?;
         return Ok(());
     }
 
-    let mut task = Task::new(job);
-    task.parts.run_at = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| anyhow::anyhow!("system time before epoch: {e}"))?
-        .saturating_add(delay)
-        .as_secs();
     storage
-        .push_task(task)
+        .push_task(crate::new_task_after(job, delay))
         .await
         .map_err(|e| anyhow::anyhow!("push review summary job: {e}"))?;
     Ok(())

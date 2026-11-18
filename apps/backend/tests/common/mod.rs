@@ -1672,3 +1672,23 @@ pub async fn upload_drive_file(
 pub fn file_id_of(file: &serde_json::Value) -> Uuid {
     Uuid::parse_str(file["id"].as_str().expect("id is string")).expect("id is uuid")
 }
+
+/// `watchdog` の見張り。落とすと見張りは止まる。
+pub struct Watchdog(#[allow(dead_code)] std::sync::mpsc::Sender<()>);
+
+/// 試験を OS スレッドの見張りで守る。`limit` を過ぎても落とされなければ、何を待っていたかを
+/// 書いてプロセスごと落とす。
+///
+/// current_thread のランタイムで、失敗したジョブのリトライが休まず回り続けると、タイマーを
+/// 進める番が来ず、`tokio::time::timeout` が効かない。試験の止まりが外の timeout（45 分）まで続く。
+/// 正常な試験の最長（初回の schema 同期込みで 1 分余り）の三倍ほどを `limit` にすること。
+pub fn watchdog(waiting_for: &'static str, limit: std::time::Duration) -> Watchdog {
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        if rx.recv_timeout(limit) == Err(std::sync::mpsc::RecvTimeoutError::Timeout) {
+            eprintln!("watchdog: {waiting_for} が {limit:?} を過ぎても終わらぬ。試験を落とす");
+            std::process::exit(1);
+        }
+    });
+    Watchdog(tx)
+}

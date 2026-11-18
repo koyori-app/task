@@ -9,10 +9,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use apalis::prelude::{
-    BoxDynError, Data, TaskSink, WorkerBuilder, WorkerContext, WorkerError, WorkerStateError,
-};
-use apalis_postgres::{CompactType, Config, JsonCodec, PgNotify, PostgresStorage};
+use apalis::prelude::{BoxDynError, Data, TaskSink, WorkerBuilder, WorkerContext};
+use apalis_postgres::{Config, PostgresStorage};
 use sea_orm::{ConnectionTrait, DatabaseBackend, DatabaseConnection, Statement};
 use tokio::sync::{Notify, watch};
 use tokio::time::timeout;
@@ -22,7 +20,7 @@ use job::supervise::{Generation, run_generation, supervise, worker_id};
 
 use crate::common::TestApp;
 
-type ProbeStorage = PostgresStorage<u32, CompactType, JsonCodec<CompactType>, PgNotify>;
+type ProbeStorage = PostgresStorage<u32>;
 
 const KEEP_ALIVE: Duration = Duration::from_secs(1);
 /// 自然には回収されない長さ。回収はテストが旧世代の行の `last_seen` を戻して起こす
@@ -36,10 +34,17 @@ fn new_queue(prefix: &str) -> (String, String) {
 }
 
 fn probe_storage(app: &TestApp, queue: &str) -> ProbeStorage {
-    let config = Config::new(queue)
-        .set_keep_alive(KEEP_ALIVE)
-        .set_reenqueue_orphaned_after(REENQUEUE_AFTER);
-    PostgresStorage::<u32>::new_with_notify(&app.state.pg_pool, &config)
+    // 孤児とみなす長さは heartbeat_interval × missed_heartbeats
+    let config = Config::default()
+        .queue(queue)
+        .heartbeat_interval(KEEP_ALIVE)
+        .missed_heartbeats((REENQUEUE_AFTER.as_secs() / KEEP_ALIVE.as_secs()) as usize);
+    PostgresStorage::new(&app.state.pg_pool).with_config(config)
+}
+
+/// ワーカーが使う backend。通知と定期の poll を併用する（本番と同じ作り）
+fn probe_backend(storage: &ProbeStorage) -> job::WorkerBackend<u32> {
+    job::worker_backend(storage, Duration::from_millis(100))
 }
 
 #[derive(Default)]
@@ -59,23 +64,19 @@ async fn probe(_n: u32) -> Result<(), BoxDynError> {
     Ok(())
 }
 
-fn blocking_generation(
-    storage: &ProbeStorage,
-    gate: &Arc<Gate>,
-    mut ctx: WorkerContext,
-) -> Generation {
-    let worker = WorkerBuilder::new(ctx.name())
-        .backend(storage.clone())
+fn blocking_generation(storage: &ProbeStorage, gate: &Arc<Gate>, ctx: WorkerContext) -> Generation {
+    let worker = WorkerBuilder::new(ctx)
+        .backend(probe_backend(storage))
         .data(gate.clone())
         .build(blocking_probe);
-    Box::pin(async move { worker.run_with_ctx(&mut ctx).await })
+    Box::pin(async move { worker.run().await })
 }
 
-fn probe_generation(storage: &ProbeStorage, mut ctx: WorkerContext) -> Generation {
-    let worker = WorkerBuilder::new(ctx.name())
-        .backend(storage.clone())
+fn probe_generation(storage: &ProbeStorage, ctx: WorkerContext) -> Generation {
+    let worker = WorkerBuilder::new(ctx)
+        .backend(probe_backend(storage))
         .build(probe);
-    Box::pin(async move { worker.run_with_ctx(&mut ctx).await })
+    Box::pin(async move { worker.run().await })
 }
 
 /// キューに 1 件だけ積んだジョブの (status, lock_by)
@@ -135,7 +136,7 @@ async fn orphaned_job_of_dead_generation_is_requeued_and_rerun_by_next_generatio
     let (tx, rx) = watch::channel(false);
 
     let id1 = worker_id(&logical, 1);
-    let ctx1 = WorkerContext::new::<()>(&id1);
+    let ctx1 = WorkerContext::new(&id1);
     let gen1 = tokio::spawn(run_generation(
         ctx1.clone(),
         blocking_generation(&storage, &gate, ctx1),
@@ -144,16 +145,16 @@ async fn orphaned_job_of_dead_generation_is_requeued_and_rerun_by_next_generatio
     timeout(DEADLINE, gate.reached.notified())
         .await
         .expect("generation 1 picks up the job");
-    // ジョブを掴んだまま世代 1 のタスクが消える
+    // ジョブを掴んだまま世代 1 のタスクが消える（掴んだ行は、ハンドラーの実行中も Queued のまま）
     gen1.abort();
     let _ = gen1.await;
     assert_eq!(
         job_row(db, &queue).await,
-        ("Running".to_string(), Some(id1.clone()))
+        ("Queued".to_string(), Some(id1.clone()))
     );
 
     let id2 = worker_id(&logical, 2);
-    let ctx2 = WorkerContext::new::<()>(&id2);
+    let ctx2 = WorkerContext::new(&id2);
     let gen2 = tokio::spawn(run_generation(
         ctx2.clone(),
         blocking_generation(&storage, &gate, ctx2.clone()),
@@ -256,20 +257,14 @@ async fn shutdown_before_first_poll_ends_generation_without_restart() {
     let storage = probe_storage(&app, &queue);
 
     let (_tx, stopped) = watch::channel(true);
-    let ctx = WorkerContext::new::<()>(&worker_id(&logical, 1));
+    let ctx = WorkerContext::new(&worker_id(&logical, 1));
     let res = timeout(
         DEADLINE,
         run_generation(ctx.clone(), probe_generation(&storage, ctx), stopped),
     )
     .await
     .expect("generation ends");
-    assert!(
-        matches!(
-            res,
-            Ok(()) | Err(WorkerError::StateError(WorkerStateError::AlreadyStarted))
-        ),
-        "unexpected result: {res:?}"
-    );
+    assert!(res.is_ok(), "unexpected result: {res:?}");
 
     let (tx, rx) = watch::channel(false);
     let builds = Arc::new(AtomicUsize::new(0));
