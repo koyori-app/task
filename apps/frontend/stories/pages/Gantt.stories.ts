@@ -405,16 +405,25 @@ export const LowDeviceMainScroll: Story = {
     await expect(canvas.findByText('巻いた先の確かめ 1')).resolves.toBeInTheDocument();
     const first = mainScrollTasks[0]!.id;
     const last = mainScrollTasks[mainScrollTasks.length - 1]!.id;
-    await waitFor(() =>
-      expect(canvasElement.querySelector(`[data-task-id="${first}"]`)).not.toBeNull(),
+    const drawn = (id: string) => canvasElement.querySelector(`[data-task-id="${id}"]`) !== null;
+    await waitFor(() => expect(drawn(first)).toBe(true));
+    // 前の物語が window を巻いたままのことがある。window を頭へ戻し、その描き直しが済んでから見る
+    // （window の位置が動くと、外の域を window に取り違えた形でも描き直されてしまう）
+    window.scrollTo(0, 0);
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    // 端末は低性能と判じられ、見える行だけを描く（60 件のうち main に見える分だけ）
+    await expect((navigator as { deviceMemory?: number }).deviceMemory).toBeUndefined();
+    await expect(canvasElement.querySelectorAll('[data-task-id]').length).toBeLessThan(
+      mainScrollTasks.length,
     );
-    // 巻く前は、main の外の下の行は描かれていない（見える行だけを描く）
-    await expect(canvasElement.querySelector(`[data-task-id="${last}"]`)).toBeNull();
+    await expect(drawn(last)).toBe(false);
+    // main を巻くと、main のスクロールを聞いて描き直す。arc-vue は描き直しを一つの rAF に寄せるので、
+    // 二つの rAF の後にその場で見る（待ち直すと、試験の場の iframe の resize でも描き直されてしまい、
+    // 外の域を window に取り違えた形でも通る）
     const main = canvasElement.querySelector('main')!;
     main.scrollTop = main.scrollHeight;
-    main.dispatchEvent(new Event('scroll'));
-    await waitFor(() =>
-      expect(canvasElement.querySelector(`[data-task-id="${last}"]`)).not.toBeNull(),
-    );
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect(drawn(last)).toBe(true);
   },
 };
