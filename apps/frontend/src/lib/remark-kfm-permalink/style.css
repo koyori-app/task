@@ -1,0 +1,47 @@
+/*
+ * remark-kfm-permalink サイドカー CSS (GitHub のパーマリンクをコードの抜粋として出す枠)。
+ * レンダラは CSS を import しない — 消費側 (v-html するページ) が
+ * rehype-kfm-code/style.css と同じ場所で明示 import する。
+ *
+ * 中身は client の custom element (element.ts) が差し込む。抜粋そのものは <kfm-code> で、
+ * 見た目は rehype-kfm-code/style.css が担う。ここが足すのは、その上に載るヘッダ
+ * (ファイルのパス・行・コミット) と、未処理・取れなかったときのリンクの余白だけ。
+ */
+kfm-permalink {
+  display: block;
+  margin: 0.5rem 0 1rem;
+}
+
+/* ヘッダ: kfm-code の帯と同じ地・同じ字に揃え、下の kfm-code と 1 つの枠に見せる */
+kfm-permalink > .kfm-permalink-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.75rem;
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: 0.375rem 0.375rem 0 0;
+  background: var(--muted);
+  color: var(--kfm-code-muted-fg);
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+}
+
+kfm-permalink > .kfm-permalink-header > .kfm-permalink-path {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-weight: 600;
+}
+
+kfm-permalink > .kfm-permalink-header > .kfm-permalink-range {
+  white-space: nowrap;
+}
+
+/* ヘッダの下の kfm-code は、上の角丸と外側の余白を消してヘッダにつなぐ */
+kfm-permalink[data-kfm-permalink='rendered'] > kfm-code {
+  margin: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}

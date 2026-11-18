@@ -31,6 +31,9 @@
  *   `@/lib/rehype-kfm-code/style.css` を starry-night の style.css と同じ場所で
  *   明示 import する (二枚組)。コピーボタンは client 専用 entry の custom element 登録
  *   (_client-registry) が担う。
+ * - GitHub のパーマリンクをコードの抜粋として出す枠も同方式: 消費側で
+ *   `@/lib/remark-kfm-permalink/style.css` を rehype-kfm-code の style.css と同じ場所で
+ *   明示 import する (抜粋は client の custom element が backend から取って差し込む)。
  * - 外部リンクの favicon の見た目も同方式: 消費側で `@/lib/rehype-kfm-link-favicon/style.css`
  *   を明示 import する (画像は backend の `/api/v1/favicons/{host}` が配信する)。
  *
@@ -49,6 +52,7 @@ import { rehypeKfmLinkFavicon } from '@/lib/rehype-kfm-link-favicon';
 import { rehypeKfmTaskOffset, remarkKfmTaskOffset } from '@/lib/rehype-kfm-task-offset';
 import { remarkGfm } from '@/lib/remark-gfm';
 import { remarkKfmMermaid } from '@/lib/remark-kfm-mermaid';
+import { remarkKfmPermalink } from '@/lib/remark-kfm-permalink';
 import { remarkKfmRawHtml } from '@/lib/remark-kfm-raw-html';
 import { remarkKfmMention } from '@/lib/remark-kfm-mention';
 import { remarkKfmTaskRef } from '@/lib/remark-kfm-task-ref';
@@ -112,6 +116,7 @@ export const renderDescription = createRenderer({
       // rehype 層 (starry-night / 将来の language-* 拡張) は mermaid フェンスを見ない。
       // remarkKfmTaskRef は GFM の後ろ (autolink 済みの link の内側を触らない) かつ alerts の
       // 後ろ (alerts は先頭 text の position で原文照合するため、先に分割すると alert 化しない)。
+      // remarkKfmPermalink は GFM の後ろ (素の URL が autolink で link になった後の段落を見る)。
       // remarkKfmTaskOffset は他の層が段落や text を触る前の構文木から位置を取るため先頭に置く。
       // remarkKfmMention も同じ位置（印は text ノードの分割で札にする。表が渡されぬ描画では何もしない）。
       remarkPlugins: [
@@ -120,6 +125,7 @@ export const renderDescription = createRenderer({
         remarkGfm,
         remarkKoyoriAlerts,
         remarkKfmMermaid,
+        remarkKfmPermalink,
         remarkKfmTaskRef,
         remarkKfmMention,
       ],
@@ -147,6 +153,7 @@ export const renderDescription = createRenderer({
         remarkGfm,
         remarkKoyoriAlerts,
         remarkKfmMermaid,
+        remarkKfmPermalink,
         remarkKfmTaskRef,
         remarkKfmMention,
         remarkBreaks,

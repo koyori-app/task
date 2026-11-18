@@ -21,4 +21,7 @@ pub fn public_github_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::<AppState>::new()
         .routes(routes!(crate::handlers::github::github_callback))
         .routes(routes!(crate::handlers::github::github_webhook))
+        .routes(routes!(
+            crate::handlers::github_snippets::get_github_snippet
+        ))
 }

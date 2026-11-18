@@ -120,6 +120,8 @@ const memberIds = ref<string[]>(initial.memberIds);
 const scale = ref<GanttScale>(initial.scale);
 const groupBy = ref<GanttGroupBy>(initial.groupBy);
 const urlProgressLine = ref<boolean | null>(initial.progressLine);
+// オーバーレイで開いているタスク（seq key）。カレンダーと同じく `?selected=` に持つ
+const selectedTaskId = ref<string | null>(initial.selected);
 const viewFrom = computed(() => from.value ?? defaultFrom(today, scale.value, compact.value));
 const to = computed(() => viewTo(viewFrom.value, scale.value, compact.value));
 
@@ -132,7 +134,7 @@ function setProgressLine(on: boolean) {
   preferences.set('ganttProgressLine', on);
 }
 
-watch([from, memberIds, scale, groupBy, urlProgressLine], () => {
+watch([from, memberIds, scale, groupBy, urlProgressLine, selectedTaskId], () => {
   if (typeof window === 'undefined') return;
   const url = applyGanttUrlState(
     new URL(window.location.href),
@@ -142,6 +144,7 @@ watch([from, memberIds, scale, groupBy, urlProgressLine], () => {
       scale: scale.value,
       groupBy: groupBy.value,
       progressLine: urlProgressLine.value,
+      selected: selectedTaskId.value,
     },
     today,
   );
@@ -317,7 +320,6 @@ watch(
 
 // ---- 棒を押した時: カレンダーと同じオーバーレイと戻り先の積み ----
 const canInline = wide;
-const selectedTaskId = ref<string | null>(null);
 const overlayParentStack = ref<string[]>([]);
 const overlayOpenSeqKey = computed(() => (canInline.value ? selectedTaskId.value : null));
 const overlayTaskSeqKey = ref<string | null>(null);
@@ -329,6 +331,25 @@ watch(
   { immediate: true },
 );
 const overlayProjectKey = computed(() => overlayTaskSeqKey.value?.replace(/-\d+$/, '') ?? '');
+
+// 同じページへのクライアント遷移（サイドバーのガントを押す・戻る等）ではページが作り直されないので、
+// URL を読み直して状態を合わせる。今の状態と同じ項目は入れない（自分の replaceState は
+// pageContext を動かさないので循環しない）
+watch(
+  () => pageContext.urlParsed?.searchAll,
+  (searchAll) => {
+    const next = parseGanttUrlState(searchAll, today);
+    if (next.from !== from.value) from.value = next.from;
+    if (next.memberIds.join('\n') !== memberIds.value.join('\n')) memberIds.value = next.memberIds;
+    if (next.scale !== scale.value) scale.value = next.scale;
+    if (next.groupBy !== groupBy.value) groupBy.value = next.groupBy;
+    if (next.progressLine !== urlProgressLine.value) urlProgressLine.value = next.progressLine;
+    if (next.selected !== selectedTaskId.value) {
+      overlayParentStack.value = [];
+      selectedTaskId.value = next.selected;
+    }
+  },
+);
 
 function openTask(task: { seq_key: string; seq_id: number; project: { key: string } }) {
   if (!canInline.value) {

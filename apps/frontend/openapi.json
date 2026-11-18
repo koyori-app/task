@@ -5030,6 +5030,195 @@
         }
       }
     },
+    "/v1/github/snippet": {
+      "get": {
+        "tags": ["GitHub"],
+        "summary": "連携リポジトリのコードの抜粋",
+        "operationId": "get_github_snippet",
+        "parameters": [
+          {
+            "name": "owner",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sha",
+            "in": "query",
+            "description": "40 桁のコミット SHA（ブランチ名・短縮 SHA は受けない）",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "description": "リポジトリ直下からのファイルのパス",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "description": "抜粋の最初の行（1 始まり）",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "description": "抜粋の最後の行。省くと `start` の 1 行だけ",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "抜粋の行",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GithubSnippetResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "クエリの形式が不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "行として表示できないファイル（バイナリ・大きすぎる）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "取得回数の上限を超えた",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "GitHub から取得できない（レート制限・障害）。`Retry-After` の秒数の間は取りに行かない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/github/webhook": {
       "post": {
         "tags": ["GitHub"],
@@ -29196,6 +29385,55 @@
         "properties": {
           "select_token": {
             "type": "string"
+          }
+        }
+      },
+      "GithubSnippetResponse": {
+        "type": "object",
+        "description": "連携リポジトリのファイルから切り出した行。",
+        "required": [
+          "repo_owner",
+          "repo_name",
+          "sha",
+          "path",
+          "start_line",
+          "end_line",
+          "lines",
+          "truncated"
+        ],
+        "properties": {
+          "end_line": {
+            "type": "integer",
+            "format": "int32",
+            "description": "実際に返した最後の行（ファイルの行数と上限で丸める）",
+            "minimum": 0
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "path": {
+            "type": "string"
+          },
+          "repo_name": {
+            "type": "string"
+          },
+          "repo_owner": {
+            "type": "string"
+          },
+          "sha": {
+            "type": "string"
+          },
+          "start_line": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "上限で打ち切ったときに true"
           }
         }
       },

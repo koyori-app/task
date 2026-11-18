@@ -198,8 +198,39 @@ export const Empty: Story = {
   beforeEach: mockDecoratorBeforeEach({ tasks: [] }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.findByText('割り当てられたタスクは0件です')).resolves.toBeInTheDocument();
+    // 今日のタブが 0 件でも、他のタブにはあるかもしれないので「割り当て 0 件」とは言わない
+    await expect(
+      canvas.findByText('今日が期限の未完了タスクはありません'),
+    ).resolves.toBeInTheDocument();
+    await expect(canvas.queryByText('割り当てられたタスクは0件です')).toBeNull();
     await expect(canvas.findByText('0件')).resolves.toBeInTheDocument();
+  },
+};
+
+export const EmptyWeekFromUrl: Story = {
+  name: 'URL のタブで開く（今週・タスクなし）',
+  beforeEach: mockDecoratorBeforeEach({ tasks: [] }),
+  decorators: [
+    () => ({
+      setup() {
+        provide(PAGE_CONTEXT_KEY, { ...mockContext, urlParsed: { search: { tab: 'week' } } });
+      },
+      template: '<story />',
+    }),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.findByText('今週が期限の未完了タスクはありません'),
+    ).resolves.toBeInTheDocument();
+    await expect(canvas.getByRole('button', { name: '今週' })).toHaveAttribute(
+      'data-variant',
+      'primary',
+    );
+    const taskUrls = (activeMock!.fetchSpy.mock.calls as [Request | string][])
+      .map(([req]) => (typeof req === 'string' ? req : req.url))
+      .filter((url) => url.includes('/users/me/tasks'));
+    await expect(taskUrls.every((url) => url.includes('filter=week'))).toBe(true);
   },
 };
 
@@ -218,7 +249,7 @@ export const TenantResolveError: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.findByText('タスクの読み込みに失敗しました')).resolves.toBeInTheDocument();
-    await expect(canvas.queryByText('割り当てられたタスクは0件です')).toBeNull();
+    await expect(canvas.queryByText('今日が期限の未完了タスクはありません')).toBeNull();
   },
 };
 

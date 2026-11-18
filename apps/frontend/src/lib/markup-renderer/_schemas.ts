@@ -15,6 +15,7 @@ import { kfmLinkFaviconSanitizeSchema } from '@/lib/rehype-kfm-link-favicon/sche
 import { starryNightSanitizeSchema } from '@/lib/rehype-starry-night/schema';
 import { gfmSanitizeSchema } from '@/lib/remark-gfm';
 import { kfmMermaidSanitizeSchema } from '@/lib/remark-kfm-mermaid';
+import { kfmPermalinkSanitizeSchema } from '@/lib/remark-kfm-permalink';
 import { kfmMentionSanitizeSchema } from '@/lib/remark-kfm-mention';
 import { kfmTaskRefSanitizeSchema } from '@/lib/remark-kfm-task-ref';
 import { koyoriAlertsSanitizeSchema } from '@/lib/remark-koyori-alerts';
@@ -27,6 +28,7 @@ export const kfmSanitizeSchemas: readonly SanitizeSchema[] = [
   starryNightSanitizeSchema,
   kfmCodeSanitizeSchema,
   kfmMermaidSanitizeSchema,
+  kfmPermalinkSanitizeSchema,
   kfmTaskRefSanitizeSchema,
   kfmMentionSanitizeSchema,
   kfmLinkFaviconSanitizeSchema,

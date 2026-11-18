@@ -28,6 +28,8 @@ hmac = "0.13"
 http-body-util = "0.1"
 rand = "0.10"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "form"] }
+rmcp = { version = "3.11", default-features = false, features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
+schemars = "1"
 sea-orm = { workspace = true, features = ["with-chrono", "postgres-array"] }
 sentry = { version = "0.48.2", default-features = false }
 serde = { workspace = true }
@@ -36,6 +38,7 @@ sha2 = "0.11"
 subtle = "2.4"
 tokio = { version = "1.52.1", features = ["fs", "io-util", "macros", "rt-multi-thread", "net", "sync", "time"] }
 thiserror = { workspace = true }
+tower = { version = "0.5.2", features = ["util"] }
 tower-http = { version = "0.7", features = ["cors", "limit", "set-header"] }
 tracing = { workspace = true }
 urlencoding = "2.1"

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { KFM_CODE_TAG } from '../rehype-kfm-code/_tag';
 import { KFM_MERMAID_TAG } from '../remark-kfm-mermaid/_tag';
+import { KFM_PERMALINK_TAG } from '../remark-kfm-permalink/_tag';
 import { KFM_CONTENT_CLASS } from '../remark-gfm/content-class';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -32,6 +33,11 @@ const EMITTED_NAMESPACE_SCOPED_PLUGINS = new Map<
   ],
   // mermaid のサイドカーは自身が emit する kfm-mermaid 要素を直に指すため器を要さない。
   ['remark-kfm-mermaid', { selectorToken: new RegExp(`(?:^|[\\s>])${KFM_MERMAID_TAG}(?![\\w-])`) }],
+  // permalink のサイドカーも自身が emit する kfm-permalink 要素を起点にする (ヘッダと中の kfm-code はその子)
+  [
+    'remark-kfm-permalink',
+    { selectorToken: new RegExp(`(?:^|[\\s>])${KFM_PERMALINK_TAG}(?![\\w-])`) },
+  ],
   // 外部リンクの favicon は自身が emit する img.kfm-link-favicon だけを指す
   ['rehype-kfm-link-favicon', { selectorToken: /\.kfm-link-favicon(?![\w-])/ }],
   [
