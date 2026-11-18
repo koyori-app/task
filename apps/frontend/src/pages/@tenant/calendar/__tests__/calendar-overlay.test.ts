@@ -1,13 +1,20 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ref } from 'vue';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { reactive, ref } from 'vue';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 
-const { navigate, GET } = vi.hoisted(() => ({ navigate: vi.fn(), GET: vi.fn() }));
-vi.mock('vike/client/router', () => ({ navigate }));
-vi.mock('vike-vue/usePageContext', () => ({
-  usePageContext: () => ({ routeParams: { tenant: 'acme' }, urlParsed: { searchAll: {} } }),
+type PageContextStub = {
+  routeParams: Record<string, string>;
+  urlParsed: { searchAll: Record<string, string[]> };
+};
+const { navigate, GET, page } = vi.hoisted(() => ({
+  navigate: vi.fn(),
+  GET: vi.fn(),
+  // 同じページへの遷移を試すため、vike と同じく反応的な pageContext を渡す
+  page: { ctx: null as unknown as PageContextStub },
 }));
+vi.mock('vike/client/router', () => ({ navigate }));
+vi.mock('vike-vue/usePageContext', () => ({ usePageContext: () => page.ctx }));
 vi.mock('@/composables/useResolvedTenantId', () => ({
   useResolvedTenantId: () => ({
     tenantId: ref('tenant-id'),
@@ -38,6 +45,9 @@ vi.mock('@/components/tasks/TaskDetailOverlay.vue', async () => {
 import Page from '../+Page.vue';
 
 enableAutoUnmount(afterEach);
+beforeEach(() => {
+  page.ctx = reactive({ routeParams: { tenant: 'acme' }, urlParsed: { searchAll: {} } });
+});
 afterEach(() => {
   navigate.mockClear();
   window.history.replaceState(null, '', '/');
@@ -112,5 +122,27 @@ describe('カレンダーのタスク詳細（TASK-303）', () => {
     expect(overlay().props('open')).toBe(false);
     expect(new URL(window.location.href).searchParams.has('selected')).toBe(false);
     expect(navigate).not.toHaveBeenCalled();
+  });
+});
+
+describe('同じページへの遷移で URL に追従する（TASK-474）', () => {
+  it('selected の有無が変わると、オーバーレイの開閉を URL に合わせる', async () => {
+    window.history.replaceState(null, '', '/acme/calendar?selected=ENG-1');
+    page.ctx.urlParsed = { searchAll: { selected: ['ENG-1'] } };
+    const wrapper = mountPage();
+    await flushPromises();
+    const overlay = () => wrapper.getComponent({ name: 'TaskDetailOverlay' });
+    expect(overlay().props()).toMatchObject({ open: true, taskId: 'ENG-1' });
+
+    window.history.replaceState(null, '', '/acme/calendar');
+    page.ctx.urlParsed = { searchAll: {} };
+    await flushPromises();
+    expect(overlay().props('open')).toBe(false);
+
+    window.history.replaceState(null, '', '/acme/calendar?selected=OPS-3');
+    page.ctx.urlParsed = { searchAll: { selected: ['OPS-3'] } };
+    await flushPromises();
+    expect(overlay().props()).toMatchObject({ open: true, projectKey: 'OPS', taskId: 'OPS-3' });
+    expect(new URL(window.location.href).searchParams.get('selected')).toBe('OPS-3');
   });
 });

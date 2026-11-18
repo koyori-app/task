@@ -2,7 +2,7 @@
 title: レビュー指摘管理
 description: PR レビューの指摘を task で追跡し、GitHub には要約コメント 1 本と、マージ可でのレビュワー本人の Approve、未解決の High / Medium があるときの変更要求だけを置く仕組みと運用ルール
 status: partial
-updated: 2026-11-14
+updated: 2026-11-15
 slug: dev/features/review-findings
 sidebar:
   order: 5
@@ -20,6 +20,7 @@ PR レビューの指摘を task 自身のデータとして管理する機能�
 | 指摘 | ラウンドに属する 1 件の問題 |
 | レビュー側 | その指摘を含むラウンドの作成者、または同じ PR のより新しいラウンドの作成者 |
 | 代行 | 作成者がテナントの利用者でなくなった指摘を、テナントオーナーが取り下げること |
+| 引き継ぎ | 別の PR の未解決の指摘を、この PR の新しいラウンド（写し）へ写すこと。元は変えない |
 | ゲート | マージしてよいかの判定 |
 
 ## 振る舞い
@@ -61,6 +62,26 @@ PR を指すキーにリポジトリを含める。採番・一覧・集計・�
 
 - 一覧と集計が見るのは現在の連携先（連携が無ければリポジトリ無し）のラウンドである。旧リポジトリのラウンドは履歴として残るが混ざらない
 - 連携を解除しても指摘は消さない。`integration_id` は `NULL` になるだけである
+
+### 引き継ぎ
+
+PR を出し直すと、元の PR に残したレビューの記録は新しい PR に移らない。マージ済みの PR を revert して出し直す、PR を閉じて別ブランチで作り直す、スタックを組み替えて PR を分ける・まとめる、といった場面である。元の PR の未解決の指摘を、新しい PR へ引き継げる。
+
+- 引き継ぐのは未解決（`open` / `fixing` / `fixed`）の指摘だけである。`verified` / `deferred` / `rejected` は写さない
+- 元の PR の記録は変えない。引き継ぎ先へ新しいラウンドとして写し、既存のラウンドへは追記しない
+- 未解決の指摘を持つ元のラウンド 1 本につき、写しのラウンドを 1 本作る。元のラウンド番号の昇順で採番する
+- 写しのラウンドの作成者と `head_sha` は元のラウンドのままにする。引き継いだ人は `carried_by`、元のラウンドは `carried_from_review_id` に持つ
+- 写しの指摘は重大度・タイトル・本文・位置・状態・`fixed_by` を元のまま持ち、元の指摘を `carried_from_finding_id` に持つ。繰り延べ先タスクは持たない
+- 位置（`file` / `line`）は照合せずそのまま写す。写しのラウンドの `head_sha` が元の commit なので、どの commit の何行目かは保たれる
+- 作成者を元のラウンドのままにするので、`rejected` / `verified` の権限は元のラウンドの作成者に残り、引き継いだ人は権限を得ない。引き継いだ人を作成者にすると、PR の作者が自分で引き継いで High を棄却でき、マージ基準を 1 人で迂回できてしまう
+- 写しのラウンドはレビューに数えない。指摘の件数（塞いでいる件数）には入るが、「ラウンドが 1 件以上」「最新ラウンドの `head_sha`」「その head にラウンドを出した人」「Approve の名義」には入らない。写しだけの PR は未レビューで、誰かが自分のラウンドを出して初めてレビュー済みになる
+- 履歴の最初の行（`from_state` が NULL）の `note` に出どころ（`PR #790 R3 の指摘 {id} から引き継ぎ`）を残す。元の指摘には跡を付けない
+- 引き継ぎ先に写しがある元の指摘は飛ばす。再実行しても増えず、写しが今どの状態でも引き継ぎ済みとして数える
+- 引き継ぎ元は同じプロジェクトの中に限る。元のリポジトリは `from_repo` で過去の連携先や連携前も指せる（既定は現在の連携先）。引き継ぎ先は現在の連携先である
+- 引き継げるのは `write:review` を持ちプロジェクトに入れる人で、起票と同じ条件である
+- 元の指摘を `FOR SHARE` で取得してから、採番用のプロジェクト行を `FOR NO KEY UPDATE` で取得し、トランザクション内で写す。状態遷移も引き継ぎも「指摘 → プロジェクト」の順でロックを取る
+
+PR 一覧でも写しはレビューのラウンド数と最終レビュー時刻に含めない。写しだけの PR は `rounds = 0`、`last_reviewed_at = null` となる。重複は大元の指摘 ID で判定する。
 
 ### 状態遷移
 
@@ -120,6 +141,7 @@ stateDiagram-v2
 
 マージ可否は「ラウンドが 1 件以上ある」かつ「open / fixing / fixed の High・Medium が 0」である。
 
+- 写しのラウンド（[引き継ぎ](#引き継ぎ)）はラウンド数・最新ラウンドの `head_sha` に数えない。指摘の件数には入る。写しだけの PR は `unreviewed` で、`rounds` は最後のレビューのラウンド番号を指す
 - 集計は最新ラウンドの `head_sha` を返す。現在の HEAD と突き合わせるのは呼び出し側である。読み取り API から GitHub を呼ばない
 - 集計はキャッシュ済みの現在 head とその確認時刻（要約ジョブが保存したもの。無ければ空）も返す。画面の「レビューが古い / 鮮度不明」の出し分けに使う。ジョブが最後に走った時点の値で push では更新されないので、ゲートの条件には使わず、表示を「可」以外へ落とす方向にだけ使う
 - 集計はどのリポジトリを見た結果か（`repository`。連携が無ければ空）も返す。リポジトリが確定しない集計をゲートとして通さないのは呼び出し側の役目で、CLI と画面の両方を含む
@@ -151,6 +173,10 @@ task review list --project TASK --pr 618 --state open --severity high,medium
 
 # ラウンド一覧（R1, R2, … と head SHA・件数）
 task review rounds --project TASK --pr 618
+
+# 出し直した PR へ、元の PR の未解決の指摘を引き継ぐ（再実行しても増えない）
+task review carry-over --project TASK --from-pr 790 --to-pr 1119
+task review carry-over --project TASK --from-pr 711 --to-pr 711 --from-repo acme/old   # 過去の連携先から
 
 # 状態遷移
 task review resolve <finding-id> --project TASK --state fixed
@@ -189,6 +215,8 @@ task notifications settings --project TASK --email ""      # メールは受け�
 投入 JSON と絞り込みの値は送信前に CLI 側でも検証する。綴り違い（`severity: "critical"`、`--state closed`）や必須項目の欠落は、どの指摘のどの項目かを添えて終了コード 2 で弾く。
 
 読み取りの 3 コマンド（`list` / `rounds` / `summary`）は `--repo` を受ける。値は `owner/name`、空文字は連携を張る前のラウンドを指す。形式が違えば終了コード 2 で弾く。
+
+`carry-over` は `--from-repo` で元のリポジトリを指す（値の規則は `--repo` と同じ）。PR 番号が 1 未満、`--from-repo` の形式違い、`--from-repo` が無いまま `--from-pr` と `--to-pr` が同じ、のどれも送信前に終了コード 2 で弾く。
 
 `submit` の JSON の例は次のとおりである。
 
@@ -249,6 +277,8 @@ task notifications settings --project TASK --email ""      # メールは受け�
 | `pr_title` / `pr_author` | 表示用の PR メタ。要約コメント投稿ジョブが GitHub から取得してキャッシュする。連携なし・取得失敗時は空のままで PR 番号だけ表示する |
 | `pr_head_sha` / `pr_head_checked_at` | 要約ジョブが GitHub から読んだ現在の head と確認時刻のキャッシュ。画面の鮮度表示に使う |
 | `summary_comment_id` | 投稿済みの要約コメントの ID |
+| `carried_from_review_id` | 引き継ぎの写しのとき、元のラウンド。元のラウンドが消えたら NULL |
+| `carried_by` | 引き継いだ利用者。写しのラウンドかどうかの判定はこの列で行う（レビューに数えない） |
 
 `review_findings`（指摘）の列は次のとおりである。
 
@@ -262,8 +292,10 @@ task notifications settings --project TASK --email ""      # メールは受け�
 | `state` | `open` / `fixing` / `fixed` / `verified` / `deferred` / `rejected` |
 | `deferred_task_id` | 繰り延べ時に自動起票した通常タスクへのリンク（任意） |
 | `fixed_by` | 最後に `fixed` を宣言した利用者。差し戻し後も消さない。自分の修正の `verified` を止める判定に使う |
+| `carried_root_finding_id` | 写しの大元の指摘 ID。外部キーにせず削除後も保持する |
+| `carried_from_finding_id` | 引き継ぎの写しのとき、元の指摘。元の指摘が消えたら NULL |
 
-定義は [m20260826000000_review_findings.rs](https://github.com/koyori-app/task/blob/main/apps/backend/migration/src/m20260826000000_review_findings.rs) にある。PR の実体表 `forge_pull_requests` は[Git ホスティング連携のデータ](/dev/features/tasks/github-tasks#データ)に書く。
+定義は [m20260826000000_review_findings.rs](https://github.com/koyori-app/task/blob/main/apps/backend/migration/src/m20260826000000_review_findings.rs) にある。引き継ぎの 4 列は [m20261115000000_review_carry_over.rs](https://github.com/koyori-app/task/blob/main/apps/backend/migration/src/m20261115000000_review_carry_over.rs) で足した。PR の実体表 `forge_pull_requests` は[Git ホスティング連携のデータ](/dev/features/tasks/github-tasks#データ)に書く。
 
 ## API
 
@@ -272,6 +304,7 @@ task notifications settings --project TASK --email ""      # メールは受け�
 | メソッド | パス | 動作 |
 |---|---|---|
 | POST | `/v1/tenants/{t}/projects/{p}/reviews` | ラウンドと指摘の一括作成（1 リクエスト）。成功後に GitHub 要約更新をジョブ投入する |
+| POST | `/v1/tenants/{t}/projects/{p}/reviews/carry-over` | 別の PR の未解決の指摘を引き継ぐ。本文は `from_pr_number`・`to_pr_number`・任意の `from_repo`。写しのラウンドを詳細つきで返す（201）。成功後に引き継ぎ先 PR の要約更新をジョブ投入する |
 | GET | `/v1/tenants/{t}/projects/{p}/reviews?pr=618` | ラウンドの一覧。指摘の件数つき |
 | GET | `/v1/tenants/{t}/projects/{p}/reviews/{id}` | ラウンドの詳細。指摘を含み、各指摘に `available_actions` |
 | GET | `/v1/tenants/{t}/projects/{p}/reviews/pull-requests` | レビューのある PR の一覧。画面の PR 一覧が使う |
@@ -300,7 +333,14 @@ PR 単位の読み取りの規則は次のとおりである。
 - 起票と状態遷移は in-app 通知を作る（起票・遷移と同じトランザクション）。受信者の規則は[通知・ウォッチャー](/dev/features/tasks/notifications)に書く
 - 起票と状態遷移は Webhook イベント（`review.round_created` / `review.finding_changed`）も同じトランザクションで積む
 - 起票の上限は、指摘が 1 ラウンド 200 件、`summary` が 20000 文字、`title` が 1〜200 文字、`body` が 1〜20000 文字、`file` が 1000 文字、`line` が 1 以上である。遷移の `note` は 2000 文字まで
-- 409 は理由を本文（`message`）に入れる。High / Medium の繰り延べ・規則にない遷移・既定ステータスが無いの 3 つである。共通の `conflict` だけでは、CLI から使うレビュワーが「直すのか、取り下げるのか」を選べない
+- 409 は理由を本文（`message`）に入れる。High / Medium の繰り延べ・規則にない遷移・既定ステータスが無いの 3 つと、引き継ぎの 2 つ（元の PR にラウンドが無い、引き継げる指摘が無い）である。共通の `conflict` だけでは、CLI から使うレビュワーが「直すのか、取り下げるのか」を選べない
+
+引き継ぎの規則は次のとおりである。
+
+- 元と先が同じ PR（owner / name と PR 番号がどちらも同じ）は 400 を返す。PR 番号は 1 以上、`from_repo` は `owner/name` か空文字で、形式が違えば 400 を返す
+- 元の PR にラウンドが無いとき（番号や `from_repo` の取り違え）と、引き継げる指摘が無いとき（解決済みか引き継ぎ済み）は 409 を返す。空のラウンドは作らない。CLI は 404 を固定の文言に丸めるので、番号違いも 409 にして理由を届ける
+- 写しのラウンドの応答には `carried_from`（元のラウンドの ID・PR 番号・ラウンド・リポジトリ）と `carried_by` を入れる。ラウンドの一覧と詳細でも同じである。写しの指摘には `carried_from_finding_id` を入れる
+- 起票と同じく、写しのラウンドごとに in-app 通知と Webhook（`review.round_created`）を同じトランザクションで作る
 
 指摘のレスポンス（ラウンド詳細・指摘一覧・起票・遷移の応答）は `available_actions` を返す。
 
@@ -316,6 +356,7 @@ PR 単位の読み取りの規則は次のとおりである。
 |---|---|---|
 | 閲覧 | プロジェクトに入れる人全員 | `read:review` |
 | 起票・状態遷移 | [状態遷移](#状態遷移)の主体の規則に従う | `write:review` |
+| 引き継ぎ | プロジェクトに入れる人全員。引き継いだ人は写しの指摘の `rejected` / `verified` の権限を得ない | `write:review` |
 | 通知の読み取り・既読化（CLI） | 本人 | タスク通知は `read:task` / `write:task`、レビュー通知は `read:review` / `write:review` |
 | 通知設定の読み取り・更新（CLI） | 本人 | `read:task` / `write:task`。`--project` にキーを渡すと UUID を引くためにプロジェクト API を呼ぶので `read:project` も要る。UUID を渡せば要らない |
 
@@ -333,7 +374,7 @@ PR 単位の読み取りの規則は次のとおりである。
 | 項目 | 値 |
 |---|---|
 | URL | `/{tenant}/projects/{key}/reviews`。`?pr=618` で PR を指定する。要約コメントのリンク先である |
-| クエリ | 指摘の絞り込みと選択は `?round=` / `?severity=` / `?state=` / `?finding=`。PR 一覧の状態は `?mine=1`（自分が作成した PR だけ）と `?page=N`（ページを操作していなければ載せない。`page` が無いときは表示中の PR が載るページを開くので、明示した 1 ページ目は `page=1` として残す） |
+| クエリ | 指摘の絞り込みと選択は `?round=` / `?severity=` / `?state=` / `?finding=`。PR 一覧の状態は `?mine=1`（自分が作成した PR だけ）と `?page=N`（ページを操作していなければ載せない。`page` が無いときは表示中の PR が載るページを開くので、明示した 1 ページ目は `page=1` として残す）、`?q=`（検索語。空なら載せない）、`?pr_state=`（選んだ PR の状態。選んでいなければ載せない） |
 | ページファイル | `apps/frontend/src/pages/@tenant/projects/@projectKey/reviews/+Page.vue` |
 | 本体 | `components/reviews/ReviewFindingsView.vue` と `ReviewRoundComposer.vue`、`ReviewFindingBody.vue` |
 
@@ -346,7 +387,7 @@ PR 単位の読み取りの規則は次のとおりである。
 ### PR 一覧
 
 - 番号・タイトルの部分一致で探せる
-- 各行にホスト上の PR の状態（Open / Merged / Closed / 状態不明）をバッジで出し、状態で絞り込める。開いた直後は Open の PR だけを出し、Open の PR が 1 件も無い一覧と、URL の `page` が Open の一覧には無く「すべて」の一覧なら在るときは「すべて」で開く。URL に `pr` が無いときに自動で開く PR は、この絞り込みで先頭に出るものである。状態の絞り込みは URL に載せず、開き直すと既定に戻る
+- 各行にホスト上の PR の状態（Open / Merged / Closed / 状態不明）をバッジで出し、状態で絞り込める。開いた直後は Open の PR だけを出し、Open の PR が 1 件も無い一覧と、URL の `page` が Open の一覧には無く「すべて」の一覧なら在るときは「すべて」で開く。URL に `pr` が無いときに自動で開く PR は、この絞り込みで先頭に出るものである。選んだ状態は `pr_state` に載せる（既定と同じ `open` でも載せる）。選んでいなければ載せず、既定の決め方で開く
 - 10 件ごとにページを分け、`page` が無ければ表示中の PR が載っているページを開く。範囲外の `page` は最後のページに寄せて理由を出す
 - 絞り込みとページ分割は画面側で行う。API は全件を集計して返す
 - 各行のバッジは件数の事実だけを出す。`blocking` が 0 なら「未解決なし」、open / fixing が残れば赤の「N 件が未解決」（N は `blocking - blocking_fixed`）、すべて fixed なら「N 件が承認待ち」である
@@ -403,6 +444,9 @@ PR 単位の読み取りの規則は次のとおりである。
 | deferred のプロジェクト横断ビュー | 溜まっている deferred（Low/Nit）の件数と一覧は無く、画面はプロジェクト単位である。テナント横断の集計エンドポイントを足してから行う |
 | 自己レビューの機械的な禁止 | GitHub の PR 作者と task の利用者を同定する仕組み（利用者への GitHub アカウント紐付け）が要る。ゲートの信頼境界として明記するに留め、禁止は branch protection の必須レビュワーで担保する |
 | リポジトリ改名への追従 | ラウンドの保存値は owner / name の文字列で、`github_integrations` も数値の repository id を持たない。GitHub 側でリポジトリや org を改名して再連携すると、同じリポジトリなのに別リポジトリ扱いになり、旧ラウンドが一覧・集計の既定の視界から外れる。`repo` の絞り込みで読むことはできる。追従するには id 列の追加と連携フローの改修が要るので、別の変更として扱う |
+| Web からの引き継ぎ操作 | 入口は API と CLI だけである。出どころは履歴の `note` とラウンドの総評として既存の画面に出る。画面の入力・確認・エラー表示は別途足す |
+| 写しだけの PR の一覧表示 | Web の PR 一覧では、写しだけの PR のラウンド数が「R0」と表示される |
+| 引き継ぎ時の通知文言の出し分け | 通知の文言・宛先は起票と同じで、写しを区別しない。Webhook の payload は `carried_by` / `carried_from` で区別できる。元の作成者には自分名義のラウンドの通知が届く |
 | ラウンドの取り消し（void） | 誤った PR 番号へ出したラウンドを消す手段は用意しない。ラウンドは「どの head を見た時点の判断か」の記録で、追記不可・削除不可がモデルの根幹である。誤投の実害は指摘を `rejected` へ落とせば消え、ラウンドそのものは「そういうレビューがあった」記録として残す |
 
 要約コメントと Approve の範囲外は[要約コメントと Approve の未実装と既知の制限](/dev/features/review-findings/github-comment#未実装と既知の制限)に書く。
@@ -484,3 +528,6 @@ PR 単位の読み取りの規則は次のとおりである。
 | 2026-11-11 | PR 一覧の「PR の状態」の既定を Open だけにし、Open の PR が無い一覧では「すべて」で開く（TASK-503）。状態の絞り込みは引き続き URL に載せない | マージ済み PR が溜まると一覧の大半を占め、多くの場合に見たいのは Open の PR である。webhook を受けていない CLI 運用では全件が `unknown` なので、Open 固定だと一覧が空になる。URL に載せると共有リンクの意味（`pr` で指す PR を開く）と絡み、既定は「開き直すと戻る」で足りる |
 | 2026-11-12 | URL の `page` が Open の一覧には無く「すべて」の一覧なら在るときは、開いた直後の「PR の状態」を「すべて」にする（TASK-503） | 状態の絞り込みは URL に載らないので、「すべて」でページを送った URL を開き直すと Open の一覧で数えることになり、在るページを「ありません」と言って最後のページへ寄せていた。状態を URL に載せずに、共有した側の一覧へ辿り着けるようにする |
 | 2026-11-14 | 未解決の High / Medium があり head が新しいとき、指摘を出した本人の名義で PR に変更要求（`REQUEST_CHANGES`）を出す（TASK-518）。承認していなくても出す。目印は承認の取り消しと共用する。画面・API・CLI には入口を足さず、Approve と同じく要約ジョブが自動で行う | Approve だけだと、指摘が残る PR は GitHub 上でレビュー待ちのままで、承認の有無でしか状態が変わらない。出す人を指摘を出した本人にすると、GitHub の表示と指摘の持ち主が合う。目印を共用すれば、承認し直しと再レビュー待ちの判定をそのまま使える。手で押す入口は API・権限・画面・CLI が増え、Approve と非対称になる |
+| 2026-11-15 | 出し直した PR への指摘の引き継ぎは、未解決の指摘を引き継ぎ先の新しいラウンドへ写し、元の PR の記録は変えない（TASK-495）。写しのラウンドの作成者と head は元のままにし、レビューには数えない。位置はそのまま写す。引き継ぎ元は同じプロジェクトの中に限る。入口は API と CLI だけにして、Web の操作は作らない | ラウンドは「どの head を見た判断か」の記録で、追記・削除しないのがモデルの根幹である。作成者を引き継いだ人にすると、PR の作者が自分で引き継いで High を棄却でき、マージ基準を迂回できる。写しをレビューに数えると、同じ commit で出し直した PR が誰もレビューしていないのに「可」になり、元の作成者の名義で Approve される。別プロジェクトは権限・PAT の束縛・作成者の在籍が別で、許さない。Web の操作は同時に進む画面の変更と衝突するので、API を用意して後から足す |
+| 2026-11-15 | 写しには大元の指摘 ID を外部キーとは別に保持し、引き継ぎ先の元の指摘とも重複を判定する。PR 一覧の最終レビュー時刻は写しを除き、写しだけなら null とする | 参照先の削除で引き継ぎの鎖が切れても、複数経路の引き継ぎで同じ指摘が増えない。写しの作成はレビューの実施時刻を更新しない。元の指摘の共有ロックを先に取り、採番のプロジェクト行を後にロックすることで、状態遷移と引き継ぎのロック順が揃い、循環待ちを防ぐ |
+| 2026-11-17 | PR 一覧の検索語を `q` に、利用者が選んだ「PR の状態」を `pr_state` に載せる（TASK-474）。選んでいなければ載せず、TASK-503 の既定の決め方で開く。TASK-503 の「状態は URL に載せない」を改める | 載せないと、再読み込みで絞り込みが消える。`page` の意味が状態に依るので、状態が無いとページを推測で補うことになる。選んだときだけ載せれば、`pr` だけの共有リンクは今と同じに開く |

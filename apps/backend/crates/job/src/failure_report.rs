@@ -4,9 +4,9 @@
 //! 応答などジョブの宛先が混ざるので Sentry へ送らない（`backend::observability`）。
 //! 代わりにこのレイヤーが、ジョブが Killed になる試行の失敗を 1 件だけ送る。
 //!
-//! `.retry()` の外側には置けない。ack は試行ごとに走り、Killed の後のリトライはロックの取得で
-//! 失敗して試行回数が増えないので、`RetryPolicy::retries(n)` の n が `max_attempts` 以上だと
-//! リトライが終わらず、外側へ結果が戻らない。この空回りでも同じタスクが何度も通るので、
+//! `.retry()` の外側には置けない。リトライを内側で回すので、外側には最後の結果しか戻らず、
+//! 途中の試行を見分けられない。リトライの方針は `job::retry_policy`（`max_attempts` で打ち切る）で、
+//! 打ち切った後は同じタスクが通らないが、プロセスの落ちや行の取り直しで同じタスクが再び通りうる。
 //! 報告済みのタスク ID を覚えて 1 タスク 1 件に絞る（プロセスとワーカーの世代をまたぐ重複は除かない）。
 //!
 //! 送るのはキュー名・タスク ID・試行回数だけで、ジョブの引数もエラー文も載せない。
@@ -19,7 +19,6 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
 use apalis::prelude::Task;
-use apalis_postgres::PgContext;
 use tower::{Layer, Service};
 
 /// ワーカーの組み立てで `.retry(..)` の後に `.layer(..)` する（後に足したものが内側になる）。
@@ -82,13 +81,12 @@ impl ReportedTasks {
     }
 }
 
-impl<S, Args, IdType> Service<Task<Args, PgContext, IdType>> for JobFailureReport<S>
+impl<S, Args> Service<Task<Args>> for JobFailureReport<S>
 where
-    S: Service<Task<Args, PgContext, IdType>>,
+    S: Service<Task<Args>>,
     S::Future: Send + 'static,
     S::Response: 'static,
     S::Error: 'static,
-    IdType: std::fmt::Display,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -98,12 +96,15 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, task: Task<Args, PgContext, IdType>) -> Self::Future {
+    fn call(&mut self, task: Task<Args>) -> Self::Future {
         let queue = self.queue;
         let reported = self.reported.clone();
-        let task_id = task.parts.task_id.as_ref().map(ToString::to_string);
-        let attempt = task.parts.attempt.clone();
-        let max_attempts = task.parts.ctx.max_attempts();
+        let task_id = task.ctx().task_id().map(ToString::to_string);
+        let attempt = task.ctx().raw_attempt().clone();
+        let max_attempts = task
+            .ctx()
+            .max_attempts()
+            .unwrap_or(crate::DEFAULT_MAX_ATTEMPTS);
         let future = self.inner.call(task);
         Box::pin(async move {
             let result = future.await;
@@ -120,8 +121,8 @@ where
 
 /// `apalis_postgres` の ack が Killed にする条件と同じ。これより手前の失敗は Failed になり、
 /// リトライを使い切っていても再び取得される。
-fn is_final_attempt(attempt: usize, max_attempts: i32) -> bool {
-    max_attempts as usize <= attempt
+fn is_final_attempt(attempt: usize, max_attempts: usize) -> bool {
+    max_attempts <= attempt
 }
 
 fn report(queue: &str, task_id: Option<&str>, attempts: usize) {

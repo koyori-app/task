@@ -3,6 +3,7 @@ import { Sidebar } from '@koyori-app/ui-vue';
 import { useExperimentFlag } from '@/composables/useLocalSettings';
 import { useRouteAlignedTenantId } from '@/composables/useRouteAlignedTenantId';
 import { useTenantStore } from '@/stores/tenant';
+import { isTenantAdmin } from '@/lib/tenant-permissions';
 import { useMeQuery, useProjectsQuery } from '@/lib/api-vue-query';
 import { usePageContext } from 'vike-vue/usePageContext';
 import { navigate } from 'vike/client/router';
@@ -51,6 +52,10 @@ const routeAlignedTenantId = useRouteAlignedTenantId(
 );
 
 const projectsQuery = useProjectsQuery(routeAlignedTenantId);
+// 共有プロジェクトを作れるのはテナントのオーナーと Admin だけ（作成 API が他は 403 にする）
+const canCreateProject = computed(() =>
+  isTenantAdmin(tenantStore.tenants.find((tenant) => tenant.id === routeAlignedTenantId.value)),
+);
 const isAdmin = computed(() => meQuery.data.value?.is_admin === true);
 
 const navProjects = computed(() => projectsQuery.data.value ?? []);
@@ -137,6 +142,7 @@ function closeOnNavigate(event: MouseEvent) {
       :loading="navProjectsLoading"
       :error="projectsQuery.isError.value"
       :show-gantt="showGantt"
+      :can-create="canCreateProject"
       @retry="retryProjects"
       @create="onCreateProject"
     />

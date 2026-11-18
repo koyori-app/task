@@ -22,6 +22,7 @@ const {
   putControl,
   labelsControl,
   typesControl,
+  taskGetControl,
   fetchMock,
 } = vi.hoisted(() => {
   const TENANT_ID = 'tenant-1';
@@ -75,12 +76,18 @@ const {
 
   // 種別一覧 GET の応答。タスクの種別を選ぶ候補になる
   const typesControl: { data: unknown[] } = { data: [] };
+  // タスクの GET を返さずに止め、渡された signal を控える（移ったら中断されるかを見る）
+  const taskGetControl: { hold: boolean; signals: AbortSignal[] } = { hold: false, signals: [] };
 
   const fetchMock = async (input: Request) => {
     const url = input.url;
     const method = input.method.toUpperCase();
 
     if (method === 'GET' && url.endsWith(`/tasks/${TASK_SEQ_KEY}`)) {
+      if (taskGetControl.hold) {
+        taskGetControl.signals.push(input.signal);
+        return new Promise<Response>(() => {});
+      }
       return jsonResponse(baseTask);
     }
     if (method === 'GET' && url.endsWith(`/tasks/${OTHER_TASK_SEQ_KEY}`)) {
@@ -125,6 +132,7 @@ const {
     putControl,
     labelsControl,
     typesControl,
+    taskGetControl,
     fetchMock,
   };
 });
@@ -241,6 +249,8 @@ describe('useTaskDetail のキャッシュ同期', () => {
     baseTask.labels = [];
     delete (baseTask as Record<string, unknown>).task_type;
     baseTask.parent_task_id = null;
+    taskGetControl.hold = false;
+    taskGetControl.signals = [];
   });
 
   afterEach(() => {
@@ -511,6 +521,20 @@ describe('useTaskDetail のキャッシュ同期', () => {
     expect(detail.savedField.value).toBeNull();
     // 保存そのものは移る前のタスクのキャッシュへ反映される
     expect(queryClient.getQueryData(taskQueryKey)).toMatchObject({ title: '新しいタイトル' });
+  });
+
+  it('取得の途中で別のタスクへ移ったら、前のタスクの取得を中断する', async () => {
+    taskGetControl.hold = true;
+    const taskId = ref(TASK_SEQ_KEY);
+    mountHost(taskId);
+    await flushPromises();
+    expect(taskGetControl.signals).toHaveLength(1);
+    expect(taskGetControl.signals[0].aborted).toBe(false);
+
+    taskId.value = OTHER_TASK_SEQ_KEY;
+    await flushPromises();
+
+    expect(taskGetControl.signals[0].aborted).toBe(true);
   });
 
   it('楽観更新のあと別のタスクへ移ると、displayTask と進行中フラグに前のタスクの値が残らない', async () => {

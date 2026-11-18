@@ -82,14 +82,14 @@ export const Confirm: Story = {
 };
 
 export const Failure: Story = {
-  name: '削除失敗',
+  name: '削除失敗（403 は権限不足の文言）',
   beforeEach: mockFetch(403),
   render: storyRender(),
   play: async ({ canvasElement }) => {
     const page = within(canvasElement.ownerDocument.body);
     await userEvent.click(page.getByRole('button', { name: '削除する' }));
     await expect(await page.findByRole('alert')).toHaveTextContent(
-      'プロジェクトを削除できませんでした',
+      'プロジェクトを削除できるのは、テナントのオーナーと Admin だけです。',
     );
   },
 };

@@ -11,7 +11,7 @@ import {
   PROJECT_KEY_PATTERN,
   suggestKey,
 } from '@/components/projects/project-key';
-import { apiClient } from '@/lib/api-vue-query';
+import { apiClient, queryErrorStatus } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
 
 type ProjectResponse = components['schemas']['ProjectResponse'];
@@ -61,8 +61,11 @@ const form = useForm({
       });
       await queryClient.invalidateQueries({ queryKey: ['get', LIST_PROJECTS_PATH] });
       void navigate(`/${props.tenantSlug}/projects/${saved.key}/tasks`);
-    } catch {
-      submitError.value = 'プロジェクトを作成できませんでした';
+    } catch (error) {
+      submitError.value =
+        queryErrorStatus(error) === 403
+          ? 'プロジェクトを作成できるのは、テナントのオーナーと Admin だけです。'
+          : 'プロジェクトを作成できませんでした';
     }
   },
 });

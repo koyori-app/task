@@ -100,6 +100,21 @@ describe('DeleteProjectDialog', () => {
     expect(wrapper.emitted('update:open')).toBeUndefined();
   });
 
+  it('403 は権限不足と明記する', async () => {
+    deleteMutateAsync.mockRejectedValue({ response: { status: 403 } });
+    const wrapper = mountDialog();
+    await flushPromises();
+
+    clickBodyButton('削除する');
+    await flushPromises();
+
+    expect(document.body.textContent).toContain(
+      'プロジェクトを削除できるのは、テナントのオーナーと Admin だけです。',
+    );
+    expect(document.body.textContent).not.toContain('プロジェクトを削除できませんでした');
+    expect(wrapper.emitted('deleted')).toBeUndefined();
+  });
+
   it('削除進行中はダイアログのクローズ要求を無視する', async () => {
     deletePending.value = true;
     const wrapper = mountDialog();

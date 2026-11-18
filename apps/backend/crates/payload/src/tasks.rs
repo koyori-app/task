@@ -243,6 +243,10 @@ pub struct UpdateTaskRequest {
 #[derive(Deserialize, ToSchema, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct ListTasksQuery {
+    /// 一覧の条件式。空は条件なし。
+    pub q: Option<String>,
+    /// due: の今日を決める IANA タイムゾーン（既定 UTC）。
+    pub timezone: Option<String>,
     pub status_id: Option<Uuid>,
     /// 優先度で絞り込む。`critical_fire` / `critical` / `high` / `medium` / `low` / `trivial` のいずれか。
     ///
@@ -303,6 +307,9 @@ fn default_limit() -> u64 {
 
 #[derive(Serialize, ToSchema, serde::Deserialize)]
 pub struct TaskListResponse {
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    #[schema(value_type = std::collections::HashMap<String, crate::task_query::TaskSearchMatch>)]
+    pub matches: std::collections::HashMap<Uuid, crate::task_query::TaskSearchMatch>,
     pub tasks: Vec<TaskResponse>,
     /// 絞り込み後の総数。件数の表示とページ番号の算出に使う。
     /// **「まだ残っているか」の判断には使わない**（取得中に動くので終わらなくなる）

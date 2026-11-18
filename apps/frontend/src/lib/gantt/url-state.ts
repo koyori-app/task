@@ -10,7 +10,7 @@ import { GANTT_SCALES, type GanttGroupBy, type GanttScale } from '@/lib/gantt/vi
  * ガントの「今どこを見ているか」を URL クエリで持つ。範囲の起点と担当者はカレンダーと同じ
  * `from`・`member` の名で持ち、ガントだけの切り替えを足す。既定の値は URL に書かず、短く保つ。
  */
-export type GanttUrlState = Pick<CalendarUrlState, 'memberIds'> & {
+export type GanttUrlState = Pick<CalendarUrlState, 'memberIds' | 'selected'> & {
   /**
    * 範囲の頭（月曜）。選んでおらねば `null` で、今日に従う（目盛りと画面の幅で決まる
    * `defaultFrom`）。今日に従う範囲は URL に書かぬので、日が替われば今日の範囲になる。
@@ -33,7 +33,7 @@ export function parseGanttUrlState(
   searchAll: Record<string, string[]> | undefined,
   today: string,
 ): GanttUrlState {
-  const { memberIds } = parseCalendarUrlState(searchAll, today);
+  const { memberIds, selected } = parseCalendarUrlState(searchAll, today);
   const rawFrom = searchAll?.from?.at(-1) ?? '';
   const from = isDateString(rawFrom) ? mondayOf(rawFrom) : null;
   const rawScale = searchAll?.scale?.at(-1);
@@ -42,6 +42,7 @@ export function parseGanttUrlState(
   return {
     from,
     memberIds,
+    selected,
     scale: GANTT_SCALES.includes(rawScale as GanttScale) ? (rawScale as GanttScale) : DEFAULT_SCALE,
     groupBy: rawGroup === 'assignee' ? 'assignee' : DEFAULT_GROUP_BY,
     progressLine: rawLine === 'on' ? true : rawLine === 'off' ? false : null,
@@ -52,7 +53,7 @@ export function parseGanttUrlState(
 export function applyGanttUrlState(url: URL, state: GanttUrlState, today: string): URL {
   const next = applyCalendarUrlState(
     url,
-    { from: mondayOf(today), memberIds: state.memberIds, projectIds: [], selected: null },
+    { from: mondayOf(today), memberIds: state.memberIds, projectIds: [], selected: state.selected },
     today,
   );
   setOrDelete(next, 'from', state.from);

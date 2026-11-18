@@ -198,6 +198,13 @@ describe('rehype-kfm-task-offset (原文の位置)', () => {
       return lines.join(rand() < 0.3 ? '\r\n' : '\n');
     }
 
+    // 時間切れの上限は 30 秒にする（vitest の既定は 5 秒）。
+    // 何のために: 300 通りの本文を描画し直すので重い。単独で撃つと約 3.6〜4.4 秒で通るが、
+    // pre-push の hook で frontend の全単体試験を並べて撃つと、約 6 秒（5987ms）かかって既定の上限で落ちた。
+    // 同じ並び撃ちを Coder で撃ち直すと、load average が 18 まで上がり 10.4 秒かかった。
+    // 試験の誤りではなく負荷で延びるので、上限だけを上げる。
+    // なぜ 30 秒か: 並び撃ちで見た最も遅い値（10.4 秒）の倍より上に置く。他の重い試験（CommentBody など）の上限とも揃う。
+    // 何が起きたら解くか: 描画（renderDescription）が速くなり、並び撃ちでも 5 秒を十分下回るようになったら、既定に戻す。
     it('属性を持つ全 input で、字・切り替え・再描画が一致する', async () => {
       const rand = mulberry32(539);
       let checkedTotal = 0;
@@ -228,6 +235,6 @@ describe('rehype-kfm-task-offset (原文の位置)', () => {
       }
       // 乱数の部品が実際にチェックボックスを出していること (空振りの検査にしない)
       expect(checkedTotal).toBeGreaterThan(300);
-    });
+    }, 30_000);
   });
 });

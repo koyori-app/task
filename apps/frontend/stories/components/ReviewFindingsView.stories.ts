@@ -270,6 +270,8 @@ const meta = {
       finding: null,
       mine: false,
       page: null,
+      q: '',
+      prState: null,
     },
   },
   parameters: {

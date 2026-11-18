@@ -16,8 +16,14 @@ import { defineComponent, h } from 'vue';
  */
 export default defineComponent({
   name: 'MarkdownEditorStub',
-  props: { modelValue: { type: String, default: '' } },
-  emits: ['update:modelValue', 'blur', 'keydown'],
+  props: {
+    modelValue: { type: String, default: '' },
+    // 貼り付けたファイルのアップロード（実物の挙動は paste-upload-extension の単体テストと story が見る）。
+    // 呼び出し側のテストは、この代役から `update:uploading` を emit して送信・保存の抑止を見る
+    uploadFile: { type: Function, default: undefined },
+    uploadScope: { type: String, default: undefined },
+  },
+  emits: ['update:modelValue', 'blur', 'keydown', 'update:uploading'],
   setup(props, { emit, attrs, expose }) {
     expose({ focus: () => {} });
     return () =>

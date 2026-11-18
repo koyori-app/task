@@ -44,3 +44,5 @@ pub mod users;
 pub mod webhooks;
 
 pub mod bots;
+
+pub mod task_query;

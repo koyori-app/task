@@ -1531,6 +1531,46 @@ describe('TaskDetailHub の説明のチェックボックスの切り替え', ()
     expect(boxes(wrapper).map((b) => b.attributes('aria-label'))).toEqual(['済み', '未了', '最後']);
   });
 
+  it('貼り付けた画像の項目は、画像の名前を 1 回だけ名前にする（退避用の hidden のリンクを読まない）', async () => {
+    const source =
+      '- [ ] ![shot.png](/v1/drive/files/0f8fad5b-d9cb-469f-a165-70867728950e/content)';
+    const wrapper = mountWith({
+      task: { ...task, description: source },
+      descriptionHtml: await renderDescription(source),
+      descriptionSource: source,
+    });
+    await nextTick();
+
+    expect(wrapper.find('[data-task-description-html] kfm-media a[hidden]').exists()).toBe(true);
+    expect(boxes(wrapper).map((b) => b.attributes('aria-label'))).toEqual(['shot.png']);
+  });
+
+  it('説明の入力欄が貼り付けたファイルを上げている間は保存を止め、終われば保存できる', async () => {
+    const wrapper = mountWith({ tenantId: 'tenant-1' });
+    await wrapper.get('button[aria-label="説明を編集"]').trigger('click');
+    await wrapper.get('textarea[aria-label="説明"]').setValue('画像つきの説明');
+    const editor = wrapper.getComponent({ name: 'MarkdownEditorStub' });
+    expect(typeof editor.props('uploadFile')).toBe('function');
+    expect(editor.props('uploadScope')).toBe(task.id);
+    const save = wrapper.findAll('button').find((button) => button.text() === '保存')!;
+
+    editor.vm.$emit('update:uploading', true);
+    await nextTick();
+    expect(save.attributes('disabled')).toBeDefined();
+    // ボタンを押さない経路（Mod-Enter）でも保存しない
+    await save.trigger('click');
+    editor.vm.$emit('submit');
+    await nextTick();
+    expect(wrapper.emitted('save:description')).toBeUndefined();
+
+    editor.vm.$emit('update:uploading', false);
+    await nextTick();
+    expect(save.attributes('disabled')).toBeUndefined();
+    editor.vm.$emit('submit');
+    await nextTick();
+    expect(wrapper.emitted('save:description')).toEqual([['画像つきの説明']]);
+  });
+
   it('位置の属性が無いチェックボックスは disabled のまま', async () => {
     const plain = '<ul><li><input type="checkbox" disabled=""> 属性なし</li></ul>';
     const wrapper = mountWith({ descriptionHtml: plain });
@@ -1822,5 +1862,34 @@ describe('TaskDetailHub の説明のチェックボックスの切り替え', ()
 
     expect(wrapper.find('[data-task-description-html]').exists()).toBe(false);
     expect(wrapper.find('[data-task-description-html] input').exists()).toBe(false);
+  });
+});
+
+describe('TaskDetailHub のタスク参照カード', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it.each([true, false])('説明のタスクリンクの有無 %s に応じてカードを置く', async (linked) => {
+    globalThis.ResizeObserver ??= class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const wrapper = mount(TaskDetailHub, {
+      props: {
+        task: { ...task, description: 'TASK-58' },
+        descriptionSource: 'TASK-58',
+        descriptionHtml: linked
+          ? '<a class="kfm-task-ref" href="/acme/projects/TASK/tasks/TASK-58">TASK-58</a>'
+          : '<p>TASK-58</p>',
+        projectKey: 'TASK',
+        statuses: [],
+        statusId: task.status_id,
+        tenantId: 'tenant',
+        mentionTenant: 'acme',
+      },
+    });
+    await vi.waitFor(() => expect(wrapper.findAll('[role="dialog"]')).toHaveLength(linked ? 1 : 0));
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

@@ -4,19 +4,22 @@ use chrono::{DateTime, NaiveDate, NaiveTime, TimeZone, Utc};
 use entity::tasks::TaskPriority;
 use payload::forge::{LinkTaskPullRequestRequest, TaskForgePullRequest, TaskForgeResponse};
 use payload::projects::ProjectResponse;
-use payload::task_comments::{CreateCommentRequest, TaskCommentResponse};
+use payload::statuses::ProjectStatusResponse;
+use payload::task_comments::{CommentListResponse, CreateCommentRequest, TaskCommentResponse};
 use payload::task_extensions::SearchTasksResponse;
 use payload::tasks::{
     AssigneeInput, BulkCreateTasksRequest, BulkCreateTasksResponse, CreateTaskRequest,
-    TaskDetailResponse, TaskListResponse, UpdateTaskRequest,
+    TaskDetailResponse, TaskListResponse, TaskResponse, UpdateTaskRequest,
 };
 use sea_orm::ActiveEnum;
+use serde::Serialize;
 use serde_json::json;
 use uuid::Uuid;
 
 use crate::Context;
-use crate::api::ApiClient;
+use crate::api::{ApiClient, WebLocation};
 use crate::cli::{TaskClearArgs, TaskFieldArgs, TaskPrCommand, TasksCommand};
+use crate::commands::projects::single_line;
 use crate::error::{CliError, Result};
 use crate::output::{OutputOptions, print};
 use crate::resolve::{
@@ -36,7 +39,45 @@ const MAX_LIST_LIMIT: u64 = 200;
 const MAX_SEARCH_LIMIT: u64 = 100;
 use crate::text_input::{read_stdin, resolve_body};
 
-pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions) -> Result<i32> {
+/// `--json <項目>` で選べる、一覧の項目の名前。CLI が足す 3 つ（`key`・`url`・`status`）に、
+/// `TaskResponse` の直列化の順を続ける。型が増減したら下のテストが落ちる。
+const TASK_LIST_FIELDS: [&str; 28] = [
+    "key",
+    "url",
+    "status",
+    "id",
+    "project_id",
+    "seq_id",
+    "title",
+    "description",
+    "status_id",
+    "priority",
+    "progress_pct",
+    "parent_task_id",
+    "milestone_id",
+    "sprint_id",
+    "soft_deadline",
+    "hard_deadline",
+    "planned_start_on",
+    "require_all_assignees_done",
+    "estimated_minutes",
+    "is_archived",
+    "created_by",
+    "assignees",
+    "labels",
+    "task_type",
+    "created_at",
+    "updated_at",
+    "completed_at",
+    "deleted_at",
+];
+
+pub async fn run(
+    context: &Context,
+    command: TasksCommand,
+    output: OutputOptions,
+    json_fields: Option<Vec<String>>,
+) -> Result<i32> {
     match command {
         TasksCommand::List {
             project,
@@ -62,9 +103,21 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             let sort = sort.as_deref().map(parse_sort).transpose()?;
             let limit = check_limit(limit, MAX_LIST_LIMIT)?;
             let offset = offset_for(page, limit)?;
+            if let Some(fields) = &json_fields {
+                check_list_fields(fields)?;
+            }
 
             let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
+            // 状態の一覧は 1 回だけ取る。`--status` の名前の解決と、表と `status` 項目の表示に使う
+            let wants_status = json_fields
+                .as_ref()
+                .is_some_and(|fields| fields.iter().any(|field| field == "status"));
+            let statuses = if status.is_some() || !output.json || wants_status {
+                Some(list_statuses(api, project.id).await?)
+            } else {
+                None
+            };
 
             let mut query: Vec<(&str, String)> = vec![
                 ("limit", limit.to_string()),
@@ -77,8 +130,8 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             if let Some(sort) = sort {
                 query.push(("sort", sort.to_string()));
             }
-            if let Some(name) = &status {
-                let id = resolve_status_id(api, project.id, name).await?;
+            if let (Some(name), Some(statuses)) = (&status, &statuses) {
+                let id = pick_status_by_name(statuses, name)?;
                 query.push(("status_id", id.to_string()));
             }
             if let Some(name) = &label {
@@ -121,10 +174,22 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
                 .get(&borrow(&tasks_path(api, project.id)), &query)
                 .await?;
             let tasks = tasks_for_display(tasks);
-            if output.json {
-                print(&tasks, output);
-            } else {
-                print_listing(&tasks, output, page);
+            let statuses = statuses.unwrap_or_default();
+            match (&json_fields, output.json) {
+                (_, false) => print_listing(&project, &tasks, &statuses, page),
+                // 項目なしの `--json` は今の出力に `key` を足すだけ（スキルが読む項目は変えない）
+                (None, true) => print(&listing_with_keys(&project, &tasks), output),
+                (Some(fields), true) => {
+                    let web = if fields.iter().any(|field| field == "url") {
+                        web_location_for_output(api).await
+                    } else {
+                        None
+                    };
+                    print(
+                        &picked_listing(&project, &tasks, fields, &statuses, web.as_ref()),
+                        output,
+                    );
+                }
             }
         }
         TasksCommand::Search {
@@ -174,6 +239,10 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             // 本文の読み取りは API を叩く前に済ませる（ファイルが無いときに
             // タスクを作ってから落ちるのを避ける）
             let description = resolve_body(description, description_file, "description")?;
+            check_description_not_empty(
+                description.as_deref(),
+                "Omit --description / --description-file to create a task without one.",
+            )?;
             let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let status_id = match status {
@@ -208,10 +277,18 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
                 custom_field_values: vec![],
             };
             check_deadline_order(body.soft_deadline, body.hard_deadline)?;
+            // 画面の URL の取得は作る前に済ませる（作ったあとに叩くと、失敗したときに
+            // 呼び出し側が再実行して二重に起票する）。失敗しても作成は止めず、URL だけ付けない
+            let web = web_location_for_output(api).await;
             let created: TaskDetailResponse = api
                 .post(&borrow(&tasks_path(api, project.id)), &body)
                 .await?;
-            print(&task_for_display(created), output);
+            let created = CreatedTask::new(&project, web.as_ref(), task_for_display(created));
+            if output.json {
+                print(&created, output);
+            } else {
+                println!("{}", created.line());
+            }
         }
         TasksCommand::BulkCreate {
             project,
@@ -228,13 +305,22 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
             let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let body = resolve_bulk_request(api, &project, prepared).await?;
+            // 作る前に済ませ、失敗しても作成は止めない（`tasks create` と同じ理由）
+            let web = web_location_for_output(api).await;
             let created: BulkCreateTasksResponse = api
                 .post(&borrow(&bulk_create_path(api, project.id)), &body)
                 .await?;
+            let created = CreatedTasks {
+                tasks: created
+                    .tasks
+                    .into_iter()
+                    .map(|detail| CreatedTask::new(&project, web.as_ref(), detail))
+                    .collect(),
+            };
             if output.json {
                 print(&created, output);
             } else {
-                for line in bulk_created_lines(&project, &created) {
+                for line in bulk_created_lines(&created) {
                     println!("{line}");
                 }
             }
@@ -267,6 +353,10 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
         } => {
             let priority = priority.as_deref().map(parse_priority).transpose()?;
             let description = resolve_body(description, description_file, "description")?;
+            check_description_not_empty(
+                description.as_deref(),
+                "To remove the description, use --clear-description.",
+            )?;
             let target = check_task_target(&task_ref, project.as_deref())?;
             let api = &context.connect().await?;
             let (project, task_id) = resolve_task_target(api, target).await?;
@@ -340,6 +430,19 @@ pub async fn run(context: &Context, command: TasksCommand, output: OutputOptions
                 )
                 .await?;
             print(&comment_for_display(comment), output);
+        }
+        TasksCommand::Comments { task_ref, project } => {
+            let target = check_task_target(&task_ref, project.as_deref())?;
+            let api = &context.connect().await?;
+            let (project, task_id) = resolve_task_target(api, target).await?;
+            let list = comments_for_display(fetch_comments(api, project.id, &task_id).await?);
+            if output.json {
+                print(&list, output);
+            } else {
+                for line in comment_lines(&list) {
+                    println!("{line}");
+                }
+            }
         }
         TasksCommand::Delete { task_ref, project } => {
             let target = check_task_target(&task_ref, project.as_deref())?;
@@ -790,15 +893,59 @@ fn bulk_create_path(api: &ApiClient, project_id: Uuid) -> Vec<String> {
     segments
 }
 
-/// `KEY-N  title` を入力順に。
-fn bulk_created_lines(project: &ProjectResponse, created: &BulkCreateTasksResponse) -> Vec<String> {
+/// 作成の応答。起票した番号と画面の URL を、`list` を取り直さずに知れるよう、
+/// 今までの項目（`TaskDetailResponse`）の前に足す。
+#[derive(Serialize)]
+struct CreatedTask {
+    /// `TASK-532` の形
+    key: String,
+    /// 画面の URL。`api_url` が `<画面の URL>/api` の形でない、またはトークンに `read:tenant` が
+    /// 無いと `null`
+    url: Option<String>,
+    #[serde(flatten)]
+    task: TaskDetailResponse,
+}
+
+impl CreatedTask {
+    fn new(project: &ProjectResponse, web: Option<&WebLocation>, task: TaskDetailResponse) -> Self {
+        let seq_id = task.task.seq_id;
+        Self {
+            key: task_key(project, seq_id),
+            url: web.map(|web| web.task_url(&project.key, seq_id)),
+            task,
+        }
+    }
+
+    /// `{key}\t{url}`。URL が無ければ `{key}` だけ。
+    fn line(&self) -> String {
+        match &self.url {
+            Some(url) => format!("{}\t{url}", self.key),
+            None => self.key.clone(),
+        }
+    }
+}
+
+/// `BulkCreateTasksResponse` と同じ包み。
+#[derive(Serialize)]
+struct CreatedTasks {
+    tasks: Vec<CreatedTask>,
+}
+
+fn task_key(project: &ProjectResponse, seq_id: i32) -> String {
+    format!("{}-{seq_id}", project.key)
+}
+
+/// `{key}\t{url}\t{title}` を入力順に。URL が無ければ空の列。
+fn bulk_created_lines(created: &CreatedTasks) -> Vec<String> {
     created
         .tasks
         .iter()
-        .map(|detail| {
+        .map(|task| {
             format!(
-                "{}-{}  {}",
-                project.key, detail.task.seq_id, detail.task.title
+                "{}\t{}\t{}",
+                task.key,
+                task.url.as_deref().unwrap_or(""),
+                single_line(&task.task.task.title)
             )
         })
         .collect()
@@ -1062,11 +1209,167 @@ pub(crate) fn offset_for(page: u64, limit: u64) -> Result<u64> {
 }
 
 /// 人間向けの一覧。総件数を出さないと、既定の 50 件で切れていることに気付けない。
-fn print_listing(tasks: &TaskListResponse, output: OutputOptions, page: u64) {
-    if !tasks.tasks.is_empty() {
-        print(tasks, output);
+/// 本文は出さない（長い本文が一覧の読み取りを埋める）。要るときは `--json` か `tasks show`。
+fn print_listing(
+    project: &ProjectResponse,
+    tasks: &TaskListResponse,
+    statuses: &[ProjectStatusResponse],
+    page: u64,
+) {
+    for task in &tasks.tasks {
+        println!("{}", task_row(project, task, statuses));
     }
     println!("{}", listing_summary(tasks, page));
+}
+
+/// `{key}\t{状態}\t{title}\t{ラベル}\t{更新日時}`。状態が一覧に無ければ `status_id`。
+/// タイトルとラベル名は改行・タブを空白に畳む（1 件 1 行・タブ区切りを崩さない）。
+fn task_row(
+    project: &ProjectResponse,
+    task: &TaskResponse,
+    statuses: &[ProjectStatusResponse],
+) -> String {
+    let status =
+        status_name(statuses, task.status_id).unwrap_or_else(|| task.status_id.to_string());
+    let labels = task
+        .labels
+        .iter()
+        .map(|label| single_line(&label.name))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{}\t{}\t{}\t{}\t{}",
+        task_key(project, task.seq_id),
+        single_line(&status),
+        single_line(&task.title),
+        labels,
+        task.updated_at
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    )
+}
+
+fn status_name(statuses: &[ProjectStatusResponse], id: Uuid) -> Option<String> {
+    statuses
+        .iter()
+        .find(|status| status.id == id)
+        .map(|status| status.name.clone())
+}
+
+/// 項目なしの `--json`。`TaskListResponse` の形のまま、各行に `key` だけを足す。
+#[derive(Serialize)]
+struct ListedTask<'a> {
+    key: String,
+    #[serde(flatten)]
+    task: &'a TaskResponse,
+}
+
+#[derive(Serialize)]
+struct TaskListing<'a> {
+    tasks: Vec<ListedTask<'a>>,
+    total: u64,
+    next_cursor: &'a Option<String>,
+}
+
+fn listing_with_keys<'a>(project: &ProjectResponse, list: &'a TaskListResponse) -> TaskListing<'a> {
+    TaskListing {
+        tasks: list
+            .tasks
+            .iter()
+            .map(|task| ListedTask {
+                key: task_key(project, task.seq_id),
+                task,
+            })
+            .collect(),
+        total: list.total,
+        next_cursor: &list.next_cursor,
+    }
+}
+
+/// 選んだ項目だけの 1 行。serde_json の `Map` は順を保たないので、指定の順を自分で持つ。
+struct Picked(Vec<(String, serde_json::Value)>);
+
+impl Serialize for Picked {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        serializer.collect_map(self.0.iter().map(|(name, value)| (name, value)))
+    }
+}
+
+#[derive(Serialize)]
+struct PickedListing<'a> {
+    tasks: Vec<Picked>,
+    total: u64,
+    next_cursor: &'a Option<String>,
+}
+
+/// `--json key,title`。包み（`tasks` / `total` / `next_cursor`）は項目なしと同じにして、
+/// jq の道筋を揃える。各行は指定した項目だけを、指定した順で出す。
+fn picked_listing<'a>(
+    project: &ProjectResponse,
+    list: &'a TaskListResponse,
+    fields: &[String],
+    statuses: &[ProjectStatusResponse],
+    web: Option<&WebLocation>,
+) -> PickedListing<'a> {
+    // 同じ項目を 2 回書いても、JSON の同じキーを 2 つ出さない
+    let mut names: Vec<&String> = Vec::new();
+    for field in fields {
+        if !names.contains(&field) {
+            names.push(field);
+        }
+    }
+    let tasks = list
+        .tasks
+        .iter()
+        .map(|task| {
+            let serde_json::Value::Object(mut all) =
+                serde_json::to_value(task).unwrap_or(serde_json::Value::Null)
+            else {
+                return Picked(Vec::new());
+            };
+            all.insert("key".into(), json!(task_key(project, task.seq_id)));
+            all.insert(
+                "status".into(),
+                status_name(statuses, task.status_id).map_or(serde_json::Value::Null, Into::into),
+            );
+            all.insert(
+                "url".into(),
+                web.map_or(serde_json::Value::Null, |web| {
+                    web.task_url(&project.key, task.seq_id).into()
+                }),
+            );
+            Picked(
+                names
+                    .iter()
+                    .map(|name| {
+                        let value = all.get(*name).cloned().unwrap_or(serde_json::Value::Null);
+                        ((*name).clone(), value)
+                    })
+                    .collect(),
+            )
+        })
+        .collect();
+    PickedListing {
+        tasks,
+        total: list.total,
+        next_cursor: &list.next_cursor,
+    }
+}
+
+/// 選べない名前は、選べる項目を並べて断る（送信前）。
+fn check_list_fields(fields: &[String]) -> Result<()> {
+    match fields
+        .iter()
+        .find(|field| !TASK_LIST_FIELDS.contains(&field.as_str()))
+    {
+        Some(unknown) => Err(CliError::validation(format!(
+            "Unknown JSON field: {unknown}. Available fields: {}",
+            TASK_LIST_FIELDS.join(", ")
+        ))),
+        None => Ok(()),
+    }
 }
 
 fn print_hits(project: &ProjectResponse, hits: &SearchTasksResponse, page: u64, limit: u64) {
@@ -1144,6 +1447,42 @@ pub(crate) fn page_summary(shown: usize, total: u64, page: u64, has_next: bool) 
     }
 }
 
+/// 一覧・作成の応答に入れる画面の URL の元。作成時の参照は POST の前に済ませる。
+///
+/// URL は付加情報なので、403 以外の失敗（テナント一覧の 5xx・通信）でも一覧・作成は止めない。
+/// 止めると、作れるはずのタスクが作れず、再実行を促すだけになる。注意を標準エラーに 1 行出して `url: null` で続ける。
+async fn web_location_for_output(api: &ApiClient) -> Option<WebLocation> {
+    match api.web_location().await {
+        Ok(web) => web,
+        Err(err) => {
+            eprintln!(
+                "warning: cannot look up the web URL, so the result has no url: {}",
+                err.message
+            );
+            None
+        }
+    }
+}
+
+/// 空（空白だけ）の本文は、途中のコマンドが失敗して空のファイルができた結果のことが多い。
+/// そのまま送ると本文が消えるので、API を叩く前に断る。
+///
+/// 空白とみなすのは `trim` の対象に加えて、BOM（U+FEFF。Windows のエディタや PowerShell の
+/// リダイレクトが先頭に付ける）とゼロ幅の文字（U+200B〜U+200D・U+2060）。
+fn check_description_not_empty(description: Option<&str>, hint: &str) -> Result<()> {
+    let blank = |text: &str| {
+        text.chars().all(|c| {
+            c.is_whitespace() || matches!(c, '\u{feff}' | '\u{200b}'..='\u{200d}' | '\u{2060}')
+        })
+    };
+    if description.is_some_and(blank) {
+        return Err(CliError::validation(format!(
+            "The description is empty. {hint}"
+        )));
+    }
+    Ok(())
+}
+
 /// 綴りは entity の `string_value` を正とする。CLI に一覧を写さない。
 fn parse_priority(raw: &str) -> Result<TaskPriority> {
     TaskPriority::try_from_value(&raw.to_ascii_lowercase()).map_err(|_| {
@@ -1206,6 +1545,90 @@ async fn resolve_task_target(
 fn comment_for_display(mut comment: TaskCommentResponse) -> TaskCommentResponse {
     comment.body = payload::mentions::to_plain(&comment.body, &comment.mentions);
     comment
+}
+
+/// タスクのコメントをスレッドごと取る。`tasks show --full`（TASK-327）が同じ取得を使えるよう、
+/// コマンドから切り離しておく。
+async fn fetch_comments(
+    api: &ApiClient,
+    project_id: Uuid,
+    task_id: &str,
+) -> Result<CommentListResponse> {
+    let mut segments = task_path(api, project_id, task_id);
+    segments.push("comments".into());
+    api.get(&borrow(&segments), &[]).await
+}
+
+/// コメント一覧を人に見せる形にする。親と返信の本文のメンション印は `@今の名` に戻す
+/// （`comment_for_display` と同じ規則）。順序と形は変えない。
+fn comments_for_display(mut list: CommentListResponse) -> CommentListResponse {
+    let mentions = &list.mentions;
+    for thread in &mut list.comments {
+        if let Some(body) = &thread.body {
+            thread.body = Some(payload::mentions::to_plain(body, mentions));
+        }
+        for reply in &mut thread.replies {
+            if let Some(body) = &reply.body {
+                reply.body = Some(payload::mentions::to_plain(body, mentions));
+            }
+        }
+    }
+    list
+}
+
+/// コメントを古い順の文章にする。返信は親の下に 4 字深く出す。
+/// 本文は改行で分けて字下げするだけで、Markdown は解釈しない。
+fn comment_lines(list: &CommentListResponse) -> Vec<String> {
+    if list.comments.is_empty() {
+        return vec!["No comments".to_string()];
+    }
+    // API は親が新しい順で来る。読むときは古い順にする
+    let mut threads: Vec<_> = list.comments.iter().collect();
+    threads.sort_by_key(|thread| thread.created_at);
+    let mut lines = Vec::new();
+    for (index, thread) in threads.into_iter().enumerate() {
+        if index > 0 {
+            lines.push(String::new());
+        }
+        push_comment(
+            &mut lines,
+            0,
+            &thread.user.name,
+            thread.created_at,
+            thread.body.as_deref(),
+        );
+        for reply in &thread.replies {
+            push_comment(
+                &mut lines,
+                4,
+                &reply.user.name,
+                reply.created_at,
+                reply.body.as_deref(),
+            );
+        }
+    }
+    lines
+}
+
+fn push_comment(
+    lines: &mut Vec<String>,
+    depth: usize,
+    author: &str,
+    created_at: DateTime<Utc>,
+    body: Option<&str>,
+) {
+    let pad = " ".repeat(depth);
+    // 作成者名の改行やタブで行が増える・列がずれると、別の発言に見える
+    lines.push(format!(
+        "{pad}{}\t{}",
+        single_line(author),
+        created_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    ));
+    // 削除済みは本文が無い。CRLF の `\r` は端末で行頭へ戻る制御になるので落とす
+    let body = body.unwrap_or("(deleted)").replace('\r', "");
+    for line in body.split('\n') {
+        lines.push(format!("{pad}  {line}"));
+    }
 }
 
 /// 作成・取得・更新したタスクを人に見せる形にする。説明文のメンション印は `@今の名` に戻す
@@ -1378,14 +1801,31 @@ mod tests {
         assert!(json["title"].is_null());
     }
 
-    /// 空文字は「本文を空にする」意図。`clear_description` とは別扱いで、そのまま送る。
     #[test]
-    fn an_update_sends_an_empty_description_as_is() {
-        let body = update_body(None, Some(""), None);
-        let json = serde_json::to_value(&body).unwrap();
-
-        assert_eq!(json["description"], "");
-        assert_eq!(json["clear_description"], false);
+    fn an_empty_description_is_refused_with_exit_code_2() {
+        // BOM・ゼロ幅の文字は `trim` の対象外なので、別に空とみなす
+        for empty in [
+            "",
+            " \n\t",
+            "\u{feff}",
+            "\u{feff}\r\n",
+            "\u{200b}",
+            " \u{feff}\u{200b}\u{200c}\u{200d}\u{2060}\n",
+        ] {
+            let err =
+                check_description_not_empty(Some(empty), "Use --clear-description.").unwrap_err();
+            assert_eq!(err.exit_code, 2);
+            assert!(
+                err.message.contains("--clear-description"),
+                "{}",
+                err.message
+            );
+        }
+        assert!(check_description_not_empty(None, "").is_ok());
+        assert!(check_description_not_empty(Some("x"), "").is_ok());
+        // 対照: 中身があれば、BOM やゼロ幅の文字が付いていても通す
+        assert!(check_description_not_empty(Some("\u{feff}x"), "").is_ok());
+        assert!(check_description_not_empty(Some("\u{200b}本文"), "").is_ok());
     }
 
     /// 未指定のラベルで空配列を送ると、API 側は「全解除」と解釈する。
@@ -1448,6 +1888,7 @@ mod tests {
     #[test]
     fn task_listing_uses_the_cursor_even_when_the_total_disagrees() {
         let tasks = TaskListResponse {
+            matches: Default::default(),
             tasks: vec![],
             total: 0,
             next_cursor: Some("next".into()),
@@ -1689,6 +2130,177 @@ mod tests {
         .unwrap()
     }
 
+    fn project_for(key: &str) -> ProjectResponse {
+        serde_json::from_value(json!({
+            "id": "11111111-1111-4111-8111-111111111111",
+            "name": "App",
+            "description": "",
+            "tenant_id": "99999999-9999-4999-8999-999999999999",
+            "icon_emoji": null,
+            "icon_url": null,
+            "key": key,
+            "is_personal": false,
+            "personal_owner_id": null,
+            "inherit_tenant_members": true,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_created_task_starts_with_the_key_and_url_and_keeps_every_other_field() {
+        let project = project_for("APP");
+        let detail = task_detail_with("説明", json!({}));
+        let plain = serde_json::to_value(&detail).unwrap();
+
+        let created = CreatedTask::new(&project, None, detail);
+        let value = serde_json::to_value(&created).unwrap();
+        let object = value.as_object().unwrap();
+
+        assert_eq!(object["key"], "APP-7");
+        assert!(object["url"].is_null());
+        // 今までの項目は 1 つも欠けず、値も同じ
+        for (name, field) in plain.as_object().unwrap() {
+            assert_eq!(&object[name], field, "{name}");
+        }
+        assert_eq!(object.len(), plain.as_object().unwrap().len() + 2);
+        // 並びは key・url が先
+        let text = serde_json::to_string(&created).unwrap();
+        assert!(text.starts_with(r#"{"key":"APP-7","url":null,"#), "{text}");
+        assert_eq!(created.line(), "APP-7");
+    }
+
+    #[test]
+    fn bulk_created_lines_have_the_key_url_and_title_with_an_empty_url_column_when_unknown() {
+        let project = project_for("APP");
+        let with_url = CreatedTask {
+            url: Some("https://h/acme/projects/APP/tasks/APP-7".into()),
+            ..CreatedTask::new(&project, None, task_detail_with("", json!({})))
+        };
+        let without_url = CreatedTask::new(&project, None, task_detail_with("", json!({})));
+        assert_eq!(
+            with_url.line(),
+            "APP-7\thttps://h/acme/projects/APP/tasks/APP-7"
+        );
+
+        let lines = bulk_created_lines(&CreatedTasks {
+            tasks: vec![with_url, without_url],
+        });
+
+        assert_eq!(
+            lines,
+            vec![
+                "APP-7\thttps://h/acme/projects/APP/tasks/APP-7\tGolden task",
+                "APP-7\t\tGolden task",
+            ]
+        );
+    }
+
+    #[test]
+    fn bulk_created_titles_are_single_line() {
+        let mut task = task_detail_with("", json!({}));
+        task.task.title = "first\tsecond\nthird\rfourth".into();
+        let lines = bulk_created_lines(&CreatedTasks {
+            tasks: vec![CreatedTask::new(&project_for("APP"), None, task)],
+        });
+        assert_eq!(lines, ["APP-7\t\tfirst second third fourth"]);
+    }
+
+    #[test]
+    fn task_list_fields_match_the_response_type() {
+        // CLI が足す項目
+        const COMPUTED: [&str; 3] = ["key", "url", "status"];
+        let detail = task_detail_with("", json!({}));
+        let serialized = serde_json::to_value(&detail.task).unwrap();
+        let mut expected: Vec<String> = COMPUTED.iter().map(|name| name.to_string()).collect();
+        expected.extend(serialized.as_object().unwrap().keys().cloned());
+        expected.sort();
+        let mut actual: Vec<String> = TASK_LIST_FIELDS
+            .iter()
+            .map(|name| name.to_string())
+            .collect();
+        actual.sort();
+        assert_eq!(
+            actual, expected,
+            "TaskResponse の項目が増減したら TASK_LIST_FIELDS を直す"
+        );
+    }
+
+    #[test]
+    fn an_unknown_list_field_is_refused_with_the_available_ones() {
+        let err = check_list_fields(&["key".into(), "titel".into()]).unwrap_err();
+        assert_eq!(err.exit_code, 2);
+        assert!(
+            err.message.contains("Unknown JSON field: titel"),
+            "{}",
+            err.message
+        );
+        assert!(err.message.contains("Available fields:"), "{}", err.message);
+        assert!(err.message.contains("key"), "{}", err.message);
+        assert!(check_list_fields(&["key".into(), "title".into(), "status".into()]).is_ok());
+    }
+
+    fn listed(tasks: Vec<serde_json::Value>) -> TaskListResponse {
+        serde_json::from_value(json!({ "tasks": tasks, "total": 1, "next_cursor": null })).unwrap()
+    }
+
+    fn task_json(title: &str) -> serde_json::Value {
+        let mut task = serde_json::to_value(task_detail_with("本文", json!({})).task).unwrap();
+        task["title"] = json!(title);
+        task
+    }
+
+    #[test]
+    fn picked_fields_come_out_in_the_requested_order_and_only_those() {
+        let project = project_for("APP");
+        let list = listed(vec![task_json("題")]);
+        let fields: Vec<String> = ["title", "key", "status", "url", "title"]
+            .iter()
+            .map(|name| name.to_string())
+            .collect();
+
+        let out = picked_listing(&project, &list, &fields, &[], None);
+        let text = serde_json::to_string(&out).unwrap();
+
+        // 状態が一覧に無ければ null。URL が引けなければ null。重複は 1 回だけ
+        assert_eq!(
+            text,
+            r#"{"tasks":[{"title":"題","key":"APP-7","status":null,"url":null}],"total":1,"next_cursor":null}"#
+        );
+    }
+
+    #[test]
+    fn the_listing_with_keys_is_the_plain_listing_plus_a_key() {
+        let project = project_for("APP");
+        let list = listed(vec![task_json("題")]);
+
+        let mut with_keys = serde_json::to_value(listing_with_keys(&project, &list)).unwrap();
+        for task in with_keys["tasks"].as_array_mut().unwrap() {
+            assert_eq!(task["key"], "APP-7");
+            task.as_object_mut().unwrap().remove("key");
+        }
+
+        assert_eq!(with_keys, serde_json::to_value(&list).unwrap());
+    }
+
+    #[test]
+    fn a_table_row_has_no_description_and_stays_on_one_line() {
+        let project = project_for("APP");
+        let mut task = task_json("1 行目\n2 行目\tタブ");
+        task["labels"] = json!([{
+            "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd", "name": "a\nb", "description": "",
+            "color": "#112233", "icon_url": null, "project_id": null,
+        }]);
+        let list = listed(vec![task]);
+
+        let row = task_row(&project, &list.tasks[0], &[]);
+
+        assert!(!row.contains("本文"), "{row}");
+        assert_eq!(row.lines().count(), 1, "{row:?}");
+        assert_eq!(row.split('\t').count(), 5, "{row:?}");
+        assert!(row.starts_with("APP-7\t"), "{row}");
+        assert!(row.contains("\t1 行目 2 行目 タブ\ta b\t"), "{row:?}");
+    }
+
     #[test]
     fn task_show_prints_attachments() {
         // `attachments` が無い応答（古いサーバー）も読める
@@ -1765,6 +2377,7 @@ mod tests {
         let alice = Uuid::new_v4();
         let one = task_detail_with(&format!("<@{alice}> 確認"), json!({}));
         let list = TaskListResponse {
+            matches: Default::default(),
             tasks: vec![one.task],
             total: 1,
             next_cursor: None,
@@ -1886,5 +2499,144 @@ mod tests {
             format_pull_request(&pull_request),
             "acme/app#87\topen\tcloses\tbody,manual\tt"
         );
+    }
+
+    const ALICE: &str = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+
+    fn comment_user(name: &str) -> serde_json::Value {
+        json!({ "id": ALICE, "name": name, "account_kind": "human", "avatar_url": null })
+    }
+
+    fn comment_node(
+        name: &str,
+        body: Option<&str>,
+        at: &str,
+        replies: serde_json::Value,
+    ) -> serde_json::Value {
+        json!({
+            "id": Uuid::new_v4(),
+            "user": comment_user(name),
+            "body": body,
+            "replies": replies,
+            "created_at": at,
+            "updated_at": at,
+            "is_deleted": body.is_none(),
+        })
+    }
+
+    fn comment_list(
+        comments: Vec<serde_json::Value>,
+        mentions: serde_json::Value,
+    ) -> CommentListResponse {
+        serde_json::from_value(json!({ "comments": comments, "mentions": mentions })).unwrap()
+    }
+
+    #[test]
+    fn comments_are_listed_oldest_first_with_replies_indented() {
+        // API は親が新しい順で来る
+        let list = comment_list(
+            vec![
+                comment_node("bob", Some("新しい"), "2026-01-03T00:00:00Z", json!([])),
+                comment_node(
+                    "alice",
+                    Some("1 行目\n2 行目"),
+                    "2026-01-02T03:04:05Z",
+                    json!([{
+                        "id": Uuid::new_v4(),
+                        "user": comment_user("carol"),
+                        "body": "返信",
+                        "created_at": "2026-01-02T04:00:00Z",
+                        "updated_at": "2026-01-02T04:00:00Z",
+                        "is_deleted": false,
+                    }]),
+                ),
+            ],
+            json!({}),
+        );
+
+        assert_eq!(
+            comment_lines(&list),
+            vec![
+                "alice\t2026-01-02T03:04:05Z",
+                "  1 行目",
+                "  2 行目",
+                "    carol\t2026-01-02T04:00:00Z",
+                "      返信",
+                "",
+                "bob\t2026-01-03T00:00:00Z",
+                "  新しい",
+            ]
+        );
+    }
+
+    /// 作成者名の改行・タブは 1 行に畳み、本文の CRLF の `\r` は落とす。
+    #[test]
+    fn comment_lines_keep_one_line_per_author_and_drop_carriage_returns() {
+        let list = comment_list(
+            vec![comment_node(
+                "al\nice\tx",
+                Some("1 行目\r\n2 行目\r"),
+                "2026-01-02T00:00:00Z",
+                json!([]),
+            )],
+            json!({}),
+        );
+
+        assert_eq!(
+            comment_lines(&list),
+            vec!["al ice x\t2026-01-02T00:00:00Z", "  1 行目", "  2 行目",]
+        );
+    }
+
+    #[test]
+    fn a_deleted_comment_shows_a_placeholder_and_an_empty_list_says_so() {
+        let list = comment_list(
+            vec![comment_node(
+                "alice",
+                None,
+                "2026-01-02T00:00:00Z",
+                json!([]),
+            )],
+            json!({}),
+        );
+        assert_eq!(
+            comment_lines(&list),
+            vec!["alice\t2026-01-02T00:00:00Z", "  (deleted)"]
+        );
+        assert_eq!(
+            comment_lines(&comment_list(vec![], json!({}))),
+            vec!["No comments"]
+        );
+    }
+
+    #[test]
+    fn comment_list_output_has_names_instead_of_mention_markers() {
+        let ghost = Uuid::new_v4();
+        let list = comment_list(
+            vec![comment_node(
+                "bob",
+                Some(&format!("<@{ALICE}> へ")),
+                "2026-01-02T00:00:00Z",
+                json!([{
+                    "id": Uuid::new_v4(),
+                    "user": comment_user("carol"),
+                    "body": format!("<@{ghost}> も"),
+                    "created_at": "2026-01-02T01:00:00Z",
+                    "updated_at": "2026-01-02T01:00:00Z",
+                    "is_deleted": false,
+                }]),
+            )],
+            json!({ ALICE: { "status": "member", "name": "alice", "avatar_url": null } }),
+        );
+
+        let shown = comments_for_display(list);
+
+        assert_eq!(shown.comments[0].body.as_deref(), Some("@alice へ"));
+        assert_eq!(
+            shown.comments[0].replies[0].body.as_deref(),
+            Some("@（不明な利用者） も")
+        );
+        let out = crate::output::render(&shown, crate::output::OutputOptions::new(true));
+        assert!(!out.contains("<@"), "{out}");
     }
 }

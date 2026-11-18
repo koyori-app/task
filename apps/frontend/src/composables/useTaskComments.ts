@@ -1,7 +1,7 @@
 import { computed, ref, type MaybeRefOrGetter, toValue } from 'vue';
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 
-import { fetchClient, apiClient } from '@/lib/api-vue-query';
+import { fetchClient, apiClient, queryErrorStatus } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
 import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
 
@@ -226,7 +226,10 @@ export function useTaskComments(params: UseTaskCommentsParams) {
       await invalidateAfterCommentMutation(queryKey);
       return true;
     } catch (error) {
-      deleteError.value = apiErrorMessage(error, 'コメントを削除できませんでした');
+      deleteError.value =
+        queryErrorStatus(error) === 403
+          ? 'コメントを削除できるのは、投稿者とテナントオーナーだけです。'
+          : apiErrorMessage(error, 'コメントを削除できませんでした');
       deleteErrorCommentId.value = commentId;
       return false;
     } finally {

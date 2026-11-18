@@ -240,6 +240,84 @@ describe('TaskComments', () => {
     expect((textarea.element as HTMLTextAreaElement).value).toBe('');
   });
 
+  describe('貼り付けたファイルのアップロード中', () => {
+    const editors = (w: VueWrapper) => w.findAllComponents({ name: 'CommentEditorStub' });
+
+    it('入力欄が上げている間は送信を止め、終われば送れる', async () => {
+      const onSubmit = vi.fn(async () => true);
+      const wrapper = mountComments({ onSubmit });
+      await wrapper.get('textarea[aria-label="コメントを入力"]').setValue('画像つきのコメント');
+      const send = wrapper.get('button[type="submit"]');
+      expect(send.attributes('disabled')).toBeUndefined();
+
+      editors(wrapper)[0]!.vm.$emit('update:uploading', true);
+      await nextTick();
+      expect(send.attributes('disabled')).toBeDefined();
+      // ボタンを押さずに form を submit しても送らない（途中の本文を送らない）
+      await wrapper.get('form').trigger('submit');
+      await flushPromises();
+      expect(onSubmit).not.toHaveBeenCalled();
+
+      editors(wrapper)[0]!.vm.$emit('update:uploading', false);
+      await nextTick();
+      expect(send.attributes('disabled')).toBeUndefined();
+      await wrapper.get('form').trigger('submit');
+      await flushPromises();
+      expect(onSubmit).toHaveBeenCalledWith('画像つきのコメント');
+    });
+
+    it('編集の入力欄が上げている間は保存を止め、終われば保存できる', async () => {
+      const onUpdate = vi.fn(async () => true);
+      const wrapper = mountComments({
+        threads: [thread('c-1', '元の本文')],
+        currentUserId: user.id,
+        onUpdate,
+      });
+      await menuItems(wrapper, 'コメントを編集')[0]!.trigger('click');
+      await wrapper.get('textarea[aria-label="コメントを編集"]').setValue('直した本文');
+      const save = wrapper.findAll('button').find((button) => button.text() === '保存')!;
+      const editor = editors(wrapper).find((e) => e.props('ariaLabel') === 'コメントを編集')!;
+
+      editor.vm.$emit('update:uploading', true);
+      await nextTick();
+      expect(save.attributes('disabled')).toBeDefined();
+      await save.trigger('click');
+      await flushPromises();
+      expect(onUpdate).not.toHaveBeenCalled();
+
+      editor.vm.$emit('update:uploading', false);
+      await nextTick();
+      expect(save.attributes('disabled')).toBeUndefined();
+      await save.trigger('click');
+      await flushPromises();
+      expect(onUpdate).toHaveBeenCalledWith('c-1', '直した本文');
+    });
+
+    it('テナントとプロジェクトが分かる時だけ、入力欄と編集の入力欄へ uploadFile を渡す', async () => {
+      const without = mountComments({ threads: [thread('c-1', '本文')], currentUserId: user.id });
+      await menuItems(without, 'コメントを編集')[0]!.trigger('click');
+      expect(editors(without).map((e) => e.props('uploadFile'))).toEqual([undefined, undefined]);
+      without.unmount();
+
+      const wrapper = mountComments({
+        threads: [thread('c-1', '本文')],
+        currentUserId: user.id,
+        tenantId: 't-1',
+        projectId: 'p-1',
+        taskId: 'ENG-1',
+      });
+      await menuItems(wrapper, 'コメントを編集')[0]!.trigger('click');
+      expect(editors(wrapper).map((e) => typeof e.props('uploadFile'))).toEqual([
+        'function',
+        'function',
+      ]);
+      // 宛先（タスクとスレッド）ごとに貼り付けを分ける。コメントの編集はコメントごと
+      const scopes = editors(wrapper).map((e) => e.props('uploadScope'));
+      expect(scopes).toContain('t-1/p-1/ENG-1/');
+      expect(scopes).toContain('c-1');
+    });
+  });
+
   it('投稿が失敗（拒否）したら下書きを残し、submitError を表示する', async () => {
     const onSubmit = vi.fn(async () => false);
     const wrapper = mountComments({ onSubmit });
@@ -375,7 +453,11 @@ describe('TaskComments', () => {
 
   it('削除は確認を挟んでから onDelete を呼ぶ', async () => {
     const onDelete = vi.fn(async () => true);
-    const wrapper = mountComments({ threads: [thread('c-1', '消すコメント')], onDelete });
+    const wrapper = mountComments({
+      threads: [thread('c-1', '消すコメント')],
+      currentUserId: user.id,
+      onDelete,
+    });
 
     await menuItems(wrapper, 'コメントを削除')[0]!.trigger('click');
     expect(onDelete).not.toHaveBeenCalled();
@@ -392,7 +474,11 @@ describe('TaskComments', () => {
 
   it('削除が backend に拒否されたら確認 UI を残し、拒否理由を対象コメントの中に出す', async () => {
     const onDelete = vi.fn(async () => false);
-    const wrapper = mountComments({ threads: [thread('c-1', '消せないコメント')], onDelete });
+    const wrapper = mountComments({
+      threads: [thread('c-1', '消せないコメント')],
+      currentUserId: user.id,
+      onDelete,
+    });
 
     await menuItems(wrapper, 'コメントを削除')[0]!.trigger('click');
     const confirmButton = wrapper.findAll('button').find((button) => button.text() === '削除する');
@@ -414,7 +500,11 @@ describe('TaskComments', () => {
 
   it('スレッドを開いたまま削除に成功したら一覧へ戻す', async () => {
     const onDelete = vi.fn(async () => true);
-    const wrapper = mountComments({ threads: [thread('c-1', '消すスレッド')], onDelete });
+    const wrapper = mountComments({
+      threads: [thread('c-1', '消すスレッド')],
+      currentUserId: user.id,
+      onDelete,
+    });
 
     const replyOpenButton = wrapper.findAll('button').find((button) => button.text() === '返信');
     await replyOpenButton!.trigger('click');
@@ -477,7 +567,19 @@ describe('TaskComments', () => {
 
     const editButtons = menuItems(wrapper, 'コメントを編集');
     expect(editButtons).toHaveLength(1);
-    // 削除ボタンはテナントオーナーも許されるため全コメントに出る
+    // 削除は投稿者本人とテナントオーナーだけ。オーナーでなければ他人のコメントには出さない
+    expect(menuItems(wrapper, 'コメントを削除')).toHaveLength(1);
+  });
+
+  it('テナントオーナーには、他人のコメントの削除も出す（編集は出さない）', () => {
+    const other = { id: 'user-2', name: '佐藤花子' };
+    const wrapper = mountComments({
+      threads: [thread('c-1', '自分のコメント'), thread('c-2', '他人のコメント', { user: other })],
+      currentUserId: user.id,
+      isTenantOwner: true,
+    });
+
+    expect(menuItems(wrapper, 'コメントを編集')).toHaveLength(1);
     expect(menuItems(wrapper, 'コメントを削除')).toHaveLength(2);
   });
 

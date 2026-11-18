@@ -41,6 +41,7 @@ import {
 } from '@/lib/review-findings';
 import {
   DEFAULT_REVIEW_FINDINGS_URL_STATE,
+  PR_QUERY_MAX_LENGTH,
   applyReviewFindingsUrlState,
   parseReviewFindingsUrlState,
   relativeReviewFindingHref,
@@ -123,10 +124,13 @@ const githubNeedsRelink = computed(
     hasGithubConnection(connectionsQuery.data.value?.connections ?? []),
 );
 /** 選択中 PR とは別——サイドバーの見える行だけを絞る。 */
-const prQuery = ref('');
-const prStateFilter = ref<PrStateFilter>(DEFAULT_PR_STATE_FILTER);
-// 一覧の初回到着時に既定の「PR の状態」を 1 回だけ確かめるための印。利用者が先に触ったら確かめない
-const prStateDecided = ref(false);
+const prQuery = ref(initialUrlState.q);
+// 利用者が選んだ「PR の状態」（URL の `pr_state`）。null は選んでいないで、URL に載せない
+const prStateExplicit = ref<PrStateFilter | null>(initialUrlState.prState);
+const prStateFilter = ref<PrStateFilter>(prStateExplicit.value ?? DEFAULT_PR_STATE_FILTER);
+// 一覧の初回到着時に既定の「PR の状態」を 1 回だけ確かめるための印。利用者が先に触ったら
+// （URL に `pr_state` があれば）確かめない
+const prStateDecided = ref(prStateExplicit.value !== null);
 // PR 一覧は連携一覧を待たずに出す（連携一覧は外部への問い合わせで遅れることがある）。
 // 連携一覧が要るのは「自分の PR」の判定だけで、その間スイッチは使えない
 const railReady = computed(() => prsQuery.isSuccess.value);
@@ -237,6 +241,8 @@ function currentUrlState(): ReviewFindingsUrlState {
     finding: focusedFindingId.value,
     mine: mineOnly.value,
     page: prPage.value,
+    q: prQuery.value,
+    prState: prStateExplicit.value,
   };
 }
 
@@ -255,7 +261,19 @@ function applyUrlState(state: ReviewFindingsUrlState, warnings: readonly string[
   focusedFindingId.value = state.finding;
   mineOnly.value = state.mine;
   prPage.value = state.page;
-  prQuery.value = '';
+  prQuery.value = state.q;
+  // ページの確かめ（checkUrlRailState）は状態の絞り込みで数えるので、先に決める
+  prStateExplicit.value = state.prState;
+  if (state.prState !== null) {
+    prStateFilter.value = state.prState;
+    prStateDecided.value = true;
+  } else if (pullRequests.value.length > 0) {
+    // 選んでいなければ、URL だけから開いたときと同じ既定の決め方で決め直す
+    prStateFilter.value = initialPrStateFilter(pullRequests.value, state.page);
+    prStateDecided.value = true;
+  } else {
+    prStateDecided.value = false;
+  }
   urlWarnings.value = [...warnings];
   urlRailCheckPending = true;
   checkUrlRailState();
@@ -328,7 +346,11 @@ watch(
       prStateFilter.value = initialPrStateFilter(list, prPage.value);
     }
     if (selectedPr.value === null) {
-      const first = filterPullRequests(list, '', null, prStateFilter.value)[0] ?? list[0];
+      // URL の `q` で絞って開いたときは、一覧に出ている PR を開く
+      const first =
+        filterPullRequests(list, prQuery.value, null, prStateFilter.value)[0] ??
+        filterPullRequests(list, '', null, prStateFilter.value)[0] ??
+        list[0];
       selectedPr.value = first.pr_number;
       writeUrl('replace');
     }
@@ -457,6 +479,7 @@ function onPrQueryInput() {
 function setPrStateFilter(value: unknown) {
   prStateDecided.value = true;
   prStateFilter.value = value as PrStateFilter;
+  prStateExplicit.value = value as PrStateFilter;
   onPrQueryInput();
 }
 
@@ -615,6 +638,7 @@ async function onRoundCreated() {
                 type="search"
                 autocomplete="off"
                 placeholder="例: 231、共有リンク"
+                :max-length="PR_QUERY_MAX_LENGTH"
                 :value="prQuery"
                 :on-value-change="
                   (v: string) => {

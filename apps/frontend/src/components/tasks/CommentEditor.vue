@@ -12,6 +12,8 @@ import {
   resolveMentionAutocompleteTooltipParent,
   setMentionNames,
 } from '@/lib/comment-mention-extensions';
+import type { UploadedFile } from '@/lib/drive-upload';
+import { pasteUploadExtensions, resetPasteUploads } from '@/lib/paste-upload-extension';
 
 /**
  * コメント用の入力欄（CodeMirror 6）。
@@ -46,6 +48,16 @@ const props = withDefaults(
     candidates?: readonly MentionCandidate[];
     /** 本文に出る印の id から引ける表示情報（API の `mentions`） */
     mentions?: MentionTable;
+    /**
+     * 貼り付けたファイルを上げる関数。渡した時だけ、ファイルの貼り付けを受けて本文に行を入れる
+     * （`useProjectFileUpload` で作る）。省略すれば貼り付けは文字だけを扱う
+     */
+    uploadFile?: (file: File, signal: AbortSignal) => Promise<UploadedFile>;
+    /**
+     * 貼り付けの宛先を表す値（タスクとスレッドなど）。変わったら進行中のアップロードを捨てる。
+     * 部品を使い回して宛先だけ替える所で、前の宛先の結果が今の本文に入らないようにする
+     */
+    uploadScope?: string;
   }>(),
   {
     placeholder: '',
@@ -55,11 +67,15 @@ const props = withDefaults(
     bare: false,
     candidates: () => [],
     mentions: () => ({}),
+    uploadFile: undefined,
+    uploadScope: undefined,
   },
 );
 
 const emit = defineEmits<{
   'update:modelValue': [value: string];
+  /** 貼り付けたファイルを上げている最中か。呼び出し側は true の間、送信・保存を止める */
+  'update:uploading': [value: boolean];
 }>();
 
 const host = useTemplateRef<HTMLDivElement>('host');
@@ -76,6 +92,16 @@ function extensions(): Extension[] {
   }
   return [
     history(),
+    // メンションの paste より先に見るため、前に置く
+    ...(props.uploadFile
+      ? [
+          pasteUploadExtensions({
+            upload: (file, signal) => props.uploadFile!(file, signal),
+            disabled: () => props.disabled,
+            onUploadingChange: (value) => emit('update:uploading', value),
+          }),
+        ]
+      : []),
     ...mentionExtensions({
       tooltipParent: mentionTooltipParent,
       candidates: () => props.candidates,
@@ -140,7 +166,18 @@ watch(
     // 自分が emit した値が戻ってきただけなら触らない（caret が末尾へ飛ぶのを防ぐ）
     if (next === lastEmitted) return;
     if (next === view.state.doc.toString()) return;
+    // 外から本文が差し替わったら、前の本文への貼り付けは捨てる
+    resetPasteUploads(view);
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: next } });
+  },
+);
+
+// 宛先が替わったら進行中の貼り付けを捨てる。空の下書き同士の切り替えでは本文が '' のままで、
+// 上の watch に当たらない
+watch(
+  () => props.uploadScope,
+  () => {
+    if (view) resetPasteUploads(view);
   },
 );
 
@@ -149,14 +186,13 @@ watch(nameTable, (table) => {
   if (view) setMentionNames(view, table);
 });
 
-// disabled / placeholder の変更は state ごと作り直す（MarkdownEditor と同じ理由）
-watch(
-  () => [props.disabled, props.placeholder],
-  () => {
-    if (!view) return;
-    view.setState(EditorState.create({ doc: props.modelValue, extensions: extensions() }));
-  },
-);
+// disabled / placeholder の変更は state ごと作り直す（MarkdownEditor と同じ理由）。
+// uploadFile の有無も同じ（テナントとプロジェクトが mount の後で分かる所で、拡張を足し直す）。
+// 関数が入れ替わっただけ（上げる先のプロジェクトが替わった）では作り直さないよう、有無だけを見る
+watch([() => props.disabled, () => props.placeholder, () => !!props.uploadFile], () => {
+  if (!view) return;
+  view.setState(EditorState.create({ doc: props.modelValue, extensions: extensions() }));
+});
 
 function focus() {
   view?.focus();

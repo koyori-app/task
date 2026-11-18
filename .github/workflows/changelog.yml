@@ -1,0 +1,96 @@
+name: Changelog
+
+# v* のタグを push したら、CHANGELOG.md をそのタグまでの内容に書き直して main へ積む。
+# 書き直しは scripts/changelog.sh（git-cliff と cliff.toml）が行う。
+# このコミットは PR を通らないので、次の版の CHANGELOG には載らない。
+# GITHUB_TOKEN の push は他のワークフローを起こさない。
+on:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: ${{ github.workflow }}
+  # 続けてタグを打ったときも、先の書き直しを途中で打ち切らない
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      # main へ CHANGELOG.md を積む
+      contents: write
+      # スタック PR の下の PR を拾うためにマージ済みの PR の一覧を読む
+      pull-requests: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          # 全てのタグと履歴が要る
+          fetch-depth: 0
+          persist-credentials: false
+
+      # checkout が注釈付きタグをコミットへの参照に置き換えることがあり、そのままだと
+      # タグのメッセージが落ちる。リポジトリは PUBLIC なので認証なしで取り直せる
+      - name: Fetch the annotated tag
+        run: |
+          set -euo pipefail
+          if [ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" != tag ]; then
+            git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          fi
+
+      # 古いタグを打ち直したときに CHANGELOG.md を巻き戻さない。最新の版は版のタグ（cliff.toml の
+      # tag_pattern。vX.Y.Z）だけから選ぶので、rc などの版のタグでないものもここで書き直さない
+      - name: Skip unless the tag is the latest version
+        id: latest
+        run: |
+          set -euo pipefail
+          latest=$(scripts/changelog.sh latest)
+          if [ "$latest" = "$GITHUB_REF_NAME" ]; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "最新の版は $latest なので $GITHUB_REF_NAME では書き直さない"
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 版は scripts/changelog.sh の GIT_CLIFF_VERSION と揃える
+      - name: Install git-cliff
+        if: steps.latest.outputs.value == 'true'
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: git-cliff@2.14.2
+
+      # 先に main が進んで push が弾かれたら、main を取り直して書き直しからやり直す（3 回まで）
+      - name: Update and push CHANGELOG.md
+        if: steps.latest.outputs.value == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          for attempt in 1 2 3; do
+            scripts/changelog.sh write "$GITHUB_REF_NAME"
+            if git diff --quiet -- CHANGELOG.md; then
+              echo "CHANGELOG.md は $GITHUB_REF_NAME まで書かれている"
+              exit 0
+            fi
+            git add CHANGELOG.md
+            git commit -m "docs(changelog): $GITHUB_REF_NAME の変更履歴を足す"
+            if git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main; then
+              exit 0
+            fi
+            echo "push が弾かれた（${attempt} 回目）。main を取り直す"
+            git fetch origin main
+            git reset --hard origin/main
+          done
+          echo "::error::CHANGELOG.md を main へ積めなかった"
+          exit 1

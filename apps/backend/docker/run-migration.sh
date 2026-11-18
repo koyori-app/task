@@ -2,8 +2,9 @@
 # マイグレーション適用 → SeaORM の schema sync が構造上ドロップできない UNIQUE INDEX を先に落とす。
 # e2e/scripts/start-backend.sh と違い `up`（冪等・データ保持）を使う。
 # `fresh` は全テーブル DROP のため、compose の depends_on 経由で再実行されるたびに
-# 開発データが全消去され、apalis の適用記録（public._sqlx_migrations）も飛んで
-# backend が 42P06（schema "apalis" already exists）で起動不能になる（2026-07-16 に2回実発生）。
+# 開発データが全消去される。apalis-postgres 1.0.0-rc.8 以前では、適用記録（public._sqlx_migrations）も飛んで
+# backend が 42P06（schema "apalis" already exists）で起動不能になった（2026-07-16 に2回実発生。
+# 1.0.0-rc.9 以降は記録を apalis スキーマに置くので、fresh でも飛ばない）。
 # まっさらにしたい時だけ手動で: docker compose run --rm migration /app/migration fresh
 set -euo pipefail
 

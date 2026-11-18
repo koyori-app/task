@@ -13,6 +13,12 @@
 // - 繰り延べの往復: deferred → open → deferred で同じ `deferred_task_id` が再オープンされる。対照: リンク先のタスクを削除してから再繰り延べするとリンクが差し替わり、削除済みタスクが復活しない
 // - 繰り延べ先の担当者ごとの完了: 設定 on で未完了の担当者が残るタスクは、指摘を閉じても完了にならない（対照: 全員完了なら完了する）。完了から開き直すと担当者の完了は全員分消える
 // - 戻り遷移: fixed → open の差し戻しはレビュー側のみ（レビュー側でない利用者は 403、対照: レビュワーは成功）。verified からの遷移はすべて拒否（終端）
+// - 引き継ぎ（TASK-495）: 元 PR の未解決（open / fixed）の指摘だけが、引き継ぎ先の新しいラウンド（作成者・head は元のまま、`carried_by` は引き継いだ人）へ写り、元 PR は変わらない
+// - 引き継ぎのレビュー扱い: 写しのラウンドはレビューに数えない（写しだけの PR は未レビュー。対照: レビュー済みの PR へ Low だけを引き継いでも最新の head は変わらず、マージ可のまま）
+// - 引き継ぎの権限: 引き継いだ人は `rejected` / `verified` の権限を得ない（対照: 元のラウンドの作成者は行える。`available_actions` も同じ）
+// - 引き継ぎの再実行: 2 回目は 409。元 PR に指摘が増えれば、その分だけ写る
+// - 引き継ぎの拒否系: 同じ PR 400 / 元ラウンド無し 409 / 引き継ぐ指摘無し 409 / PR 番号 0 と形式違いの `from_repo` 400 / `write:review` の無い PAT 403 / テナント外 403（対照: 201）
+// - 引き継ぎの元リポジトリ: 過去の連携先を `from_repo` で指せる（既定は現在の連携先）
 
 use crate::common::TestApp;
 use axum::http::StatusCode;
@@ -2009,6 +2015,763 @@ async fn summary_gate_takes_the_first_matching_condition() {
     );
     assert_eq!(summary["mergeable"], true, "既存フィールドは残す");
 
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+// ── 引き継ぎ（TASK-495） ─────────────────────────────────────────────────
+
+const OLD_HEAD: &str = "60cdd7795f94fa4e4148ce996c2efb4c363e3f5e";
+const NEW_HEAD: &str = "1111111111111111111111111111111111111111";
+
+/// 指定の head で、`(severity, title)` の指摘を持つラウンドを起票し、(review_id, 指摘の id の並び) を返す。
+async fn submit_round_with(
+    fx: &Fixture,
+    pr: i32,
+    head_sha: &str,
+    findings: &[(&str, &str)],
+) -> (String, Vec<String>) {
+    let findings: Vec<serde_json::Value> = findings
+        .iter()
+        .map(|(severity, title)| {
+            serde_json::json!({
+                "severity": severity,
+                "title": title,
+                "body": "再現条件と根拠",
+                "file": "apps/frontend/src/App.vue",
+                "line": 42,
+            })
+        })
+        .collect();
+    let res = fx
+        .app
+        .post_json_with_session(
+            &fx.reviews_path(),
+            serde_json::json!({
+                "pr_number": pr,
+                "head_sha": head_sha,
+                "summary": "総評",
+                "findings": findings,
+            }),
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let body = json(res).await;
+    (
+        body["id"].as_str().expect("review id").to_string(),
+        body["findings"]
+            .as_array()
+            .expect("findings")
+            .iter()
+            .map(|f| f["id"].as_str().expect("finding id").to_string())
+            .collect(),
+    )
+}
+
+async fn carry_over(
+    fx: &Fixture,
+    from_pr: i32,
+    to_pr: i32,
+    from_repo: Option<&str>,
+) -> reqwest::Response {
+    fx.app
+        .post_json_with_session(
+            &format!("{}/carry-over", fx.reviews_path()),
+            serde_json::json!({
+                "from_pr_number": from_pr,
+                "from_repo": from_repo,
+                "to_pr_number": to_pr,
+            }),
+        )
+        .await
+}
+
+async fn findings_of(fx: &Fixture, pr: i32) -> Vec<serde_json::Value> {
+    json(
+        fx.app
+            .get_with_session(&format!("{}?pr={pr}", fx.findings_path()))
+            .await,
+    )
+    .await
+    .as_array()
+    .expect("findings")
+    .clone()
+}
+
+fn finding_titled<'a>(findings: &'a [serde_json::Value], title: &str) -> &'a serde_json::Value {
+    findings
+        .iter()
+        .find(|f| f["title"] == title)
+        .unwrap_or_else(|| panic!("{title} の指摘が無い: {findings:?}"))
+}
+
+/// 修正者でも引き継ぎ者でもない利用者（テナントメンバー）を足す。
+async fn add_member(fx: &mut Fixture) -> crate::common::TestUser {
+    let user = fx.app.insert_user_default().await;
+    fx.login(&fx.reviewer.clone()).await;
+    let added = fx
+        .app
+        .post_json_with_session(
+            &format!("/v1/tenants/{}/members", fx.tenant_id),
+            serde_json::json!({ "user_id": user.id, "role": "Member" }),
+        )
+        .await;
+    assert_eq!(added.status(), StatusCode::CREATED);
+    user
+}
+
+/// 未解決の指摘だけが、作成者と head を保ったまま新しいラウンドへ写る。
+#[tokio::test]
+async fn carry_over_copies_unresolved_findings_into_new_rounds() {
+    let mut fx = setup().await;
+    link_repo(&fx, "acme", "app").await;
+    fx.login(&fx.reviewer.clone()).await;
+
+    // 元 PR: R1 に 4 件（open / fixed / verified / rejected）、R2 は指摘なし
+    let (review_1, ids) = submit_round_with(
+        &fx,
+        790,
+        OLD_HEAD,
+        &[
+            ("high", "open のまま"),
+            ("medium", "fixed のまま"),
+            ("low", "verified 済み"),
+            ("nit", "rejected 済み"),
+        ],
+    )
+    .await;
+    submit_round_with(&fx, 790, NEW_HEAD, &[]).await;
+    fx.login(&fx.developer.clone()).await;
+    assert_eq!(
+        transition(&fx, &ids[1], "fixed").await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        transition(&fx, &ids[2], "fixed").await.status(),
+        StatusCode::OK
+    );
+    fx.login(&fx.reviewer.clone()).await;
+    assert_eq!(
+        transition(&fx, &ids[2], "verified").await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        transition(&fx, &ids[3], "rejected").await.status(),
+        StatusCode::OK
+    );
+    // 要求者ごとに変わる `available_actions` は比べない
+    let source_state = |findings: Vec<serde_json::Value>| -> Vec<(String, String, usize)> {
+        let mut out: Vec<_> = findings
+            .iter()
+            .map(|f| {
+                (
+                    f["id"].as_str().expect("id").to_string(),
+                    f["state"].as_str().expect("state").to_string(),
+                    f["transitions"].as_array().expect("transitions").len(),
+                )
+            })
+            .collect();
+        out.sort();
+        out
+    };
+    let source_before = source_state(findings_of(&fx, 790).await);
+
+    // 修正者が引き継ぐ
+    fx.login(&fx.developer.clone()).await;
+    let res = carry_over(&fx, 790, 1119, None).await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let body = json(res).await;
+    let rounds = body["rounds"].as_array().expect("rounds");
+    assert_eq!(
+        rounds.len(),
+        1,
+        "未解決を持つ元ラウンド 1 本につき写し 1 本"
+    );
+    let copy = &rounds[0];
+    assert_eq!(copy["pr_number"], 1119);
+    assert_eq!(copy["round"], 1);
+    assert_eq!(
+        copy["head_sha"], OLD_HEAD,
+        "元のラウンドが見た commit のまま"
+    );
+    assert_eq!(
+        copy["reviewer"]["id"],
+        fx.reviewer.id.to_string(),
+        "作成者は元のまま"
+    );
+    assert_eq!(copy["carried_by"]["id"], fx.developer.id.to_string());
+    assert_eq!(copy["carried_from"]["review_id"], review_1);
+    assert_eq!(copy["carried_from"]["pr_number"], 790);
+    assert_eq!(copy["carried_from"]["round"], 1);
+    assert_eq!(copy["finding_count"], 2);
+
+    let copied = copy["findings"].as_array().expect("findings");
+    assert_eq!(copied.len(), 2, "open と fixed だけ: {copied:?}");
+    let open = finding_titled(copied, "open のまま");
+    assert_eq!(open["state"], "open");
+    assert_eq!(open["severity"], "high");
+    assert_eq!(open["file"], "apps/frontend/src/App.vue");
+    assert_eq!(open["line"], 42);
+    assert_eq!(open["carried_from_finding_id"], ids[0]);
+    let fixed = finding_titled(copied, "fixed のまま");
+    assert_eq!(fixed["state"], "fixed", "状態は元のまま");
+    assert_eq!(
+        fixed["fixed_by"],
+        fx.developer.id.to_string(),
+        "fixed_by も保つ"
+    );
+    assert_eq!(fixed["carried_from_finding_id"], ids[1]);
+    let history = open["transitions"].as_array().expect("transitions");
+    assert_eq!(history.len(), 1);
+    assert!(history[0]["from_state"].is_null());
+    assert_eq!(history[0]["actor"]["id"], fx.developer.id.to_string());
+    assert!(
+        history[0]["note"]
+            .as_str()
+            .expect("note")
+            .contains("PR #790 R1"),
+        "出どころが履歴に残る: {history:?}"
+    );
+
+    // 引き継ぎ先の一覧にも出る。元 PR は件数も状態も変わらない
+    assert_eq!(findings_of(&fx, 1119).await.len(), 2);
+    assert_eq!(source_state(findings_of(&fx, 790).await), source_before);
+    assert!(
+        findings_of(&fx, 790)
+            .await
+            .iter()
+            .all(|f| f["carried_from_finding_id"].is_null())
+    );
+
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+/// 写しのラウンドは指摘の件数には入るが、レビューには数えない。
+#[tokio::test]
+async fn carried_rounds_do_not_count_as_a_review() {
+    let mut fx = setup().await;
+    link_repo(&fx, "acme", "app").await;
+    fx.login(&fx.reviewer.clone()).await;
+    submit_round_with(&fx, 790, OLD_HEAD, &[("high", "未解決")]).await;
+
+    // 写しだけの PR は未レビュー（塞いでいる件数には入る）
+    assert_eq!(
+        carry_over(&fx, 790, 1119, None).await.status(),
+        StatusCode::CREATED
+    );
+    let summary = json(
+        fx.app
+            .get_with_session(&format!("{}/summary?pr=1119", fx.reviews_path()))
+            .await,
+    )
+    .await;
+    assert_eq!(summary["gate"], "unreviewed");
+    assert_eq!(summary["mergeable"], false);
+    assert_eq!(summary["blocking"], 1);
+    assert_eq!(summary["rounds"], 0);
+    assert!(
+        summary["latest_head_sha"].is_null(),
+        "写しの head を最新にしない"
+    );
+
+    // この PR へ自分でラウンドを出せば、その head が最新になる
+    submit_round_with(&fx, 1119, NEW_HEAD, &[]).await;
+    let summary = json(
+        fx.app
+            .get_with_session(&format!("{}/summary?pr=1119", fx.reviews_path()))
+            .await,
+    )
+    .await;
+    assert_eq!(summary["gate"], "blocked");
+    assert_eq!(summary["latest_head_sha"], NEW_HEAD);
+    assert_eq!(summary["blocking"], 1, "写しの指摘は塞いだまま");
+
+    // 対照: レビュー済みの PR へ Low だけを引き継いでも、最新の head は動かず、マージ可のまま
+    submit_round_with(&fx, 791, OLD_HEAD, &[("low", "軽い指摘")]).await;
+    submit_round_with(&fx, 900, NEW_HEAD, &[]).await;
+    assert_eq!(
+        carry_over(&fx, 791, 900, None).await.status(),
+        StatusCode::CREATED
+    );
+    let summary = json(
+        fx.app
+            .get_with_session(&format!("{}/summary?pr=900", fx.reviews_path()))
+            .await,
+    )
+    .await;
+    assert_eq!(summary["latest_head_sha"], NEW_HEAD);
+    assert_eq!(summary["blocking"], 0);
+    assert_eq!(summary["mergeable"], true);
+
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+/// 引き継いだ人は、写しの指摘の `rejected` / `verified` の権限を得ない。
+#[tokio::test]
+async fn carrying_over_does_not_move_the_right_to_reject() {
+    let mut fx = setup().await;
+    link_repo(&fx, "acme", "app").await;
+    let carrier = add_member(&mut fx).await;
+    fx.login(&fx.reviewer.clone()).await;
+    let (_, ids) = submit_round_with(
+        &fx,
+        790,
+        OLD_HEAD,
+        &[("high", "棄却したい指摘"), ("medium", "確認したい修正")],
+    )
+    .await;
+    fx.login(&fx.developer.clone()).await;
+    assert_eq!(
+        transition(&fx, &ids[1], "fixed").await.status(),
+        StatusCode::OK
+    );
+
+    // 引き継ぐのは、修正者でも作成者でもない第三者
+    fx.login(&carrier).await;
+    assert_eq!(
+        carry_over(&fx, 790, 1119, None).await.status(),
+        StatusCode::CREATED
+    );
+    let copies = findings_of(&fx, 1119).await;
+    let high = finding_titled(&copies, "棄却したい指摘");
+    let medium = finding_titled(&copies, "確認したい修正");
+    let high_id = high["id"].as_str().expect("id").to_string();
+    let medium_id = medium["id"].as_str().expect("id").to_string();
+    assert!(
+        !high["available_actions"]
+            .as_array()
+            .expect("actions")
+            .contains(&"rejected".into()),
+        "引き継いだ人に rejected は出ない: {high}"
+    );
+    assert!(
+        !medium["available_actions"]
+            .as_array()
+            .expect("actions")
+            .contains(&"verified".into()),
+        "引き継いだ人に verified は出ない: {medium}"
+    );
+    assert_eq!(
+        transition(&fx, &high_id, "rejected").await.status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        transition(&fx, &medium_id, "verified").await.status(),
+        StatusCode::FORBIDDEN
+    );
+
+    // 対照: 元のラウンドの作成者は、引き継ぎ先でも行える
+    fx.login(&fx.reviewer.clone()).await;
+    let copies = findings_of(&fx, 1119).await;
+    let actions = |title: &str| -> Vec<serde_json::Value> {
+        finding_titled(&copies, title)["available_actions"]
+            .as_array()
+            .expect("actions")
+            .clone()
+    };
+    assert!(actions("棄却したい指摘").contains(&"rejected".into()));
+    assert!(actions("確認したい修正").contains(&"verified".into()));
+    assert_eq!(
+        transition(&fx, &high_id, "rejected").await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        transition(&fx, &medium_id, "verified").await.status(),
+        StatusCode::OK
+    );
+
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+    fx.app.cleanup_user(carrier.id).await;
+}
+
+/// 再実行しても増えず、元 PR に指摘が増えた分だけ写る。
+#[tokio::test]
+async fn carrying_over_twice_does_not_duplicate() {
+    let mut fx = setup().await;
+    link_repo(&fx, "acme", "app").await;
+    fx.login(&fx.reviewer.clone()).await;
+    submit_round_with(&fx, 790, OLD_HEAD, &[("high", "最初の指摘")]).await;
+
+    assert_eq!(
+        carry_over(&fx, 790, 1119, None).await.status(),
+        StatusCode::CREATED
+    );
+    let again = carry_over(&fx, 790, 1119, None).await;
+    assert_eq!(again.status(), StatusCode::CONFLICT);
+    assert!(
+        json(again).await["message"]
+            .as_str()
+            .expect("message")
+            .contains("引き継げる指摘がありません")
+    );
+    assert_eq!(findings_of(&fx, 1119).await.len(), 1, "増えない");
+
+    // 写しが解消されても、元の指摘は引き継ぎ済みとして数える
+    let copy = findings_of(&fx, 1119).await[0]["id"]
+        .as_str()
+        .expect("id")
+        .to_string();
+    assert_eq!(
+        transition(&fx, &copy, "rejected").await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        carry_over(&fx, 790, 1119, None).await.status(),
+        StatusCode::CONFLICT
+    );
+
+    // 元 PR に新しい指摘が増えたら、その 1 件だけが新しいラウンドへ写る
+    submit_round_with(&fx, 790, NEW_HEAD, &[("medium", "後から増えた指摘")]).await;
+    let third = carry_over(&fx, 790, 1119, None).await;
+    assert_eq!(third.status(), StatusCode::CREATED);
+    let body = json(third).await;
+    let rounds = body["rounds"].as_array().expect("rounds");
+    assert_eq!(rounds.len(), 1);
+    assert_eq!(rounds[0]["round"], 2, "引き継ぎ先の採番は続く");
+    assert_eq!(rounds[0]["head_sha"], NEW_HEAD);
+    assert_eq!(rounds[0]["findings"].as_array().expect("findings").len(), 1);
+    assert_eq!(findings_of(&fx, 1119).await.len(), 2);
+
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+#[tokio::test]
+async fn carry_over_rejects_bad_requests() {
+    let mut fx = setup().await;
+    link_repo(&fx, "acme", "app").await;
+    fx.login(&fx.reviewer.clone()).await;
+    submit_round_with(&fx, 790, OLD_HEAD, &[("high", "未解決")]).await;
+    submit_round_with(&fx, 792, OLD_HEAD, &[("nit", "棄却済み")]).await;
+    let nit = findings_of(&fx, 792).await[0]["id"]
+        .as_str()
+        .expect("id")
+        .to_string();
+    assert_eq!(
+        transition(&fx, &nit, "rejected").await.status(),
+        StatusCode::OK
+    );
+
+    // 同じ PR（既定の連携先も、同じリポジトリの明示も）
+    assert_eq!(
+        carry_over(&fx, 790, 790, None).await.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        carry_over(&fx, 790, 790, Some("acme/app")).await.status(),
+        StatusCode::BAD_REQUEST
+    );
+    // PR 番号は 1 以上、from_repo は owner/name
+    assert_eq!(
+        carry_over(&fx, 0, 1119, None).await.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        carry_over(&fx, 790, 0, None).await.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        carry_over(&fx, 790, 1119, Some("x")).await.status(),
+        StatusCode::BAD_REQUEST
+    );
+    // 元ラウンドが無い（番号違い）と、引き継げる指摘が無い（解決済みだけ）は 409 で理由を返す
+    let missing = carry_over(&fx, 999, 1119, None).await;
+    assert_eq!(missing.status(), StatusCode::CONFLICT);
+    assert!(
+        json(missing).await["message"]
+            .as_str()
+            .expect("message")
+            .contains("レビューラウンドがありません")
+    );
+    let resolved = carry_over(&fx, 792, 1119, None).await;
+    assert_eq!(resolved.status(), StatusCode::CONFLICT);
+    assert!(
+        json(resolved).await["message"]
+            .as_str()
+            .expect("message")
+            .contains("引き継げる指摘がありません")
+    );
+    assert!(
+        findings_of(&fx, 1119).await.is_empty(),
+        "拒否した引き継ぎは何も作らない"
+    );
+
+    // write:review の無い PAT
+    let read_only = fx
+        .app
+        .insert_pat(fx.reviewer.id, fx.tenant_id, vec![Scope::ReadReview], None)
+        .await;
+    let res = fx
+        .app
+        .post_json_with_bearer(
+            &format!("{}/carry-over", fx.reviews_path()),
+            serde_json::json!({ "from_pr_number": 790, "to_pr_number": 1119 }),
+            &read_only,
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    // テナント外の利用者
+    let outsider = fx.app.insert_user_default().await;
+    fx.login(&outsider.clone()).await;
+    assert_eq!(
+        carry_over(&fx, 790, 1119, None).await.status(),
+        StatusCode::FORBIDDEN
+    );
+
+    // 対照: 正しい入力は通る
+    fx.login(&fx.developer.clone()).await;
+    assert_eq!(
+        carry_over(&fx, 790, 1119, None).await.status(),
+        StatusCode::CREATED
+    );
+
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+    fx.app.cleanup_user(outsider.id).await;
+}
+
+/// 過去の連携先のラウンドも、`from_repo` で指せば引き継げる。
+#[tokio::test]
+async fn carry_over_reads_the_source_from_a_past_repository() {
+    let mut fx = setup().await;
+    fx.login(&fx.reviewer.clone()).await;
+    let old_integration = link_repo(&fx, "acme", "old-repo").await;
+    submit_round_with(&fx, 711, OLD_HEAD, &[("high", "旧リポジトリの指摘")]).await;
+
+    github_integrations::Entity::delete_by_id(old_integration)
+        .exec(&fx.app.state.db)
+        .await
+        .expect("delete integration");
+    link_repo(&fx, "acme", "new-repo").await;
+
+    // 既定（現在の連携先）には元ラウンドが無い
+    assert_eq!(
+        carry_over(&fx, 711, 712, None).await.status(),
+        StatusCode::CONFLICT
+    );
+
+    // 旧リポジトリを指せば、同じ PR 番号へも引き継げる
+    let res = carry_over(&fx, 711, 711, Some("acme/old-repo")).await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let body = json(res).await;
+    let copy = &body["rounds"][0];
+    assert_eq!(copy["carried_from"]["repository"], "acme/old-repo");
+    assert_eq!(copy["carried_from"]["pr_number"], 711);
+    let history = &copy["findings"][0]["transitions"][0];
+    assert!(
+        history["note"]
+            .as_str()
+            .expect("note")
+            .contains("acme/old-repo の PR #711 R1"),
+        "別リポジトリの出どころが履歴に残る: {history}"
+    );
+    assert_eq!(findings_of(&fx, 711).await.len(), 1, "現在の連携先に写る");
+
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+/// 写しの鎖と分岐は大元ごとに一件で、元 PR への帰還でも増えない。
+#[tokio::test]
+async fn carry_over_roots_do_not_duplicate_across_paths() {
+    let mut fx = setup().await;
+    link_repo(&fx, "acme", "app").await;
+    fx.login(&fx.reviewer.clone()).await;
+    submit_round_with(&fx, 790, OLD_HEAD, &[("high", "root")]).await;
+    for (from, to, expected) in [
+        (790, 791, StatusCode::CREATED),
+        (791, 792, StatusCode::CREATED),
+        (792, 790, StatusCode::CONFLICT),
+        (790, 792, StatusCode::CONFLICT),
+        (790, 793, StatusCode::CREATED),
+        (791, 793, StatusCode::CONFLICT),
+    ] {
+        assert_eq!(
+            carry_over(&fx, from, to, None).await.status(),
+            expected,
+            "{from} -> {to}"
+        );
+    }
+    let listed = json(
+        fx.app
+            .get_with_session(&format!("{}/pull-requests", fx.reviews_path()))
+            .await,
+    )
+    .await;
+    let prs = listed.as_array().expect("PR list");
+    for pr in prs {
+        if pr["pr_number"] != 790 {
+            assert_eq!(pr["rounds"], 0);
+            assert!(pr["last_reviewed_at"].is_null());
+        }
+    }
+    for pr in [790, 791, 792, 793] {
+        assert_eq!(findings_of(&fx, pr).await.len(), 1);
+    }
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+/// 遷移がプロジェクト FK を待つ間も、引き継ぎは先に元の指摘を待つ。
+/// 時間ではなく pg_blocking_pids で順序を確認する。繰り延べのタスク作成も含む。
+#[tokio::test]
+async fn carry_over_waits_for_source_transition_before_numbering() {
+    use sea_orm::{ConnectionTrait, DatabaseBackend, Statement, TransactionTrait};
+    use std::time::Duration;
+    for state in ["fixed", "deferred"] {
+        let mut fx = setup().await;
+        link_repo(&fx, "acme", "app").await;
+        fx.login(&fx.reviewer.clone()).await;
+        let (_, finding) = submit_round(&fx, 790, "low", "concurrent").await;
+        fx.login(&fx.developer.clone()).await;
+        let db = &fx.app.state.db;
+        let holder = db.begin().await.unwrap();
+        let pid: i32 = holder
+            .query_one_raw(Statement::from_string(
+                DatabaseBackend::Postgres,
+                "SELECT pg_backend_pid() AS pid",
+            ))
+            .await
+            .unwrap()
+            .unwrap()
+            .try_get("", "pid")
+            .unwrap();
+        holder
+            .execute_raw(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                "SELECT id FROM projects WHERE id = $1 FOR UPDATE",
+                [fx.project_id.into()],
+            ))
+            .await
+            .unwrap();
+        let control = async {
+            let transition_pid = tokio::time::timeout(Duration::from_secs(10), async {
+                loop {
+                    let row = db.query_one_raw(Statement::from_sql_and_values(DatabaseBackend::Postgres,
+                        "SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)) LIMIT 1", [pid.into()])).await.unwrap();
+                    if let Some(row) = row { break row.try_get::<i32>("", "pid").unwrap(); }
+                    tokio::task::yield_now().await;
+                }
+            }).await.expect("transition holds finding and waits for project");
+            let observe = async {
+                let waited = tokio::time::timeout(Duration::from_secs(10), async {
+                    loop {
+                        let row = db.query_one_raw(Statement::from_sql_and_values(DatabaseBackend::Postgres,
+                            "SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)) AND query LIKE '%review_findings%' LIMIT 1", [transition_pid.into()])).await.unwrap();
+                        if row.is_some() { break; }
+                        tokio::task::yield_now().await;
+                    }
+                }).await;
+                holder.rollback().await.unwrap();
+                waited
+            };
+            let (response, waited) = tokio::join!(carry_over(&fx, 790, 791, None), observe);
+            waited.expect("carry-over must wait on the source finding before the project");
+            assert_eq!(
+                response.status(),
+                if state == "deferred" {
+                    StatusCode::CONFLICT
+                } else {
+                    StatusCode::CREATED
+                }
+            );
+        };
+        let (changed, ()) = tokio::join!(transition(&fx, &finding, state), control);
+        assert_eq!(changed.status(), StatusCode::OK);
+        if state == "fixed" {
+            assert_eq!(findings_of(&fx, 791).await[0]["state"], "fixed");
+        }
+        fx.app.cleanup_user(fx.reviewer.id).await;
+        fx.app.cleanup_user(fx.developer.id).await;
+    }
+}
+
+/// PR 一覧のレビュー時刻と番号は、後から写しを追加しても変わらない。
+#[tokio::test]
+async fn carried_rounds_do_not_change_pull_request_review_metadata() {
+    let mut fx = setup().await;
+    link_repo(&fx, "acme", "app").await;
+    fx.login(&fx.reviewer.clone()).await;
+    submit_round_with(&fx, 790, OLD_HEAD, &[("low", "source")]).await;
+    submit_round_with(&fx, 791, NEW_HEAD, &[]).await;
+    let before = json(
+        fx.app
+            .get_with_session(&format!("{}/pull-requests", fx.reviews_path()))
+            .await,
+    )
+    .await;
+    let original = before
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|pr| pr["pr_number"] == 791)
+        .unwrap();
+    for to in [791, 792] {
+        assert_eq!(
+            carry_over(&fx, 790, to, None).await.status(),
+            StatusCode::CREATED
+        );
+    }
+    let after = json(
+        fx.app
+            .get_with_session(&format!("{}/pull-requests", fx.reviews_path()))
+            .await,
+    )
+    .await;
+    for pr in after.as_array().unwrap() {
+        match pr["pr_number"].as_i64().unwrap() {
+            791 => {
+                assert_eq!(pr["rounds"], original["rounds"]);
+                assert_eq!(pr["last_reviewed_at"], original["last_reviewed_at"]);
+            }
+            792 => {
+                assert_eq!(pr["rounds"], 0);
+                assert!(pr["last_reviewed_at"].is_null());
+            }
+            _ => {}
+        }
+    }
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+/// 採番のロックは通知・タスクのプロジェクト FK 検査と競合しない。
+#[tokio::test]
+async fn round_numbering_does_not_block_project_foreign_keys() {
+    use sea_orm::{ConnectionTrait, DatabaseBackend, Statement, TransactionTrait};
+    let fx = setup().await;
+    let db = &fx.app.state.db;
+    let numbering = db.begin().await.unwrap();
+    let repo = service::reviews::RepoRef {
+        owner: String::new(),
+        name: String::new(),
+        integration_id: None,
+    };
+    assert_eq!(
+        service::reviews::next_round(&numbering, fx.project_id, &repo, 790)
+            .await
+            .unwrap(),
+        1
+    );
+    let foreign_key = db.begin().await.unwrap();
+    let compatible = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        foreign_key.execute_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "SELECT id FROM projects WHERE id = $1 FOR KEY SHARE",
+            [fx.project_id.into()],
+        )),
+    )
+    .await;
+    numbering.rollback().await.unwrap();
+    foreign_key.rollback().await.unwrap();
+    compatible
+        .expect("numbering must allow FK key-share locks")
+        .unwrap();
     fx.app.cleanup_user(fx.reviewer.id).await;
     fx.app.cleanup_user(fx.developer.id).await;
 }

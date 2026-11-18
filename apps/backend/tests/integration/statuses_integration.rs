@@ -864,6 +864,62 @@ async fn reorder_rejects_duplicate_or_unknown_ids() {
 }
 
 #[tokio::test]
+async fn reorder_rejects_an_empty_list() {
+    let mut app = TestApp::new().await;
+    let user = app.insert_user_default().await;
+    app.login_session_no_content(&user.email, &user.password)
+        .await;
+    // insert_tenant_project はステータスを作らない。0 件同士で件数の検査を通り、
+    // WHEN の無い CASE が構文エラーになって 500 だった。
+    let tp = app.insert_tenant_project(user.id).await;
+    assert!(project_statuses(&app, &tp).await.is_empty());
+
+    let response = app
+        .put_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{}/statuses/reorder",
+                tp.tenant_id, tp.project_id
+            ),
+            serde_json::json!({ "ids": [] }),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response.json::<serde_json::Value>().await.unwrap(),
+        serde_json::json!({ "message": "bad-request" })
+    );
+
+    // 対照: ステータスがあっても空の入力は 400 のまま、全件を渡す並べ替えは通る。
+    let backlog = create_status(&app, &tp, "Backlog", false, false).await;
+    let in_progress = create_status(&app, &tp, "In Progress", false, false).await;
+    assert_eq!(
+        reorder(&app, &tp, &serde_json::json!([])).await,
+        StatusCode::BAD_REQUEST
+    );
+
+    let ids = vec![in_progress, backlog];
+    let response = app
+        .put_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{}/statuses/reorder",
+                tp.tenant_id, tp.project_id
+            ),
+            serde_json::json!({ "ids": ids }),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Vec<serde_json::Value> = response.json().await.unwrap();
+    let returned_ids: Vec<Uuid> = body
+        .iter()
+        .map(|status| status["id"].as_str().unwrap().parse().unwrap())
+        .collect();
+    assert_eq!(returned_ids, ids);
+    for (pos, status) in body.iter().enumerate() {
+        assert_eq!(status["position"].as_i64().unwrap(), pos as i64);
+    }
+}
+
+#[tokio::test]
 async fn reorder_waits_for_the_project_row_lock() {
     let (app, tp, _old_done_id, _next_done_id, _old_task_id, _next_task_id) = setup().await;
     create_status(&app, &tp, "Backlog", false, false).await;

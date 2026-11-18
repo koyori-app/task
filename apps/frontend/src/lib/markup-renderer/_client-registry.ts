@@ -12,8 +12,12 @@
  */
 import { KFM_CODE_TAG } from '../rehype-kfm-code/_tag';
 import { createKfmCodeElement } from '../rehype-kfm-code/element';
+import { KFM_MEDIA_TAG } from '../rehype-kfm-drive-url/_tag';
+import { createKfmMediaElement } from '../rehype-kfm-drive-url/element';
 import { KFM_MERMAID_TAG } from '../remark-kfm-mermaid/_tag';
 import { createKfmMermaidElement } from '../remark-kfm-mermaid/element';
+import { KFM_PERMALINK_TAG } from '../remark-kfm-permalink/_tag';
+import { createKfmPermalinkElement } from '../remark-kfm-permalink/element';
 
 export type KfmCustomElementDefinition = readonly [
   tagName: `kfm-${string}`,
@@ -28,6 +32,8 @@ export type KfmCustomElementDefinition = readonly [
 const KFM_CUSTOM_ELEMENTS: readonly KfmCustomElementDefinition[] = [
   [KFM_CODE_TAG, createKfmCodeElement],
   [KFM_MERMAID_TAG, createKfmMermaidElement],
+  [KFM_MEDIA_TAG, createKfmMediaElement],
+  [KFM_PERMALINK_TAG, createKfmPermalinkElement],
 ];
 
 export type RegisterKfmCustomElementsResult = {

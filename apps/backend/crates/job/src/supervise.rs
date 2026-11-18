@@ -19,7 +19,8 @@ use tokio::time::Instant;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-/// 1 世代分のワーカーの実行。`run_with_ctx` に渡された ctx で動かす future
+/// 1 世代分のワーカーの実行。`build` に渡された ctx を持つワーカーを `run` する future
+/// （ワーカーが ctx を開始する。ここで開始してはならない）
 pub type Generation = Pin<Box<dyn Future<Output = Result<(), WorkerError>> + Send>>;
 
 const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
@@ -49,7 +50,7 @@ where
         }
         generation += 1;
         let id = worker_id(&logical_name, generation);
-        let ctx = WorkerContext::new::<()>(&id);
+        let ctx = WorkerContext::new(&id);
         let started = Instant::now();
         let handle = tokio::spawn(run_generation(ctx.clone(), build(ctx), shutdown.clone()));
         info!(worker = %logical_name, generation, id = %id, "apalis worker generation started");
@@ -84,22 +85,33 @@ where
 ///
 /// `run_until` は使わない。signal が先に完了すると未開始の ctx へ `stop()` して
 /// `NotStarted` が捨てられ、その後に起動したワーカーが止まらなくなる。
+/// ワーカーは `run` の最初の poll で ctx を開始するので、動かし始めてから shutdown が来た時は、
+/// `run` を進めて開始させてから止める（開始前の `stop()` は `NotStarted` で何もしない）。
 pub async fn run_generation(
-    mut ctx: WorkerContext,
+    ctx: WorkerContext,
     mut run: Generation,
     shutdown: watch::Receiver<bool>,
 ) -> Result<(), WorkerError> {
-    ctx.start()?;
-    tokio::select! {
-        // 既に shutdown 済みなら初回 poll 前に止める（starter の start() が AlreadyStarted を返す）
-        biased;
-        _ = wait_for_shutdown(shutdown) => {
-            let _ = ctx.stop();
-            run.await
-        }
-        res = &mut run => res,
+    // 既に shutdown 済みなら、`run` を一度も poll せずに終える（poll するとワーカーが開始・登録される）
+    if *shutdown.borrow() {
+        return Ok(());
     }
+    tokio::select! {
+        biased;
+        _ = wait_for_shutdown(shutdown) => {}
+        res = &mut run => return res,
+    }
+    while ctx.stop().is_err() {
+        tokio::select! {
+            res = &mut run => return res,
+            _ = tokio::time::sleep(STOP_RETRY) => {}
+        }
+    }
+    run.await
 }
+
+/// ワーカーが ctx を開始するまで、`stop()` を試し直す間隔
+const STOP_RETRY: Duration = Duration::from_millis(10);
 
 async fn wait_for_shutdown(mut shutdown: watch::Receiver<bool>) {
     while !*shutdown.borrow() {
@@ -126,6 +138,15 @@ mod tests {
         ErrAfterStop,
     }
 
+    /// ワーカーと同じく、最初に ctx を開始し、stop されるまで動く（stop 後に処理中のジョブは無い）
+    async fn run_until_stopped(mut ctx: WorkerContext) -> Result<(), WorkerError> {
+        ctx.start()?;
+        while !ctx.is_stopped() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        Ok(())
+    }
+
     /// 台本どおりに終わる偽の世代を作る `build` と、各世代を作った時刻。
     /// 台本を使い切った後の世代は stop されるまで動いて Ok で終わる
     fn script(
@@ -142,19 +163,19 @@ mod tests {
             starts.push(Instant::now());
             Box::pin(async move {
                 match fake {
-                    Some(Fake::Err) => Err(WorkerError::HeartbeatError("boom".into())),
+                    Some(Fake::Err) => Err(WorkerError::BackendError("boom".into())),
                     Some(Fake::Ok) => Ok(()),
                     Some(Fake::Panic) => panic!("listener creation failed"),
                     Some(Fake::ErrAfter(d)) => {
                         tokio::time::sleep(d).await;
-                        Err(WorkerError::HeartbeatError("boom".into()))
+                        Err(WorkerError::BackendError("boom".into()))
                     }
                     Some(Fake::ErrAfterStop) => {
-                        ctx.await?;
-                        Err(WorkerError::HeartbeatError("boom".into()))
+                        run_until_stopped(ctx).await?;
+                        Err(WorkerError::BackendError("boom".into()))
                     }
-                    // WorkerContext は stop 後（処理中のジョブが無ければ）に Ok で完了する
-                    None => ctx.await,
+                    // stop 後（処理中のジョブが無ければ）に Ok で完了する
+                    None => run_until_stopped(ctx).await,
                 }
             })
         };

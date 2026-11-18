@@ -108,7 +108,7 @@ fn format_task_type_line(task_type: &TaskTypeResponse) -> String {
     format!("{}\t{}", single_line(&task_type.name), task_type.color)
 }
 
-fn single_line(text: &str) -> String {
+pub(crate) fn single_line(text: &str) -> String {
     text.split(['\r', '\n', '\t'])
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()

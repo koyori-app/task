@@ -10,6 +10,7 @@ import ReactionBar from '@/components/reactions/ReactionBar.vue';
 import UserAvatar from '@/components/UserAvatar.vue';
 import { timelineDateTime, timelineTime } from '@/lib/activity-timeline';
 import type { MentionCandidate, MentionTable } from '@/lib/comment-mention';
+import { useProjectFileUpload } from '@/composables/useProjectFileUpload';
 import type { ReactionController } from '@/composables/useReactions';
 import type { CommentReply, CommentThread } from '@/composables/useTaskComments';
 
@@ -26,17 +27,18 @@ const props = defineProps<{
   deleting?: boolean;
   /**
    * ログイン中ユーザーの ID（/v1/auth/me）。未取得なら null。
-   * 編集は backend が投稿者本人以外を必ず 403 にするため、編集ボタンは
-   * comment.user.id が一致するときだけ出す。削除は backend が投稿者本人に
-   * 加えテナントオーナーにも許していて、frontend からはオーナーかどうかを
-   * 確実に判定できないため、削除ボタンは全コメントに出したままにする —
-   * 可否は backend が判定し、拒否されたら deleteError を拒まれた通りに表示する。
+   * 編集は投稿者本人だけ、削除は投稿者本人とテナントオーナーだけを backend が通す
+   * （delete_comment と同じ）。どちらにも当たらないコメントには出さない。
    */
   currentUserId?: string | null;
+  /** 見ている人がテナントオーナーか。他人のコメントの削除を出すかに使う */
+  isTenantOwner?: boolean;
   /** 本文の札をプロフィールへの link にするテナント（表示用 id。CommentBody 参照） */
   mentionTenant?: string;
   /** プロフィールのカードがプロフィール API を引くテナント（UUID）。無ければカードは名前と画像だけ */
   tenantId?: string | null;
+  /** 編集で貼り付けたファイルを上げる先のプロジェクト（UUID）。無ければ貼り付けは文字だけを扱う */
+  projectId?: string | null;
   /** このコメントの更新失敗メッセージ（対象コメントの中に出す） */
   updateError?: string | null;
   /** このコメントの削除失敗メッセージ（対象コメントの中に出す） */
@@ -61,6 +63,12 @@ const editing = ref(false);
 const editDraft = ref('');
 const confirmingDelete = ref(false);
 const editorRef = ref<InstanceType<typeof CommentEditor> | null>(null);
+const uploadFile = useProjectFileUpload(
+  () => props.tenantId,
+  () => props.projectId,
+);
+/** 編集の入力欄が貼り付けたファイルを上げている最中か。その間は保存を止める（途中の本文を送らない） */
+const editUploading = ref(false);
 
 const reactionBarRef = ref<InstanceType<typeof ReactionBar> | null>(null);
 const hasReactions = computed(
@@ -75,14 +83,17 @@ const showHeaderAddButton = computed(
     !hasReactions.value,
 );
 
+const isAuthor = computed(
+  () => !!props.currentUserId && props.comment.user.id === props.currentUserId,
+);
+const canDelete = computed(() => isAuthor.value || !!props.isTenantOwner);
+
 const menuItems = computed(() => [
   ...(hasReactions.value ? [{ value: 'reactions', label: 'リアクションを見る' }] : []),
-  ...(props.comment.user.id === props.currentUserId
-    ? [{ value: 'edit', label: 'コメントを編集' }]
+  ...(isAuthor.value ? [{ value: 'edit', label: 'コメントを編集' }] : []),
+  ...(canDelete.value && !confirmingDelete.value
+    ? [{ value: 'delete', label: 'コメントを削除', destructive: true }]
     : []),
-  ...(confirmingDelete.value
-    ? []
-    : [{ value: 'delete', label: 'コメントを削除', destructive: true }]),
 ]);
 
 function onMenuSelect(value: string) {
@@ -118,6 +129,7 @@ function closeDeleteConfirm() {
 }
 
 async function commitEditing() {
+  if (editUploading.value) return;
   const next = editDraft.value.trim();
   if (!next || next === (props.comment.body ?? '')) {
     cancelEditing();
@@ -204,6 +216,9 @@ async function confirmDelete() {
           aria-label="コメントを編集"
           :candidates="mentionCandidates"
           :mentions="mentions"
+          :upload-file="uploadFile"
+          :upload-scope="comment.id"
+          @update:uploading="editUploading = $event"
         />
         <div class="flex justify-end gap-2">
           <Button
@@ -215,7 +230,7 @@ async function confirmDelete() {
           />
           <Button
             type="button"
-            :disabled="updating || !editDraft.trim()"
+            :disabled="updating || editUploading || !editDraft.trim()"
             :label="updating ? '保存中…' : '保存'"
             @click="commitEditing"
           />

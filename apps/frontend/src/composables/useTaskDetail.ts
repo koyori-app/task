@@ -7,14 +7,16 @@ import type { EditableField, MutatingField } from '@/components/tasks/editable-f
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import { fetchClient, apiClient, TASK_SEARCH_PATH } from '@/lib/api-vue-query';
+import { isTenantOwner as isOwnerOf } from '@/lib/tenant-permissions';
 import { clampProgressPct, localDateInputToIso, taskListHref } from '@/lib/task-display';
 import type { components } from '@/generated/api';
 import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
 import { TASK_RELATIONS_PATH } from '@/composables/useTaskSubtasks';
 import { UNSCHEDULED_PATH } from '@/lib/gantt/unscheduled';
 
-export const GET_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}' as const;
-const LIST_STATUSES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/statuses' as const;
+export { GET_TASK_PATH } from '@/lib/task-query';
+import { GET_TASK_PATH, fetchTask } from '@/lib/task-query';
+export const LIST_STATUSES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/statuses' as const;
 const LIST_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
 const LIST_LABELS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/labels' as const;
 const LIST_TASK_TYPES_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/task-types' as const;
@@ -93,6 +95,7 @@ export function useTaskDetail(params: UseTaskDetailParams) {
 
   const {
     tenantId,
+    resolvedTenant,
     isTenantNotFound,
     isResolving: isTenantResolving,
     isError: isTenantResolveError,
@@ -161,21 +164,11 @@ export function useTaskDetail(params: UseTaskDetailParams) {
 
   const taskQuery = useQuery({
     queryKey: taskQueryKey,
-    queryFn: async ({ signal }) => {
-      const { data, error, response } = await fetchClient.GET(GET_TASK_PATH, {
-        params: {
-          path: {
-            tenant_id: tenantId.value!,
-            project_id: projectId.value!,
-            id: taskId.value,
-          },
-        },
+    queryFn: ({ signal }) =>
+      fetchTask(
+        { path: { tenant_id: tenantId.value!, project_id: projectId.value!, id: taskId.value } },
         signal,
-      });
-      if (response.status === 404) return null;
-      if (error) throw error;
-      return data;
-    },
+      ),
     enabled: computed(() => !!tenantId.value && !!projectId.value && !!taskId.value),
   });
 
@@ -656,6 +649,8 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     // 解決済み ID（消費側で必要になれば使う）
     tenantId,
     projectId,
+    /** 見ている人がテナントオーナーか。他人のコメントの削除・添付の解除を出すかに使う */
+    isTenantOwner: computed(() => isOwnerOf(resolvedTenant.value)),
     // Hub バインド用
     displayTask,
     statuses: computed(() => statusesQuery.data.value ?? []),

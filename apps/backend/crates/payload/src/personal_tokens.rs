@@ -89,11 +89,35 @@ pub struct PersonalTokenIdentityResponse {
 impl PersonalTokenIdentityResponse {
     /// 結び付けられたテナント。旧サーバーの応答（`tenant_id` だけ）も 1 件として読む。
     pub fn bound_tenant_ids(&self) -> Vec<Uuid> {
-        if self.tenant_ids.is_empty() {
-            self.tenant_id.into_iter().collect()
-        } else {
-            self.tenant_ids.clone()
-        }
+        bound(&self.tenant_ids, self.tenant_id)
+    }
+}
+
+fn bound(tenant_ids: &[Uuid], tenant_id: Option<Uuid>) -> Vec<Uuid> {
+    if tenant_ids.is_empty() {
+        tenant_id.into_iter().collect()
+    } else {
+        tenant_ids.to_vec()
+    }
+}
+
+/// `/personal_tokens/me` のうち、行き先のテナントを決めるのに要る項目だけ。
+///
+/// ほとんどのコマンドの前段で読む応答は、使う項目だけの型で読む。応答の全体
+/// （`PersonalTokenIdentityResponse`）で読むと、CLI が使わない項目の増減で、無関係な
+/// コマンドまで止まる。元の応答を直列化したものが読めることはテストで固定する。
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct PersonalTokenTenants {
+    #[serde(default)]
+    pub tenant_ids: Vec<Uuid>,
+    #[serde(default)]
+    pub tenant_id: Option<Uuid>,
+}
+
+impl PersonalTokenTenants {
+    /// `PersonalTokenIdentityResponse::bound_tenant_ids` と同じ。
+    pub fn bound_tenant_ids(&self) -> Vec<Uuid> {
+        bound(&self.tenant_ids, self.tenant_id)
     }
 }
 
@@ -203,5 +227,53 @@ mod legacy_identity_tests {
             json.get("tenant_id").is_none(),
             "tenant_id must be absent for several tenants"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn identity(tenant_ids: Vec<Uuid>, tenant_id: Option<Uuid>) -> PersonalTokenIdentityResponse {
+        PersonalTokenIdentityResponse {
+            id: Uuid::from_u128(1),
+            name: "bot".into(),
+            user_id: Uuid::from_u128(2),
+            username: "yupix".into(),
+            account_kind: "human".into(),
+            tenant_ids,
+            tenant_id,
+            scopes: vec![],
+            allowed_project_ids: None,
+            expires_at: None,
+        }
+    }
+
+    /// CLI は前段で `PersonalTokenTenants` だけを読む。サーバーが返す全体の応答
+    /// （1 件・複数・旧サーバーの `tenant_id` だけ）から、同じテナントが読める。
+    #[test]
+    fn the_narrow_type_reads_the_tenants_of_the_full_response() {
+        let a = Uuid::from_u128(10);
+        let b = Uuid::from_u128(11);
+        for full in [
+            identity(vec![a], Some(a)),
+            identity(vec![a, b], None),
+            identity(vec![], Some(a)),
+            identity(vec![], None),
+        ] {
+            let narrow: PersonalTokenTenants =
+                serde_json::from_value(serde_json::to_value(&full).unwrap()).unwrap();
+            assert_eq!(narrow.bound_tenant_ids(), full.bound_tenant_ids());
+        }
+    }
+
+    #[test]
+    fn the_narrow_type_reads_a_response_without_the_other_fields() {
+        let a = Uuid::from_u128(10);
+        let narrow: PersonalTokenTenants =
+            serde_json::from_value(serde_json::json!({ "tenant_ids": [a] })).unwrap();
+        assert_eq!(narrow.bound_tenant_ids(), vec![a]);
+        let none: PersonalTokenTenants = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert!(none.bound_tenant_ids().is_empty());
     }
 }

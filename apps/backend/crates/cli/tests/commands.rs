@@ -285,25 +285,62 @@ async fn my_list_sends_the_default_page() {
 /// 実バイナリを走らせて標準出力を取る。表示は `println!` に出るので、
 /// 行と要約を確かめるにはプロセスを分けるしかない。
 async fn run_binary(server: &MockServer, args: &[&str]) -> (bool, String) {
+    run_binary_at(server, "", args).await
+}
+
+/// `api_url` を `{server}{prefix}` にして走らせる。`<画面の URL>/api` の形を作るのに使う。
+/// モックは `{prefix}/v1/...` に置く。
+async fn run_binary_at(server: &MockServer, prefix: &str, args: &[&str]) -> (bool, String) {
+    let (status, stdout, _) = run_binary_full(server, prefix, args, None).await;
+    (status, stdout)
+}
+
+/// `run_binary_at` に標準入力を渡し、標準エラーも返す。
+async fn run_binary_full(
+    server: &MockServer,
+    prefix: &str,
+    args: &[&str],
+    stdin: Option<&str>,
+) -> (bool, String, String) {
     let home = tempfile::tempdir().unwrap();
-    let uri = server.uri();
+    let uri = format!("{}{prefix}", server.uri());
     let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
+    let stdin = stdin.map(str::to_string);
     let output = tokio::task::spawn_blocking(move || {
-        std::process::Command::new(env!("CARGO_BIN_EXE_task"))
+        use std::io::Write;
+        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_task"));
+        command
             .args(&args[1..])
             .env_clear()
             .env("HOME", home.path())
             .env("TASK_API_URL", uri)
             .env("TASK_TOKEN", "token-1")
             .env("TASK_TENANT", TENANT)
-            .output()
-            .unwrap()
+            // 実バイナリは `from_process` を通る。通知で GitHub へ出ないようにする
+            .env("TASK_NO_UPDATE_CHECK", "1")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        match stdin {
+            Some(input) => {
+                command.stdin(std::process::Stdio::piped());
+                let mut child = command.spawn().unwrap();
+                child
+                    .stdin
+                    .take()
+                    .unwrap()
+                    .write_all(input.as_bytes())
+                    .unwrap();
+                child.wait_with_output().unwrap()
+            }
+            None => command.output().unwrap(),
+        }
     })
     .await
     .unwrap();
     (
         output.status.success(),
         String::from_utf8(output.stdout).unwrap(),
+        String::from_utf8(output.stderr).unwrap(),
     )
 }
 
@@ -748,6 +785,488 @@ async fn tasks_update_clears_every_assignee_in_the_update_request() {
     assert_eq!(body["assignees"], json!([]));
 }
 
+/// 途中のコマンドが失敗して空のファイルができても、本文を消さない。
+#[tokio::test]
+async fn tasks_update_refuses_an_empty_description_file_before_any_request() {
+    let harness = harness().await;
+    let dir = tempfile::tempdir().unwrap();
+    // BOM・ゼロ幅の文字だけの本文も、空とみなす（`trim` は U+FEFF・U+200B を空白にしない）
+    for (name, content) in [
+        ("empty.md", ""),
+        ("blank.md", " \n\t\n"),
+        ("bom.md", "\u{feff}"),
+        ("bom-newline.md", "\u{feff}\r\n"),
+        ("zero-width.md", " \u{200b}\n\u{feff}\u{200d}\n"),
+    ] {
+        let file = dir.path().join(name);
+        std::fs::write(&file, content).unwrap();
+        let error = harness
+            .run(&[
+                "task",
+                "tasks",
+                "update",
+                "APP-7",
+                "--description-file",
+                file.to_str().unwrap(),
+            ])
+            .await
+            .unwrap_err();
+        assert_eq!(error.exit_code, 2, "{name}: {}", error.message);
+        assert!(
+            error.message.contains("--clear-description"),
+            "{}",
+            error.message
+        );
+    }
+    for inline in ["", "\u{feff}", "\u{feff} \u{200b}"] {
+        let error = harness
+            .run(&["task", "tasks", "update", "APP-7", "--description", inline])
+            .await
+            .unwrap_err();
+        assert_eq!(error.exit_code, 2, "{inline:?}");
+    }
+    assert!(harness.sent_nothing().await);
+}
+
+/// 標準入力（`--description-file -`）から来る BOM だけの本文も、更新・作成の両方で API を叩く前に断る。
+#[tokio::test]
+async fn a_bom_only_description_from_stdin_is_refused_before_any_request() {
+    let harness = harness().await;
+    for args in [
+        &[
+            "task",
+            "tasks",
+            "update",
+            "APP-7",
+            "--description-file",
+            "-",
+        ][..],
+        &[
+            "task",
+            "tasks",
+            "create",
+            "--project",
+            "APP",
+            "--title",
+            "T",
+            "--description-file",
+            "-",
+        ][..],
+    ] {
+        let (ok, stdout, stderr) =
+            run_binary_full(&harness.server, "", args, Some("\u{feff}\r\n")).await;
+        assert!(!ok, "{args:?}: {stdout}");
+        assert!(stderr.contains("The description is empty"), "{stderr}");
+    }
+    assert!(harness.sent_nothing().await);
+}
+
+/// 対照: 本文を消す明示のフラグだけが、本文を空にする要求を送る。
+#[tokio::test]
+async fn tasks_update_clears_the_description_only_with_the_explicit_flag() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    Mock::given(method("PUT"))
+        .and(path(project_path("tasks/APP-7")))
+        .and(body_partial_json(json!({ "clear_description": true })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(task_detail_json()))
+        .expect(1)
+        .mount(&harness.server)
+        .await;
+    let code = harness
+        .run(&["task", "tasks", "update", "APP-7", "--clear-description"])
+        .await
+        .unwrap();
+    assert_eq!(code, 0);
+}
+
+#[tokio::test]
+async fn tasks_create_refuses_an_empty_description_file_before_any_request() {
+    let harness = harness().await;
+    let dir = tempfile::tempdir().unwrap();
+    for (name, content) in [("empty.md", ""), ("bom.md", "\u{feff}\n")] {
+        let file = dir.path().join(name);
+        std::fs::write(&file, content).unwrap();
+        let error = harness
+            .run(&[
+                "task",
+                "tasks",
+                "create",
+                "--project",
+                "APP",
+                "--title",
+                "T",
+                "--description-file",
+                file.to_str().unwrap(),
+            ])
+            .await
+            .unwrap_err();
+        assert_eq!(error.exit_code, 2, "{name}: {}", error.message);
+    }
+    assert!(harness.sent_nothing().await);
+}
+
+fn comment_list_json() -> serde_json::Value {
+    json!({
+        "comments": [{
+            "id": "c0000000-0000-4000-8000-000000000001",
+            "user": { "id": ALICE_ID, "name": "alice", "account_kind": "human", "avatar_url": null },
+            "body": "確認お願いします",
+            "replies": [],
+            "created_at": "2026-01-02T03:04:05Z",
+            "updated_at": "2026-01-02T03:04:05Z",
+            "is_deleted": false,
+        }],
+        "mentions": {},
+    })
+}
+
+#[tokio::test]
+async fn tasks_comments_reads_the_thread_endpoint() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    Mock::given(method("GET"))
+        .and(path(project_path("tasks/APP-7/comments")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(comment_list_json()))
+        .mount(&harness.server)
+        .await;
+
+    for args in [
+        &["task", "tasks", "comments", "APP-7"][..],
+        &["task", "--json", "tasks", "comments", "APP-7"][..],
+    ] {
+        assert_eq!(harness.run(args).await.unwrap(), 0);
+    }
+    assert_eq!(
+        harness
+            .calls_to(&project_path("tasks/APP-7/comments"))
+            .await,
+        2
+    );
+    let requests = harness.server.received_requests().await.unwrap();
+    assert!(requests.iter().all(|r| r.method.as_str() == "GET"));
+}
+
+#[tokio::test]
+async fn tasks_comments_reports_a_missing_task() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    Mock::given(method("GET"))
+        .and(path(project_path("tasks/APP-9/comments")))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({ "message": "not found" })))
+        .mount(&harness.server)
+        .await;
+
+    let err = harness
+        .run(&["task", "tasks", "comments", "APP-9"])
+        .await
+        .unwrap_err();
+    assert_eq!(err.exit_code, 5);
+}
+
+/// 作成の応答の `url` を引くために、`<画面の URL>/api` の形で走らせる足場。
+/// プロジェクト・状態・作成のモックを `/api/v1/...` に置き、`/api/v1/tenants` は呼び側が決める。
+async fn mount_create_under_api(server: &MockServer, bulk: bool) {
+    let base = format!("/api/v1/tenants/{TENANT}/projects");
+    Mock::given(method("GET"))
+        .and(path(base.clone()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([project_json()])))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{base}/{PROJECT_ID}/statuses")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([status_json(
+            TODO_STATUS,
+            "Todo",
+            true,
+            false,
+            false,
+            0
+        )])))
+        .mount(server)
+        .await;
+    let (post_path, response) = if bulk {
+        (
+            format!("{base}/{PROJECT_ID}/tasks/bulk-create"),
+            json!({ "tasks": [task_detail_json()] }),
+        )
+    } else {
+        (format!("{base}/{PROJECT_ID}/tasks"), task_detail_json())
+    };
+    Mock::given(method("POST"))
+        .and(path(post_path))
+        .respond_with(ResponseTemplate::new(201).set_body_json(response))
+        .mount(server)
+        .await;
+}
+
+async fn mount_api_tenants(server: &MockServer, response: ResponseTemplate) {
+    Mock::given(method("GET"))
+        .and(path("/api/v1/tenants"))
+        .respond_with(response)
+        .mount(server)
+        .await;
+}
+
+fn tenants_ok() -> ResponseTemplate {
+    ResponseTemplate::new(200).set_body_json(json!([
+        { "id": TENANT, "display_id": "acme", "name": "Acme" }
+    ]))
+}
+
+async fn posts_to(server: &MockServer) -> usize {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|request| request.method.as_str() == "POST")
+        .count()
+}
+
+/// 起票した番号を知るのに `list` を取り直さずに済むよう、作成の応答に `key` と画面の URL を入れる。
+#[tokio::test]
+async fn tasks_create_prints_the_key_and_url() {
+    let harness = harness().await;
+    let server = &harness.server;
+    mount_create_under_api(server, false).await;
+    mount_api_tenants(server, tenants_ok()).await;
+    let create = [
+        "task",
+        "tasks",
+        "create",
+        "--project",
+        "APP",
+        "--title",
+        "T",
+    ];
+
+    let (ok, stdout) = run_binary_at(server, "/api", &create).await;
+    assert!(ok, "{stdout}");
+    assert_eq!(
+        stdout,
+        format!("APP-7\t{}/acme/projects/APP/tasks/APP-7\n", server.uri())
+    );
+
+    let mut json_args = create.to_vec();
+    json_args.insert(1, "--json");
+    let (ok, stdout) = run_binary_at(server, "/api", &json_args).await;
+    assert!(ok, "{stdout}");
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(value["key"], "APP-7");
+    assert_eq!(
+        value["url"],
+        format!("{}/acme/projects/APP/tasks/APP-7", server.uri())
+    );
+    // 今までの項目はそのまま残る
+    assert_eq!(value["seq_id"], 7);
+    assert_eq!(value["title"], "Golden task");
+}
+
+/// `read:tenant` が無いトークンでも作成はできる。URL だけが付かない。
+#[tokio::test]
+async fn tasks_create_omits_the_url_when_the_token_cannot_list_tenants() {
+    let harness = harness().await;
+    let server = &harness.server;
+    mount_create_under_api(server, false).await;
+    mount_api_tenants(server, ResponseTemplate::new(403)).await;
+    let create = [
+        "task",
+        "tasks",
+        "create",
+        "--project",
+        "APP",
+        "--title",
+        "T",
+    ];
+
+    let (ok, stdout) = run_binary_at(server, "/api", &create).await;
+    assert!(ok, "{stdout}");
+    assert_eq!(stdout, "APP-7\n");
+
+    let mut json_args = create.to_vec();
+    json_args.insert(1, "--json");
+    let (ok, stdout) = run_binary_at(server, "/api", &json_args).await;
+    assert!(ok, "{stdout}");
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(value["key"], "APP-7");
+    assert!(value["url"].is_null());
+}
+
+/// URL は付加情報。テナント一覧が 403 以外で失敗しても、作成は止めない（`url: null` で続ける）。
+/// 参照は POST の前に済ませる（作ったあとに叩いて失敗すると、再実行で二重に起票する）。
+#[tokio::test]
+async fn tasks_create_still_posts_without_a_url_when_the_tenant_lookup_fails() {
+    let harness = harness().await;
+    let server = &harness.server;
+    mount_create_under_api(server, false).await;
+    mount_api_tenants(server, ResponseTemplate::new(500)).await;
+    let create = [
+        "task",
+        "tasks",
+        "create",
+        "--project",
+        "APP",
+        "--title",
+        "T",
+    ];
+
+    let (ok, stdout, stderr) = run_binary_full(server, "/api", &create, None).await;
+    assert!(ok, "{stdout}{stderr}");
+    assert_eq!(stdout, "APP-7\n");
+    assert!(
+        stderr.contains("warning: cannot look up the web URL"),
+        "{stderr}"
+    );
+    assert_eq!(posts_to(server).await, 1);
+    assert_tenants_before_post(server).await;
+
+    let mut json_args = create.to_vec();
+    json_args.insert(1, "--json");
+    let (ok, stdout, _) = run_binary_full(server, "/api", &json_args, None).await;
+    assert!(ok, "{stdout}");
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(value["key"], "APP-7");
+    assert!(value["url"].is_null());
+}
+
+#[tokio::test]
+async fn tasks_bulk_create_still_posts_without_a_url_when_the_tenant_lookup_fails() {
+    let harness = harness().await;
+    let server = &harness.server;
+    mount_create_under_api(server, true).await;
+    mount_api_tenants(server, ResponseTemplate::new(500)).await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("tasks.json");
+    std::fs::write(&file, r#"[{"title": "Golden task"}]"#).unwrap();
+
+    let (ok, stdout, stderr) = run_binary_full(
+        server,
+        "/api",
+        &[
+            "task",
+            "tasks",
+            "bulk-create",
+            "--project",
+            "APP",
+            file.to_str().unwrap(),
+        ],
+        None,
+    )
+    .await;
+
+    assert!(ok, "{stdout}{stderr}");
+    assert_eq!(stdout, "APP-7\t\tGolden task\n");
+    assert!(
+        stderr.contains("warning: cannot look up the web URL"),
+        "{stderr}"
+    );
+    assert_eq!(posts_to(server).await, 1);
+    assert_tenants_before_post(server).await;
+}
+
+/// テナント一覧の参照は、作成の POST より前に行われている。
+async fn assert_tenants_before_post(server: &MockServer) {
+    let requests = server.received_requests().await.unwrap();
+    let tenants = requests
+        .iter()
+        .position(|request| request.url.path() == "/api/v1/tenants")
+        .expect("tenants was not looked up");
+    let post = requests
+        .iter()
+        .position(|request| request.method.as_str() == "POST")
+        .expect("no POST");
+    assert!(tenants < post);
+}
+
+#[tokio::test]
+async fn tasks_bulk_create_prints_the_key_and_url_of_each_task() {
+    let harness = harness().await;
+    let server = &harness.server;
+    mount_create_under_api(server, true).await;
+    mount_api_tenants(server, tenants_ok()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("tasks.json");
+    std::fs::write(&file, r#"[{"title": "Golden task"}]"#).unwrap();
+    let file = file.to_str().unwrap();
+    let url = format!("{}/acme/projects/APP/tasks/APP-7", server.uri());
+
+    let (ok, stdout) = run_binary_at(
+        server,
+        "/api",
+        &["task", "tasks", "bulk-create", "--project", "APP", file],
+    )
+    .await;
+    assert!(ok, "{stdout}");
+    assert_eq!(stdout, format!("APP-7\t{url}\tGolden task\n"));
+
+    let (ok, stdout) = run_binary_at(
+        server,
+        "/api",
+        &[
+            "task",
+            "--json",
+            "tasks",
+            "bulk-create",
+            "--project",
+            "APP",
+            file,
+        ],
+    )
+    .await;
+    assert!(ok, "{stdout}");
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(value["tasks"][0]["key"], "APP-7");
+    assert_eq!(value["tasks"][0]["url"], url);
+    assert_eq!(value["tasks"][0]["seq_id"], 7);
+}
+
+/// 対照: `api_url` が `<画面の URL>/api` の形でなければ、URL を作れないので何も引かない。
+#[tokio::test]
+async fn tasks_create_does_not_look_up_tenants_when_the_url_cannot_be_built() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    mount_statuses(&harness).await;
+    Mock::given(method("POST"))
+        .and(path(project_path("tasks")))
+        .respond_with(ResponseTemplate::new(201).set_body_json(task_detail_json()))
+        .mount(&harness.server)
+        .await;
+
+    let (ok, stdout) = run_binary(
+        &harness.server,
+        &[
+            "task",
+            "tasks",
+            "create",
+            "--project",
+            "APP",
+            "--title",
+            "T",
+        ],
+    )
+    .await;
+
+    assert!(ok, "{stdout}");
+    assert_eq!(stdout, "APP-7\n");
+    assert_eq!(harness.calls_to("/v1/tenants").await, 0);
+}
+
+/// `Context::new` には更新の相手がいない。テストの足場から GitHub へ出る経路は無い。
+#[tokio::test]
+async fn self_update_is_not_available_without_an_updater() {
+    let harness = harness().await;
+
+    let err = harness.run(&["task", "self-update"]).await.unwrap_err();
+
+    assert!(
+        err.message.contains("not available in this build"),
+        "{}",
+        err.message
+    );
+    assert!(harness.sent_nothing().await);
+}
+
 #[tokio::test]
 async fn tasks_update_propagates_rejection_and_failure_without_further_writes() {
     let harness = harness().await;
@@ -866,6 +1385,7 @@ async fn ambiguous_assignee_names_fail_before_updating() {
 async fn tasks_list_resolves_the_assignee_name_without_listing_candidates() {
     let harness = harness().await;
     mount_project_lookup(&harness).await;
+    mount_statuses(&harness).await;
     Mock::given(method("GET"))
         .and(path(project_path("assignable-users")))
         .and(query_param("username", "alice"))
@@ -904,6 +1424,7 @@ async fn tasks_list_resolves_the_assignee_name_without_listing_candidates() {
 async fn tasks_list_sends_the_unassigned_filter() {
     let harness = harness().await;
     mount_project_lookup(&harness).await;
+    mount_statuses(&harness).await;
     Mock::given(method("GET"))
         .and(path(project_path("tasks")))
         .and(query_param("unassigned", "true"))
@@ -924,6 +1445,7 @@ async fn tasks_list_sends_the_unassigned_filter() {
 async fn tasks_list_sends_the_priority_filter_in_the_query_form() {
     let harness = harness().await;
     mount_project_lookup(&harness).await;
+    mount_statuses(&harness).await;
     Mock::given(method("GET"))
         .and(path(project_path("tasks")))
         .and(query_param("priority", "critical_fire"))
@@ -946,6 +1468,200 @@ async fn tasks_list_sends_the_priority_filter_in_the_query_form() {
         .await
         .unwrap();
     assert_eq!(code, 0);
+}
+
+const LIST_DESCRIPTION: &str = "長い本文の印がここに入る";
+
+fn listed_task(seq_id: i64, title: &str) -> serde_json::Value {
+    let mut task = task_detail_json();
+    task["seq_id"] = json!(seq_id);
+    task["title"] = json!(title);
+    task["description"] = json!(LIST_DESCRIPTION);
+    task["labels"] = json!([label_json(BUG_LABEL, "bug")]);
+    task["updated_at"] = json!("2026-01-02T03:04:05Z");
+    task
+}
+
+async fn mount_two_listed_tasks(harness: &Harness) {
+    Mock::given(method("GET"))
+        .and(path(project_path("tasks")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "tasks": [listed_task(1, "最初"), listed_task(2, "次")],
+            "total": 2,
+            "next_cursor": null,
+        })))
+        .mount(&harness.server)
+        .await;
+}
+
+/// タイトルで 1 件を探すだけで本文まで読ませない。`--json` に項目を並べて選べる。
+#[tokio::test]
+async fn tasks_list_json_fields_print_only_those_fields() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    mount_statuses(&harness).await;
+    mount_two_listed_tasks(&harness).await;
+
+    for args in [
+        // `=` なしでも、`tasks list` では次の語を項目として読む
+        &[
+            "task",
+            "tasks",
+            "list",
+            "--project",
+            "APP",
+            "--json",
+            "key,title",
+        ][..],
+        &[
+            "task",
+            "tasks",
+            "list",
+            "--json=key,title",
+            "--project",
+            "APP",
+        ][..],
+    ] {
+        let (ok, stdout) = run_binary(&harness.server, args).await;
+        assert!(ok, "{args:?}: {stdout}");
+        let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+        assert_eq!(value["total"], 2, "{stdout}");
+        let rows = value["tasks"].as_array().unwrap();
+        assert_eq!(rows.len(), 2);
+        for row in rows {
+            let keys: Vec<&String> = row.as_object().unwrap().keys().collect();
+            assert_eq!(keys, ["key", "title"], "{stdout}");
+        }
+        assert_eq!(rows[0]["key"], "APP-1");
+        assert_eq!(rows[1]["title"], "次");
+        assert!(!stdout.contains(LIST_DESCRIPTION), "{stdout}");
+    }
+}
+
+/// 項目の順は指定どおり。状態は名前で出す。
+#[tokio::test]
+async fn tasks_list_json_fields_keep_the_requested_order_and_name_the_status() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    mount_statuses(&harness).await;
+    mount_two_listed_tasks(&harness).await;
+
+    let (ok, stdout) = run_binary(
+        &harness.server,
+        &[
+            "task",
+            "tasks",
+            "list",
+            "--project",
+            "APP",
+            "--json=status,key,seq_id",
+        ],
+    )
+    .await;
+
+    assert!(ok, "{stdout}");
+    // 順は出力の文字列で見る（`serde_json::Value` は順を保たない）
+    let position = |name: &str| stdout.find(&format!("\"{name}\":")).unwrap();
+    assert!(position("status") < position("key"), "{stdout}");
+    assert!(position("key") < position("seq_id"), "{stdout}");
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let row = value["tasks"][0].as_object().unwrap();
+    assert_eq!(row.len(), 3);
+    assert_eq!(row["status"], "Todo");
+    assert_eq!(row["seq_id"], 1);
+}
+
+/// 既定の表では本文を出さない（長い本文が一覧の読み取りを埋めるため）。
+#[tokio::test]
+async fn tasks_list_does_not_print_descriptions_by_default() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    mount_statuses(&harness).await;
+    mount_two_listed_tasks(&harness).await;
+
+    let (ok, stdout) = run_binary(
+        &harness.server,
+        &["task", "tasks", "list", "--project", "APP"],
+    )
+    .await;
+
+    assert!(ok, "{stdout}");
+    assert!(!stdout.contains(LIST_DESCRIPTION), "{stdout}");
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(lines.len(), 3, "{stdout}");
+    assert_eq!(lines[0], "APP-1\tTodo\t最初\tbug\t2026-01-02T03:04:05Z");
+    assert_eq!(lines[1], "APP-2\tTodo\t次\tbug\t2026-01-02T03:04:05Z");
+    assert_eq!(lines[2], "2 件表示 / 全 2 件");
+}
+
+/// 項目なしの `--json` は今までどおり全項目を出す（スキルが `.tasks[] | .seq_id` で読む）。
+/// 足すのは `key` だけで、状態の一覧とテナントの一覧は引かない。
+#[tokio::test]
+async fn tasks_list_bare_json_keeps_every_field() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    mount_two_listed_tasks(&harness).await;
+
+    for args in [
+        &["task", "tasks", "list", "--project", "APP", "--json"][..],
+        &["task", "--json", "tasks", "list", "--project", "APP"][..],
+    ] {
+        let (ok, stdout) = run_binary(&harness.server, args).await;
+        assert!(ok, "{args:?}: {stdout}");
+        let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+        assert_eq!(value["total"], 2);
+        let row = &value["tasks"][0];
+        assert_eq!(row["key"], "APP-1");
+        assert_eq!(row["seq_id"], 1);
+        assert_eq!(row["description"], LIST_DESCRIPTION);
+        assert!(row["status_id"].is_string());
+        assert!(row.get("status").is_none());
+        assert!(row.get("url").is_none());
+    }
+    assert_eq!(harness.calls_to(&project_path("statuses")).await, 0);
+    assert_eq!(harness.calls_to("/v1/tenants").await, 0);
+}
+
+#[tokio::test]
+async fn tasks_list_rejects_an_unknown_json_field_before_any_request() {
+    let harness = harness().await;
+
+    let err = harness
+        .run(&[
+            "task",
+            "tasks",
+            "list",
+            "--project",
+            "APP",
+            "--json=key,titel",
+        ])
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.exit_code, 2);
+    assert!(
+        err.message.contains("Unknown JSON field: titel"),
+        "{}",
+        err.message
+    );
+    assert!(err.message.contains("Available fields:"), "{}", err.message);
+    assert!(err.message.contains("title"), "{}", err.message);
+    assert!(harness.sent_nothing().await);
+}
+
+/// 項目を選べるのは `tasks list` だけ。ほかで黙って無視すると、絞れたつもりで全部読んでしまう。
+#[tokio::test]
+async fn json_fields_are_refused_outside_tasks_list() {
+    let harness = harness().await;
+
+    let err = harness
+        .run(&["task", "projects", "list", "--json=key"])
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.exit_code, 2);
+    assert!(err.message.contains("tasks list"), "{}", err.message);
+    assert!(harness.sent_nothing().await);
 }
 
 #[tokio::test]
@@ -1040,6 +1756,45 @@ async fn a_response_that_no_longer_matches_the_shared_type_is_reported_not_swall
             && err.message.contains("update to the latest release"),
         "{}",
         err.message
+    );
+}
+
+#[tokio::test]
+async fn tasks_list_keeps_results_when_the_url_lookup_fails() {
+    let harness = harness().await;
+    // Reuse the /api project fixture; list data is independent of creation.
+    mount_create_under_api(&harness.server, false).await;
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/api/v1/tenants/{TENANT}/projects/{PROJECT_ID}/tasks"
+        )))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "tasks": [task_detail_json()], "total": 1, "next_cursor": null
+        })))
+        .mount(&harness.server)
+        .await;
+    mount_api_tenants(&harness.server, ResponseTemplate::new(500)).await;
+    let (ok, stdout, stderr) = run_binary_full(
+        &harness.server,
+        "/api",
+        &[
+            "task",
+            "tasks",
+            "list",
+            "--project",
+            "APP",
+            "--json=key,url",
+        ],
+        None,
+    )
+    .await;
+    assert!(ok, "{stdout}{stderr}");
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(value["tasks"][0]["key"], "APP-7");
+    assert!(value["tasks"][0]["url"].is_null());
+    assert!(
+        stderr.contains("warning: cannot look up the web URL"),
+        "{stderr}"
     );
 }
 
@@ -1173,6 +1928,8 @@ fn a_type_and_clearing_it_cannot_be_combined() {
 async fn tasks_list_filters_by_the_type() {
     let harness = harness().await;
     mount_project_lookup(&harness).await;
+    // 一覧の表は状態名の列を出すので、状態一覧も引く
+    mount_statuses(&harness).await;
     mount_task_types(&harness, 1).await;
     Mock::given(method("GET"))
         .and(path(project_path("tasks")))

@@ -76,6 +76,11 @@ impl ConfigStore {
         self.dir.join("config.yaml")
     }
 
+    /// 新しい版を最後に確かめた時刻の置き場所。
+    pub fn update_state_path(&self) -> PathBuf {
+        self.dir.join("update-check.json")
+    }
+
     pub fn load(&self) -> Result<TaskConfig> {
         let path = self.path();
         if !path.exists() {
@@ -90,7 +95,7 @@ impl ConfigStore {
     }
 
     pub fn save(&self, config: &TaskConfig) -> Result<()> {
-        std::fs::create_dir_all(&self.dir)
+        create_private_dir(&self.dir)
             .map_err(|err| CliError::new(format!("Cannot create {}: {err}", self.dir.display())))?;
         let path = self.path();
         let body = serde_yaml_ng::to_string(config)
@@ -130,6 +135,23 @@ fn home_from_env_ordered(env: impl Fn(&str) -> Option<String>, windows: bool) ->
     }
     // USERPROFILE が無い Windows は稀だが、MSYS 系が置いた HOME があれば拾う
     lookup("HOME").map(PathBuf::from)
+}
+
+/// 設定ディレクトリを（無ければ）所有者だけが入れる権限（0700）で作る。
+/// 既にあるディレクトリの権限は変えない。
+pub(crate) fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(dir)
+    }
 }
 
 /// 新規作成の時点で所有者だけが読めるようにして書く。
@@ -415,6 +437,19 @@ mod tests {
     /// `fs::write` で作ると 0644 で生まれ、chmod が走るまでの間、同じマシンの
     /// 他の利用者にトークンが読める。書き込みだけを直接呼んで、あとからの
     /// chmod に頼らずに閉じていることを確かめる。
+    #[cfg(unix)]
+    #[test]
+    fn creates_the_config_directory_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (_home, store) = store();
+        store.save(&TaskConfig::default()).unwrap();
+
+        let dir = store.path().parent().unwrap().to_path_buf();
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+    }
+
     #[cfg(unix)]
     #[test]
     fn creates_the_token_file_already_restricted_without_relying_on_chmod() {

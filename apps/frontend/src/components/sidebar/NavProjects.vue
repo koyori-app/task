@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { PhFiles, PhGear, PhGitPullRequest, PhListChecks, PhPlus } from '@phosphor-icons/vue';
 import { ChartGantt } from '@lucide/vue';
-import { type Component, computed } from 'vue';
+import { type Component, computed, ref, watch } from 'vue';
 import type { components } from '@/generated/api';
 
 import { Accordion, Button, SidebarLink, Skeleton } from '@koyori-app/ui-vue';
@@ -11,12 +11,14 @@ type ProjectNavItem = components['schemas']['ProjectResponse'];
 const props = defineProps<{
   tenantSlug: string;
   projects: components['schemas']['ProjectResponse'][];
-  /** 現在の URL パス。active 強調と初期展開の判定に使う */
+  /** 現在の URL パス。active 強調と展開の判定に使う */
   currentPath?: string;
   loading?: boolean;
   error?: boolean;
   /** ガントの口を出すか（テナントのガントと同じく、実験的な機能の設定で出す） */
   showGantt?: boolean;
+  /** 共有プロジェクトを作れる人（テナントのオーナーと Admin）にだけ、作成ボタンを出す。既定は出さない */
+  canCreate?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -39,6 +41,30 @@ function projectBaseUrl(project: ProjectNavItem) {
 function isProjectActive(project: ProjectNavItem) {
   return !!props.currentPath && props.currentPath.startsWith(`${projectBaseUrl(project)}/`);
 }
+
+/**
+ * 開いているプロジェクト。サイドバーはクライアント遷移で作り直されないので、`defaultOpen`
+ * （マウント時に 1 回だけ読まれる）ではなくこちらで持ち、現在の URL に追従させる
+ */
+const openIds = ref<Set<string>>(new Set());
+
+function setOpen(id: string, open: boolean) {
+  const next = new Set(openIds.value);
+  if (open) next.add(id);
+  else next.delete(id);
+  openIds.value = next;
+}
+
+// 別のプロジェクトへ移ったらそのプロジェクトを開く。見るのはプロジェクトの切り替わりだけで、
+// 同じプロジェクトの中を移っても手で畳んだものは開き直さない。他のプロジェクトは閉じない
+const activeProjectId = computed(() => sortedProjects.value.find(isProjectActive)?.id ?? null);
+watch(
+  activeProjectId,
+  (id) => {
+    if (id) setOpen(id, true);
+  },
+  { immediate: true },
+);
 
 interface ProjectChild {
   label: string;
@@ -91,7 +117,7 @@ function isChildActive(child: ProjectChild) {
         Projects
       </h2>
       <Button
-        v-if="tenantSlug"
+        v-if="tenantSlug && canCreate"
         variant="ghost"
         ariaLabel="プロジェクトを作成"
         @click="emit('create')"
@@ -113,47 +139,60 @@ function isChildActive(child: ProjectChild) {
         <p class="mb-2.5 text-xs leading-snug text-muted-foreground">
           プロジェクトはまだありません。
         </p>
-        <Button v-if="tenantSlug" class="w-full" label="プロジェクトを作成" @click="emit('create')">
+        <Button
+          v-if="tenantSlug && canCreate"
+          class="w-full"
+          label="プロジェクトを作成"
+          @click="emit('create')"
+        >
           <template #icon><PhPlus class="size-3.5" /></template>
         </Button>
       </div>
     </div>
     <template v-else>
-      <Accordion
+      <!-- レールではアイコンだけが縦に並び、どれがプロジェクトの中の項目か分からないので、
+           開いているプロジェクトは見出しと中の項目を角丸の帯で囲む -->
+      <div
         v-for="project in sortedProjects"
-        :id="project.id"
         :key="project.id"
-        :label="project.name"
-        :default-open="isProjectActive(project)"
+        data-project-group
+        class="rounded-xl border border-transparent in-data-[sidebar-rail=true]:has-[[aria-expanded=true]]:border-border in-data-[sidebar-rail=true]:has-[[aria-expanded=true]]:bg-sidebar-accent/50 in-data-[sidebar-rail=true]:has-[[aria-expanded=true]]:-mx-1 in-data-[sidebar-rail=true]:has-[[aria-expanded=true]]:p-1"
       >
-        <template #icon>
-          <img
-            v-if="project.icon_url"
-            :src="project.icon_url"
-            alt=""
-            class="size-4 shrink-0 rounded-sm object-cover"
-          />
-          <span v-else-if="project.icon_emoji" class="text-base leading-none">{{
-            project.icon_emoji
-          }}</span>
-          <span
-            v-else
-            class="flex size-4 shrink-0 items-center justify-center rounded-full bg-accent text-[10px] font-semibold leading-none"
-            >{{ projectInitial(project) }}</span
-          >
-        </template>
-        <div v-if="tenantSlug" class="flex flex-col gap-(--koyori-space-xs)">
-          <SidebarLink
-            v-for="child in projectChildren(project)"
-            :key="child.href"
-            :label="child.label"
-            :href="child.href"
-            :current="isChildActive(child)"
-          >
-            <template #icon><component :is="child.icon" class="size-4" /></template>
-          </SidebarLink>
-        </div>
-      </Accordion>
+        <Accordion
+          :id="project.id"
+          :label="project.name"
+          :open="openIds.has(project.id)"
+          :on-open-change="(open: boolean) => setOpen(project.id, open)"
+        >
+          <template #icon>
+            <img
+              v-if="project.icon_url"
+              :src="project.icon_url"
+              alt=""
+              class="size-4 shrink-0 rounded-sm object-cover"
+            />
+            <span v-else-if="project.icon_emoji" class="text-base leading-none">{{
+              project.icon_emoji
+            }}</span>
+            <span
+              v-else
+              class="flex size-4 shrink-0 items-center justify-center rounded-full bg-accent text-[10px] font-semibold leading-none"
+              >{{ projectInitial(project) }}</span
+            >
+          </template>
+          <div v-if="tenantSlug" class="flex flex-col gap-(--koyori-space-xs)">
+            <SidebarLink
+              v-for="child in projectChildren(project)"
+              :key="child.href"
+              :label="child.label"
+              :href="child.href"
+              :current="isChildActive(child)"
+            >
+              <template #icon><component :is="child.icon" class="size-4" /></template>
+            </SidebarLink>
+          </div>
+        </Accordion>
+      </div>
     </template>
   </div>
 </template>

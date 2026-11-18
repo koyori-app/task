@@ -5,6 +5,7 @@
 // 受け入れ条件（docs/dev/features/review-findings/index.md から移した。テストの無い条件はページの「未実装と既知の制限」に残す）
 // - CLI の鮮度検査: 最新ラウンドの `head_sha` と照合対象の HEAD が違えば不成立。HEAD が決まらないときも不成立（`--no-head-check` を付けたときだけ通す）。判定は crates/cli/src/commands/reviews.rs の gate_failure の単体テストで見る
 // - CLI のリポジトリ検査: 連携の無いプロジェクトでは不成立（`--allow-unlinked` を付けたときだけ通す）。同じく gate_failure の単体テストで見る
+// - 引き継ぎ: `review carry-over` は `reviews/carry-over` へ元と先の PR 番号（と任意の元リポジトリ）を送る。PR 番号が 1 未満・`--from-repo` が owner/name でない・元と先が同じ PR（`--from-repo` 無し）は、何も送らず終了コード 2
 // - 指摘数の境界: 201 件は CLI の事前検証で弾く（crates/cli/src/commands/reviews.rs の単体テスト）
 
 mod common;
@@ -289,4 +290,131 @@ async fn an_invalid_argument_is_reported_before_missing_configuration() {
         "{}",
         err.message
     );
+}
+
+fn carry_over_response() -> serde_json::Value {
+    json!({
+        "rounds": [{
+            "id": "66666666-6666-4666-8666-666666666666",
+            "project_id": PROJECT_ID,
+            "pr_number": 1119,
+            "round": 1,
+            "head_sha": HEAD_SHA,
+            "reviewer": { "id": "77777777-7777-4777-8777-777777777777", "username": "yupix", "avatar_url": null },
+            "reviewer_left_tenant": false,
+            "summary": "PR #790 R1 から未解決の指摘 1 件を引き継ぎ",
+            "pr_title": null,
+            "pr_author": null,
+            "created_at": "2026-01-01T00:00:00Z",
+            "finding_count": 1,
+            "carried_from": {
+                "review_id": "55555555-5555-4555-8555-555555555555",
+                "pr_number": 790,
+                "round": 1,
+                "repository": null,
+            },
+            "carried_by": { "id": "88888888-8888-4888-8888-888888888888", "username": "dev", "avatar_url": null },
+            "findings": [finding_json()],
+        }],
+    })
+}
+
+#[tokio::test]
+async fn carry_over_posts_the_source_and_destination_pull_requests() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    Mock::given(method("POST"))
+        .and(path(project_path("reviews/carry-over")))
+        .and(body_json(json!({
+            "from_pr_number": 790,
+            "from_repo": null,
+            "to_pr_number": 1119,
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(carry_over_response()))
+        .expect(1)
+        .mount(&harness.server)
+        .await;
+
+    let code = harness
+        .run(&[
+            "task",
+            "review",
+            "carry-over",
+            "--project",
+            "APP",
+            "--from-pr",
+            "790",
+            "--to-pr",
+            "1119",
+        ])
+        .await
+        .unwrap();
+    assert_eq!(code, 0);
+}
+
+/// 別リポジトリ（過去の連携先）を指すときは、同じ PR 番号でも送る。
+#[tokio::test]
+async fn carry_over_sends_the_source_repository() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    Mock::given(method("POST"))
+        .and(path(project_path("reviews/carry-over")))
+        .and(body_json(json!({
+            "from_pr_number": 711,
+            "from_repo": "acme/old",
+            "to_pr_number": 711,
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(carry_over_response()))
+        .expect(1)
+        .mount(&harness.server)
+        .await;
+
+    let code = harness
+        .run(&[
+            "task",
+            "review",
+            "carry-over",
+            "--project",
+            "APP",
+            "--from-pr",
+            "711",
+            "--to-pr",
+            "711",
+            "--from-repo",
+            "acme/old",
+        ])
+        .await
+        .unwrap();
+    assert_eq!(code, 0);
+}
+
+#[tokio::test]
+async fn carry_over_rejects_bad_arguments_before_sending() {
+    let cases: [(&[&str], &str); 4] = [
+        (
+            &["--from-pr", "0", "--to-pr", "1119"],
+            "--from-pr must be a positive integer",
+        ),
+        (
+            &["--from-pr", "790", "--to-pr", "abc"],
+            "--to-pr must be a positive integer",
+        ),
+        (
+            &["--from-pr", "790", "--to-pr", "1119", "--from-repo", "x"],
+            "--from-repo must be owner/name",
+        ),
+        (
+            &["--from-pr", "790", "--to-pr", "790"],
+            "--from-pr and --to-pr must be different pull requests",
+        ),
+    ];
+    for (args, expected) in cases {
+        let harness = harness().await;
+        let mut argv = vec!["task", "review", "carry-over", "--project", "APP"];
+        argv.extend(args);
+        let err = harness.run(&argv).await.unwrap_err();
+        assert_eq!(err.exit_code, 2, "{args:?}");
+        assert!(err.message.starts_with(expected), "{}", err.message);
+        assert!(harness.sent_nothing().await, "{args:?}");
+    }
 }

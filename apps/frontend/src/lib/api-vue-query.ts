@@ -470,7 +470,7 @@ export function usePasswordChangeMutation() {
   return apiClient.useMutation('post', '/v1/auth/password/change');
 }
 
-const DRIVE_FOLDERS_PATH = '/v1/tenants/{tenant_id}/drive/folders' as const;
+export const DRIVE_FOLDERS_PATH = '/v1/tenants/{tenant_id}/drive/folders' as const;
 export const DRIVE_FILES_PATH = '/v1/tenants/{tenant_id}/drive/files' as const;
 export const DRIVE_FILE_PATH = '/v1/tenants/{tenant_id}/drive/files/{id}' as const;
 export const DRIVE_FILE_CONTENT_UPDATE_PATH =

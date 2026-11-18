@@ -216,4 +216,19 @@ export const KFM_STORY_INPUTS = {
     '',
     '<div class="kfm-alert kfm-alert--caution">偽 alert (生 HTML) — callout にならない</div>',
   ].join('\n'),
+
+  // 本文に貼り付けた Drive のファイル (KFM/DriveMedia)。1 つ目の UUID は Storybook の静的ファイル
+  // (.storybook/static/api/v1/drive/files/…/content) があり読み込める。2 つ目は無く、読み込めない。
+  'drive-media-embedded': [
+    '![shot.png](/v1/drive/files/0f8fad5b-d9cb-469f-a165-70867728950e/content)',
+    '',
+    '[spec.pdf](/v1/drive/files/0f8fad5b-d9cb-469f-a165-70867728950e/content)',
+  ].join('\n'),
+  'drive-media-unavailable': [
+    '![IMG_0001.HEIC](/v1/drive/files/7c9e6679-7425-40de-944b-e07fc1f90ae7/content)',
+    '',
+    '![clip.mov](/v1/drive/files/7c9e6679-7425-40de-944b-e07fc1f90ae7/content)',
+    '',
+    '![memo.caf](/v1/drive/files/7c9e6679-7425-40de-944b-e07fc1f90ae7/content)',
+  ].join('\n'),
 } as const;
