@@ -103,6 +103,11 @@ describe('uploadMarkdown', () => {
     ['画像', uploaded(ID_A, 'shot.png'), `![shot.png](${url(ID_A)})`],
     ['画像以外', uploaded(ID_A, 'a.pdf', 'application/pdf'), `[a.pdf](${url(ID_A)})`],
     [
+      'Markdown の記号（* _ ` < &）を逃がす',
+      uploaded(ID_A, '__init__*`<b>&amp;.py', 'text/x-python'),
+      `[\\_\\_init\\_\\_\\*\\\`\\<b>\\&amp;.py](${url(ID_A)})`,
+    ],
+    [
       '名前の角括弧と \\ を逃がす',
       uploaded(ID_A, 'a[1]\\b.png'),
       `![a\\[1\\]\\\\b.png](${url(ID_A)})`,
@@ -224,6 +229,22 @@ describe('貼り付けたファイルのアップロード', () => {
     expect(view.state.doc.toString()).toBe(`![big.png](${url(ID_A)})\n`);
     expect(host.querySelector('.cm-paste-upload')).toBeNull();
     expect(uploading).toEqual([true, false, true, false]);
+  });
+
+  it('上げている間の取り消しは signal を中断して表示を消し、uploading を false に戻す', async () => {
+    const { view, host, calls, uploading } = setup('本文');
+    startPasteUpload(view, [file('big.mp4', 'video/mp4')]);
+    const [cancel] = buttons(host);
+    expect(cancel.textContent).toBe('取り消し');
+    expect(buttons(host)).toHaveLength(1);
+    cancel.click();
+    expect(calls[0].signal.aborted).toBe(true);
+    expect(host.querySelector('.cm-paste-upload')).toBeNull();
+    expect(uploading).toEqual([true, false]);
+    // 後から上げ終わっても本文には入らない
+    calls[0].resolve(uploaded(ID_A, 'big.mp4', 'video/mp4'));
+    await settle();
+    expect(view.state.doc.toString()).toBe('本文');
   });
 
   it('失敗の取り消しは表示を消し、upload を呼ばない', async () => {

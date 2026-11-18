@@ -23,14 +23,18 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-type UploadCall = { file: File; resolve: (value: UploadedFile) => void };
+type UploadCall = {
+  file: File;
+  resolve: (value: UploadedFile) => void;
+  reject: (reason: Error) => void;
+};
 
 /** 手で解決する `uploadFile` */
 function manualUpload() {
   const calls: UploadCall[] = [];
   const uploadFile = (file: File) =>
-    new Promise<UploadedFile>((resolve) => {
-      calls.push({ file, resolve });
+    new Promise<UploadedFile>((resolve, reject) => {
+      calls.push({ file, resolve, reject });
     });
   return { calls, uploadFile };
 }
@@ -63,6 +67,7 @@ function withControls(args: Record<string, unknown>) {
         <button type="button" data-testid="replace" @click="value = '別の本文'">本文を差し替える</button>
         <button type="button" data-testid="close" @click="open = false">入力欄を閉じる</button>
         <button type="button" data-testid="disable" @click="disabled = true">読み取り専用にする</button>
+        <button type="button" data-testid="enable" @click="disabled = false">読み取り専用を解く</button>
         <pre data-testid="out" style="font-size: 11px; white-space: pre-wrap">{{ value }}</pre>
         <output data-testid="uploading">{{ uploading }}</output>
       </div>`,
@@ -102,7 +107,9 @@ export const PasteVideo: Story = {
     await pasteFile(canvasElement, 'clip.mp4', 'video/mp4');
     // 上げている間は呼び出し側へ知らせる（保存を止めるため）。本文は変わらない
     await waitFor(() => expect(out(canvasElement, 'uploading')).toBe('true'));
-    await expect(uploadNote(canvasElement)?.textContent).toBe('アップロード中… clip.mp4');
+    await expect(uploadNote(canvasElement)?.querySelector('[role="status"]')?.textContent).toBe(
+      'アップロード中… clip.mp4',
+    );
     await expect(out(canvasElement)).toBe('');
 
     // 動画も画像と同じ埋め込みの書式で入る（描画側が名前の拡張子でプレイヤーにする）
@@ -196,5 +203,48 @@ export const PasteThenDisable: Story = {
     pasteDisabled.calls[0].resolve({ id: FILE_ID, name: 'shot.png', mimeType: 'image/png' });
     await new Promise((resolve) => setTimeout(resolve, 100));
     await expect(out(canvasElement)).toBe('');
+  },
+};
+
+const pasteAfterSave = manualUpload();
+
+export const PasteFailsAfterSaveFailed: Story = {
+  args: { uploadFile: pasteAfterSave.uploadFile },
+  render: withControls,
+  play: async ({ canvasElement }) => {
+    pasteAfterSave.calls.length = 0;
+    await waitFor(() =>
+      expect(canvasElement.querySelector('[data-markdown-editor-input]')).toBeTruthy(),
+    );
+    // 保存に失敗すると、読み取り専用が一度入って戻る（state を 2 回作り直す）
+    await userEvent.click(within(canvasElement).getByTestId('disable'));
+    await userEvent.click(within(canvasElement).getByTestId('enable'));
+    await waitFor(() =>
+      expect(
+        canvasElement
+          .querySelector('[data-markdown-editor-input]')
+          ?.getAttribute('contenteditable'),
+      ).toBe('true'),
+    );
+
+    // その後も貼り付けを受け、失敗の「再試行」「取り消し」が効く
+    await pasteFile(canvasElement, 'a.png', 'image/png');
+    pasteAfterSave.calls[0].reject(new Error('ファイルをアップロードできませんでした'));
+    const retry = await waitFor(() =>
+      within(uploadNote(canvasElement)!).getByRole('button', { name: '再試行' }),
+    );
+    await userEvent.click(retry);
+    await waitFor(() => expect(pasteAfterSave.calls).toHaveLength(2));
+    pasteAfterSave.calls[1].reject(new Error('ファイルをアップロードできませんでした'));
+    const cancel = await waitFor(() =>
+      within(uploadNote(canvasElement)!).getByRole('button', { name: '取り消し' }),
+    );
+    await userEvent.click(cancel);
+    await waitFor(() => expect(uploadNote(canvasElement)).toBeNull());
+
+    // 取り消した後の貼り付けも入る
+    await pasteFile(canvasElement, 'b.png', 'image/png');
+    pasteAfterSave.calls[2].resolve({ id: FILE_ID, name: 'b.png', mimeType: 'image/png' });
+    await waitFor(() => expect(out(canvasElement)).toBe(`![b.png](${FILE_URL})\n`));
   },
 };

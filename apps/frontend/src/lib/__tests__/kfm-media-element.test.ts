@@ -66,42 +66,78 @@ describe('<kfm-media>', () => {
     expectUntouched(parts);
   });
 
-  it('接続より前に失敗していた画像（complete で幅 0）も入れ替える', () => {
-    const parts = build('image', (media) => {
-      Object.defineProperty(media, 'complete', { value: true });
-      Object.defineProperty(media, 'naturalWidth', { value: 0 });
-    });
+  /** 接続時の確認（画像は decode() を待つ）が終わるまで待つ */
+  const checked = async () => {
+    for (let i = 0; i < 5; i += 1) await Promise.resolve();
+  };
+  const completeWithWidth = (media: HTMLElement, width: number, decode?: () => Promise<void>) => {
+    Object.defineProperty(media, 'complete', { value: true });
+    Object.defineProperty(media, 'naturalWidth', { value: width });
+    Object.defineProperty(media, 'decode', { value: decode });
+  };
+
+  it('接続より前に失敗していた画像（complete で幅 0、decode が拒否）も入れ替える', async () => {
+    const parts = build('image', (media) =>
+      completeWithWidth(media, 0, () => Promise.reject(new Error('EncodingError'))),
+    );
     document.body.append(parts.host);
+    await checked();
     expectFailed(parts);
   });
 
-  it('読み込み済みの画像（complete で幅あり）・読み込み中の画像は入れ替えない', () => {
-    const loaded = build('image', (media) => {
-      Object.defineProperty(media, 'complete', { value: true });
-      Object.defineProperty(media, 'naturalWidth', { value: 320 });
-    });
+  it('幅 0 でも decode できる画像（寸法を持たない SVG）は入れ替えない', async () => {
+    const parts = build('image', (media) => completeWithWidth(media, 0, () => Promise.resolve()));
+    document.body.append(parts.host);
+    await checked();
+    expectUntouched(parts);
+  });
+
+  it('decode() が無い環境では、complete で幅 0 の画像を入れ替える', async () => {
+    const parts = build('image', (media) => completeWithWidth(media, 0, undefined));
+    document.body.append(parts.host);
+    await checked();
+    expectFailed(parts);
+  });
+
+  it('decode を待つ間に外された画像には触らない', async () => {
+    const parts = build('image', (media) =>
+      completeWithWidth(media, 0, () => Promise.reject(new Error('EncodingError'))),
+    );
+    document.body.append(parts.host);
+    parts.host.remove();
+    await checked();
+    expectUntouched(parts);
+  });
+
+  it('読み込み済みの画像（complete で幅あり）・読み込み中の画像は入れ替えない', async () => {
+    const decode = () => Promise.reject(new Error('呼ばれないはず'));
+    const loaded = build('image', (media) => completeWithWidth(media, 320, decode));
     const loading = build('image', (media) => {
       Object.defineProperty(media, 'complete', { value: false });
       Object.defineProperty(media, 'naturalWidth', { value: 0 });
+      Object.defineProperty(media, 'decode', { value: decode });
     });
     document.body.append(loaded.host, loading.host);
+    await checked();
     expectUntouched(loaded);
     expectUntouched(loading);
   });
 
-  it('接続より前に失敗していた動画（error あり）も入れ替える', () => {
+  it('接続より前に失敗していた動画（error あり）も入れ替える', async () => {
     const parts = build('video', (media) => {
       Object.defineProperty(media, 'error', { value: { code: 4 } });
     });
     document.body.append(parts.host);
+    await checked();
     expectFailed(parts);
   });
 
-  it('失敗していない動画（error が null）は入れ替えない', () => {
+  it('失敗していない動画（error が null）は入れ替えない', async () => {
     const parts = build('video', (media) => {
       Object.defineProperty(media, 'error', { value: null });
     });
     document.body.append(parts.host);
+    await checked();
     expectUntouched(parts);
   });
 

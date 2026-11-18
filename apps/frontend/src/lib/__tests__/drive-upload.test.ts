@@ -109,6 +109,39 @@ describe('uploadProjectFile', () => {
     );
   });
 
+  it('フォルダの取得で通信が切れたら、ブラウザの文言ではなく保存先の文言にする', async () => {
+    stubFetch({
+      folders: () => {
+        throw new TypeError('Failed to fetch');
+      },
+    });
+    await expect(uploadProjectFile(target, png())).rejects.toThrow('保存先を読み込めませんでした');
+  });
+
+  it('アップロードで通信が切れたら、ブラウザの文言ではなく汎用の文言にする', async () => {
+    stubFetch({
+      upload: () => {
+        throw new TypeError('Failed to fetch');
+      },
+    });
+    await expect(uploadProjectFile(target, png())).rejects.toThrow(
+      'ファイルをアップロードできませんでした',
+    );
+  });
+
+  it('通信の途中で中断されたら、文言ではなく AbortError を投げる', async () => {
+    const controller = new AbortController();
+    stubFetch({
+      upload: () => {
+        controller.abort();
+        throw new DOMException('The operation was aborted.', 'AbortError');
+      },
+    });
+    await expect(uploadProjectFile(target, png(), controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+  });
+
   it('呼ぶ前に中断済みなら API を呼ばず AbortError を投げる', async () => {
     const seen = stubFetch();
     const controller = new AbortController();

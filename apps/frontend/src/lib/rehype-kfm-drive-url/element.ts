@@ -10,7 +10,7 @@
  *   モジュール評価が落ちない)。import してよいのは _tag.ts だけ (+client.ts が同期で読む)。
  * - `error` はバブリングしないので、自分に capture で付けて子の失敗を拾う。
  * - 登録より前に失敗していたもの (SSR の HTML を読み終えた後で upgrade される) は、接続時に
- *   `img.complete && naturalWidth === 0`・`media.error !== null` で見る。
+ *   画像は `complete` で幅 0 かつ `decode()` が拒否、動画・音声は `media.error !== null` で見る。
  * - 状態は `data-kfm-media="failed"` で示す (client だけが立てる。SSR HTML には出さない)。
  */
 import { KFM_MEDIA_TAG } from './_tag';
@@ -23,12 +23,22 @@ function mediaOf(host: HTMLElement): Media | null {
   return host.querySelector<Media>(':scope > img, :scope > video, :scope > audio');
 }
 
-function alreadyFailed(media: Media): boolean {
-  if (media.localName === 'img') {
-    const img = media as HTMLImageElement;
-    return img.complete && img.naturalWidth === 0;
+/**
+ * 接続より前に失敗していたか。画像は `complete` で幅 0 が失敗の候補だが、寸法を持たない SVG
+ * (`viewBox` だけ) は読み込めていても幅 0 になり得る。幅だけで決めず、`decode()` で確かめる
+ * (読み込めた画像は解決し、壊れた画像は拒否する)。`decode()` が無い環境は幅で決める。
+ */
+async function alreadyFailed(media: Media): Promise<boolean> {
+  if (media.localName !== 'img') return (media as HTMLMediaElement).error != null;
+  const img = media as HTMLImageElement;
+  if (!img.complete || img.naturalWidth !== 0) return false;
+  if (typeof img.decode !== 'function') return true;
+  try {
+    await img.decode();
+    return false;
+  } catch {
+    return true;
   }
-  return (media as HTMLMediaElement).error != null;
 }
 
 export function createKfmMediaElement(): CustomElementConstructor {
@@ -41,7 +51,11 @@ export function createKfmMediaElement(): CustomElementConstructor {
     connectedCallback(): void {
       this.addEventListener('error', this.onMediaError, true);
       const media = mediaOf(this);
-      if (media !== null && alreadyFailed(media)) this.fallBack();
+      if (media === null) return;
+      void alreadyFailed(media).then((failed) => {
+        // 確かめている間に外された・中身が替わったものには触らない
+        if (failed && this.isConnected && mediaOf(this) === media) this.fallBack();
+      });
     }
 
     disconnectedCallback(): void {

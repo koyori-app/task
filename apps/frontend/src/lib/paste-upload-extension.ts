@@ -72,20 +72,24 @@ class UploadWidget extends WidgetType {
   override toDOM(view: EditorView): HTMLElement {
     const root = document.createElement('span');
     const names = this.names.join(NAME_SEPARATOR);
+    const message = document.createElement('span');
+    const cancel = this.button('取り消し', () => view.plugin(pasteUploadPlugin)?.cancel(this.id));
     if (this.error === null) {
       root.className = 'cm-paste-upload';
-      root.setAttribute('role', 'status');
-      root.textContent = `アップロード中… ${names}`;
+      message.setAttribute('role', 'status');
+      message.textContent = `アップロード中… ${names}`;
+      // 上げている間は送信・保存が止まる。回線が止まった時に利用者が自分で抜けられるよう、
+      // ここからも取り消せるようにする (表示は本文の端にあると範囲の削除では消えない)
+      root.append(message, cancel);
       return root;
     }
     root.className = 'cm-paste-upload cm-paste-upload-error';
-    const message = document.createElement('span');
     message.setAttribute('role', 'alert');
     message.textContent = `${names} を貼り付けできませんでした: ${this.error}`;
     root.append(
       message,
       this.button('再試行', () => view.plugin(pasteUploadPlugin)?.retry(this.id)),
-      this.button('取り消し', () => view.plugin(pasteUploadPlugin)?.cancel(this.id)),
+      cancel,
     );
     return root;
   }
@@ -155,9 +159,9 @@ type Batch = {
 };
 
 /*
- * 進行中のアップロードの持ち主。フィールドに `#private` を使わない: MarkdownEditor は view を Vue の
- * ref に入れており、破棄 (`destroy`) が reactive の proxy 越しに呼ばれる。proxy 越しの `#private` は
- * TypeError になる。
+ * 進行中のアップロードの持ち主。フィールドに `#private` を使わない: 呼び出し側が view を Vue の
+ * reactive に入れると、破棄 (`destroy`) が proxy 越しに呼ばれ、proxy 越しの `#private` は TypeError に
+ * なる (部品は view を proxy にしない形で持つが、ここが壊れると保存の抑止が解けなくなるので備える)。
  */
 class PasteUploadPlugin {
   readonly batches = new Map<number, Batch>();
@@ -334,7 +338,12 @@ export function shouldUploadPaste(data: Pick<DataTransfer, 'files' | 'getData'> 
  * 描画側は名前の拡張子で動画・音声を見分けるので、名前はそのまま残す。
  */
 export function uploadMarkdown(file: UploadedFile): string {
-  const name = file.name.replace(/[\r\n]+/g, ' ').replace(/[\\[\]]/g, '\\$&');
+  // 名前は Markdown として解釈させない (`__init__.py` が太字の `init.py` にならないようにする)。
+  // 語の中の `_` は強調にならないので逃がさない (`IMG_0001.HEIC` を本文でそのまま読めるようにする)
+  const name = file.name
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/[\\[\]*`<&]/g, '\\$&')
+    .replace(/(?<![\p{L}\p{N}])_|_(?![\p{L}\p{N}])/gu, '\\_');
   const mime = file.mimeType.split(';')[0].trim().toLowerCase();
   const embed = mime.startsWith('image/') || driveMediaKind(file.name) !== undefined;
   return `${embed ? '!' : ''}[${name}](/v1/drive/files/${file.id}/content)`;

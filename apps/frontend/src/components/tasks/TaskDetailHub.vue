@@ -365,6 +365,8 @@ function ownText(node: Node): string {
   if (node.nodeType !== 1) return '';
   const element = node as HTMLElement;
   const tag = element.tagName;
+  // 隠した要素は読まない（貼り付けた画像の退避用のリンクは、画像の alt と同じ名前を持つ）
+  if (element.hidden) return '';
   if (tag === 'UL' || tag === 'OL') return '';
   if (tag === 'IMG') return element.getAttribute('alt') ?? '';
   if (tag === 'BR') return '\n';

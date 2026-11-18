@@ -1,6 +1,7 @@
 // 本文の Drive のファイルの URL（/api の付け足し、動画・音声の描き分け、kfm-media の包み、対象外）
 import { describe, expect, it } from 'vitest';
 import { renderDescription } from '../markup-renderer';
+import { uploadMarkdown } from '../paste-upload-extension';
 import { driveContentProxyPath, driveMediaKind } from '../rehype-kfm-drive-url';
 
 const ID = '0f8fad5b-d9cb-469f-a165-70867728950e';
@@ -101,6 +102,29 @@ describe.each([
     expect(doc.body.textContent).toBe(
       '<kfm-media data-kind="video" onclick="pwn()">hi</kfm-media>',
     );
+  });
+});
+
+describe('貼り付けで作る行（uploadMarkdown）の描画', () => {
+  it.each([
+    '__init__.py',
+    'a*b*c.txt',
+    'a`b`.txt',
+    'a<b>&amp;.txt',
+    'a[1]\\b.txt',
+    'IMG_0001_2.txt',
+  ])('%s は名前のまま表示される（Markdown として解釈されない）', async (name) => {
+    const html = await renderDescription(uploadMarkdown({ id: ID, name, mimeType: 'text/plain' }));
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    expect(doc.querySelector('a')?.textContent).toBe(name);
+    expect(doc.querySelector('a')?.children).toHaveLength(0);
+  });
+
+  it('記号を含む名前の動画も、名前の拡張子でプレイヤーになる', async () => {
+    const name = '__rec__*1.mp4';
+    const html = await renderDescription(uploadMarkdown({ id: ID, name, mimeType: 'video/mp4' }));
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    expect(doc.querySelector('video')?.getAttribute('title')).toBe(name);
   });
 });
 

@@ -12,7 +12,7 @@ import { EditorState, type Extension } from '@codemirror/state';
 import type { EditorView as EditorViewType } from '@codemirror/view';
 import { EditorView, keymap, placeholder as placeholderExt } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
-import { computed, onBeforeUnmount, onMounted, ref, toRaw, useTemplateRef, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, shallowRef, useTemplateRef, watch } from 'vue';
 
 import type { MentionCandidate, MentionTable } from '@/lib/comment-mention';
 import type { UploadedFile } from '@/lib/drive-upload';
@@ -96,7 +96,13 @@ const emit = defineEmits<{
 }>();
 
 const host = useTemplateRef<HTMLDivElement>('host');
-const view = ref<EditorView | null>(null);
+/**
+ * `shallowRef` で持つ（`ref` にしない）。`ref` は EditorView を reactive の proxy で包み、proxy 越しに
+ * `setState` を呼ぶと、作り直した DocView と plugin が proxy の view を持つ。CodeMirror は plugin を
+ * 同一性で引くので、proxy 越しでは見つからず、その結果を素の view と共有する表に覚えてしまう。
+ * 以後、貼り付けたファイルのアップロードの操作（再試行・取り消し・次の貼り付け）が効かなくなる。
+ */
+const view = shallowRef<EditorView | null>(null);
 /** 直近に自分が emit した値。v-model の往復で state を作り直さないための照合用 */
 let lastEmitted: string | null = null;
 let mentionTooltipParent: HTMLElement | null = null;
@@ -343,12 +349,9 @@ watch(
   },
 );
 
-/**
- * 進行中の貼り付けを捨てる。view は ref に入れてあり reactive の proxy 越しになるので、素の view を渡す
- * （proxy 越しでは CodeMirror が plugin を同一性で引けず、何も起きない）。
- */
+/** 進行中の貼り付けを捨てる */
 function resetUploads() {
-  if (view.value) resetPasteUploads(toRaw(view.value) as EditorViewType);
+  if (view.value) resetPasteUploads(view.value);
 }
 
 // 宛先が替わったら進行中の貼り付けを捨てる。空の本文同士の切り替えでは本文が '' のままで、

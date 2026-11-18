@@ -11,6 +11,22 @@ export type UploadedFile = { id: string; name: string; mimeType: string };
 export type UploadTarget = { tenantId: string; projectId: string };
 
 /**
+ * 要求の結果を待つ。通信そのものの失敗（オフライン、中継の切断）は応答でなく例外で届き、文言が
+ * ブラウザごとの英語（`Failed to fetch` など）になるので、`undefined` に替えて呼び出し側の文言に任せる。
+ * 中断されていたら、成否に依らず中断の理由を投げる。
+ */
+async function settled<T>(request: Promise<T>, signal?: AbortSignal): Promise<T | undefined> {
+  let result: T | undefined;
+  try {
+    result = await request;
+  } catch {
+    result = undefined;
+  }
+  signal?.throwIfAborted();
+  return result;
+}
+
+/**
  * `file` をプロジェクトのルートフォルダへ上げる。失敗は利用者に出す文言の `Error` で投げる。
  * `signal` が中断されたら、どの段でも中断の理由 (`AbortError`) をそのまま投げる。
  */
@@ -23,24 +39,25 @@ export async function uploadProjectFile(
   if (file.size === 0) throw new Error('空のファイルは貼り付けできません');
 
   const path = { tenant_id: target.tenantId };
-  const folders = await fetchClient.GET(DRIVE_FOLDERS_PATH, {
-    params: { path, query: { project_id: target.projectId, root_only: true } },
+  const folders = await settled(
+    fetchClient.GET(DRIVE_FOLDERS_PATH, {
+      params: { path, query: { project_id: target.projectId, root_only: true } },
+      signal,
+    }),
     signal,
-  });
-  signal?.throwIfAborted();
-  if (folders.error) throw new Error('保存先を読み込めませんでした');
+  );
+  if (!folders || folders.error) throw new Error('保存先を読み込めませんでした');
   const folder = folders.data[0];
   if (!folder) throw new Error('プロジェクトの保存先が見つかりません');
 
   const form = new FormData();
   form.append('folder_id', folder.id);
   form.append('file', file);
-  const uploaded = await fetchClient.POST(DRIVE_FILES_PATH, {
-    params: { path },
-    body: form,
+  const uploaded = await settled(
+    fetchClient.POST(DRIVE_FILES_PATH, { params: { path }, body: form, signal }),
     signal,
-  });
-  signal?.throwIfAborted();
+  );
+  if (!uploaded) throw new Error('ファイルをアップロードできませんでした');
   if (uploaded.error) {
     throw new Error(
       uploaded.response.status === 413

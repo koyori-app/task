@@ -380,6 +380,11 @@ function uploadNote(canvasElement: HTMLElement) {
   return canvasElement.querySelector<HTMLElement>('.cm-paste-upload');
 }
 
+/** 上げている間の表示の字（「取り消し」のボタンを除く） */
+function uploadStatus(canvasElement: HTMLElement) {
+  return uploadNote(canvasElement)?.querySelector('[role="status"]')?.textContent;
+}
+
 /** 空の本文に出す案内（placeholder）が見えているか */
 function placeholderShown(canvasElement: HTMLElement) {
   const el = canvasElement.querySelector('.cm-placeholder');
@@ -408,10 +413,7 @@ export const PasteImage: Story = {
     fire(editor, 'paste', fileClipboard(png()));
 
     // 上げている間は入力欄の中に表示だけが出て、本文（送る文字列）は変わらない
-    await waitFor(() =>
-      expect(uploadNote(canvasElement)?.textContent).toBe('アップロード中… shot.png'),
-    );
-    await expect(uploadNote(canvasElement)?.getAttribute('role')).toBe('status');
+    await waitFor(() => expect(uploadStatus(canvasElement)).toBe('アップロード中… shot.png'));
     await expect(out(canvasElement)).toBe('見て ');
     await expect(pasteImage.calls).toHaveLength(1);
 
@@ -455,10 +457,35 @@ export const PasteUploadFailed: Story = {
     );
     await waitFor(() => expect(pasteFailed.calls).toHaveLength(2));
     await expect(pasteFailed.calls[1].file.name).toBe('big.png');
-    await expect(uploadNote(canvasElement)?.textContent).toBe('アップロード中… big.png');
+    await expect(uploadStatus(canvasElement)).toBe('アップロード中… big.png');
     pasteFailed.calls[1].resolve({ id: FILE_ID, name: 'big.png', mimeType: 'image/png' });
     await waitFor(() => expect(out(canvasElement)).toBe(`![big.png](${FILE_URL})\n`));
     await expect(uploadNote(canvasElement)).toBeNull();
+  },
+};
+
+const pasteCancelled = manualUpload();
+
+export const PasteThenCancelWhileUploading: Story = {
+  args: { candidates, uploadFile: pasteCancelled.uploadFile },
+  render: withValue('先に送りたい文'),
+  play: async ({ canvasElement }) => {
+    pasteCancelled.calls.length = 0;
+    const editor = await ready(canvasElement);
+    await userEvent.keyboard('{Control>}{End}{/Control}');
+    fire(editor, 'paste', fileClipboard(new File(['x'], 'big.mp4', { type: 'video/mp4' })));
+    await waitFor(() => expect(uploadStatus(canvasElement)).toBe('アップロード中… big.mp4'));
+
+    // 回線が止まっても、上げている間の表示から取り消せる（送信の抑止から自分で抜けられる）
+    await userEvent.click(
+      within(uploadNote(canvasElement)!).getByRole('button', { name: '取り消し' }),
+    );
+    await waitFor(() => expect(uploadNote(canvasElement)).toBeNull());
+
+    // 後から上げ終わっても本文には入らない
+    pasteCancelled.calls[0].resolve({ id: FILE_ID, name: 'big.mp4', mimeType: 'video/mp4' });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await expect(out(canvasElement)).toBe('先に送りたい文');
   },
 };
 
