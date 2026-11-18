@@ -359,8 +359,8 @@ export const DependencyToggle: Story = {
         { from_task_id: 'task-4', to_task_id: 'task-1' },
         // 済み: 完了した task-3 が task-5 を阻む
         { from_task_id: 'task-3', to_task_id: 'task-5' },
-        // 普通: task-1 が、まだ始まらぬ task-6（7/27 から）を阻む
-        { from_task_id: 'task-1', to_task_id: 'task-6' },
+        // 普通: task-1 が、まだ始まらぬ task-2（目安 7/21）を阻む
+        { from_task_id: 'task-1', to_task_id: 'task-2' },
       ],
     }),
   play: async ({ canvasElement }) => {
