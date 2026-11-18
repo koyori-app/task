@@ -15,6 +15,12 @@ import {
 import type { components } from '@/generated/api';
 import type { TenantUuid } from '@/lib/api-ids';
 import { fetchClient, useMeQuery } from '@/lib/api-vue-query';
+import {
+  DEFAULT_HOME_DASHBOARD_URL_STATE,
+  applyHomeDashboardUrlState,
+  type HomeDashboardTab,
+  type HomeDashboardUrlState,
+} from '@/lib/home-dashboard-url-state';
 import { taskDetailHref, taskListHref, taskSeqKey, PRIORITY_CONFIG } from '@/lib/task-display';
 import { activityActor, activityText, relativeTime } from '@/lib/task-activity';
 import { useNow } from '@/composables/useNow';
@@ -29,21 +35,27 @@ const props = defineProps<{
   tenantId: TenantUuid;
   tenantSlug: string;
   canCreateProject?: boolean;
+  /** URL（`?tab=`・`?page=`）から読んだ絞り込みとページ。同じページへの遷移で変われば追従する */
+  initialUrlState?: HomeDashboardUrlState;
 }>();
 const DASHBOARD_PATH = '/v1/tenants/{tenant_id}/users/me/dashboard' as const;
 const MY_TASKS_PATH = '/v1/tenants/{tenant_id}/users/me/tasks' as const;
 const TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}' as const;
 type DashboardTask = components['schemas']['DashboardTask'];
-type Filter = 'today' | 'week' | 'overdue' | 'all';
-const tabs: { key: Filter; label: string; count: 'today' | 'week' | 'overdue' | 'open' }[] = [
+const tabs: {
+  key: HomeDashboardTab;
+  label: string;
+  count: 'today' | 'week' | 'overdue' | 'open';
+}[] = [
   { key: 'today', label: '今日', count: 'today' },
   { key: 'week', label: '今週', count: 'week' },
   { key: 'overdue', label: '期限超過', count: 'overdue' },
   { key: 'all', label: 'すべて', count: 'open' },
 ];
-const filter = ref<Filter>('today');
-const offset = ref(0);
 const pageSize = 5;
+const initial = props.initialUrlState ?? DEFAULT_HOME_DASHBOARD_URL_STATE;
+const filter = ref<HomeDashboardTab>(initial.tab);
+const offset = ref((initial.page - 1) * pageSize);
 const createOpen = ref(false);
 const pending = ref<string[]>([]);
 const mutationError = ref('');
@@ -149,6 +161,27 @@ watch(
     mutationError.value = '';
   },
   { flush: 'sync' },
+);
+// 履歴は積まず、今の項目を書き換える（タスク一覧・カレンダーと同じ）
+watch([filter, offset], () => {
+  if (typeof window === 'undefined') return;
+  const url = applyHomeDashboardUrlState(new URL(window.location.href), {
+    tab: filter.value,
+    page: Math.floor(offset.value / pageSize) + 1,
+  });
+  window.history.replaceState(window.history.state, '', url);
+});
+// 同じページへのクライアント遷移（サイドバーのホームを押す等）で URL が変われば追従する。
+// 今の状態と同じなら何もしない
+watch(
+  () => props.initialUrlState,
+  (next) => {
+    const state = next ?? DEFAULT_HOME_DASHBOARD_URL_STATE;
+    const nextOffset = (state.page - 1) * pageSize;
+    if (state.tab === filter.value && nextOffset === offset.value) return;
+    filter.value = state.tab;
+    offset.value = nextOffset;
+  },
 );
 // A completion can remove the last row of a later page.
 watch(
