@@ -31,6 +31,7 @@ mod forge_reviews_integration;
 mod github_http_integration;
 mod github_integration;
 mod github_issue_sync_integration;
+mod github_snippets_integration;
 mod job_max_attempts_integration;
 mod job_retry_limit_integration;
 mod my_tasks_integration;

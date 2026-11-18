@@ -92,7 +92,12 @@ pub struct PushRange<'a> {
     pub page: u32,
 }
 
-fn request(http: &Client, method: Method, url: &str, token: &str) -> reqwest::RequestBuilder {
+pub(super) fn request(
+    http: &Client,
+    method: Method,
+    url: &str,
+    token: &str,
+) -> reqwest::RequestBuilder {
     http.request(method, url)
         .header("Authorization", format!("Bearer {token}"))
         .header("Accept", "application/vnd.github+json")

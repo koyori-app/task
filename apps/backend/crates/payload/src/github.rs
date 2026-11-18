@@ -75,3 +75,36 @@ pub struct GithubConnectRequest {
     pub repo_owner: String,
     pub repo_name: String,
 }
+
+/// `GET /v1/github/snippet` のクエリ。GitHub のパーマリンク
+/// （`/{owner}/{repo}/blob/{sha}/{path}#L{start}-L{end}`）を分解した値。
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct GithubSnippetQuery {
+    pub owner: String,
+    pub repo: String,
+    /// 40 桁のコミット SHA（ブランチ名・短縮 SHA は受けない）
+    pub sha: String,
+    /// リポジトリ直下からのファイルのパス
+    pub path: String,
+    /// 抜粋の最初の行（1 始まり）
+    pub start: u32,
+    /// 抜粋の最後の行。省くと `start` の 1 行だけ
+    #[serde(default)]
+    pub end: Option<u32>,
+}
+
+/// 連携リポジトリのファイルから切り出した行。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct GithubSnippetResponse {
+    pub repo_owner: String,
+    pub repo_name: String,
+    pub sha: String,
+    pub path: String,
+    pub start_line: u32,
+    /// 実際に返した最後の行（ファイルの行数と上限で丸める）
+    pub end_line: u32,
+    pub lines: Vec<String>,
+    /// 上限で打ち切ったときに true
+    pub truncated: bool,
+}
