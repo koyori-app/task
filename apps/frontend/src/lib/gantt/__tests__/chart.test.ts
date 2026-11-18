@@ -10,6 +10,8 @@ const layout: GanttLayout = {
   skipped: 0,
 };
 
+const DEPS = [{ blocker_task_id: 'a', blocked_task_id: 'b', state: 'normal' as const }];
+
 describe('chartRows と chartHeight', () => {
   it('広い画面は課題の行を標準の高さのままにし、群れの見出しに高さを付ける', () => {
     expect(chartRows(layout, false)).toEqual([
@@ -31,6 +33,8 @@ describe('chartRows と chartHeight', () => {
       compact: true,
       progressLine: false,
       backend: 'svg',
+      deps: [],
+      scrollContainer: null,
     });
     expect(props.rowHeight).toBe(STANDARD_ROW_H);
     expect(props.barAlign).toBe('bottom');
@@ -38,7 +42,7 @@ describe('chartRows と chartHeight', () => {
     expect(chartHeight(props.rows, true)).toBe(HEADER_H + GROUP_H + 72);
   });
 
-  it('広い画面でも狭い画面でも端末の格を high に決め、図だけの内側のスクロール域を作らせない', () => {
+  it('外のスクロール域をそのまま渡し、依存の矢印は広い画面だけで渡す', () => {
     for (const compact of [false, true]) {
       const props = chartProps({
         layout,
@@ -50,8 +54,12 @@ describe('chartRows と chartHeight', () => {
         compact,
         progressLine: false,
         backend: 'svg',
+        deps: DEPS,
+        scrollContainer: window,
       });
-      expect(props.deviceTier).toBe('high');
+      expect(props.scrollContainer).toBe(window);
+      expect('deviceTier' in props).toBe(false);
+      expect(props.deps).toEqual(compact ? [] : DEPS);
     }
   });
 });

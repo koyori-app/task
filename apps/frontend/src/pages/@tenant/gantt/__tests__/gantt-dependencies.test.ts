@@ -4,15 +4,16 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import { createPinia } from 'pinia';
 
-// 狭い画面（1024px 未満）の依存の印。画面の幅は useMediaQuery を差し替えて狭くする
-const { GET, page } = vi.hoisted(() => ({
+// 依存の矢印と、狭い画面（1024px 未満）の依存の印。画面の幅は useMediaQuery を差し替えて決める
+const { GET, page, screen } = vi.hoisted(() => ({
   GET: vi.fn(),
   page: { searchAll: {} as Record<string, string[]> },
+  screen: { wide: false },
 }));
 vi.mock('@vueuse/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@vueuse/core')>();
   const { ref: vueRef } = await import('vue');
-  return { ...actual, useMediaQuery: () => vueRef(false) };
+  return { ...actual, useMediaQuery: () => vueRef(screen.wide) };
 });
 vi.mock('vike/client/router', () => ({ navigate: vi.fn() }));
 vi.mock('vike-vue/usePageContext', () => ({
@@ -43,7 +44,7 @@ vi.mock('@koyori-app/arc-vue', async () => {
   return {
     GanttChart: defineComponent({
       name: 'GanttChart',
-      props: ['tasks', 'today'],
+      props: ['tasks', 'today', 'deps', 'scrollContainer', 'deviceTier'],
       emits: ['task-click'],
       setup: () => () => h('div'),
     }),
@@ -61,6 +62,7 @@ enableAutoUnmount(afterEach);
 afterEach(() => {
   GET.mockReset();
   page.searchAll = {};
+  screen.wide = false;
   window.history.replaceState(null, '', '/');
 });
 
@@ -158,5 +160,51 @@ describe('狭い画面の依存の印', () => {
     await wrapper.get('[data-testid="gantt-dependencies-retry"]').trigger('click');
     await flushPromises();
     expect(relationCalls()).toHaveLength(2);
+  });
+});
+
+describe('広い画面の依存の矢印', () => {
+  it('関係に状態を付けて図へ渡す（未完了が阻んで予定開始を過ぎれば待ちで遅れ、阻みが済めば済み）', async () => {
+    screen.wide = true;
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const deps = wrapper.getComponent({ name: 'GanttChart' }).props('deps') as {
+      blocker_task_id: string;
+      blocked_task_id: string;
+      state: string;
+      note?: string;
+    }[];
+    expect(deps).toEqual([
+      { blocker_task_id: 'a', blocked_task_id: 'b', state: 'delayed', note: 'ENG-1 待ち' },
+      { blocker_task_id: 'd', blocked_task_id: 'c', state: 'done' },
+    ]);
+  });
+
+  it('切り替えを切れば矢印を渡さぬ', async () => {
+    screen.wide = true;
+    page.searchAll = { deps: ['off'] };
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(wrapper.getComponent({ name: 'GanttChart' }).props('deps')).toEqual([]);
+  });
+
+  it('図に外のスクロール域を渡し、端末の格は決め打たぬ', async () => {
+    screen.wide = true;
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const chart = wrapper.getComponent({ name: 'GanttChart' });
+    // 試験の頁には縦に巻く祖先が無いので、頁そのもの（window）を巻く域にする
+    expect(chart.props('scrollContainer')).toBe(window);
+    expect(chart.props('deviceTier')).toBeUndefined();
+  });
+
+  it('狭い画面では矢印を描かず、行の添えに印を出す', async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(wrapper.getComponent({ name: 'GanttChart' }).props('deps')).toEqual([]);
   });
 });

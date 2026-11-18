@@ -355,8 +355,12 @@ export const DependencyToggle: Story = {
   beforeEach: () =>
     createMockFetch({
       relations: [
+        // 待ちで遅れ: 未完了の task-4 が、今日（7/15）より前に始まる task-1 を阻む
         { from_task_id: 'task-4', to_task_id: 'task-1' },
+        // 済み: 完了した task-3 が task-5 を阻む
         { from_task_id: 'task-3', to_task_id: 'task-5' },
+        // 普通: task-1 が、まだ始まらぬ task-6（7/27 から）を阻む
+        { from_task_id: 'task-1', to_task_id: 'task-6' },
       ],
     }),
   play: async ({ canvasElement }) => {

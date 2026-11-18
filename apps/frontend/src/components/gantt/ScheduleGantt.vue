@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import LoadErrorState from '@/components/LoadErrorState.vue';
 import { ChevronDown, ChevronLeft, ChevronRight, Loader2 } from '@lucide/vue';
-import { computed, onErrorCaptured, ref, useTemplateRef, watch } from 'vue';
+import { computed, onErrorCaptured, onMounted, ref, shallowRef, useTemplateRef, watch } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
 import { useElementSize, useMediaQuery, useWindowSize } from '@vueuse/core';
 import { navigate } from 'vike/client/router';
@@ -39,6 +39,7 @@ import {
   SCHEDULE_RELATIONS_PATH,
 } from '@/lib/calendar/schedule';
 import { dependencyEdges } from '@/lib/gantt/dependencies';
+import { scrollParentOf } from '@/lib/gantt/scroll-parent';
 import { dateInZone } from '@/lib/calendar/timeline';
 import {
   layoutGantt,
@@ -312,6 +313,11 @@ const backend = computed(() =>
 
 // 図の箱の幅いっぱいに範囲の日を割る
 const chartBox = useTemplateRef<HTMLElement>('chartBox');
+// 頁を縦に巻く外の域。組まれた後に図の箱から辿って決める
+const scrollContainer = shallowRef<HTMLElement | Window | null>(null);
+onMounted(() => {
+  scrollContainer.value = scrollParentOf(chartBox.value);
+});
 const { width: chartBoxWidth } = useElementSize(chartBox);
 const dayWidth = computed(() => fitDayWidth(chartBoxWidth.value, scale.value, compact.value));
 
@@ -326,6 +332,8 @@ const chart = computed(() =>
     compact: compact.value,
     progressLine: progressLine.value,
     backend: backend.value,
+    deps: dependencies.value.edges,
+    scrollContainer: scrollContainer.value,
   }),
 );
 
@@ -590,24 +598,27 @@ const LEGEND_BAR = `linear-gradient(to right, ${GANTT_PALETTE.TierLow} 40%, ${GA
         <span class="inline-flex items-center gap-1" data-testid="gantt-legend-dependency">
           <span
             class="inline-block h-0.5 w-5"
-            style="background: var(--koyori-color-info)"
+            :style="{ background: GANTT_PALETTE.Dep }"
             aria-hidden="true"
+            data-testid="gantt-legend-dep"
           />
           依存
         </span>
         <span class="inline-flex items-center gap-1">
           <span
             class="inline-block w-5 border-t-2 border-dashed"
-            style="border-color: var(--koyori-color-danger)"
+            :style="{ borderColor: GANTT_PALETTE.DepDelayed }"
             aria-hidden="true"
+            data-testid="gantt-legend-dep-delayed"
           />
           待ちで遅れ
         </span>
         <span class="inline-flex items-center gap-1">
           <span
             class="inline-block h-0.5 w-5"
-            style="background: var(--koyori-color-text-disabled)"
+            :style="{ background: GANTT_PALETTE.DepDone }"
             aria-hidden="true"
+            data-testid="gantt-legend-dep-done"
           />
           済み
         </span>

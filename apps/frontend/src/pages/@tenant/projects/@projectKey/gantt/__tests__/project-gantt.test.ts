@@ -194,6 +194,11 @@ describe('プロジェクトのガント', () => {
       GANTT_PALETTE.WarnStroke,
     );
     expect(style('[data-testid="gantt-legend-today"]').background).toBe(GANTT_PALETTE.Today);
+    expect(style('[data-testid="gantt-legend-dep"]').background).toBe(GANTT_PALETTE.Dep);
+    expect(style('[data-testid="gantt-legend-dep-delayed"]').borderColor).toBe(
+      GANTT_PALETTE.DepDelayed,
+    );
+    expect(style('[data-testid="gantt-legend-dep-done"]').background).toBe(GANTT_PALETTE.DepDone);
   });
 
   it('プロジェクトが見つからない時は予定を引かず、見つからない旨を出す', async () => {
