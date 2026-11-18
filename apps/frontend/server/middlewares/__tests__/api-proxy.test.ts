@@ -183,6 +183,141 @@ describe('backend redirects (real fetch)', () => {
   });
 });
 
+/**
+ * MCP の入口。公開 URL は <画面の origin>/api/mcp で、backend の /mcp に届かなければ
+ * MCP クライアントは接続できない。backend の統合テストは /mcp を直接呼ぶので、
+ * 中継の欠落はここでしか捉えられない。mock の fetch では実際に送られるヘッダーと
+ * 本文が分からないので、スタブの backend へ実際の fetch で送る。
+ */
+describe('MCP endpoint (real fetch)', () => {
+  type Seen = { method: string; url: string; headers: Record<string, string>; body: string };
+  let server: Server;
+  let seen: Seen[] = [];
+
+  beforeEach(async () => {
+    seen = [];
+    server = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk: Buffer) => chunks.push(chunk));
+      req.on('end', () => {
+        seen.push({
+          method: req.method ?? '',
+          url: req.url ?? '',
+          headers: Object.fromEntries(
+            Object.entries(req.headers).map(([name, value]) => [name, String(value)]),
+          ),
+          body: Buffer.concat(chunks).toString('utf8'),
+        });
+        if (req.method !== 'POST') {
+          res.writeHead(405, { allow: 'POST' });
+          res.end();
+          return;
+        }
+        if (!req.headers.authorization) {
+          res.writeHead(401, {
+            'content-type': 'application/json',
+            'www-authenticate': 'Bearer',
+          });
+          res.end('{"message":"unauthorized"}');
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end('{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}');
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+    const { port } = server.address() as AddressInfo;
+    vi.stubEnv('API_BASE', `http://127.0.0.1:${port}`);
+    vi.resetModules();
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  });
+
+  async function mcpApp() {
+    const { apiProxyPlugin: plugin } = await import('../api-proxy');
+    return new Elysia().use(plugin);
+  }
+
+  it('forwards POST /api/mcp to the backend /mcp with the headers and body intact', async () => {
+    const proxyApp = await mcpApp();
+    const body = '{"jsonrpc":"2.0","id":1,"method":"tools/list"}';
+
+    const response = await proxyApp.handle(
+      new Request('http://localhost/api/mcp', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer pat-1',
+          accept: 'application/json, text/event-stream',
+          'content-type': 'application/json',
+          'mcp-protocol-version': '2025-11-25',
+          origin: 'https://task.example.com',
+        },
+        body,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('application/json');
+    expect(await response.text()).toBe('{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}');
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ method: 'POST', url: '/mcp', body });
+    expect(seen[0]!.headers).toMatchObject({
+      authorization: 'Bearer pat-1',
+      accept: 'application/json, text/event-stream',
+      'content-type': 'application/json',
+      'mcp-protocol-version': '2025-11-25',
+      origin: 'https://task.example.com',
+    });
+  });
+
+  it('hands the backend 401 and its WWW-Authenticate to the client', async () => {
+    const proxyApp = await mcpApp();
+
+    const response = await proxyApp.handle(
+      new Request('http://localhost/api/mcp', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get('www-authenticate')).toBe('Bearer');
+    expect(await response.json()).toEqual({ message: 'unauthorized' });
+  });
+
+  it.each(['GET', 'DELETE'])('lets the backend answer %s /api/mcp with 405', async (method) => {
+    const proxyApp = await mcpApp();
+
+    const response = await proxyApp.handle(new Request('http://localhost/api/mcp', { method }));
+
+    expect(response.status).toBe(405);
+    expect(seen).toMatchObject([{ method, url: '/mcp' }]);
+  });
+
+  // 足したのは /api/mcp の 1 パスだけ。backend のほかのパスは公開しない
+  it.each(['/api/mcp/extra', '/api/mcpx', '/api/scalar', '/api/jobs', '/api'])(
+    'does not forward %s',
+    async (pathname) => {
+      const proxyApp = await mcpApp();
+
+      const response = await proxyApp.handle(
+        new Request(`http://localhost${pathname}`, { method: 'POST', body: '{}' }),
+      );
+
+      expect(response.status).toBe(404);
+      expect(seen).toHaveLength(0);
+    },
+  );
+});
+
 describe('.env loading', () => {
   const originalCwd = process.cwd();
   let temporaryDirectory: string | undefined;

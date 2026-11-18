@@ -16,6 +16,7 @@ pub mod favicons;
 pub mod forge;
 pub mod forge_merge_effects;
 pub mod github;
+pub mod github_snippets;
 pub mod labels;
 pub mod milestones;
 pub mod my_tasks;

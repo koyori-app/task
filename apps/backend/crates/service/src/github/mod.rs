@@ -13,6 +13,7 @@ pub mod issues;
 pub mod pr_comments;
 pub mod repositories;
 pub mod review_summary_queue;
+pub mod snippets;
 pub mod sync;
 pub mod webhook_events;
 
