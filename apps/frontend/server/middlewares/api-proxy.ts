@@ -159,11 +159,13 @@ async function proxyToBackend(request: Request): Promise<Response> {
 }
 
 /**
- * Dev/prod SSR: forward /api/v1/* to the Rust backend with /api stripped.
+ * Dev/prod SSR: forward /api/v1/* and /api/mcp to the Rust backend with /api stripped.
  * Local SSR routes (/internal/*) stay on Elysia.
+ *
+ * /api/mcp は MCP の入口（backend の POST /mcp）。backend は v1 の外に置いているので、
+ * この 1 つのパスだけを足す。/api/mcp/* やほかの /api/* は転送しない
+ * （backend には /scalar や管理用のパスもあり、公開する範囲を広げないため）。
  */
-export const apiProxyPlugin = new Elysia({ name: 'api-proxy' }).all(
-  '/api/v1/*',
-  ({ request }) => proxyToBackend(request),
-  { parse: 'none' },
-);
+export const apiProxyPlugin = new Elysia({ name: 'api-proxy' })
+  .all('/api/v1/*', ({ request }) => proxyToBackend(request), { parse: 'none' })
+  .all('/api/mcp', ({ request }) => proxyToBackend(request), { parse: 'none' });
