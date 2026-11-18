@@ -101,9 +101,22 @@ fn set_priority(body: &mut Value, priority: Option<String>) {
     }
 }
 
+/// 任意の引数の空文字（空白だけを含む）を「省略」と読む。
+///
+/// 使わない引数に `""` を入れてくるクライアントがある。名前として解決すると、
+/// 束縛が 1 件の PAT でも `tenant: ""` が「テナントが見つからない」になる。
+/// 本文（`title`・`description`・`body`）には付けない
+fn blank_as_none<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<String>::deserialize(deserializer)?.filter(|value| !value.trim().is_empty()))
+}
+
 #[derive(Deserialize, JsonSchema)]
 struct TenantArgs {
     /// Tenant name or UUID. Only needed when the token is bound to more than one tenant
+    #[serde(default, deserialize_with = "blank_as_none")]
     tenant: Option<String>,
 }
 
@@ -139,6 +152,7 @@ struct ListProjectOptionsArgs {
     /// Which list to return: statuses, labels, task_types, milestones, sprints or assignable_users
     kind: ProjectOptionKind,
     /// Tenant name or UUID. Only needed when the token is bound to more than one tenant
+    #[serde(default, deserialize_with = "blank_as_none")]
     tenant: Option<String>,
 }
 
@@ -147,16 +161,19 @@ struct ListTasksArgs {
     /// Project key or UUID
     project: String,
     /// Filter expression of the task list (same syntax as the filter box of the list screen). Omit for no filter
+    #[serde(default, deserialize_with = "blank_as_none")]
     q: Option<String>,
     /// List archived tasks instead of active ones
     is_archived: Option<bool>,
     /// created_at_desc (default), or title / assignee / priority / deadline followed by _asc or _desc
+    #[serde(default, deserialize_with = "blank_as_none")]
     sort: Option<String>,
     /// Tasks per page (1-200)
     limit: Option<u64>,
     /// Number of tasks to skip
     offset: Option<u64>,
     /// Tenant name or UUID. Only needed when the token is bound to more than one tenant
+    #[serde(default, deserialize_with = "blank_as_none")]
     tenant: Option<String>,
 }
 
@@ -171,6 +188,7 @@ struct SearchTasksArgs {
     /// Number of hits to skip
     offset: Option<u64>,
     /// Tenant name or UUID. Only needed when the token is bound to more than one tenant
+    #[serde(default, deserialize_with = "blank_as_none")]
     tenant: Option<String>,
 }
 
@@ -178,9 +196,11 @@ struct SearchTasksArgs {
 struct TaskArgs {
     /// Task ref (KEY-N or UUID)
     task: String,
-    /// Project key or UUID. Required when `task` is a UUID
+    /// Project key or UUID. Required when `task` is a UUID; ignored when `task` is KEY-N
+    #[serde(default, deserialize_with = "blank_as_none")]
     project: Option<String>,
     /// Tenant name or UUID. Only needed when the token is bound to more than one tenant
+    #[serde(default, deserialize_with = "blank_as_none")]
     tenant: Option<String>,
 }
 
@@ -193,30 +213,40 @@ struct CreateTaskArgs {
     /// Task description (Markdown)
     description: Option<String>,
     /// Status name or UUID (default: the project's default status)
+    #[serde(default, deserialize_with = "blank_as_none")]
     status: Option<String>,
     /// CriticalFire, Critical, High, Medium, Low or Trivial
+    #[serde(default, deserialize_with = "blank_as_none")]
     priority: Option<String>,
     /// Parent task UUID. A new task takes the parent's deadlines and planned start unless set here
+    #[serde(default, deserialize_with = "blank_as_none")]
     parent_task_id: Option<String>,
     /// Label UUIDs
     label_ids: Option<Vec<String>>,
     /// User UUIDs to assign
     assignee_ids: Option<Vec<String>>,
     /// Task type UUID
+    #[serde(default, deserialize_with = "blank_as_none")]
     task_type_id: Option<String>,
     /// Milestone UUID
+    #[serde(default, deserialize_with = "blank_as_none")]
     milestone_id: Option<String>,
     /// Sprint UUID
+    #[serde(default, deserialize_with = "blank_as_none")]
     sprint_id: Option<String>,
     /// Soft deadline (RFC 3339, or YYYY-MM-DD for the start of that day in UTC)
+    #[serde(default, deserialize_with = "blank_as_none")]
     soft_deadline: Option<String>,
     /// Hard deadline (RFC 3339, or YYYY-MM-DD for the start of that day in UTC)
+    #[serde(default, deserialize_with = "blank_as_none")]
     hard_deadline: Option<String>,
     /// Planned start date (YYYY-MM-DD)
+    #[serde(default, deserialize_with = "blank_as_none")]
     planned_start_on: Option<String>,
     /// Estimate in minutes (1 or more)
     estimated_minutes: Option<i32>,
     /// Tenant name or UUID. Only needed when the token is bound to more than one tenant
+    #[serde(default, deserialize_with = "blank_as_none")]
     tenant: Option<String>,
 }
 
@@ -224,7 +254,8 @@ struct CreateTaskArgs {
 struct UpdateTaskArgs {
     /// Task ref (KEY-N or UUID)
     task: String,
-    /// Project key or UUID. Required when `task` is a UUID
+    /// Project key or UUID. Required when `task` is a UUID; ignored when `task` is KEY-N
+    #[serde(default, deserialize_with = "blank_as_none")]
     project: Option<String>,
     /// New title
     title: Option<String>,
@@ -233,8 +264,10 @@ struct UpdateTaskArgs {
     /// Remove the description
     clear_description: Option<bool>,
     /// Status name or UUID
+    #[serde(default, deserialize_with = "blank_as_none")]
     status: Option<String>,
     /// CriticalFire, Critical, High, Medium, Low or Trivial
+    #[serde(default, deserialize_with = "blank_as_none")]
     priority: Option<String>,
     /// Progress percentage (0-100)
     progress_pct: Option<i16>,
@@ -245,6 +278,7 @@ struct UpdateTaskArgs {
     /// true moves the task into the archive, false brings it back
     is_archived: Option<bool>,
     /// Tenant name or UUID. Only needed when the token is bound to more than one tenant
+    #[serde(default, deserialize_with = "blank_as_none")]
     tenant: Option<String>,
 }
 
@@ -252,13 +286,16 @@ struct UpdateTaskArgs {
 struct AddTaskCommentArgs {
     /// Task ref (KEY-N or UUID)
     task: String,
-    /// Project key or UUID. Required when `task` is a UUID
+    /// Project key or UUID. Required when `task` is a UUID; ignored when `task` is KEY-N
+    #[serde(default, deserialize_with = "blank_as_none")]
     project: Option<String>,
     /// Comment body (Markdown)
     body: String,
     /// Comment UUID to reply to
+    #[serde(default, deserialize_with = "blank_as_none")]
     parent_comment_id: Option<String>,
     /// Tenant name or UUID. Only needed when the token is bound to more than one tenant
+    #[serde(default, deserialize_with = "blank_as_none")]
     tenant: Option<String>,
 }
 
@@ -266,13 +303,15 @@ struct AddTaskCommentArgs {
 struct LinkPullRequestArgs {
     /// Task ref (KEY-N or UUID)
     task: String,
-    /// Project key or UUID. Required when `task` is a UUID
+    /// Project key or UUID. Required when `task` is a UUID; ignored when `task` is KEY-N
+    #[serde(default, deserialize_with = "blank_as_none")]
     project: Option<String>,
     /// Pull request number
     number: i32,
     /// Complete the task when the pull request is merged
     closes: Option<bool>,
     /// Tenant name or UUID. Only needed when the token is bound to more than one tenant
+    #[serde(default, deserialize_with = "blank_as_none")]
     tenant: Option<String>,
 }
 
@@ -823,6 +862,33 @@ mod tests {
             parse_date("planned_start_on", "12/01").unwrap_err().message,
             "planned_start_on must be YYYY-MM-DD"
         );
+    }
+
+    #[test]
+    fn blank_optional_arguments_are_read_as_omitted() {
+        let args: TaskArgs =
+            serde_json::from_value(json!({ "task": "KEY-1", "project": "", "tenant": "  " }))
+                .unwrap();
+        assert_eq!(args.project, None);
+        assert_eq!(args.tenant, None);
+
+        let args: TaskArgs =
+            serde_json::from_value(json!({ "task": "KEY-1", "project": null })).unwrap();
+        assert_eq!(args.project, None);
+        assert_eq!(args.tenant, None);
+
+        let args: TaskArgs =
+            serde_json::from_value(json!({ "task": "KEY-1", "tenant": "acme" })).unwrap();
+        assert_eq!(args.tenant.as_deref(), Some("acme"));
+
+        // 本文は空でもそのまま渡し、検証を API に任せる
+        let args: UpdateTaskArgs = serde_json::from_value(
+            json!({ "task": "KEY-1", "description": "", "status": "", "priority": "" }),
+        )
+        .unwrap();
+        assert_eq!(args.description.as_deref(), Some(""));
+        assert_eq!(args.status, None);
+        assert_eq!(args.priority, None);
     }
 
     #[test]

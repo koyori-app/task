@@ -18,7 +18,8 @@ CLI を入れにくい環境で、CLI の代わりに使うためのものであ
 
 ### エンドポイント
 
-公開 URL は `<画面の origin>/api/mcp` である。backend から見たパスは `/mcp` で、frontend のサーバーが `/api` を外して転送する。
+公開 URL は `<画面の origin>/api/mcp` である。backend から見たパスは `/mcp` で、frontend のサーバーが `/api/mcp` を backend の `/mcp` へ転送する。
+frontend のサーバーが backend へ転送するのは `/api/v1/` で始まるパスと `/api/mcp` だけである。
 
 通信は Streamable HTTP で、サーバーはセッションを持たない。
 1 つの要求に、`Content-Type: application/json` の応答を 1 つ返す。
@@ -49,12 +50,15 @@ SDK の rmcp 3.11 が対応するバージョンの要求を受ける。
 ### ツールの実行
 
 ツールは REST API を backend の中で呼び直し、API の応答の JSON をそのまま文字列で返す。
-呼び直すときに渡すヘッダーは `Authorization` だけで、Cookie は渡さない。
+呼び直すときに元の要求から引き継ぐヘッダーは `Authorization` だけで、Cookie は渡さない。
 そのため、ツールでできる操作は PAT の scope、テナントの束縛、プロジェクトの束縛で決まり、REST API を直接呼んだときと同じになる。
 
 失敗は `isError: true` の結果として返す。
 文面は API の状態コードと `message` を並べたもので、例は `403 forbidden`、`404 not-found`、`409 github-integration-missing` である。
 引数の誤りは API を呼ぶ前に `label_ids must be a UUID` のような文面で返す。
+
+任意の引数のうち `tenant`、`project`、`status`、`priority`、`q`、`sort`、ID、日付は、空文字を省略として読む。
+`title`、`description`、`body` は空文字のまま API へ渡す。
 
 ### テナントの決め方
 
@@ -74,7 +78,8 @@ PAT を複数のテナントに束縛していて `tenant` を省くと、候補
 `project` はプロジェクトのキーか UUID で指す。キーは大文字と小文字を区別しない。
 
 `task` は `KEY-N` の形か UUID で指す。
-`KEY-N` のときはキーからプロジェクトを決めるので、`project` は要らない。
+`KEY-N` のときはキーからプロジェクトを決め、`project` は読まない。
+`KEY-N` のキーも大文字と小文字を区別しない。
 UUID のときは `project` が必須で、無ければ `project is required when task is a UUID` を返す。
 
 `status` は状態の名前か UUID で指す。
@@ -165,8 +170,9 @@ Claude Code のクラウド環境では、環境の設定で環境変数 `TASK_T
 | `tenant` が名前 | `read:tenant` |
 | `status` が名前、または `create_task` で `status` を省く | `read:task` |
 
-ID を引く呼び出しが 403 のときは、足りない scope と、UUID で渡せば通ることを文面に添える。
-例は `403 forbidden (resolving project key "TASK" needs the read:project scope; pass the project UUID instead)` である。
+ID を引く呼び出しが 403 のときは、考えられる原因を文面に添える。
+403 は scope が足りないときのほか、PAT を束縛していないテナントやプロジェクトを指したときにも返るので、原因は断定しない。
+例は `403 forbidden (could not look up project key "TASK": the token may lack the read:project scope, or it is not allowed in this tenant; if the scope is missing, pass the project UUID instead)` である。
 
 ## 未実装と既知の制限
 
@@ -187,3 +193,4 @@ ID を引く呼び出しが 403 のときは、足りない scope と、UUID で
 | 2026-11-18 | 認証は PAT の Bearer だけにし、Cookie と Device Token を断る | PAT は scope、テナント、プロジェクトで渡す範囲を絞れる。Device Token は scope を持たず、束縛したテナントも引けない。OAuth は TASK-563 で扱う |
 | 2026-11-18 | 最初のツールを 12 個にする | タスクを読む、状態を変える、コメントする、PR をつなぐ流れを満たす。残りは同じ形で TASK-560 と TASK-561 で足す |
 | 2026-11-18 | `.mcp.json` をリポジトリに置かず、設定例を書く | URL は配置先ごとに違う。接続先が決まってから TASK-564 で足す |
+| 2026-11-18 | frontend のサーバーの転送に `/api/mcp` の 1 パスだけを足す | backend は frontend のサーバー越しにしか公開されない。`/api` 全体を転送すると、backend の API 仕様の画面などの `v1` の外のパスまで公開される |

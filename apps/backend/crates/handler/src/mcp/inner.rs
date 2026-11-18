@@ -203,6 +203,70 @@ mod tests {
         assert_eq!(request_target(&["v1", "tenants"], &[]), "/v1/tenants");
     }
 
+    /// 受けた要求のヘッダー名を返すだけのルーター。
+    fn header_echo() -> Router {
+        Router::new().fallback(|request: Request<Body>| async move {
+            let mut names: Vec<String> = request
+                .headers()
+                .keys()
+                .map(|name| name.as_str().to_string())
+                .collect();
+            names.sort();
+            axum::Json(serde_json::json!({
+                "headers": names,
+                "authorization": request
+                    .headers()
+                    .get(AUTHORIZATION)
+                    .and_then(|value| value.to_str().ok()),
+            }))
+        })
+    }
+
+    /// 内向きの呼び出しへ外側から写すのは `Authorization` だけ。`Cookie` を写すと、
+    /// Bearer を見ない経路が足されたときに PAT に無い権限がセッションで通る。
+    /// 既存の認証は Bearer を優先するので、統合テストでは写しても落ちない
+    #[tokio::test]
+    async fn only_authorization_is_copied_from_the_outer_request() {
+        let (parts, ()) = Request::builder()
+            .uri("/mcp")
+            .header(AUTHORIZATION, "Bearer pat-1")
+            .header("cookie", "session=abc")
+            .header("origin", "https://evil.example")
+            .header("x-forwarded-for", "203.0.113.9")
+            .header("mcp-protocol-version", "2025-11-25")
+            .body(())
+            .unwrap()
+            .into_parts();
+        let api = InnerApi::from_parts(&header_echo(), &parts).unwrap();
+
+        let seen = api.get(&["v1", "tenants"], &[]).await.unwrap();
+        assert_eq!(
+            seen["headers"],
+            serde_json::json!(["accept", "authorization"])
+        );
+        assert_eq!(seen["authorization"], "Bearer pat-1");
+
+        let seen = api
+            .post(&["v1", "tenants"], &serde_json::json!({}))
+            .await
+            .unwrap();
+        assert_eq!(
+            seen["headers"],
+            serde_json::json!(["accept", "authorization", "content-type"])
+        );
+    }
+
+    #[test]
+    fn request_without_authorization_is_refused() {
+        let (parts, ()) = Request::builder()
+            .uri("/mcp")
+            .header("cookie", "session=abc")
+            .body(())
+            .unwrap()
+            .into_parts();
+        assert!(InnerApi::from_parts(&header_echo(), &parts).is_err());
+    }
+
     #[test]
     fn error_message_prefers_the_api_message() {
         assert_eq!(error_message(br#"{"message":"forbidden"}"#), "forbidden");

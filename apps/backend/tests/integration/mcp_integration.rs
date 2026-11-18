@@ -764,7 +764,7 @@ async fn resolving_a_key_needs_read_project_and_uuids_do_not() {
     assert_eq!(
         outcome.error(),
         format!(
-            "403 forbidden (resolving project key \"{}\" needs the read:project scope; pass the project UUID instead)",
+            "403 forbidden (could not look up project key \"{}\": the token may lack the read:project scope, or it is not allowed in this tenant; if the scope is missing, pass the project UUID instead)",
             fx.project_key
         )
     );
@@ -940,9 +940,107 @@ async fn tenant_can_be_passed_by_name() {
     assert_eq!(
         outcome.error(),
         format!(
-            "403 forbidden (resolving tenant \"{display_id}\" needs the read:tenant scope; pass the tenant UUID instead)"
+            "403 forbidden (could not look up tenant \"{display_id}\" by name: the token may lack the read:tenant scope; if so, pass the tenant UUID instead)"
         )
     );
+}
+
+/// プロジェクトのキーは大文字小文字を区別しない。`KEY-N` も同じ綴りで通る
+#[tokio::test]
+async fn lowercase_task_reference_resolves_to_the_same_task() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+    let (reference, id) = create_task(&app, &token, &fx, "小文字で指す").await;
+
+    let fetched = call(
+        &app,
+        &token,
+        "get_task",
+        json!({ "task": reference.to_lowercase() }),
+    )
+    .await
+    .json();
+    assert_eq!(fetched["id"], id);
+
+    // 対照: 番号が違えば 404 のまま
+    let outcome = call(
+        &app,
+        &token,
+        "get_task",
+        json!({ "task": format!("{}-99999", fx.project_key.to_lowercase()) }),
+    )
+    .await;
+    assert_eq!(outcome.error(), "404 not-found");
+}
+
+/// 使わない引数に空文字を入れてくるクライアントがある。空文字は省略として読む
+#[tokio::test]
+async fn blank_optional_arguments_are_treated_as_omitted() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    // read:tenant が無いので、空文字を名前として引くと 403 になる PAT
+    let token = app
+        .insert_pat(
+            fx.user.id,
+            fx.tp.tenant_id,
+            vec![Scope::ReadProject, Scope::WriteTask],
+            None,
+        )
+        .await;
+
+    let created = call(
+        &app,
+        &token,
+        "create_task",
+        json!({
+            "project": fx.project_key,
+            "title": "空文字の引数",
+            "tenant": "",
+            "status": " ",
+            "priority": "",
+            "parent_task_id": "",
+        }),
+    )
+    .await
+    .json();
+    assert_eq!(created["status_id"], fx.todo.to_string());
+
+    let reference = format!("{}-{}", fx.project_key, created["seq_id"]);
+    let fetched = call(
+        &app,
+        &token,
+        "get_task",
+        json!({ "task": reference, "project": "", "tenant": "" }),
+    )
+    .await
+    .json();
+    assert_eq!(fetched["id"], created["id"]);
+}
+
+/// 解決の 403 は scope の不足とは限らない。束縛の外のテナントでは、scope があっても 403 になる
+#[tokio::test]
+async fn forbidden_while_resolving_does_not_claim_the_scope_is_missing() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+    let other_tenant = insert_tenant(&app.state.db, fx.user.id).await;
+
+    let outcome = call(
+        &app,
+        &token,
+        "get_task",
+        json!({ "task": "KEY-1", "tenant": other_tenant.to_string() }),
+    )
+    .await;
+
+    let message = outcome.error();
+    assert!(message.starts_with("403 forbidden ("), "{message}");
+    assert!(
+        message.contains("or it is not allowed in this tenant"),
+        "{message}"
+    );
+    assert!(!message.contains("needs the read:project"), "{message}");
 }
 
 #[tokio::test]
@@ -1002,7 +1100,9 @@ async fn missing_task_is_404() {
     assert_eq!(outcome.error(), "404 not-found");
 }
 
-/// 内向きの呼び出しに Cookie を渡さない。渡すと、PAT に無い権限がセッションで通る
+/// PAT とセッション Cookie を両方付けても、判定は PAT の scope で行う。
+/// 内向きの呼び出しへ Cookie を写さないこと自体は、`handler` の単体テスト
+/// （`mcp::inner` の `only_authorization_is_copied_from_the_outer_request`）で固定している
 #[tokio::test]
 async fn session_cookie_does_not_widen_the_token_scope() {
     let mut app = TestApp::new().await;

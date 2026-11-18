@@ -38,7 +38,7 @@ pub(super) async fn tenant_id(api: &InnerApi, tenant: Option<&str>) -> Result<St
     let tenants = api.get(&["v1", "tenants"], &[]).await.map_err(|failure| {
         failure.explain_forbidden(|| {
             format!(
-                "resolving tenant \"{name}\" needs the read:tenant scope; pass the tenant UUID instead"
+                "could not look up tenant \"{name}\" by name: the token may lack the read:tenant scope; if so, pass the tenant UUID instead"
             )
         })
     })?;
@@ -123,21 +123,44 @@ pub(super) async fn project_id(
     if is_uuid(project) {
         return Ok(project.to_string());
     }
+    Ok(find_project_by_key(api, tenant_id, project).await?.id)
+}
+
+/// キーから引いたプロジェクト。`key` は保存されている綴り（入力の大文字小文字ではない）
+struct FoundProject {
+    id: String,
+    key: String,
+}
+
+/// 403 は scope の不足とは限らない（束縛の外のテナントでも 403）。原因を断定せずに添える
+async fn find_project_by_key(
+    api: &InnerApi,
+    tenant_id: &str,
+    key: &str,
+) -> Result<FoundProject, ToolFailure> {
     let projects = api
         .get(&["v1", "tenants", tenant_id, "projects"], &[])
         .await
         .map_err(|failure| {
             failure.explain_forbidden(|| {
                 format!(
-                    "resolving project key \"{project}\" needs the read:project scope; pass the project UUID instead"
+                    "could not look up project key \"{key}\": the token may lack the read:project scope, or it is not allowed in this tenant; if the scope is missing, pass the project UUID instead"
                 )
             })
         })?;
     list(&projects)
         .iter()
-        .find(|candidate| str_field(candidate, "key").eq_ignore_ascii_case(project))
-        .map(|found| str_field(found, "id").to_string())
-        .ok_or_else(|| ToolFailure::new(format!("Project not found: {project}")))
+        .find(|candidate| str_field(candidate, "key").eq_ignore_ascii_case(key))
+        .map(|found| FoundProject {
+            id: str_field(found, "id").to_string(),
+            key: str_field(found, "key").to_string(),
+        })
+        .ok_or_else(|| ToolFailure::new(format!("Project not found: {key}")))
+}
+
+/// `KEY-N` のうち番号の部分（最後の `-` の後ろ）。
+fn seq_number(task_id: &str) -> &str {
+    task_id.rsplit('-').next().unwrap_or(task_id)
 }
 
 /// タスクの指し方。`KEY-42` は API がそのまま解決できるので文字列のまま渡す。
@@ -184,7 +207,13 @@ pub(super) async fn task_location(
         TaskRef::Seq {
             project_key,
             task_id,
-        } => Ok((project_id(api, tenant_id, &project_key).await?, task_id)),
+        } => {
+            // キーは大文字小文字を無視して引く。API はタスクの `KEY-N` を保存した綴りで
+            // 照合するので、見つけたプロジェクトのキーで組み直して渡す（`task-42` も通る）
+            let found = find_project_by_key(api, tenant_id, &project_key).await?;
+            let task_id = format!("{}-{}", found.key, seq_number(&task_id));
+            Ok((found.id, task_id))
+        }
         TaskRef::Uuid(uuid) => {
             let project = project
                 .ok_or_else(|| ToolFailure::new("project is required when task is a UUID"))?;
@@ -209,7 +238,7 @@ pub(super) async fn list_statuses(
         .await
         .map_err(|failure| {
             failure.explain_forbidden(|| {
-                "resolving the status needs the read:task scope; pass the status UUID instead"
+                "could not list the statuses to resolve the status: the token may lack the read:task scope, or it is not allowed in this project; if the scope is missing, pass the status UUID instead"
                     .to_string()
             })
         })?;
@@ -320,6 +349,12 @@ mod tests {
                 task_id: "KEY-1".into()
             }
         );
+    }
+
+    #[test]
+    fn seq_number_is_the_part_after_the_last_dash() {
+        assert_eq!(seq_number("KEY-1"), "1");
+        assert_eq!(seq_number("my-key-12"), "12");
     }
 
     #[test]
