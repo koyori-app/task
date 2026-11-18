@@ -1,0 +1,77 @@
+# CHANGELOG.md と GitHub Release の本文を作る git-cliff の設定。scripts/changelog.sh から呼ぶ
+# （PR の一覧を GitHub から取って CHANGELOG_PR_MAP に渡すので、git-cliff を直に呼ばない）。
+#
+# 1 行 = 1 PR。main へ入った PR のマージコミットと squash コミット（題の末尾が (#N)）だけを拾い、
+# PR の中の個々のコミットと main へ直接積んだコミットは載せない。
+# スタック PR は、いちばん上の PR のマージコミット 1 つで下の PR もまとめて入る。コミットからは
+# 下の PR が分からないので、CHANGELOG_PR_MAP（マージコミットの SHA・PR 番号・題の TSV）で
+# 1 コミットを PR の数だけの行に広げ、split_commits で 1 行ずつの項目にする。
+
+[changelog]
+header = """
+# Changelog
+
+このファイルは git-cliff（cliff.toml）が生成する。手で編集しない。
+"""
+body = """
+{% if version -%}
+## [{{ version | trim_start_matches(pat="v") }}]({% if previous.version %}https://github.com/koyori-app/task/compare/{{ previous.version }}...{{ version }}{% else %}https://github.com/koyori-app/task/releases/tag/{{ version }}{% endif %}) - {{ timestamp | date(format="%Y-%m-%d", timezone="Asia/Tokyo") }}
+{%- else -%}
+## 未リリース
+{%- endif %}
+{% if message %}
+{{ message | trim }}
+{% endif -%}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim }}
+
+{% for commit in commits -%}
+- {% if commit.breaking %}**破壊的変更** {% endif %}{% if commit.scope %}**{{ commit.scope }}**: {% endif %}{{ commit.message | trim }}
+{% endfor -%}
+{% endfor -%}
+"""
+trim = false
+# 生成した全文（タグのメッセージを含む）にかける。PR へのリンクにした残りの #N と TASK-N をリンクにする
+postprocessors = [
+  # 語の境界は ASCII の英数字だけで見る（\w と \b は日本語の文字も語の一部と見るので、
+  # 「これでTASK-5」「TASK-509の対応」がリンクにならない）。scripts/changelog_pr_map.py と同じ規則
+  # #N は Issue へのリンク（GitHub は PR の番号なら PR へ送る）
+  { pattern = '(^|[^\[A-Za-z0-9_&])#([0-9]+)(?-u:\b)', replace = "$1[#$2](https://github.com/koyori-app/task/issues/$2)" },
+  # TASK-N は task のタスクへのリンク
+  { pattern = '(^|[^\[/A-Za-z0-9_])TASK-([0-9]+)(?-u:\b)', replace = "$1[TASK-$2](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-$2)" },
+]
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+# 前処理と区分けは、まずコミット全体に、次に 1 行ずつにもう一度かかる。
+# 下の前処理はどれも、2 度かけても結果が変わらない形にしてある（リンクにした行は (#N) で終わらない）
+split_commits = true
+tag_pattern = '^v[0-9]+\.[0-9]+\.[0-9]+$'
+sort_commits = "oldest"
+commit_preprocessors = [
+  # マージコミット: 本文 1 行目が PR の題
+  { pattern = '^Merge pull request #(\d+) from [^\n]+\n+([^\n]+)[\s\S]*$', replace = "$2 (#$1)" },
+  # 本文の無いマージコミット: 枝の名前 type/slug から題を作る（PR の一覧が取れていれば次の段で本当の題に替わる）
+  { pattern = '^Merge pull request #(\d+) from [^/\s]+/([a-z]+)/(\S+)\s*$', replace = "$2: $3 (#$1)" },
+  # squash コミット: 2 行目以降を捨てる
+  { pattern = '^([^\n]*\(#\d+\))[ \t]*\n[\s\S]*$', replace = "$1" },
+  # そのコミットで入った PR を 1 行ずつに広げる（題は GitHub のものを使う）。一覧に無ければそのまま
+  { pattern = '^[^\n]*\(#\d+\)$', replace_command = '''msg=$(cat); out=$(awk -F'\t' -v sha="$COMMIT_SHA" '$1 == sha { print $3 " (#" $2 ")" }' "${CHANGELOG_PR_MAP:-/dev/null}"); printf '%s' "${out:-$msg}"''' },
+  # 行末の (#N) は PR へのリンク
+  { pattern = '(?m)\(#(\d+)\)$', replace = "([#$1](https://github.com/koyori-app/task/pull/$1))" },
+]
+commit_parsers = [
+  { message = '^Merge ', skip = true },
+  # PR の数だけの行に広げたコミット。1 行ずつに分けてから下の規則で区分けし直す
+  { message = '^[^\n]*\(\[#\d+\]\([^\n]*\)\)\n', group = "stack" },
+  { message = '^(chore|ci|test|style|build|renovate|dependabot)(\(|!|:)', skip = true },
+  { message = '^\w+\(deps[^)\n]*\)', skip = true },
+  { message = '^feat[^\n]*\(\[#\d+\]\([^\n]*\)\)$', group = "<!-- 0 -->機能追加" },
+  { message = '^fix[^\n]*\(\[#\d+\]\([^\n]*\)\)$', group = "<!-- 1 -->修正" },
+  { message = '^perf[^\n]*\(\[#\d+\]\([^\n]*\)\)$', group = "<!-- 2 -->性能" },
+  { message = '^refactor[^\n]*\(\[#\d+\]\([^\n]*\)\)$', group = "<!-- 3 -->リファクタリング" },
+  { message = '^docs[^\n]*\(\[#\d+\]\([^\n]*\)\)$', group = "<!-- 4 -->ドキュメント" },
+  { message = '^[^\n]*\(\[#\d+\]\([^\n]*\)\)$', group = "<!-- 5 -->その他" },
+  { message = '', skip = true },
+]

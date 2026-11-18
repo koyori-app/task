@@ -5,6 +5,7 @@ name: Release CLI
 #
 # pull_request でも同じ matrix を組み立てるが、そちらは公開しない。リリース経路を
 # タグ push で初めて試すと、壊れていたときにリリースそのものが作れない。
+# リリースの本文は git-cliff（cliff.toml）が作る（notes ジョブ）。
 on:
   push:
     tags:
@@ -23,6 +24,13 @@ on:
       - 'apps/backend/.cargo/**'
       - '.github/workflows/release-cli.yml'
       - 'rust-toolchain.toml'
+      # リリースの本文（notes ジョブ）
+      - 'cliff.toml'
+      - 'CHANGELOG.md'
+      - 'scripts/changelog.sh'
+      - 'scripts/changelog_pr_map.py'
+      - 'scripts/changelog_pr_map_test.py'
+      - 'scripts/changelog-fixtures/**'
   workflow_dispatch:
 
 concurrency:
@@ -174,11 +182,76 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  # リリースの本文を git-cliff で作る。PR でも未リリースの分で作れることと、
+  # scripts/changelog.sh check（cliff.toml の固定の検査と CHANGELOG.md のずれ）を確かめる
+  notes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
+      # スタック PR の下の PR を拾うためにマージ済みの PR の一覧を読む
+      pull-requests: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # 全てのタグと履歴が要る
+          fetch-depth: 0
+          persist-credentials: false
+
+      # checkout が注釈付きタグをコミットへの参照に置き換えることがあり、そのままだと
+      # タグのメッセージが本文から落ちる。リポジトリは PUBLIC なので認証なしで取り直せる
+      - name: Fetch the annotated tag
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          if [ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" != tag ]; then
+            git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          fi
+
+      # 版は scripts/changelog.sh の GIT_CLIFF_VERSION と揃える
+      - name: Install git-cliff
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: git-cliff@2.14.2
+
+      # 検査は GitHub の上の今の PR の題・本文を読むので、マージ済みの PR を後から直すと落ちる。
+      # タグの push で落とすとリリースと無関係な理由で公開が止まるので、PR と手動実行だけで回す
+      - name: Check the changelog
+        if: github.event_name != 'push' || github.ref_type != 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/changelog.sh check
+
+      # タグの push はその版の節を、それ以外は未リリースの分を作る（v0.0.0 は存在しないタグ）
+      - name: Generate the release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            scripts/changelog.sh notes "$GITHUB_REF_NAME" > release-notes.md
+          else
+            scripts/changelog.sh notes v0.0.0 > release-notes.md
+          fi
+          cat release-notes.md >> "$GITHUB_STEP_SUMMARY"
+          grep -q '^## \[' release-notes.md || { echo "::error::リリースの本文に版の見出しがありません"; exit 1; }
+
+      # 名前を release ジョブの pattern: task-* に当てない（配布物に混ぜない）
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-notes
+          path: release-notes.md
+          if-no-files-found: error
+
   release:
     # 全ての target がビルドできたときだけ公開する（壊れた配布物を出さない）。
     # 版を名乗るのはタグの push だけ（Derive the version from the tag）なので、
     # タグを指定した手動実行のビルド（版 0.1.0）は公開しない
-    needs: build
+    needs: [build, notes]
     if: github.event_name == 'push' && github.ref_type == 'tag'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -196,6 +269,13 @@ jobs:
           pattern: task-*
           merge-multiple: true
           path: dist
+
+      # dist/* は添付と SHA256SUMS の対象なので、本文は別の場所に落とす
+      - name: Download the release notes
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-notes
+          path: notes
 
       - name: Install cosign
         uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
@@ -236,11 +316,12 @@ jobs:
           set -euo pipefail
           ls -l dist
 
-          # 同じタグで作り直したときも添付をやり直せるようにする
+          # 同じタグで作り直したときも添付をやり直せるようにする。既にあるリリースの
+          # 本文は書き換えない（手で直した本文を上書きしない）
           if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" dist/* --clobber
           else
             gh release create "$GITHUB_REF_NAME" dist/* \
               --title "$GITHUB_REF_NAME" \
-              --generate-notes
+              --notes-file notes/release-notes.md
           fi
