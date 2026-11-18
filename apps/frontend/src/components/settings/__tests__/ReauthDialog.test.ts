@@ -15,6 +15,7 @@ const jsonResponse = (data: unknown, status = 200) =>
 const STALE = {
   fresh: false,
   expires_at: null,
+  remaining_secs: null,
   window_secs: 300,
   methods: { password: false, passkey: true, oauth: [] },
 };
@@ -156,5 +157,61 @@ describe('ReauthDialog の問いの入れ替わり', () => {
     expect(testid('reauth-dialog').closest('dialog')?.textContent).toContain(
       'Google の連携を追加するには本人確認が要りますが',
     );
+  });
+});
+
+describe('ReauthDialog の通信の切れ', () => {
+  function stubOffline(methods: { password: boolean; passkey: boolean }) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (req: Request) => {
+        const { pathname } = new URL(req.url, 'http://localhost');
+        if (pathname.endsWith('/v1/auth/reauth')) {
+          return jsonResponse({ ...STALE, methods: { ...methods, oauth: [] } });
+        }
+        // 本人確認の口へ届く前に通信が切れた
+        throw new TypeError('Failed to fetch');
+      }),
+    );
+  }
+
+  it('パスワードで確かめる最中に切れたら、誤りを出してボタンを戻す', async () => {
+    stubOffline({ password: true, passkey: false });
+    mount(ReauthDialog, { props: { returnPath: '/settings/security' }, attachTo: document.body });
+    let settled = false;
+    void requireRecentAuth({ kind: 'set-password' }).then(() => (settled = true));
+    await flushPromises();
+
+    testid('reauth-method-password').click();
+    await flushPromises();
+    const input = document.body.querySelector<HTMLInputElement>('#reauth-password')!;
+    input.value = 'Whatever123!';
+    input.dispatchEvent(new Event('input'));
+    await flushPromises();
+    testid('reauth-password-submit').click();
+    await flushPromises();
+
+    expect(testid('reauth-dialog').closest('dialog')?.textContent).toContain(
+      '通信できませんでした。接続を確かめてから、もう一度お試しください。',
+    );
+    expect((testid('reauth-password-submit') as HTMLButtonElement).disabled).toBe(false);
+    expect((testid('reauth-method-password') as HTMLButtonElement).disabled).toBe(false);
+    expect(settled).toBe(false);
+  });
+
+  it('パスキーで確かめる最中に切れたら、誤りを出して一覧へ戻す', async () => {
+    stubOffline({ password: false, passkey: true });
+    stubWebAuthn(async () => ASSERTION);
+    mount(ReauthDialog, { props: { returnPath: '/settings/security' }, attachTo: document.body });
+    void requireRecentAuth({ kind: 'set-password' });
+    await flushPromises();
+
+    testid('reauth-method-passkey').click();
+    await flushPromises();
+
+    expect(testid('reauth-dialog').textContent).toContain(
+      'パスキーで確かめられませんでした。もう一度試すか、ほかの方法を選んでください。',
+    );
+    expect((testid('reauth-method-passkey') as HTMLButtonElement).disabled).toBe(false);
   });
 });

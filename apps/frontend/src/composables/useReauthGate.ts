@@ -45,9 +45,16 @@ export async function requireRecentAuth(
   resume: ReauthResume,
   options: { notice?: string } = {},
 ): Promise<boolean> {
-  const { data, error } = await fetchClient.GET(REAUTH_PATH);
+  let result;
+  try {
+    result = await fetchClient.GET(REAUTH_PATH);
+  } catch {
+    // 通信が切れた。呼び手は問えなかった時と同じに知らせる（例外のまま抜けると、何も出ずに止まる）
+    throw new ReauthStatusError();
+  }
+  const { data, error } = result;
   if (error || !data) throw new ReauthStatusError();
-  if (isReauthFresh(data, new Date().getTime())) return true;
+  if (isReauthFresh(data)) return true;
   // 前の問いが開いたままなら、取り消したことにして閉じる
   settle?.(false);
   state.open = true;

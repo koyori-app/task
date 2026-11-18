@@ -48,8 +48,8 @@ type MockState = {
   passwordError?: { status: number; message: string };
   /** POST /password が先に何度 reauth-required を返すか（打っている間に期間が切れた形）。 */
   passwordReauthRequired?: number;
-  /** GET /v1/auth/reauth の返り値。未指定なら印あり（関所を素通りする）。 */
-  reauth?: ReauthStatus | { status: number };
+  /** GET /v1/auth/reauth の返り値。未指定なら印あり（関所を素通りする）。'offline' は通信の切れ。 */
+  reauth?: ReauthStatus | { status: number } | 'offline';
   /** POST /v1/auth/reauth/password の正しいパスワード。合えば印を立てる。 */
   reauthPassword?: string;
 };
@@ -59,6 +59,7 @@ type ReauthStatus = components['schemas']['ReauthStatusResponse'];
 const FRESH: ReauthStatus = {
   fresh: true,
   expires_at: '2999-01-01T00:00:00Z',
+  remaining_secs: 300,
   window_secs: 300,
   methods: { password: true, passkey: false, oauth: [] },
 };
@@ -67,6 +68,7 @@ function stale(methods: Partial<ReauthStatus['methods']> = {}): ReauthStatus {
   return {
     fresh: false,
     expires_at: null,
+    remaining_secs: null,
     window_secs: 300,
     methods: { password: true, passkey: false, oauth: [], ...methods },
   };
@@ -113,6 +115,7 @@ function stubFetch(state: MockState) {
     if (method === 'GET' && pathname.endsWith('/v1/auth/reauth')) {
       reauthQueries.push(1);
       const reauth = state.reauth ?? FRESH;
+      if (reauth === 'offline') throw new TypeError('Failed to fetch');
       if ('status' in reauth) return jsonResponse({ message: 'internal' }, reauth.status);
       return jsonResponse(reauth);
     }
@@ -789,7 +792,7 @@ describe('AuthMethodsSection の本人確認', () => {
     stubFetch({
       connections: [connection()],
       providers: [provider('google')],
-      reauth: { ...FRESH, expires_at: new Date(new Date().getTime() + 5_000).toISOString() },
+      reauth: { ...FRESH, remaining_secs: 5 },
     });
     const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
     mountSection(true);
@@ -800,6 +803,50 @@ describe('AuthMethodsSection の本人確認', () => {
 
     expect(assignSpy).not.toHaveBeenCalled();
     expect(dialog()?.textContent).toContain('本人確認');
+  });
+
+  it('端末の時計が server より進んでいても遅れていても、残りの秒数で判じて移る', async () => {
+    // server の時刻で 2 分後に切れる印。端末の時計だけをずらす
+    const serverNow = new Date('2026-11-18T00:00:00Z').getTime();
+    for (const skew of [10 * 60_000, 285_000, -10 * 60_000]) {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(serverNow + skew);
+      stubFetch({
+        connections: [connection()],
+        providers: [provider('google')],
+        reauth: {
+          ...FRESH,
+          expires_at: new Date(serverNow + 120_000).toISOString(),
+          remaining_secs: 120,
+        },
+      });
+      const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+      const wrapper = mountSection(true);
+      await flushPromises();
+
+      clickBodyButton('連携する');
+      await flushPromises();
+
+      expect(assignSpy, `skew ${skew}`).toHaveBeenCalledWith(GOOGLE_LINK);
+      // Dialog は閉じていても <dialog> を描くので、開いておらぬことを見る
+      expect(document.body.querySelector('dialog[open]'), `skew ${skew}`).toBeNull();
+      wrapper.unmount();
+      assignSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('要否を問う通信が切れたら、移らずに知らせる', async () => {
+    stubFetch({ connections: [connection()], providers: [provider('google')], reauth: 'offline' });
+    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+    mountSection(true);
+    await flushPromises();
+
+    clickBodyButton('連携する');
+    await flushPromises();
+
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('本人確認の状態を確かめられませんでした。');
   });
 
   it('GitHub App の連携は本人確認を問わずに移る', async () => {

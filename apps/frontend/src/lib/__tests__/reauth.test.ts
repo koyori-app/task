@@ -2,40 +2,40 @@ import { describe, expect, it } from 'vitest';
 import {
   isReauthFresh,
   parseReauthMarker,
-  REAUTH_MARGIN_MS,
+  REAUTH_MARGIN_SECS,
   reauthOAuthLabel,
   reauthOperationLabel,
   reauthWindowLabel,
   type ReauthStatus,
 } from '../reauth';
 
-const NOW = Date.parse('2026-11-18T00:00:00Z');
-
-function status(fresh: boolean, expiresInMs: number | null): ReauthStatus {
+function status(fresh: boolean, remainingSecs: number | null): ReauthStatus {
   return {
     fresh,
-    expires_at: expiresInMs === null ? null : new Date(NOW + expiresInMs).toISOString(),
+    // 端末の時計とは比べない値。どの時刻でも判定に効かないことを、わざと遠い過去にして見る
+    expires_at: remainingSecs === null ? null : '2000-01-01T00:00:00Z',
+    remaining_secs: remainingSecs,
     window_secs: 300,
     methods: { password: true, passkey: false, oauth: [] },
   };
 }
 
 describe('isReauthFresh', () => {
-  it('印が有効期間の内で、切れるまで余裕があれば撃てる', () => {
-    expect(isReauthFresh(status(true, 120_000), NOW)).toBe(true);
-    expect(isReauthFresh(status(true, REAUTH_MARGIN_MS + 1), NOW)).toBe(true);
+  it('残りの秒数が余裕を越えていれば撃てる', () => {
+    expect(isReauthFresh(status(true, 120))).toBe(true);
+    expect(isReauthFresh(status(true, REAUTH_MARGIN_SECS + 1))).toBe(true);
   });
 
   it('切れる間際の印は無いものとみなす（問うてから撃つまでに切れると 403 の頁で止まる）', () => {
-    expect(isReauthFresh(status(true, REAUTH_MARGIN_MS), NOW)).toBe(false);
-    expect(isReauthFresh(status(true, 1_000), NOW)).toBe(false);
+    expect(isReauthFresh(status(true, REAUTH_MARGIN_SECS))).toBe(false);
+    expect(isReauthFresh(status(true, 1))).toBe(false);
   });
 
   it('印が無ければ撃てない', () => {
-    expect(isReauthFresh(status(false, null), NOW)).toBe(false);
-    // fresh が false なら時刻があっても信じない
-    expect(isReauthFresh(status(false, 120_000), NOW)).toBe(false);
-    expect(isReauthFresh(status(true, null), NOW)).toBe(false);
+    expect(isReauthFresh(status(false, null))).toBe(false);
+    // fresh が false なら残りがあっても信じない
+    expect(isReauthFresh(status(false, 120))).toBe(false);
+    expect(isReauthFresh(status(true, null))).toBe(false);
   });
 });
 

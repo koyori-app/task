@@ -122,19 +122,25 @@ async function byPassword() {
   }
   busy.value = true;
   passwordError.value = null;
-  const { error: e } = await fetchClient.POST('/v1/auth/reauth/password', {
-    body: { password: password.value },
-    parseAs: 'text',
-  });
-  busy.value = false;
-  if (!e) {
-    finish(true);
-    return;
+  try {
+    const { error: e } = await fetchClient.POST('/v1/auth/reauth/password', {
+      body: { password: password.value },
+      parseAs: 'text',
+    });
+    if (!e) {
+      finish(true);
+      return;
+    }
+    passwordError.value =
+      messageOf(e) === 'invalid-current-password'
+        ? 'パスワードが違います。もう一度入力してください。'
+        : '確かめられませんでした。時間をおいて再度お試しください。';
+  } catch {
+    // 通信が切れた。ボタンを戻し、やり直せるようにする
+    passwordError.value = '通信できませんでした。接続を確かめてから、もう一度お試しください。';
+  } finally {
+    busy.value = false;
   }
-  passwordError.value =
-    messageOf(e) === 'invalid-current-password'
-      ? 'パスワードが違います。もう一度入力してください。'
-      : '確かめられませんでした。時間をおいて再度お試しください。';
 }
 
 async function byPasskey() {
