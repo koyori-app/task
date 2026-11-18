@@ -54,10 +54,10 @@ export const GANTT_PALETTE: PaletteOverrides = {
   Today: 'var(--koyori-color-info)',
   ProgressLine: 'var(--koyori-color-warning)',
   // 依存の矢印（cmd_426 の板）。普通は info、待ちで遅れは danger の破線（破線は arc が描く）、
-  // 済みは text-disabled で退かせる
+  // 済みは text-muted の灰で退かせる（text-disabled は図の地との対比が 3:1 に届かない）
   Dep: 'var(--koyori-color-info)',
   DepDelayed: 'var(--koyori-color-danger)',
-  DepDone: 'var(--koyori-color-text-disabled)',
+  DepDone: 'var(--koyori-color-text-muted)',
 };
 
 /** 標準の行の高さ。arc は棒を下へ寄せる時、この高さの行と同じ隙を棒の下に残す */

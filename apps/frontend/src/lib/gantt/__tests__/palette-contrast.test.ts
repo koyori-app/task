@@ -42,6 +42,13 @@ describe.each(['light', 'dark'] as const)('ガントの palette の対比（%s�
     ['今日の線と図の地', 'Today', GROUND],
     ['今日の線と土日の帯', 'Today', 'Weekend'],
     ['稲妻線と図の地', 'ProgressLine', GROUND],
+    ['依存の矢印と図の地', 'Dep', GROUND],
+    ['依存の矢印と土日の帯', 'Dep', 'Weekend'],
+    ['待ちで遅れの矢印と図の地', 'DepDelayed', GROUND],
+    ['待ちで遅れの矢印と土日の帯', 'DepDelayed', 'Weekend'],
+    ['済みの矢印と図の地', 'DepDone', GROUND],
+    ['済みの矢印と土日の帯', 'DepDone', 'Weekend'],
+    ['済みの矢印と群れの帯', 'DepDone', 'GroupRow'],
   ] as const)('%s は 3:1 以上', (_, a, b) => {
     expect(contrast(theme, a, b)).toBeGreaterThanOrEqual(3);
   });

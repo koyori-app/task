@@ -316,7 +316,7 @@ describe('依存の矢印（本物の wasm）', () => {
     const { svg } = render({ deps: DEPS });
     for (const color of [
       'var(--koyori-color-info)',
-      'var(--koyori-color-text-disabled)',
+      'var(--koyori-color-text-muted)',
       'var(--koyori-color-danger)',
     ]) {
       expect(svg).toContain(color);
