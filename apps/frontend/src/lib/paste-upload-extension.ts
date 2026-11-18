@@ -13,11 +13,19 @@
  * | `setState` (disabled / placeholder の変更) | 旧 plugin の `destroy()` で中断 | 捨てる |
  * | 外からの本文の差し替え・宛先の切り替え | 部品が `resetPasteUploads` を呼ぶ | 捨てる |
  * | 利用者が widget を含む範囲を消す (undo で消える場合も同じ) | plugin の `update` で中断 | 捨てる |
+ * | 行の入れ替え (Alt+↑/↓)・字の入れ替え (Ctrl+T) | 続く | widget を置き直し、その位置へ入れる |
  *
  * 結果を捨てても、上げ終えたファイルは Drive に残る。送信・保存は、呼び出し側が
  * `onUploadingChange` を見て上げている間は止める。
  */
-import { Facet, Prec, StateEffect, StateField, type Extension } from '@codemirror/state';
+import {
+  Facet,
+  Prec,
+  StateEffect,
+  StateField,
+  type Extension,
+  type Transaction,
+} from '@codemirror/state';
 import {
   Decoration,
   EditorView,
@@ -125,11 +133,51 @@ function positionOf(set: DecorationSet, id: number): number | null {
   return null;
 }
 
-/** 1 回の貼り付けにつき widget 1 つ。位置は文書の変更に追従し、widget を含む範囲が消えたら無くなる */
+/**
+ * 字を消さない入れ替えか。行の入れ替え (Alt+↑/↓) は動かす行でなく**隣の行**を消して反対側へ入れ直し、
+ * 字の入れ替え (Ctrl+T) は caret の前後の字を置き換える。どちらも文書の上では「範囲の削除」なので、
+ * その中の widget は位置の写しで落ちるが、利用者は何も消していない。
+ * ドラッグでの移動 (`move.drop`) は選んだ範囲を動かす操作なので含めない (範囲の削除と同じ扱い)。
+ */
+function isReorder(tr: Transaction): boolean {
+  return tr.isUserEvent('move.line') || tr.isUserEvent('move.character');
+}
+
+/**
+ * 入れ替えで落ちた widget の新しい位置。行の入れ替えでは、消された行は同じ字のまま別の所へ入り直すので、
+ * その行の中の同じ位置へ付いていく。見つからなければ、消された範囲があった所の直後に置く。
+ */
+function reorderedPosition(tr: Transaction, pos: number): number {
+  const line = tr.startState.doc.lineAt(pos);
+  const lineBreak = tr.startState.lineBreak;
+  let found: number | null = null;
+  tr.changes.iterChanges((_fromA, _toA, fromB, _toB, inserted) => {
+    if (found !== null) return;
+    const text = inserted.toString();
+    if (text === lineBreak + line.text) found = fromB + lineBreak.length + (pos - line.from);
+    else if (text === line.text + lineBreak) found = fromB + (pos - line.from);
+  });
+  return found ?? tr.changes.mapPos(pos, 1);
+}
+
+/**
+ * 1 回の貼り付けにつき widget 1 つ。位置は文書の変更に追従し、widget を含む範囲が消えたら無くなる
+ * (plugin がその貼り付けを中断する)。字を消さない入れ替えでは無くさず、置き直す。
+ */
 const uploadField = StateField.define<DecorationSet>({
   create: () => Decoration.none,
   update(value, tr) {
     let next = value.map(tr.changes);
+    if (tr.docChanged && next.size < value.size && isReorder(tr)) {
+      const kept = new Set<unknown>();
+      for (const iter = next.iter(); iter.value !== null; iter.next()) kept.add(iter.value.spec.id);
+      const restored = [];
+      for (const iter = value.iter(); iter.value !== null; iter.next()) {
+        if (kept.has(iter.value.spec.id)) continue;
+        restored.push(iter.value.range(reorderedPosition(tr, iter.from)));
+      }
+      next = next.update({ add: restored, sort: true });
+    }
     for (const effect of tr.effects) {
       if (effect.is(removeEffect)) {
         const { id } = effect.value;
@@ -269,7 +317,7 @@ class PasteUploadPlugin {
     const results = await Promise.allSettled(
       files.map(async (file) => options.upload(file, controller.signal)),
     );
-    // 中断 (破棄・setState・reset・取り消し) の後は、この view にも文書にも触らない。
+    // 中断 (破棄・setState・reset・取り消し・表示を含む範囲の削除) の後は、この view にも文書にも触らない。
     // batch を外す経路はどれも先に中断するので、中断の有無だけを見れば足りる
     if (controller.signal.aborted) return;
 

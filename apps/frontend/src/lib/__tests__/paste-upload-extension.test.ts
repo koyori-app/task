@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // 貼り付けたファイルのアップロード（取るかの判定、上げている間の表示、結果の入れ方、失敗と再試行、中断）
-import { history, undo } from '@codemirror/commands';
+import { history, moveLineDown, moveLineUp, transposeChars, undo } from '@codemirror/commands';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -283,6 +283,66 @@ describe('貼り付けたファイルのアップロード', () => {
     expect(view.state.doc.toString()).toBe('');
     expect(calls[0].signal.aborted).toBe(true);
     expect(uploading).toEqual([true, false]);
+  });
+
+  describe('字を消さない入れ替え（隣の行を消して入れ直す操作）', () => {
+    const line = `![a.png](${url(ID_A)})\n`;
+
+    it('下の行を上へ動かしても中断せず、表示は元の行の同じ位置に付いていく', async () => {
+      const { view, host, calls, uploading } = setup('スクショです\n二行目');
+      view.dispatch({ selection: { anchor: 6 } });
+      startPasteUpload(view, [file('a.png')]);
+      // 2 行目に caret を置いて Alt+↑。CodeMirror は 1 行目を消して 2 行目の下へ入れ直す
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+      expect(moveLineUp(view)).toBe(true);
+      expect(view.state.doc.toString()).toBe('二行目\nスクショです');
+      expect(calls[0].signal.aborted).toBe(false);
+      expect(status(host)).not.toBeNull();
+      expect(uploading).toEqual([true]);
+      calls[0].resolve(uploaded(ID_A, 'a.png'));
+      await settle();
+      expect(view.state.doc.toString()).toBe(`二行目\nスクショです${line}`);
+      expect(uploading).toEqual([true, false]);
+    });
+
+    it('上の行を下へ動かしても中断せず、表示は元の行の同じ位置に付いていく', async () => {
+      const { view, host, calls } = setup('一行目\nスクショです');
+      view.dispatch({ selection: { anchor: 6 } });
+      startPasteUpload(view, [file('a.png')]);
+      // 1 行目に caret を置いて Alt+↓。CodeMirror は 2 行目を消して 1 行目の上へ入れ直す
+      view.dispatch({ selection: { anchor: 0 } });
+      expect(moveLineDown(view)).toBe(true);
+      expect(view.state.doc.toString()).toBe('スクショです\n一行目');
+      expect(calls[0].signal.aborted).toBe(false);
+      expect(status(host)).not.toBeNull();
+      calls[0].resolve(uploaded(ID_A, 'a.png'));
+      await settle();
+      expect(view.state.doc.toString()).toBe(`スク${line}ショです\n一行目`);
+    });
+
+    it('表示のある行そのものを動かしても中断しない', async () => {
+      const { view, calls } = setup('一行目\nスクショです');
+      view.dispatch({ selection: { anchor: 6 } });
+      startPasteUpload(view, [file('a.png')]);
+      expect(moveLineUp(view)).toBe(true);
+      expect(calls[0].signal.aborted).toBe(false);
+      calls[0].resolve(uploaded(ID_A, 'a.png'));
+      await settle();
+      expect(view.state.doc.toString()).toBe(`スク${line}ショです\n一行目`);
+    });
+
+    it('caret の前後の字の入れ替え（Ctrl+T）でも中断しない', async () => {
+      const { view, host, calls } = setup('あいう');
+      view.dispatch({ selection: { anchor: 1 } });
+      startPasteUpload(view, [file('a.png')]);
+      expect(transposeChars(view)).toBe(true);
+      expect(view.state.doc.toString()).toBe('いあう');
+      expect(calls[0].signal.aborted).toBe(false);
+      expect(status(host)).not.toBeNull();
+      calls[0].resolve(uploaded(ID_A, 'a.png'));
+      await settle();
+      expect(view.state.doc.toString()).toBe(`いあ${line}う`);
+    });
   });
 
   it('失敗すると文書を変えずに role=alert へ文言を出し、再試行で入る', async () => {
