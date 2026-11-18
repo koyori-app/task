@@ -10,6 +10,7 @@ import MarkdownEditor from '@/components/markdown/MarkdownEditor.vue';
 import CreateTaskDialog from '@/components/tasks/CreateTaskDialog.vue';
 import { Button, Field, Input, Spinner } from '@koyori-app/ui-vue';
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts';
+import { useProjectFileUpload } from '@/composables/useProjectFileUpload';
 import { renderOnServer, TRANSIENT_FAILURE_RETRIES } from '@/composables/useRenderedDescription';
 import type { components } from '@/generated/api';
 import type { ProjectUuid, TenantUuid } from '@/lib/api-ids';
@@ -121,6 +122,13 @@ const draftReady = ref(false);
 /** 下書きの元にした本文の ETag。`If-Match` はこれを送る（再取得で差し替えない） */
 const draftBaseEtag = ref<string | null>(null);
 const saving = ref(false);
+// 本文に貼り付けたファイルはプロジェクトの Drive へ上げ、本文に行として入れる
+const uploadFile = useProjectFileUpload(
+  () => props.tenantId,
+  () => props.projectId,
+);
+/** 本文の入力欄が貼り付けたファイルを上げている最中か。その間は保存を止める（途中の本文を保存しない） */
+const bodyUploading = ref(false);
 const saveError = ref<string | null>(null);
 const conflict = ref(false);
 const reloading = ref(false);
@@ -194,7 +202,7 @@ const tasksKey = computed(() => driveFileTasksQueryOptions(props.tenantId, props
 
 async function save() {
   const current = meta.value;
-  if (saving.value || !current || !draftReady.value) return;
+  if (saving.value || bodyUploading.value || !current || !draftReady.value) return;
   saveError.value = null;
   const nextTitle = draftTitle.value.trim();
   if (!nextTitle) {
@@ -279,6 +287,8 @@ async function reloadLatest() {
 
 /** 412 の後に、他の人の更新を承知のうえで自分の下書きで上書きする（新しい ETag はこのときだけ使う） */
 async function overwriteWithDraft() {
+  // save() は上げている間は何もしない。ここで止めないと、保存せずに衝突の表示だけが消える
+  if (bodyUploading.value) return;
   await refetchLatest();
   const latest = contentQuery.data.value;
   if (!latest) return;
@@ -461,7 +471,7 @@ function taskHref(task: { seq_key: string; project: { key: string } }) {
           <Button
             type="button"
             variant="tertiary"
-            :disabled="reloading"
+            :disabled="reloading || bodyUploading"
             label="自分の下書きで上書き"
             @click="overwriteWithDraft"
           />
@@ -477,6 +487,9 @@ function taskHref(task: { seq_key: string; project: { key: string } }) {
           aria-label="本文"
           placeholder="Markdown で書けます"
           min-height-class="min-h-96"
+          :upload-file="uploadFile"
+          :upload-scope="fileId"
+          @update:uploading="bodyUploading = $event"
         />
         <section aria-label="プレビュー" class="min-w-0 rounded-md border p-4">
           <div v-if="html" class="kfm-content" v-html="html" />
@@ -487,7 +500,11 @@ function taskHref(task: { seq_key: string; project: { key: string } }) {
       </div>
 
       <div class="flex items-center gap-2">
-        <Button type="submit" :disabled="saving || conflict" :label="saving ? '保存中…' : '保存'">
+        <Button
+          type="submit"
+          :disabled="saving || conflict || bodyUploading"
+          :label="saving ? '保存中…' : '保存'"
+        >
           <template #icon><Spinner v-if="saving" hide-label /></template>
         </Button>
         <Button

@@ -314,6 +314,34 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
     wrapper.unmount();
   });
 
+  it('説明の入力欄が貼り付けたファイルを上げている間は作成を止め、終われば作成できる', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('画像つきのタスク');
+    const editor = wrapper.getComponent({ name: 'MarkdownEditorStub' });
+    expect(typeof editor.props('uploadFile')).toBe('function');
+    const created = () =>
+      invalidateSpy.mock.calls.some(
+        ([filters]: unknown[]) =>
+          JSON.stringify(filters) ===
+          JSON.stringify({
+            queryKey: ['get', '/v1/tenants/{tenant_id}/projects/{project_id}/tasks'],
+          }),
+      );
+
+    editor.vm.$emit('update:uploading', true);
+    await nextTick();
+    await new DOMWrapper(getForm()).trigger('submit');
+    await flushPromises();
+    expect(created()).toBe(false);
+
+    editor.vm.$emit('update:uploading', false);
+    await nextTick();
+    await new DOMWrapper(getForm()).trigger('submit');
+    await vi.waitFor(() => expect(created()).toBe(true));
+    wrapper.unmount();
+  });
+
   it('always invalidates the task list after successful create', async () => {
     const wrapper = mountDialog(queryClient);
     await nextTick();

@@ -24,8 +24,12 @@ export default defineComponent({
     disabled: { type: Boolean, default: false },
     placeholder: { type: String, default: '' },
     ariaLabel: { type: String, default: undefined },
+    // 貼り付けたファイルのアップロード（実物の挙動は paste-upload-extension の単体テストと story が見る）。
+    // 呼び出し側のテストは、この代役から `update:uploading` を emit して送信・保存の抑止を見る
+    uploadFile: { type: Function, default: undefined },
+    uploadScope: { type: String, default: undefined },
   },
-  emits: ['update:modelValue'],
+  emits: ['update:modelValue', 'update:uploading'],
   setup(props, { emit, expose }) {
     expose({
       focus: () => {},

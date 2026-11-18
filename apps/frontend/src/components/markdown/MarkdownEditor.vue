@@ -12,9 +12,11 @@ import { EditorState, type Extension } from '@codemirror/state';
 import type { EditorView as EditorViewType } from '@codemirror/view';
 import { EditorView, keymap, placeholder as placeholderExt } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
-import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, shallowRef, useTemplateRef, watch } from 'vue';
 
 import type { MentionCandidate, MentionTable } from '@/lib/comment-mention';
+import type { UploadedFile } from '@/lib/drive-upload';
+import { pasteUploadExtensions, resetPasteUploads } from '@/lib/paste-upload-extension';
 import { isImeKeydown } from '@/lib/ime-keydown-guard';
 import {
   mentionExtensions,
@@ -59,6 +61,16 @@ const props = withDefaults(
      * 持たない（タイトルなど周りの文字の左端に揃える）。マウント時に 1 回だけ読み、途中で切り替えても反映しない
      */
     variant?: 'outlined' | 'plain';
+    /**
+     * 貼り付けたファイルを上げる関数。渡した時だけ、ファイルの貼り付けを受けて本文に行を入れる
+     * （`useProjectFileUpload` で作る）。省略すれば貼り付けは文字だけを扱う
+     */
+    uploadFile?: (file: File, signal: AbortSignal) => Promise<UploadedFile>;
+    /**
+     * 貼り付けの宛先を表す値（タスク・ドキュメントなど）。変わったら進行中のアップロードを捨てる。
+     * 部品を使い回して宛先だけ替える所で、前の宛先の結果が今の本文に入らないようにする
+     */
+    uploadScope?: string;
   }>(),
   {
     placeholder: '',
@@ -68,6 +80,8 @@ const props = withDefaults(
     candidates: undefined,
     mentions: () => ({}),
     variant: 'outlined',
+    uploadFile: undefined,
+    uploadScope: undefined,
   },
 );
 
@@ -77,10 +91,18 @@ const emit = defineEmits<{
   keydown: [event: KeyboardEvent];
   /** Mod-Enter。字下げで Tab を使う文脈からキーボードだけで確定して抜けるための口 */
   submit: [];
+  /** 貼り付けたファイルを上げている最中か。呼び出し側は true の間、保存を止める */
+  'update:uploading': [value: boolean];
 }>();
 
 const host = useTemplateRef<HTMLDivElement>('host');
-const view = ref<EditorView | null>(null);
+/**
+ * `shallowRef` で持つ（`ref` にしない）。`ref` は EditorView を reactive の proxy で包み、proxy 越しに
+ * `setState` を呼ぶと、作り直した DocView と plugin が proxy の view を持つ。CodeMirror は plugin を
+ * 同一性で引くので、proxy 越しでは見つからず、その結果を素の view と共有する表に覚えてしまう。
+ * 以後、貼り付けたファイルのアップロードの操作（再試行・取り消し・次の貼り付け）が効かなくなる。
+ */
+const view = shallowRef<EditorView | null>(null);
 /** 直近に自分が emit した値。v-model の往復で state を作り直さないための照合用 */
 let lastEmitted: string | null = null;
 let mentionTooltipParent: HTMLElement | null = null;
@@ -222,6 +244,16 @@ function extensions(): Extension[] {
   }
   return [
     history(),
+    // メンションの paste より先に見るため、前に置く
+    ...(props.uploadFile
+      ? [
+          pasteUploadExtensions({
+            upload: (file, signal) => props.uploadFile!(file, signal),
+            disabled: () => props.disabled,
+            onUploadingChange: (value) => emit('update:uploading', value),
+          }),
+        ]
+      : []),
     ...(props.candidates
       ? mentionExtensions({
           tooltipParent: mentionTooltipParent,
@@ -309,26 +341,36 @@ watch(
     // 自分が emit した値が戻ってきただけなら触らない (カーソルが末尾へ飛ぶのを防ぐ)
     if (next === lastEmitted) return;
     if (next === current.state.doc.toString()) return;
+    // 外から本文が差し替わったら、前の本文への貼り付けは捨てる
+    resetUploads();
     current.dispatch({
       changes: { from: 0, to: current.state.doc.length, insert: next },
     });
   },
 );
 
+/** 進行中の貼り付けを捨てる */
+function resetUploads() {
+  if (view.value) resetPasteUploads(view.value);
+}
+
+// 宛先が替わったら進行中の貼り付けを捨てる。空の本文同士の切り替えでは本文が '' のままで、
+// 上の watch に当たらない
+watch(() => props.uploadScope, resetUploads);
+
 // 引き表（API の表・候補）が替わったら札の字を引き直す
 watch(nameTable, (table) => {
-  if (view.value && props.candidates) setMentionNames(view.value as EditorViewType, table);
+  if (view.value && props.candidates) setMentionNames(view.value, table);
 });
 
-// disabled / placeholder の変更は state ごと作り直す (上のコメントの理由)
-watch(
-  () => [props.disabled, props.placeholder],
-  () => {
-    const current = view.value;
-    if (!current) return;
-    current.setState(EditorState.create({ doc: props.modelValue, extensions: extensions() }));
-  },
-);
+// disabled / placeholder の変更は state ごと作り直す (上のコメントの理由)。
+// uploadFile の有無も同じ (テナントとプロジェクトが mount の後で分かる所で、拡張を足し直す)。
+// 関数が入れ替わっただけ (上げる先のプロジェクトが替わった) では作り直さないよう、有無だけを見る
+watch([() => props.disabled, () => props.placeholder, () => !!props.uploadFile], () => {
+  const current = view.value;
+  if (!current) return;
+  current.setState(EditorState.create({ doc: props.modelValue, extensions: extensions() }));
+});
 
 /** 呼び出し側が編集開始時にフォーカスを移すために使う */
 function focus() {
@@ -338,7 +380,7 @@ function focus() {
 /** `@` を打って候補を開く。`candidates` を渡した時だけ効く */
 function openMentionPicker() {
   if (!view.value || props.disabled || !props.candidates) return;
-  openPicker(view.value as EditorViewType);
+  openPicker(view.value);
 }
 
 defineExpose({ focus, openMentionPicker });

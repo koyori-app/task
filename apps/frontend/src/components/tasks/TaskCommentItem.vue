@@ -10,6 +10,7 @@ import ReactionBar from '@/components/reactions/ReactionBar.vue';
 import UserAvatar from '@/components/UserAvatar.vue';
 import { timelineDateTime, timelineTime } from '@/lib/activity-timeline';
 import type { MentionCandidate, MentionTable } from '@/lib/comment-mention';
+import { useProjectFileUpload } from '@/composables/useProjectFileUpload';
 import type { ReactionController } from '@/composables/useReactions';
 import type { CommentReply, CommentThread } from '@/composables/useTaskComments';
 
@@ -36,6 +37,8 @@ const props = defineProps<{
   mentionTenant?: string;
   /** プロフィールのカードがプロフィール API を引くテナント（UUID）。無ければカードは名前と画像だけ */
   tenantId?: string | null;
+  /** 編集で貼り付けたファイルを上げる先のプロジェクト（UUID）。無ければ貼り付けは文字だけを扱う */
+  projectId?: string | null;
   /** このコメントの更新失敗メッセージ（対象コメントの中に出す） */
   updateError?: string | null;
   /** このコメントの削除失敗メッセージ（対象コメントの中に出す） */
@@ -60,6 +63,12 @@ const editing = ref(false);
 const editDraft = ref('');
 const confirmingDelete = ref(false);
 const editorRef = ref<InstanceType<typeof CommentEditor> | null>(null);
+const uploadFile = useProjectFileUpload(
+  () => props.tenantId,
+  () => props.projectId,
+);
+/** 編集の入力欄が貼り付けたファイルを上げている最中か。その間は保存を止める（途中の本文を送らない） */
+const editUploading = ref(false);
 
 const reactionBarRef = ref<InstanceType<typeof ReactionBar> | null>(null);
 const hasReactions = computed(
@@ -120,6 +129,7 @@ function closeDeleteConfirm() {
 }
 
 async function commitEditing() {
+  if (editUploading.value) return;
   const next = editDraft.value.trim();
   if (!next || next === (props.comment.body ?? '')) {
     cancelEditing();
@@ -206,6 +216,9 @@ async function confirmDelete() {
           aria-label="コメントを編集"
           :candidates="mentionCandidates"
           :mentions="mentions"
+          :upload-file="uploadFile"
+          :upload-scope="comment.id"
+          @update:uploading="editUploading = $event"
         />
         <div class="flex justify-end gap-2">
           <Button
@@ -217,7 +230,7 @@ async function confirmDelete() {
           />
           <Button
             type="button"
-            :disabled="updating || !editDraft.trim()"
+            :disabled="updating || editUploading || !editDraft.trim()"
             :label="updating ? '保存中…' : '保存'"
             @click="commitEditing"
           />
