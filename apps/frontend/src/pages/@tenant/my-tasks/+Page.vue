@@ -10,13 +10,19 @@ import { Button, Spinner } from '@koyori-app/ui-vue';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import type { components } from '@/generated/api';
 import { fetchClient } from '@/lib/api-vue-query';
+import {
+  MY_TASKS_MAX_SHOWN,
+  MY_TASKS_PAGE_LIMIT,
+  applyMyTasksUrlState,
+  myTasksEmptyMessage,
+  parseMyTasksUrlState,
+  type MyTasksTab,
+} from '@/lib/my-tasks-url-state';
 import { taskDetailHref } from '@/lib/task-display';
 
-type FilterTab = 'today' | 'week' | 'no_due_date' | 'overdue' | 'all';
 type MyTaskItem = components['schemas']['MyTaskItem'];
 
 const TASKS_PATH = '/v1/tenants/{tenant_id}/users/me/tasks' as const;
-const TASKS_PAGE_LIMIT = 50;
 
 const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
@@ -30,7 +36,7 @@ const {
   tenantsQuery,
 } = useResolvedTenantId(tenantDisplayId);
 
-const tabs: { key: FilterTab; label: string }[] = [
+const tabs: { key: MyTasksTab; label: string }[] = [
   { key: 'today', label: '今日' },
   { key: 'week', label: '今週' },
   { key: 'no_due_date', label: '期限なし' },
@@ -38,15 +44,19 @@ const tabs: { key: FilterTab; label: string }[] = [
   { key: 'all', label: 'すべて' },
 ];
 
-const activeFilter = ref<FilterTab>('today');
+// タブと読み込んだ件数は URL（`?tab=`・`?shown=`）に持ち、タスクを開いて戻っても同じ画面に戻す
+const urlState = computed(() => parseMyTasksUrlState(pageContext.urlParsed?.search));
+const activeFilter = ref<MyTasksTab>(urlState.value.tab);
 const offset = ref(0);
+// 次に取る件数。URL から復元するときは読み込んでいた件数を 1 回で取る
+const limit = ref(urlState.value.shown);
 const loadedTasks = ref<MyTaskItem[]>([]);
 const taskTotal = ref(0);
 
 function myTasksQueryKey(
   resolvedTenantId: string,
-  filter: FilterTab,
-  limit: number,
+  filter: MyTasksTab,
+  queryLimit: number,
   queryOffset: number,
 ) {
   return [
@@ -55,7 +65,7 @@ function myTasksQueryKey(
     {
       params: {
         path: { tenant_id: resolvedTenantId },
-        query: { filter, timezone, limit, offset: queryOffset },
+        query: { filter, timezone, limit: queryLimit, offset: queryOffset },
       },
     },
   ] as const;
@@ -63,7 +73,7 @@ function myTasksQueryKey(
 
 const tasksQuery = useQuery({
   queryKey: computed(() =>
-    myTasksQueryKey(tenantId.value!, activeFilter.value, TASKS_PAGE_LIMIT, offset.value),
+    myTasksQueryKey(tenantId.value!, activeFilter.value, limit.value, offset.value),
   ),
   queryFn: async ({ queryKey, signal }) => {
     const { data, error } = await fetchClient.GET(TASKS_PATH, {
@@ -85,12 +95,17 @@ watch(
   activeFilter,
   () => {
     offset.value = 0;
+    limit.value = MY_TASKS_PAGE_LIMIT;
   },
   { flush: 'sync' },
 );
 
-watch(tenantId, () => {
+watch(tenantId, (_next, prev) => {
+  // 初回の解決（null → ID。テナント一覧がキャッシュに無いとき）では、URL から読んだ件数を保つ。
+  // 戻すと再読み込みや共有リンクで `?shown=` が 50 件に戻り、URL からも消える
+  if (!prev) return;
   offset.value = 0;
+  limit.value = MY_TASKS_PAGE_LIMIT;
   loadedTasks.value = [];
   taskTotal.value = 0;
 });
@@ -108,12 +123,34 @@ watch(
   { immediate: true },
 );
 
+// 履歴は積まず、今の項目を書き換える（タスク一覧・カレンダーと同じ）
+watch([activeFilter, offset, limit], () => {
+  if (typeof window === 'undefined') return;
+  const url = applyMyTasksUrlState(new URL(window.location.href), {
+    tab: activeFilter.value,
+    shown: offset.value + limit.value,
+  });
+  window.history.replaceState(window.history.state, '', url);
+});
+
+// 同じページへのクライアント遷移（`?tab=week` を見ている間にサイドバーの My Tasks を押す等）は
+// ページが作り直されないので、URL の変化に追従する。今の状態と同じなら何もしない
+watch(urlState, (next) => {
+  const shown = Math.min(offset.value + limit.value, MY_TASKS_MAX_SHOWN);
+  if (next.tab === activeFilter.value && next.shown === shown) return;
+  activeFilter.value = next.tab;
+  offset.value = 0;
+  limit.value = next.shown;
+});
+
 const allTasks = computed(() => loadedTasks.value);
 const hasMoreTasks = computed(() => allTasks.value.length < taskTotal.value);
 
 function loadMore() {
   if (tasksQuery.isFetching.value || !hasMoreTasks.value) return;
-  offset.value += TASKS_PAGE_LIMIT;
+  // 復元で 100 件を 1 回で取った後も、読み込んだ続きから 1 回分ずつ取る
+  offset.value = loadedTasks.value.length;
+  limit.value = MY_TASKS_PAGE_LIMIT;
 }
 
 const groupedTasks = computed(() => {
@@ -260,7 +297,7 @@ function retryFailed() {
       </section>
 
       <p v-if="!allTasks.length" class="py-8 text-center text-sm text-muted-foreground">
-        割り当てられたタスクは0件です
+        {{ myTasksEmptyMessage(activeFilter) }}
       </p>
 
       <div v-if="hasMoreTasks" class="flex justify-center pt-2">

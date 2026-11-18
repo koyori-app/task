@@ -5,6 +5,7 @@ import { createPinia } from 'pinia';
 import HomeDashboard from '../HomeDashboard.vue';
 import type { TenantUuid } from '@/lib/api-ids';
 import type { components } from '@/generated/api';
+import type { HomeDashboardUrlState } from '@/lib/home-dashboard-url-state';
 
 enableAutoUnmount(afterEach);
 afterEach(() => vi.unstubAllGlobals());
@@ -52,7 +53,7 @@ function fixture(): components['schemas']['DashboardResponse'] {
 }
 function setup(
   handler: (request: Request) => Response | Promise<Response>,
-  props?: { canCreateProject?: boolean },
+  props?: { canCreateProject?: boolean; initialUrlState?: HomeDashboardUrlState },
 ) {
   const fetch = vi.fn(handler);
   vi.stubGlobal('fetch', fetch);
@@ -316,5 +317,65 @@ describe('HomeDashboard', () => {
     pressT();
     await flushPromises();
     expect(createOpen(wrapper)).toBe(false);
+  });
+});
+
+describe('HomeDashboard のタブとページを URL に持つ（TASK-474）', () => {
+  afterEach(() => window.history.replaceState(null, '', '/'));
+  const requested = (fetch: ReturnType<typeof setup>['fetch'], filter: string, offset: string) =>
+    fetch.mock.calls.some(([req]) => {
+      const params = new URL(req.url).searchParams;
+      return params.get('filter') === filter && params.get('offset') === offset;
+    });
+  const urlParams = () => new URL(window.location.href).searchParams;
+
+  it('initialUrlState のタブとページで取得する', async () => {
+    const { fetch } = setup((req) => respond(req, fixture()), {
+      initialUrlState: { tab: 'overdue', page: 2 },
+    });
+    await flushPromises();
+    expect(requested(fetch, 'overdue', '5')).toBe(true);
+    expect(requested(fetch, 'today', '0')).toBe(false);
+  });
+
+  it('タブを押すと tab が、「次へ」で page が載り、タブを替えると page が消える', async () => {
+    const pushState = vi.spyOn(window.history, 'pushState');
+    const { wrapper } = setup((req) => respond(req, fixture()));
+    await flushPromises();
+    const tabButton = (label: string) =>
+      wrapper
+        .get('[aria-label="タスクの絞り込み"]')
+        .findAll('button')
+        .find((b) => b.text().startsWith(label))!;
+    await tabButton('今週').trigger('click');
+    await flushPromises();
+    expect(urlParams().get('tab')).toBe('week');
+    expect(urlParams().has('page')).toBe(false);
+
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '次へ')!
+      .trigger('click');
+    await flushPromises();
+    expect(urlParams().get('page')).toBe('2');
+
+    await tabButton('今日').trigger('click');
+    await flushPromises();
+    expect(urlParams().has('tab')).toBe(false);
+    expect(urlParams().has('page')).toBe(false);
+    expect(pushState).not.toHaveBeenCalled();
+    pushState.mockRestore();
+  });
+
+  it('initialUrlState が変われば（同じページへの遷移）追従する', async () => {
+    const { wrapper, fetch } = setup((req) => respond(req, fixture()), {
+      initialUrlState: { tab: 'week', page: 1 },
+    });
+    await flushPromises();
+    await wrapper.setProps({ initialUrlState: { tab: 'all', page: 2 } });
+    await flushPromises();
+    expect(requested(fetch, 'all', '5')).toBe(true);
+    expect(urlParams().get('tab')).toBe('all');
+    expect(urlParams().get('page')).toBe('2');
   });
 });

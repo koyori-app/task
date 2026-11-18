@@ -150,6 +150,24 @@ watch(
 // カレンダーはテナント横断なので、プロジェクトは seq key（KEY-N）の KEY から取る
 const overlayProjectKey = computed(() => overlayTaskSeqKey.value?.replace(/-\d+$/, '') ?? '');
 
+// 同じページへのクライアント遷移（サイドバーのカレンダーを押す・戻る等）ではページが作り直されない
+// ので、URL を読み直して状態を合わせる。今の状態と同じ項目は入れない（ガントと同じ）
+watch(
+  () => pageContext.urlParsed?.searchAll,
+  (searchAll) => {
+    const next = parseCalendarUrlState(searchAll, today);
+    if (next.from !== from.value) from.value = next.from;
+    if (next.memberIds.join('\n') !== memberIds.value.join('\n')) memberIds.value = next.memberIds;
+    if (next.projectIds.join('\n') !== projectIds.value.join('\n')) {
+      projectIds.value = next.projectIds;
+    }
+    if (next.selected !== selectedTaskId.value) {
+      overlayParentStack.value = [];
+      selectedTaskId.value = next.selected;
+    }
+  },
+);
+
 function openTask(task: ScheduleTask) {
   if (!canInline.value) {
     void navigate(taskDetailHref(tenantDisplayId.value, task.project.key, task.seq_id));

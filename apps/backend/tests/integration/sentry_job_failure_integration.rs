@@ -7,9 +7,10 @@ use std::time::Duration;
 
 use apalis::layers::WorkerBuilderExt;
 use apalis::layers::retry::RetryPolicy;
-use apalis::prelude::{BoxDynError, TaskSink, WorkerBuilder};
-use apalis_postgres::{CompactType, Config, JsonCodec, PgNotify, PostgresStorage};
+use apalis::prelude::{BoxDynError, TaskBuilder, TaskSink, WorkerBuilder};
+use apalis_postgres::{Config, PostgresStorage};
 use backend::observability;
+use job::AttemptLimit;
 use job::failure_report::JobFailureReportLayer;
 use sea_orm::{ConnectionTrait, DatabaseBackend, DatabaseConnection, Statement};
 use sentry::protocol::Event;
@@ -18,13 +19,21 @@ use uuid::Uuid;
 
 use crate::common::TestApp;
 
-type ProbeStorage = PostgresStorage<String, CompactType, JsonCodec<CompactType>, PgNotify>;
+type ProbeStorage = PostgresStorage<String>;
 
 const QUEUE_LABEL: &str = "sentry-probe";
 const VICTIM: &str = "victim@example.com";
-const DEADLINE: Duration = Duration::from_secs(60);
-/// Killed の後も回り続けるリトライが、重複して報告しないことを見る長さ
+/// 使い切っていない行は、ワーカーの poll の間隔（空振りが続くと最大 60 秒まで伸びる）を挟んで取り直される
+const DEADLINE: Duration = Duration::from_secs(180);
+/// 使い切った後も回り続けるリトライが、重複して報告しないことを見る長さ
 const SETTLE: Duration = Duration::from_secs(3);
+/// 試験ごとの見張り。上限で打ち切られないリトライは休まず回って tokio のタイマーを止めるので、
+/// `DEADLINE` の timeout は効かない。正常の最長（初回の schema 同期込みで 1 分余り）の三倍ほど
+const WATCHDOG: Duration = Duration::from_secs(240);
+
+fn probe_storage(app: &TestApp, queue: &str) -> ProbeStorage {
+    PostgresStorage::new(&app.state.pg_pool).with_config(Config::default().queue(queue))
+}
 
 async fn always_fails(email: String) -> Result<(), BoxDynError> {
     Err(format!("550 mailbox unavailable <{email}>").into())
@@ -47,6 +56,36 @@ async fn job_status(db: &DatabaseConnection, queue: &str) -> String {
     row.try_get("", "status").expect("status")
 }
 
+/// 試行を使い切った行（apalis-postgres 1.0.0-rc.9 以降は `Failed` のまま残り、`Killed` にはならない）
+async fn is_exhausted(db: &DatabaseConnection, queue: &str) -> bool {
+    let row = db
+        .query_one_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "SELECT status, attempts, max_attempts FROM apalis.jobs WHERE job_type = $1",
+            [queue.into()],
+        ))
+        .await
+        .expect("select job")
+        .expect("job row");
+    let status: String = row.try_get("", "status").expect("status");
+    let attempts: i32 = row.try_get("", "attempts").expect("attempts");
+    let max_attempts: i32 = row.try_get("", "max_attempts").expect("max_attempts");
+    status == "Failed" && attempts >= max_attempts
+}
+
+async fn wait_for_exhausted(db: &DatabaseConnection, queue: &str) {
+    tokio::time::timeout(DEADLINE, async {
+        loop {
+            if is_exhausted(db, queue).await {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("job did not use up its attempts"));
+}
+
 async fn wait_for_status(db: &DatabaseConnection, queue: &str, expected: &str) {
     tokio::time::timeout(DEADLINE, async {
         loop {
@@ -67,29 +106,37 @@ fn runtime() -> tokio::runtime::Runtime {
         .expect("runtime")
 }
 
-/// 失敗し続けるジョブを `retries` のリトライで最後まで動かし、送られたイベントを返す
-fn events_of_failing_job(retries: usize) -> Vec<Event<'static>> {
+/// 失敗し続けるジョブを `policy` のリトライで最後まで動かし、送られたイベントを返す
+fn events_of_failing_job(
+    policy: AttemptLimit<RetryPolicy>,
+    max_attempts: usize,
+) -> Vec<Event<'static>> {
+    let _watchdog = crate::common::watchdog("失敗し続けるジョブの試行の使い切り", WATCHDOG);
     sentry::test::with_captured_events(|| {
         let subscriber = tracing_subscriber::registry().with(observability::tracing_layer());
         tracing::subscriber::with_default(subscriber, || {
             runtime().block_on(async {
                 let app = TestApp::new().await;
                 let queue = format!("sentry_fail_{}", Uuid::new_v4().simple());
-                let mut storage: ProbeStorage = PostgresStorage::<String>::new_with_notify(
-                    &app.state.pg_pool,
-                    &Config::new(&queue),
-                );
-                storage.push(VICTIM.to_owned()).await.expect("push");
+                let mut storage = probe_storage(&app, &queue);
+                storage
+                    .push_task(
+                        TaskBuilder::new(VICTIM.to_owned())
+                            .max_attempts(max_attempts)
+                            .build(),
+                    )
+                    .await
+                    .expect("push");
 
                 let worker = WorkerBuilder::new(format!("{queue}-worker"))
-                    .backend(storage)
-                    .retry(RetryPolicy::retries(retries))
+                    .backend(job::worker_backend(&storage, Duration::from_millis(100)))
+                    .retry(policy)
                     .layer(JobFailureReportLayer::new(QUEUE_LABEL))
                     .enable_tracing()
                     .build(always_fails);
                 let handle = tokio::spawn(worker.run());
 
-                wait_for_status(&app.state.db, &queue, "Killed").await;
+                wait_for_exhausted(&app.state.db, &queue).await;
                 tokio::time::sleep(SETTLE).await;
                 handle.abort();
             });
@@ -111,35 +158,40 @@ fn assert_single_failure_report(events: &[Event<'static>]) {
     assert!(!rendered.contains(VICTIM), "{rendered}");
 }
 
-/// リトライが max_attempts 以上のキュー: Killed の後もリトライが終わらないので、
-/// レイヤーをリトライの外に置くと 1 件も届かない
+/// 再試行の回数に上限を置かない方針（認証メールなど）: 試行を使い切る最後の試行の失敗を 1 件だけ送る
 #[test]
 fn exhausted_retries_report_once() {
-    assert_single_failure_report(&events_of_failing_job(8));
+    // 本番のジョブと同じ上限（`job::DEFAULT_MAX_ATTEMPTS`）
+    assert_single_failure_report(&events_of_failing_job(
+        job::retry_policy(),
+        job::DEFAULT_MAX_ATTEMPTS,
+    ));
 }
 
 /// リトライが max_attempts に満たないキュー: 使い切っても Failed で再取得されるので、
-/// Killed になる最後の試行まで送らない
+/// 試行を使い切る最後の試行まで送らない
 #[test]
 fn refetched_job_reports_only_when_killed() {
-    assert_single_failure_report(&events_of_failing_job(1));
+    // 1 回の取得で 2 回試し、2 回目の取得で 3 回目の試行が最後になる
+    assert_single_failure_report(&events_of_failing_job(job::retry_policy_within(1), 3));
 }
 
 #[test]
 fn successful_job_reports_nothing() {
+    let _watchdog = crate::common::watchdog("成功するジョブの Done", WATCHDOG);
     let events = sentry::test::with_captured_events(|| {
         runtime().block_on(async {
             let app = TestApp::new().await;
             let queue = format!("sentry_ok_{}", Uuid::new_v4().simple());
-            let mut storage: ProbeStorage = PostgresStorage::<String>::new_with_notify(
-                &app.state.pg_pool,
-                &Config::new(&queue),
-            );
-            storage.push(VICTIM.to_owned()).await.expect("push");
+            let mut storage = probe_storage(&app, &queue);
+            storage
+                .push_task(job::new_task(VICTIM.to_owned()))
+                .await
+                .expect("push");
 
             let worker = WorkerBuilder::new(format!("{queue}-worker"))
-                .backend(storage)
-                .retry(RetryPolicy::retries(1))
+                .backend(job::worker_backend(&storage, Duration::from_millis(100)))
+                .retry(job::retry_policy_within(1))
                 .layer(JobFailureReportLayer::new(QUEUE_LABEL))
                 .build(succeeds);
             let handle = tokio::spawn(worker.run());

@@ -15,8 +15,9 @@ export const DEFAULT_PR_STATE_FILTER: PrStateFilter = 'open';
  * （全件マージ済み、webhook を受けておらず全件 `unknown` の CLI 運用など）では
  * 空の一覧を見せず「すべて」で開く。
  *
- * 状態の絞り込みは URL に載らないので、URL の `page`（`urlPage`）が Open の一覧には無く
- * 「すべて」の一覧なら在るときは、「すべて」でページを送った URL とみなして「すべて」で開く。
+ * URL に `pr_state` が無いとき（選んでいない・状態を載せる前の URL）に使う。URL の `page`
+ * （`urlPage`）が Open の一覧には無く「すべて」の一覧なら在るときは、「すべて」でページを
+ * 送った URL とみなして「すべて」で開く。
  * 作成者の絞り込み（`mine`）は連携一覧を待つため、ここでは数えない。
  */
 export function initialPrStateFilter(

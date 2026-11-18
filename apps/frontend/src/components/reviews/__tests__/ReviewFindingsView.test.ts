@@ -231,6 +231,8 @@ function mountView(
         finding: null,
         mine: false,
         page: null,
+        q: '',
+        prState: null,
       },
       ...viewProps,
     },
@@ -473,6 +475,8 @@ describe('ReviewFindingsView', () => {
         finding: 'f-1',
         mine: false,
         page: null,
+        q: '',
+        prState: null,
       },
     });
     await flushPromises();
@@ -497,6 +501,8 @@ describe('ReviewFindingsView', () => {
         finding: 'missing-finding',
         mine: false,
         page: null,
+        q: '',
+        prState: null,
       },
     });
     await flushPromises();
@@ -638,6 +644,8 @@ describe('ReviewFindingsView', () => {
         finding: null,
         mine: false,
         page: null,
+        q: '',
+        prState: null,
       },
     });
     await flushPromises();
@@ -679,6 +687,8 @@ describe('ReviewFindingsView', () => {
         finding: null,
         mine: false,
         page: null,
+        q: '',
+        prState: null,
       },
     });
     await flushPromises();
@@ -703,6 +713,8 @@ describe('ReviewFindingsView', () => {
         finding: null,
         mine: false,
         page: null,
+        q: '',
+        prState: null,
       },
     });
     await flushPromises();
@@ -716,6 +728,8 @@ describe('ReviewFindingsView', () => {
         finding: null,
         mine: false,
         page: null,
+        q: '',
+        prState: null,
       },
     });
     await flushPromises();
@@ -740,6 +754,8 @@ describe('ReviewFindingsView', () => {
         finding: 'f-1',
         mine: false,
         page: null,
+        q: '',
+        prState: null,
       },
     });
     await flushPromises();
@@ -768,6 +784,8 @@ describe('ReviewFindingsView', () => {
         finding: null,
         mine: false,
         page: null,
+        q: '',
+        prState: null,
       },
       initialUrlWarnings: ['URL の重大度「urgent」は知らない値のため無視しました。'],
     });
@@ -793,6 +811,8 @@ describe('ReviewFindingsView', () => {
         finding: null,
         mine: false,
         page: null,
+        q: '',
+        prState: null,
       },
     });
     await flushPromises();
@@ -819,6 +839,8 @@ describe('ReviewFindingsView', () => {
         finding: null,
         mine: false,
         page: null,
+        q: '',
+        prState: null,
       },
     });
     await flushPromises();
@@ -924,7 +946,7 @@ describe('ReviewFindingsView', () => {
       );
     });
 
-    it('「すべて」を選ぶと Merged / Closed も並び、状態の絞り込みは URL に載せない', async () => {
+    it('「すべて」を選ぶと Merged / Closed も並び、選んだ状態は pr_state に載る（TASK-474）', async () => {
       stubFetch({
         findings: [finding()],
         prNumbers: [620, 619, 618],
@@ -938,8 +960,113 @@ describe('ReviewFindingsView', () => {
       await flushPromises();
 
       expect(prNavButtons()).toHaveLength(3);
-      // 状態の絞り込みは載らない（page は PR 一覧を操作したときに明示される 1 ページ目）
-      expect([...new URL(window.location.href).searchParams.keys()].sort()).toEqual(['page', 'pr']);
+      // 選んだ状態は載る（page は PR 一覧を操作したときに明示される 1 ページ目）
+      expect([...new URL(window.location.href).searchParams.keys()].sort()).toEqual([
+        'page',
+        'pr',
+        'pr_state',
+      ]);
+      expect(new URL(window.location.href).searchParams.get('pr_state')).toBe('all');
+    });
+
+    it('検索欄に入力すると q に載り、空にすると消える（TASK-474）', async () => {
+      stubFetch({ findings: [finding()], prNumbers: [620, 619, 618] });
+      const wrapper = mountView({ initialUrlState: noPrUrlState });
+      await flushPromises();
+
+      await wrapper.get('#filter-pr').setValue('619');
+      await flushPromises();
+      expect(new URL(window.location.href).searchParams.get('q')).toBe('619');
+
+      await wrapper.get('#filter-pr').setValue('');
+      await flushPromises();
+      expect(new URL(window.location.href).searchParams.has('q')).toBe(false);
+    });
+
+    it('URL の検索語と状態で一覧を開く（TASK-474）', async () => {
+      stubFetch({
+        findings: [finding({ pr_number: 620 })],
+        prNumbers: [620, 619, 618, 617],
+        prStates: { '620': 'merged', '619': 'merged', '618': 'open' },
+      });
+      const wrapper = mountView({
+        initialUrlState: { ...noPrUrlState, pr: 620, q: '620', prState: 'merged' },
+      });
+      await flushPromises();
+
+      expect((wrapper.get('#filter-pr').element as HTMLInputElement).value).toBe('620');
+      expect(pickerTrigger(document.body, 'PR の状態').getAttribute('aria-label')).toBe(
+        'PR の状態: Merged',
+      );
+      expect(prNavButtons().map((b) => b.textContent)).toEqual([expect.stringContaining('#620')]);
+    });
+
+    it('pr が無く q がある URL では、検索語で絞った一覧の先頭の PR を開く', async () => {
+      stubFetch({ findings: [finding()], prNumbers: [620, 619, 618] });
+      const wrapper = mountView({ initialUrlState: { ...noPrUrlState, q: '619' } });
+      await flushPromises();
+
+      expect(new URL(window.location.href).searchParams.get('pr')).toBe('619');
+      expect(wrapper.find('[data-testid="pr-rail-note"]').exists()).toBe(false);
+    });
+
+    it('pr が無く q に一致する PR が無ければ、これまでどおり状態で絞った先頭を開く', async () => {
+      stubFetch({ findings: [finding()], prNumbers: [620, 619, 618] });
+      mountView({ initialUrlState: { ...noPrUrlState, q: '99999' } });
+      await flushPromises();
+
+      expect(new URL(window.location.href).searchParams.get('pr')).toBe('620');
+    });
+
+    it('検索欄は 200 文字までしか入らず、URL から読む上限と揃う', async () => {
+      stubFetch({ findings: [finding()], prNumbers: [620, 619, 618] });
+      const wrapper = mountView({ initialUrlState: noPrUrlState });
+      await flushPromises();
+
+      expect(wrapper.get('#filter-pr').attributes('maxlength')).toBe('200');
+    });
+
+    it('Open が無い一覧でも、URL で明示した Open は「すべて」へ倒さない', async () => {
+      stubFetch({
+        findings: [finding({ pr_number: 620 })],
+        prNumbers: [620, 619],
+        prStates: { '620': 'merged', '619': 'closed' },
+      });
+      const wrapper = mountView({
+        initialUrlState: { ...noPrUrlState, pr: 620, prState: 'open' },
+      });
+      await flushPromises();
+
+      expect(pickerTrigger(document.body, 'PR の状態').getAttribute('aria-label')).toBe(
+        'PR の状態: Open',
+      );
+      expect(prNavButtons()).toHaveLength(0);
+      expect(wrapper.find('[data-testid="no-pr-match"]').exists()).toBe(true);
+    });
+
+    it('popstate で pr_state の無い URL へ戻ると、既定の決め方で状態を決め直す', async () => {
+      stubFetch({
+        findings: [finding()],
+        prNumbers: [620, 619, 618],
+        prStates: { '620': 'merged', '619': 'closed' },
+      });
+      window.history.replaceState({}, '', '/acme/projects/APP/reviews?pr=618&pr_state=merged&q=62');
+      const wrapper = mountView({
+        initialUrlState: { ...noPrUrlState, pr: 618, prState: 'merged', q: '62' },
+      });
+      await flushPromises();
+      expect(pickerTrigger(document.body, 'PR の状態').getAttribute('aria-label')).toBe(
+        'PR の状態: Merged',
+      );
+
+      window.history.replaceState({}, '', '/acme/projects/APP/reviews?pr=618');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      await flushPromises();
+      expect(pickerTrigger(document.body, 'PR の状態').getAttribute('aria-label')).toBe(
+        'PR の状態: Open',
+      );
+      expect((wrapper.get('#filter-pr').element as HTMLInputElement).value).toBe('');
+      expect(prNavButtons().map((b) => b.textContent)).toEqual([expect.stringContaining('#618')]);
     });
 
     it('共有リンクでマージ済み PR を開いたとき、その PR の指摘は出し、一覧には出ない理由を添える', async () => {

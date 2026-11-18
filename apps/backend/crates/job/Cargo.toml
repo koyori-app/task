@@ -8,8 +8,8 @@ common = { path = "../common" }
 entity = { path = "../entity" }
 anyhow = { workspace = true }
 service = { path = "../service" }
-apalis = { version = "1.0.0-rc.9", features = ["limit", "retry", "tracing"] }
-apalis-postgres = { version = "1.0.0-rc.8", default-features = false, features = ["migrate", "tokio-comp", "time"] }
+apalis = { version = "1.2.0", features = ["limit", "retry", "tracing"] }
+apalis-postgres = { version = "1.1.0", default-features = false, features = ["migrate", "tokio-comp"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 redis = { workspace = true }
@@ -18,7 +18,7 @@ sentry = { version = "0.48.2", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # apalis-postgres と同じ版。webhook の受信記録とジョブ投入を 1 トランザクションにまとめるのに使う
-sqlx = { version = "0.8", default-features = false, features = ["postgres"] }
+sqlx = { version = "0.9", default-features = false, features = ["postgres"] }
 tokio = { version = "1.52.1", features = ["macros", "sync", "time"] }
 tower = "0.5.2"
 tracing = { workspace = true }

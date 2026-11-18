@@ -23,28 +23,35 @@ export const WEEKEND_DAYS = [5, 6];
 /** 色は library の token だけで当てる。canvas は var() を図の要素の computed style から読む */
 export const GANTT_PALETTE: PaletteOverrides = {
   HeaderBg: 'var(--koyori-color-surface)',
-  GroupRow: 'var(--koyori-color-surface-disabled)',
-  // 群れの見出しの行の上でも土日が途切れて見えぬよう、群れの帯より一段濃い色にする
-  Weekend: 'var(--koyori-color-surface-hover)',
+  // 群れの帯と土日の帯は、surface の段のうち互いに一番離れる二つにする。どの組でも明度の
+  // 対比は小さいので、群れの帯を一段強く（暗い表示で明るく、明るい表示で暗く）して紛れぬようにする
+  GroupRow: 'var(--koyori-color-surface-active)',
+  Weekend: 'var(--koyori-color-surface-disabled)',
   Grid: 'var(--koyori-color-border)',
   GridLabel: 'var(--koyori-color-text-muted)',
   // 日の段の日の数字。渡さないと arc は字に色を書かず、暗い theme の見出しで黒く潰れる
   DayNumber: 'var(--koyori-color-text)',
-  BarBg: 'var(--koyori-color-accent-subtle)',
+  // 未着手の棒の地。図の地とも土日の帯とも非文字の対比 3:1 を越える段にする（accent-subtle は
+  // 暗い表示で図の地に溶けた）。進み（accent）との対比も 4.5:1 を越える
+  BarBg: 'var(--koyori-color-border-strong)',
   TierLow: 'var(--koyori-color-accent)',
   TierMid: 'var(--koyori-color-accent)',
   TierHigh: 'var(--koyori-color-accent)',
-  // 済みの棒は地を淡い緑で埋め、縁を濃い緑で引く（案 A の完了の行）
-  TierDone: 'var(--koyori-color-success-subtle)',
+  // 済みの棒は地を淡い緑で埋め、縁と進みを濃い緑で引く（案 A の完了の行）。進みを地と同じ色に
+  // すると、暗い表示で進みの濃い所が見えぬ
+  TierDone: 'var(--koyori-color-success)',
   DoneBg: 'var(--koyori-color-success-subtle)',
   DoneStroke: 'var(--koyori-color-success)',
   WarnBg: 'var(--koyori-color-danger-subtle)',
   WarnStroke: 'var(--koyori-color-danger)',
   HardDeadline: 'var(--koyori-color-danger)',
-  Note: 'var(--koyori-color-text-muted)',
+  // 添えの字と範囲の外の印の字。帯（図の地）の上で、明暗とも 4.5:1 を大きく越える段にする
+  Note: 'var(--koyori-color-text-secondary)',
   // 添えの字の下の帯。今日の線と格子を字の所だけ隠すので、図の地と同じ色にする
   NoteBg: 'var(--koyori-color-surface)',
-  Today: 'var(--koyori-color-text)',
+  // 今日の線は稲妻線（warning の実線）と色相で分ける。稲妻線は今日の線の上の層に描かれ、ずれの無い
+  // 行では今日の線に重なるので、字の色（白・黒）では重なった所が橙の点線に見えた
+  Today: 'var(--koyori-color-info)',
   ProgressLine: 'var(--koyori-color-warning)',
 };
 
