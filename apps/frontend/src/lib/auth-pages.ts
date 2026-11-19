@@ -11,6 +11,8 @@ export const AUTH_PAGE_PATHS: readonly string[] = [
   '/auth/2fa',
   '/verify-email',
   '/desktop/authorize',
+  // MCP の OAuth の同意画面。未ログインなら自分でサインインへ送って戻る
+  '/oauth/authorize',
   '/invitations/accept',
 ];
 

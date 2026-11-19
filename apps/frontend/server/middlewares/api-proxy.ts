@@ -163,9 +163,16 @@ async function proxyToBackend(request: Request): Promise<Response> {
  * Local SSR routes (/internal/*) stay on Elysia.
  *
  * /api/mcp は MCP の入口（backend の POST /mcp）。backend は v1 の外に置いているので、
- * この 1 つのパスだけを足す。/api/mcp/* やほかの /api/* は転送しない
+ * このパスと、MCP の OAuth の 4 つのパスだけを足す。
+ * - メタデータの 2 つ（/.well-known/*）は、先頭が /api でないので、そのままのパスで backend に届く
+ * - /api/oauth/token と /api/oauth/revoke は backend の POST /oauth/token と /oauth/revoke
+ * /api/mcp/*、/api/oauth/* のほかのパス、/.well-known/ のほかのパス、ほかの /api/* は転送しない
  * （backend には /scalar や管理用のパスもあり、公開する範囲を広げないため）。
  */
 export const apiProxyPlugin = new Elysia({ name: 'api-proxy' })
   .all('/api/v1/*', ({ request }) => proxyToBackend(request), { parse: 'none' })
-  .all('/api/mcp', ({ request }) => proxyToBackend(request), { parse: 'none' });
+  .all('/api/mcp', ({ request }) => proxyToBackend(request), { parse: 'none' })
+  .get('/.well-known/oauth-protected-resource/api/mcp', ({ request }) => proxyToBackend(request))
+  .get('/.well-known/oauth-authorization-server', ({ request }) => proxyToBackend(request))
+  .post('/api/oauth/token', ({ request }) => proxyToBackend(request), { parse: 'none' })
+  .post('/api/oauth/revoke', ({ request }) => proxyToBackend(request), { parse: 'none' });

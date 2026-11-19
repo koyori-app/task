@@ -253,6 +253,31 @@ export function useRevokePersonalTokenMutation() {
   return apiClient.useMutation('delete', '/v1/personal_tokens/{id}');
 }
 
+/** MCP の OAuth の同意画面: 認可の要求を確かめ、画面に出す中身を得る。 */
+export function usePreviewAuthorizationMutation() {
+  return apiClient.useMutation('post', '/v1/oauth_grants/preview');
+}
+
+export function useApproveAuthorizationMutation() {
+  return apiClient.useMutation('post', '/v1/oauth_grants/authorize');
+}
+
+export function useDenyAuthorizationMutation() {
+  return apiClient.useMutation('post', '/v1/oauth_grants/deny');
+}
+
+/** 連携中のアプリ（自分の OAuth の許可）。 */
+export const oauthGrantsQueryOptions = () =>
+  apiClient.queryOptions('get', '/v1/oauth_grants', undefined, { retry: false });
+
+export function useOAuthGrantsQuery() {
+  return apiClient.useQuery('get', '/v1/oauth_grants', undefined, { retry: false });
+}
+
+export function useRevokeOAuthGrantMutation() {
+  return apiClient.useMutation('delete', '/v1/oauth_grants/{id}');
+}
+
 export const devicesQueryOptions = () =>
   apiClient.queryOptions('get', '/v1/users/me/devices', undefined, { retry: false });
 
@@ -268,10 +293,11 @@ export function useCreateDesktopAuthCodeMutation() {
   return apiClient.useMutation('post', '/v1/desktop/auth/codes');
 }
 
-export function useTenantsQuery() {
+export function useTenantsQuery(options?: { enabled?: MaybeRefOrGetter<boolean> }) {
   return apiClient.useQuery('get', '/v1/tenants', undefined, {
     staleTime: AUTH_ME_STALE_TIME_MS,
     retry: false,
+    ...(options?.enabled !== undefined ? { enabled: options.enabled } : {}),
   });
 }
 

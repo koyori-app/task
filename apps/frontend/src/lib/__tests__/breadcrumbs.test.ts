@@ -7,6 +7,7 @@ describe('パンくずのルート台帳', () => {
     ['/settings/profile', 'プロフィール'],
     ['/settings/security', 'セキュリティ'],
     ['/settings/tokens', 'API トークン'],
+    ['/settings/apps', '連携中のアプリ'],
     ['/acme', 'ホーム'],
     ['/acme/my-tasks', 'My Tasks'],
     ['/acme/calendar', 'カレンダー'],
