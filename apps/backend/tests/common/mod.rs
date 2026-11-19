@@ -228,7 +228,13 @@ fn is_loopback_host(host: &str) -> bool {
 fn pin_test_endpoints(settings: &mut settings::Settings, endpoints: &TestEndpoints) {
     settings.database_url = endpoints.database_url.clone();
     settings.redis_url = endpoints.redis_url.clone();
+    // MCP の OAuth で受けるクライアントも、環境や `.env` の値に左右させない
+    settings.oauth_allowed_client_ids = TEST_OAUTH_CLIENT.to_string();
 }
+
+/// 試験用の OAuth のクライアント（`client_id`）。既定の許可リストはこの 1 件。
+/// メタデータは `TestApp::seed_oauth_client` が Redis のキャッシュに置く（外へ取りに行かない）。
+pub const TEST_OAUTH_CLIENT: &str = "https://client.test/oauth/metadata.json";
 
 fn set_default_env(key: &str, value: &str) {
     if std::env::var(key).is_err() {
@@ -671,6 +677,39 @@ impl TestApp {
         settings.email_verification_app_url = "http://localhost:3000".to_string();
         settings.reauth_window_secs = secs;
         Self::build(settings).await
+    }
+
+    /// MCP の OAuth の許可リスト（`OAUTH_ALLOWED_CLIENT_IDS` の生の値）を差し替えて起こす。
+    pub async fn new_with_oauth_clients(allowed_client_ids: &str) -> Self {
+        init_tracing();
+        let endpoints = ensure_test_env();
+        let mut settings = settings::load_settings().expect("load settings");
+        pin_test_endpoints(&mut settings, endpoints);
+        settings.email_verification_app_url = "http://localhost:3000".to_string();
+        settings.oauth_allowed_client_ids = allowed_client_ids.to_string();
+        Self::build(settings).await
+    }
+
+    /// OAuth のクライアントのメタデータを Redis のキャッシュに置く。
+    pub async fn seed_oauth_client_metadata(
+        &self,
+        metadata: &service::oauth_server::client::ClientMetadata,
+    ) {
+        service::oauth_server::client::cache_client(&self.state.redis_client, metadata, 300)
+            .await
+            .expect("seed oauth client");
+    }
+
+    /// `refresh_token` の grant を宣言するクライアントを Redis のキャッシュに置く。
+    pub async fn seed_oauth_client(&self, client_id: &str, redirect_uris: &[&str]) {
+        self.seed_oauth_client_metadata(&service::oauth_server::client::ClientMetadata {
+            client_id: client_id.to_string(),
+            client_name: "Test Client".to_string(),
+            client_uri: None,
+            redirect_uris: redirect_uris.iter().map(|uri| (*uri).to_string()).collect(),
+            allow_refresh: true,
+        })
+        .await;
     }
 
     pub async fn new_with_github() -> Self {
@@ -1519,6 +1558,7 @@ pub async fn insert_personal_token_for_test(
         user_id: Set(user_id),
         scopes: Set(ScopeList(scopes)),
         allowed_project_ids: Set(allowed_project_ids.map(|ids| serde_json::json!(ids))),
+        oauth_client_id: Set(None),
     }
     .insert(db)
     .await

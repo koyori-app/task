@@ -91,6 +91,10 @@ fn register_tags(openapi: &mut OpenApi) {
             .description(Some("パーソナルアクセストークン（PAT）管理"))
             .build(),
         TagBuilder::new()
+            .name("OAuth Grants")
+            .description(Some("MCP の OAuth の同意と、連携中のアプリの管理"))
+            .build(),
+        TagBuilder::new()
             .name("Drive Files")
             .description(Some("ドライブ — ファイル操作"))
             .build(),

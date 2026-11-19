@@ -274,7 +274,7 @@ where
 
 /// 一度だけ名前解決し、公開アドレスだけなら接続先を返す。https 以外・443 以外のポート・
 /// private 宛ては None（名前解決の前に判定する）。
-async fn resolve_public(url: &Url) -> Option<Vec<SocketAddr>> {
+pub(crate) async fn resolve_public(url: &Url) -> Option<Vec<SocketAddr>> {
     if url.scheme() != "https" {
         return None;
     }

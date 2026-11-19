@@ -19,6 +19,9 @@ pub struct Model {
     pub scopes: super::super::scopes::ScopeList,
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub allowed_project_ids: Option<Json>,
+    pub oauth_client_id: Option<String>,
+    #[sea_orm(has_many)]
+    pub oauth_tokens: HasMany<super::oauth_tokens::Entity>,
     #[sea_orm(
         belongs_to,
         from = "user_id",

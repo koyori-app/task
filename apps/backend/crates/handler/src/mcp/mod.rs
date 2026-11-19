@@ -18,12 +18,14 @@ use rmcp::transport::streamable_http_server::{
     StreamableHttpServerConfig, StreamableHttpService, session::never::NeverSessionManager,
 };
 use service::auth::AuthError;
+use service::oauth_server;
 
 use crate::AppState;
-use crate::extractors::{AuthMethod, AuthUser, bearer_token_from_parts};
+use crate::extractors::{AuthMethod, AuthUser, McpAudience, bearer_token_from_parts};
 use crate::middlewares::logging::logging_middleware;
 
 mod inner;
+mod oauth;
 mod resolve;
 mod tools;
 
@@ -41,9 +43,14 @@ pub fn mount(api: Router, state: AppState) -> Router {
     );
     let mcp = Router::new()
         .route_service("/mcp", service)
-        .layer(middleware::from_fn_with_state(state, require_pat))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_bearer,
+        ))
         .layer(middleware::from_fn(logging_middleware));
-    api.merge(mcp)
+    // OAuth の公開のエンドポイントも Cookie を見ないので、同じくレイヤーの外に置く
+    let oauth = oauth::routes(state).layer(middleware::from_fn(logging_middleware));
+    api.merge(mcp).merge(oauth)
 }
 
 fn config(settings: &Settings) -> StreamableHttpServerConfig {
@@ -70,28 +77,54 @@ fn origin_with_port(origin: &str) -> String {
     }
 }
 
-fn with_bearer_challenge(mut response: Response) -> Response {
+/// 401 の `WWW-Authenticate` の値。`resource_metadata` で、MCP クライアントが認可サーバーを
+/// 見つけられるようにする。無効な Bearer には `error="invalid_token"` を足す。
+fn bearer_challenge(settings: &Settings, had_credential: bool) -> String {
+    let error = if had_credential {
+        "error=\"invalid_token\", "
+    } else {
+        ""
+    };
+    format!(
+        "Bearer {error}resource_metadata=\"{}\", scope=\"{}\"",
+        oauth_server::protected_resource_metadata_url(settings),
+        oauth_server::scope_string(&oauth_server::GRANTABLE_SCOPES),
+    )
+}
+
+fn with_bearer_challenge(
+    mut response: Response,
+    settings: &Settings,
+    had_credential: bool,
+) -> Response {
     if response.status() == StatusCode::UNAUTHORIZED {
-        response
-            .headers_mut()
-            .insert(WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
+        // 設定の origin がヘッダーに載せられない値でも、方式だけは返す
+        let value = HeaderValue::from_str(&bearer_challenge(settings, had_credential))
+            .unwrap_or_else(|_| HeaderValue::from_static("Bearer"));
+        response.headers_mut().insert(WWW_AUTHENTICATE, value);
     }
     response
 }
 
-/// PAT の Bearer だけを通す。
+/// PAT か OAuth のアクセストークンの Bearer だけを通す。
 ///
 /// Bearer の無い要求はここで 401 にする。`AuthUser` へ進めるとセッション Cookie で認証されるため。
 /// Device Token は scope を持たず、テナントの束縛も引けないので断る。
+/// 要求に `McpAudience` の目印を載せる。OAuth のアクセストークンは、この目印の在る要求でだけ通る。
 /// 通した `AuthUser` は使わない。内向きの呼び出しが毎回認証し直す。
-async fn require_pat(State(state): State<AppState>, req: Request<Body>, next: Next) -> Response {
+async fn require_bearer(State(state): State<AppState>, req: Request<Body>, next: Next) -> Response {
     let (mut parts, body) = req.into_parts();
     if bearer_token_from_parts(&parts).is_none() {
-        return with_bearer_challenge(AuthError::Unauthorized.into_response());
+        return with_bearer_challenge(
+            AuthError::Unauthorized.into_response(),
+            &state.settings,
+            false,
+        );
     }
+    parts.extensions.insert(McpAudience);
     let auth = match AuthUser::from_request_parts(&mut parts, &state).await {
         Ok(auth) => auth,
-        Err(error) => return with_bearer_challenge(error.into_response()),
+        Err(error) => return with_bearer_challenge(error.into_response(), &state.settings, true),
     };
     if !matches!(auth.method, AuthMethod::PersonalToken { .. }) {
         return AppError::Forbidden.into_response();
@@ -101,7 +134,43 @@ async fn require_pat(State(state): State<AppState>, req: Request<Body>, next: Ne
 
 #[cfg(test)]
 mod tests {
-    use super::origin_with_port;
+    use super::{bearer_challenge, origin_with_port};
+    use common::settings::Settings;
+
+    fn settings(allow_origin: &str) -> Settings {
+        let mut settings: Settings = serde_json::from_value(serde_json::json!({
+            "database_url": "",
+            "redis_url": "",
+            "smtp_host": "",
+            "smtp_port": 0,
+            "smtp_username": "",
+            "smtp_password": "",
+            "smtp_from": "",
+            "email_verification_app_url": "http://localhost:3000",
+            "personal_token_secret": "a".repeat(32),
+            "recovery_code_secret": "c".repeat(32),
+            "totp_encryption_key": "b".repeat(32),
+        }))
+        .expect("settings");
+        settings.allow_origin = allow_origin.to_string();
+        settings
+    }
+
+    #[test]
+    fn challenge_points_at_the_protected_resource_metadata() {
+        assert_eq!(
+            bearer_challenge(&settings("https://app.example.com/"), false),
+            "Bearer resource_metadata=\"https://app.example.com/.well-known/oauth-protected-resource/api/mcp\", scope=\"read:tenant read:project read:task write:task read:milestone read:sprint\""
+        );
+    }
+
+    #[test]
+    fn challenge_for_a_rejected_bearer_names_the_error() {
+        assert_eq!(
+            bearer_challenge(&settings("https://app.example.com"), true),
+            "Bearer error=\"invalid_token\", resource_metadata=\"https://app.example.com/.well-known/oauth-protected-resource/api/mcp\", scope=\"read:tenant read:project read:task write:task read:milestone read:sprint\""
+        );
+    }
 
     #[test]
     fn origin_gets_the_default_port_of_its_scheme() {

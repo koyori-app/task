@@ -289,6 +289,7 @@ pub async fn create_bot_token(
         token_hash: Set(hash),
         scopes: Set(ScopeList(payload.scopes)),
         allowed_project_ids: Set(payload.project_ids.map(|v| serde_json::json!(v))),
+        oauth_client_id: Set(None),
         expires_at: Set(Some(payload.expires_at.into())),
         last_used_at: Set(None),
         revoked: Set(false),
