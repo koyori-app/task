@@ -2,6 +2,18 @@
 
 このファイルは git-cliff（cliff.toml）が生成する。手で編集しない。
 
+## [0.1.54](https://github.com/koyori-app/task/compare/v0.1.53...v0.1.54) - 2026-11-20
+
+ガントに依存の矢印を表示し、パスキーの追加・削除と再認証手段の追加に直近の本人確認を求め、VRT と Storybook の試験で失敗するストーリーを修正した
+
+### 機能追加
+
+- **frontend**: ガントに依存の矢印を描く ([TASK-510](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-510)) ([#1220](https://github.com/koyori-app/task/pull/1220))
+
+### 修正
+
+- **auth**: パスキーの追加と削除と、再認証の手段を足す操作に、直近の本人確認を求める ([TASK-543](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-543)) ([#1206](https://github.com/koyori-app/task/pull/1206))
+- **frontend**: VRT と storybook の試験で落ちる物語を直す ([#1222](https://github.com/koyori-app/task/pull/1222))
 ## [0.1.53](https://github.com/koyori-app/task/compare/v0.1.52...v0.1.53) - 2026-11-19
 
 MCP サーバーのエンドポイントと、入力欄へのファイルの貼り付けで Drive へ上げて本文にメディアを表示する機能、本文の GitHub パーマリンクのコード抜粋表示、git-cliff による CHANGELOG とリリースノートの生成を足し、My Tasks のタブや絞り込みを URL に残し、プロフィールのアバターの URL 入力欄を消し、ステータスの並べ替えで空の一覧を 400 にし、passkey の認証の検証を強め、ガントの暗い表示の色と依存の脆弱性を直した
