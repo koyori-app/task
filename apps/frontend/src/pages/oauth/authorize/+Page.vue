@@ -153,7 +153,11 @@ function submitErrorMessage(e: unknown, fallback: string): string {
   if (status === 403 && err.error?.message === '2fa-setup-required') {
     return '選択したテナントのどれかが 2 段階認証を必須にしています。2 段階認証を設定してから、もう一度お試しください。';
   }
-  if (status === 403) return '選択したテナントに所属していないため、接続できません。';
+  // 理由を名指しする 403 だけ原因を伝え、ほかの 403（Origin の検査など）は汎用の文にする
+  // （PAT の発行の画面と同じ分け方）
+  if (status === 403 && err.error?.message === 'tenant-membership-missing') {
+    return '選択したテナントに所属していないため、接続できません。';
+  }
   if (status === 400) return authorizeErrorMessage(err.error?.message);
   return fallback;
 }
