@@ -4,6 +4,7 @@ import { provide } from 'vue';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
 import { createPinia, setActivePinia } from 'pinia';
 import CommentBody from '@/components/tasks/CommentBody.vue';
+import { htmlTheme } from '../html-theme';
 /** 開くまで通信せず、成功は共有キャッシュ、403・404は閲覧不可として表示する。 */
 const TENANT = '11111111-1111-4111-8111-111111111111';
 const USER = '22222222-2222-4222-8222-222222222222';
@@ -114,7 +115,9 @@ async function open(canvasElement: HTMLElement, key = 'TASK-58') {
 }
 function story(mode: Mode, light = false): Story {
   return {
-    beforeEach: mock(mode),
+    // 明るい表示は html の data-theme で定める。本文の色（remark-gfm のリンクなど）は html の
+    // data-theme を見るので、内側の箱の属性だけでは暗い表示の色が残る。カードも body へ出る
+    beforeEach: light ? [mock(mode), htmlTheme('light')] : mock(mode),
     render: render(light, mode === 'other' ? 'ENG-58 を見てください。' : undefined),
     play: async ({ canvasElement }) => {
       const { canvas, link, dialog } = await open(
