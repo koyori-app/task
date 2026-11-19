@@ -15,6 +15,8 @@ import {
 import { computed, onMounted, ref, watch, type Component } from 'vue';
 import { Button, Field, Input, Skeleton } from '@koyori-app/ui-vue';
 import PasswordMethodRow from '@/components/settings/PasswordMethodRow.vue';
+import ReauthDialog from '@/components/settings/ReauthDialog.vue';
+import { requireRecentAuth, ReauthStatusError } from '@/composables/useReauthGate';
 import {
   meQueryOptions,
   oauthConnectionsQueryOptions,
@@ -29,7 +31,12 @@ import {
   type OAuthConnection,
   type OAuthProvider,
 } from '@/lib/auth-methods';
-import { consumeNotice, markNotice, OAUTH_LINK_NOTICE } from '@/lib/one-time-notice';
+import {
+  consumeNotice,
+  markNotice,
+  OAUTH_LINK_NOTICE,
+  REAUTH_RESUME_NOTICE,
+} from '@/lib/one-time-notice';
 import {
   connectionProviderLabel,
   connectionProviderSlug,
@@ -37,6 +44,7 @@ import {
   providerLabel,
   startOAuth,
 } from '@/lib/oauth-providers';
+import { parseReauthMarker, type ReauthResume } from '@/lib/reauth';
 import type { components } from '@/generated/api';
 
 const props = defineProps<{ user: components['schemas']['UserResponse'] }>();
@@ -55,6 +63,11 @@ const oauthFailed = ref(false);
 const confirmingKey = ref<string | null>(null);
 const rowError = ref<Record<string, string>>({});
 const instanceDrafts = ref<Record<string, string>>({});
+const reauthError = ref<string | null>(null);
+/** 本人確認の後に続ける連携の追加。プロバイダーの一覧が届くまで待つ。 */
+const resumeLink = ref<Extract<ReauthResume, { kind: 'link' }> | null>(null);
+/** 本人確認の後に、初回のパスワードの欄を開く。 */
+const resumeSetPassword = ref(false);
 
 /**
  * 連携を開始した接続。連携一覧に現れるまで通知を保留する。
@@ -103,7 +116,50 @@ onMounted(() => {
     // state は引き継ぐ（null を渡すと vike のクライアントルーターの state を捨てる）
     window.history.replaceState(window.history.state, '', SECURITY_PATH);
   }
+  // 本人確認のために連携の画面へ移り、戻ってきた。根拠は URL ではなく、移る前にこのタブへ置いた印
+  const marker = parseReauthMarker(consumeNotice(REAUTH_RESUME_NOTICE));
+  if (marker) {
+    if (oauthFailed.value) {
+      // 確かめられずに戻った（照合の違い・プロバイダーの拒否）。本人確認を出し直し、知らせはそこに出す
+      oauthFailed.value = false;
+      const via = marker.via ? providerLabel(marker.via) : '連携';
+      void resumeAfterReauth(
+        marker.resume,
+        `${via} で確かめられませんでした。連携しているアカウントで確かめるか、ほかの方法を選んでください。`,
+      );
+    } else {
+      void resumeAfterReauth(marker.resume);
+    }
+  }
 });
+
+/**
+ * 直近の本人確認が要る操作の前に呼ぶ。要らなければすぐ true、要れば dialog で確かめて true。
+ * 取り消すか、要否を問えなければ false（問えずに撃てば、連携の開始は 403 の頁で止まる）。
+ */
+async function gate(resume: ReauthResume, notice?: string): Promise<boolean> {
+  reauthError.value = null;
+  try {
+    return await requireRecentAuth(resume, { notice });
+  } catch (e) {
+    if (!(e instanceof ReauthStatusError)) throw e;
+    reauthError.value = '本人確認の状態を確かめられませんでした。時間をおいて再度お試しください。';
+    return false;
+  }
+}
+
+/** 連携で確かめて戻った後、押し直さずに元の操作を続ける。 */
+async function resumeAfterReauth(resume: ReauthResume, notice?: string) {
+  if (notice && !(await gate(resume, notice))) return;
+  if (resume.kind === 'set-password') {
+    if (!notice) flash.value = '本人確認ができました。パスワードを設定してください。';
+    resumeSetPassword.value = true;
+    return;
+  }
+  if (!notice)
+    flash.value = `本人確認ができました。${providerLabel(resume.provider)} の連携へ進みます。`;
+  resumeLink.value = resume;
+}
 
 const connections = computed<OAuthConnection[]>(
   () => connectionsQuery.data.value?.connections ?? [],
@@ -128,6 +184,20 @@ watch(
 );
 
 const providers = computed(() => providersQuery.data.value?.providers ?? []);
+
+watch(
+  [resumeLink, providers],
+  () => {
+    const pending = resumeLink.value;
+    if (!pending) return;
+    const provider = providers.value.find((candidate) => candidate.provider === pending.provider);
+    if (!provider) return;
+    resumeLink.value = null;
+    if (pending.instanceUrl) instanceDrafts.value[provider.provider] = pending.instanceUrl;
+    void onLink(provider, pending.instanceUrl);
+  },
+  { immediate: true },
+);
 const passkeyCount = computed(() => passkeysQuery.data.value?.passkeys?.length ?? 0);
 
 const methodCount = computed(() =>
@@ -226,11 +296,23 @@ function providerHint(provider: OAuthProvider): string {
     : 'インスタンス URL を指定して連携します';
 }
 
-function onLink(provider: OAuthProvider) {
+async function onLink(provider: OAuthProvider, resumedInstanceUrl?: string) {
   const instanceUrl = provider.requires_instance_url
-    ? instanceDrafts.value[provider.provider]?.trim()
+    ? (resumedInstanceUrl ?? instanceDrafts.value[provider.provider])?.trim()
     : undefined;
   if (provider.requires_instance_url && (!instanceUrl || instanceAlreadyLinked(provider))) return;
+  // ログインに使える連携を足すには、直近の本人確認が要る。全画面で移る前に問い、要れば先に確かめる
+  // （連携専用の GitHub App は再認証の手段にならないので要らない）
+  if (
+    provider.sign_in &&
+    !(await gate({
+      kind: 'link',
+      provider: provider.provider,
+      ...(instanceUrl ? { instanceUrl } : {}),
+    }))
+  ) {
+    return;
+  }
 
   // 戻ってきたときの通知はこの印だけを根拠にする（URL には何も足さない）
   markNotice(
@@ -309,11 +391,13 @@ async function onPasswordSet() {
     <p v-if="oauthFailed" role="alert" class="text-destructive text-sm">
       外部プロバイダーでの連携に失敗しました。もう一度お試しください。
     </p>
+    <p v-if="reauthError" role="alert" class="text-destructive text-sm">{{ reauthError }}</p>
 
     <div class="divide-y overflow-hidden rounded-lg border">
       <PasswordMethodRow
         :has-password="user.has_password"
         :email="user.email"
+        :resume-open="resumeSetPassword"
         @set="onPasswordSet"
       />
 
@@ -474,5 +558,6 @@ async function onPasswordSet() {
         </div>
       </template>
     </div>
+    <ReauthDialog :return-path="SECURITY_PATH" />
   </div>
 </template>

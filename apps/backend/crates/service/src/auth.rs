@@ -91,6 +91,8 @@ pub enum AuthError {
     InvalidCurrentPassword,
     #[error("password not set")]
     PasswordNotSet,
+    #[error("recent authentication required")]
+    ReauthRequired,
 }
 
 impl From<sea_orm::DbErr> for AuthError {
@@ -284,6 +286,13 @@ impl IntoResponse for AuthError {
                 StatusCode::BAD_REQUEST,
                 Json(ServerError {
                     message: "password-not-set".into(),
+                }),
+            )
+                .into_response(),
+            AuthError::ReauthRequired => (
+                StatusCode::FORBIDDEN,
+                Json(ServerError {
+                    message: "reauth-required".into(),
                 }),
             )
                 .into_response(),

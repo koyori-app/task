@@ -116,6 +116,9 @@ pub struct Settings {
     pub bootstrap_admin_email: Option<String>,
     /// WebAuthn RP ID（省略時は `email_verification_app_url` のホスト名）
     pub webauthn_rp_id: Option<String>,
+    /// 再認証の有効期間（秒）。パスキーの追加と削除は、直近のこの秒数の内に本人確認をしていることを求める。
+    #[serde(default = "default_reauth_window_secs")]
+    pub reauth_window_secs: u64,
     /// GitHub App 連携。`GITHUB_APP_ID` 未設定時は `None`（他機能は起動可能）。
     #[serde(default, skip_deserializing)]
     pub github_app: Option<GithubAppSettings>,
@@ -151,6 +154,10 @@ where
 
 fn default_github_app_frontend_base_url() -> String {
     String::new()
+}
+
+fn default_reauth_window_secs() -> u64 {
+    300
 }
 
 fn default_totp_issuer() -> String {
@@ -318,6 +325,7 @@ mod tests {
             totp_issuer: "TaskApp".to_string(),
             bootstrap_admin_email: None,
             webauthn_rp_id: None,
+            reauth_window_secs: 300,
             github_app: Some(test_github_app_settings()),
         }
     }

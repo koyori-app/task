@@ -26,6 +26,7 @@ use payload::auth_2fa::*;
 use payload::tenants::TenantResponse;
 use service::auth::AuthError;
 use service::login_session::{user_in_require_2fa_tenant, user_satisfies_2fa};
+use service::reauth::mark_reauthed;
 use service::totp::{
     self, clear_2fa_attempts, decrypt_totp_secret, encrypt_totp_secret, generate_recovery_codes,
     generate_totp_secret_base32, hash_recovery_code, normalize_recovery_code, otpauth_uri,
@@ -302,6 +303,8 @@ pub async fn verify_2fa(
     .await?;
     session.set("half_authed", false);
     session.renew();
+    // TOTP かリカバリーコードで本人と確かめた。登録の完了（totp_verify_setup）では立てない
+    mark_reauthed(&session);
     Ok(StatusCode::NO_CONTENT)
 }
 

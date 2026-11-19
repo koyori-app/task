@@ -38,6 +38,7 @@ use service::db::{is_postgres_unique_violation, with_transaction};
 use service::email::normalize_email;
 use service::email_verification;
 use service::login_session::establish_login_session;
+use service::reauth::mark_reauthed;
 use service::storage::StorageError;
 
 #[axum::debug_handler]
@@ -87,6 +88,8 @@ pub async fn login(
     if let Some(response) = establish_login_session(&session, &state.db, &user).await? {
         return Ok((StatusCode::OK, Json(response)).into_response());
     }
+    // パスワードで本人と確かめたので、パスキーの追加と削除の再認証を満たす
+    mark_reauthed(&session);
 
     Ok(StatusCode::NO_CONTENT.into_response())
 }

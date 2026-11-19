@@ -11,6 +11,12 @@
 /** OAuth 連携を開始したプロバイダー。値はプロバイダー名。 */
 export const OAUTH_LINK_NOTICE = 'task:oauth-link-started';
 
+/**
+ * 本人確認のために連携の画面へ移ったこと。値は、戻った画面で続ける操作と、確かめに使った連携
+ * （`lib/reauth.ts` の ReauthMarker）。パスワードなどの秘密は置かない。
+ */
+export const REAUTH_RESUME_NOTICE = 'task:reauth-resume';
+
 /** パスワード変更でサインアウトされたこと。 */
 export const PASSWORD_CHANGED_NOTICE = 'task:password-changed';
 

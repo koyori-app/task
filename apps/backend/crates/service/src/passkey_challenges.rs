@@ -16,6 +16,7 @@ const KEY_REG: &str = "webauthn:reg:";
 const KEY_REG_LOCK: &str = "webauthn:reg:lock:";
 const KEY_AUTH: &str = "webauthn:auth:";
 const KEY_AUTH_DISC: &str = "webauthn:auth:disc:";
+const KEY_REAUTH: &str = "webauthn:reauth:";
 
 /// 登録フロー排他ロックを取得する（`SET key 1 NX EX REGISTRATION_LOCK_TTL_SECS`）。成功時のみ `true`。
 pub async fn acquire_registration_lock(
@@ -127,6 +128,22 @@ pub async fn take_discoverable_authentication(
     challenge_id: Uuid,
 ) -> Result<Option<DiscoverableAuthentication>, anyhow::Error> {
     take_json(redis, &format!("{KEY_AUTH_DISC}{challenge_id}")).await
+}
+
+/// 再認証（ログイン済みの利用者がパスキーで本人確認する）のチャレンジ。利用者ごとに 1 つ。
+pub async fn store_reauth(
+    redis: &RedisConnection,
+    user_id: Uuid,
+    state: &PasskeyAuthentication,
+) -> Result<(), anyhow::Error> {
+    store_json(redis, &format!("{KEY_REAUTH}{user_id}"), state).await
+}
+
+pub async fn take_reauth(
+    redis: &RedisConnection,
+    user_id: Uuid,
+) -> Result<Option<PasskeyAuthentication>, anyhow::Error> {
+    take_json(redis, &format!("{KEY_REAUTH}{user_id}")).await
 }
 
 async fn store_json<T: Serialize>(
