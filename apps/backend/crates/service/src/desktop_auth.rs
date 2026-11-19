@@ -1,7 +1,6 @@
 //! Koyori Desktop の認証（Authorization Code + PKCE、loopback）。
 //! 規則は docs/dev/design/personal-access-tokens-authz.md の「Desktop 認証」。
 
-use argon2::password_hash::rand_core::{OsRng, RngCore};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{Duration, Utc};
@@ -53,7 +52,7 @@ pub async fn issue_code(
     pending: &PendingCode,
 ) -> Result<String, anyhow::Error> {
     let mut buf = [0u8; 32];
-    OsRng.fill_bytes(&mut buf);
+    crate::random::fill(&mut buf);
     let code = URL_SAFE_NO_PAD.encode(buf);
 
     let mut conn = redis

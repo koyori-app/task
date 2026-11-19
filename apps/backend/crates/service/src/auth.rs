@@ -2,10 +2,7 @@ use std::sync::OnceLock;
 
 use argon2::{
     Argon2,
-    password_hash::{
-        PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
-        rand_core::{OsRng, RngCore},
-    },
+    password_hash::{PasswordHasher, PasswordVerifier, phc::PasswordHash},
 };
 
 use axum::{
@@ -300,6 +297,8 @@ impl IntoResponse for AuthError {
     }
 }
 
+/// salt の長さ（バイト）。argon2 0.5.3 の `SaltString::generate` と同じ 16 バイト（PHC の文字列では 22 字）。
+const ARGON2_SALT_LEN: usize = 16;
 const ARGON2_PRODUCTION_COSTS: (u32, u32, u32) = (131072, 3, 2);
 const ARGON2_TEST_COSTS: (u32, u32, u32) = (8192, 1, 1);
 
@@ -361,11 +360,11 @@ pub fn create_password_hash(password: &str) -> Result<String, AuthError> {
 }
 
 fn password_hash_with_costs(password: &str, costs: (u32, u32, u32)) -> Result<String, AuthError> {
-    let salt = SaltString::generate(&mut OsRng);
+    let salt = crate::random::bytes::<ARGON2_SALT_LEN>();
     let argon2 = argon2_with_costs(costs)?;
 
     let hash = argon2
-        .hash_password(password.as_bytes(), &salt)
+        .hash_password_with_salt(password.as_bytes(), &salt)
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("password hash: {e}")))?;
 
     Ok(hash.to_string())
@@ -404,7 +403,7 @@ pub fn verify_password(password: &str, password_hash: &str) -> Result<bool, Auth
 /// メール認証用トークンを生成する。
 pub fn generate_email_verification_token() -> String {
     let mut buf = [0u8; 32];
-    OsRng.fill_bytes(&mut buf);
+    crate::random::fill(&mut buf);
     URL_SAFE_NO_PAD.encode(buf)
 }
 
@@ -417,7 +416,7 @@ pub const DEVICE_TOKEN_PREFIX: &str = "kdt_";
 /// `<prefix><base64url>` 形式のトークンと、DBに保存するHMACハッシュを返す。
 fn generate_prefixed_token(prefix: &str, secret: &str) -> Result<(String, String), AuthError> {
     let mut buf = [0u8; 32];
-    OsRng.fill_bytes(&mut buf);
+    crate::random::fill(&mut buf);
     let token = format!("{prefix}{}", URL_SAFE_NO_PAD.encode(buf));
     let token_hash = create_personal_token_hash(&token, secret)?;
     Ok((token, token_hash))
