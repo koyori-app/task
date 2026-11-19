@@ -48,6 +48,21 @@ describe('AccountSettingsNav の環境設定と実験的機能', () => {
     expect(link.attributes('aria-current')).toBe('page');
   });
 
+  it('「連携中のアプリ」は「アクセストークン」のすぐ下に並び、/settings/apps への link になる', async () => {
+    const { wrapper } = mountNav('/settings/apps');
+    await flushPromises();
+
+    const titles = linkTitles(wrapper);
+    expect(titles.indexOf('連携中のアプリ')).toBe(titles.indexOf('アクセストークン') + 1);
+    expect(titles).toHaveLength(8);
+    const link = wrapper.get('a[href="/settings/apps"]');
+    expect(link.text()).toBe('連携中のアプリ');
+    expect(link.find('svg').exists()).toBe(true);
+    expect(link.attributes('aria-current')).toBe('page');
+    // 隣の「アクセストークン」は現在の項目にならない
+    expect(wrapper.get('a[href="/settings/tokens"]').attributes('aria-current')).toBeUndefined();
+  });
+
   it('未実装の「通知」はリンク先を持たず、押せない項目として並ぶ', async () => {
     const { wrapper } = mountNav();
     await flushPromises();
