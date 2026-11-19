@@ -324,25 +324,15 @@ async fn exchange_code(state: &AppState, form: &TokenForm) -> Result<IssuedToken
         Err(error) => return Err(TokenError::server_error(error)),
     }
 
-    let tokens =
-        grant::create_grant(&state.db, &state.settings.personal_token_secret, &pending).await?;
-
-    match grant::code_was_replayed(&state.redis_client, code).await {
-        Ok(false) => Ok(tokens),
-        Ok(true) => {
-            grant::revoke_grant(&state.db, pending.grant_id)
-                .await
-                .map_err(TokenError::server_error)?;
-            Err(TokenError::invalid_grant())
-        }
-        // 確かめられないまま有効な許可を残さない
-        Err(error) => {
-            grant::revoke_grant(&state.db, pending.grant_id)
-                .await
-                .map_err(TokenError::server_error)?;
-            Err(TokenError::server_error(error))
-        }
-    }
+    // 許可を作り、commit のあとで二重使用を確かめる
+    Ok(grant::create_grant_for_code(
+        &state.redis_client,
+        &state.db,
+        &state.settings.personal_token_secret,
+        code,
+        &pending,
+    )
+    .await?)
 }
 
 /// リフレッシュトークンを回す。要求の `scope` は読まない（発行する scope は許可の行に在る）。

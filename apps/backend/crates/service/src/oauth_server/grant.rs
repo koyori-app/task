@@ -194,6 +194,33 @@ pub async fn code_was_replayed(redis: &RedisConnection, code: &str) -> Result<bo
     Ok(exists > 0)
 }
 
+/// 消費したコードから許可を作り、作ったあとで二重使用を確かめる（コードの交換の本体）。
+///
+/// 同じコードの 2 つの交換は、後から来た側が印を置いてから許可を取り消す
+/// （[`take_code`] の `Used`）。その取り消しが、先に来た側の commit より前に走ると空振りになる。
+/// そこで、先に来た側は commit のあとで印を読み、在れば自分で取り消す。どの順でも許可は残らない。
+/// 印を読めなかったとき（Redis の失敗）も、確かめられないまま有効な許可を残さない。
+pub async fn create_grant_for_code(
+    redis: &RedisConnection,
+    db: &DatabaseConnection,
+    secret: &str,
+    code: &str,
+    pending: &PendingAuthorization,
+) -> Result<IssuedTokens, GrantError> {
+    let tokens = create_grant(db, secret, pending).await?;
+    match code_was_replayed(redis, code).await {
+        Ok(false) => Ok(tokens),
+        Ok(true) => {
+            revoke_grant(db, pending.grant_id).await?;
+            Err(GrantError::InvalidGrant)
+        }
+        Err(error) => {
+            revoke_grant(db, pending.grant_id).await?;
+            Err(GrantError::Internal(error))
+        }
+    }
+}
+
 /// `oauth_tokens` に 1 行足し、平文を返す。
 async fn insert_token<C: ConnectionTrait>(
     conn: &C,

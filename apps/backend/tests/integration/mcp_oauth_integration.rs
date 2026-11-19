@@ -19,9 +19,10 @@ use crate::common::{
 use axum::http::StatusCode;
 use backend::utils::desktop_auth::s256_challenge;
 use backend::utils::oauth_server::client::{ClientMetadata, fetch_rate_limit_key};
-use backend::utils::oauth_server::grant::{self, CodeState, PendingAuthorization};
+use backend::utils::oauth_server::grant::{self, CodeState, GrantError, PendingAuthorization};
 use backend::utils::password_reset;
 use chrono::{Duration, Utc};
+use common::cache::redis::RedisConnection;
 use entity::project_members::ProjectRole;
 use entity::scopes::Scope;
 use entity::tenant_members::TenantRole;
@@ -853,6 +854,59 @@ async fn consent_endpoints_are_session_only() {
     assert_eq!(res.status(), StatusCode::OK);
 }
 
+/// 本番のセッション Cookie は SameSite=None なので、同意と解除を守るのは `Origin` の検査である。
+/// ほかのサイトの `Origin` が付いた、Cookie だけの要求は断る。
+#[tokio::test]
+async fn consent_and_disconnect_reject_a_foreign_origin() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    connect(&app, &[fx.tp.tenant_id], &ALL_SCOPES).await;
+    let grant_id = only_grant(&app, fx.user.id).await.id;
+    let body = approval(json!({}), &[fx.tp.tenant_id], &ALL_SCOPES);
+    let frontend_origin = app.state.settings.public_origin();
+    let post = |path: &str, origin: &str| {
+        app.client()
+            .post(format!("{}{path}", app.base_url()))
+            .header(header::ORIGIN, origin)
+            .json(&body)
+            .send()
+    };
+    let delete = |origin: &str| {
+        app.client()
+            .delete(format!("{}/v1/oauth_grants/{grant_id}", app.base_url()))
+            .header(header::ORIGIN, origin)
+            .send()
+    };
+
+    for path in [
+        "/v1/oauth_grants/authorize",
+        "/v1/oauth_grants/deny",
+        "/v1/oauth_grants/preview",
+    ] {
+        let res = post(path, "https://evil.example").await.expect("request");
+        assert_eq!(message_of(res).await, forbidden("forbidden"), "{path}");
+    }
+    let res = delete("https://evil.example").await.expect("request");
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        grants_of(&app, fx.user.id).await.len(),
+        1,
+        "許可は増えていない"
+    );
+    assert!(
+        !only_grant(&app, fx.user.id).await.revoked,
+        "解除されていない"
+    );
+
+    // 対照: 画面の origin からの要求は通る
+    let res = post("/v1/oauth_grants/authorize", &frontend_origin)
+        .await
+        .expect("request");
+    assert_eq!(res.status(), StatusCode::OK);
+    let res = delete(&frontend_origin).await.expect("request");
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+}
+
 #[tokio::test]
 async fn device_token_cannot_consent() {
     let mut app = TestApp::new().await;
@@ -1535,25 +1589,48 @@ async fn take(app: &TestApp, code: &str) -> CodeState {
         .expect("take code")
 }
 
-async fn create(app: &TestApp, pending: &PendingAuthorization) -> Tokens {
-    let issued = grant::create_grant(
-        &app.state.db,
-        &app.state.settings.personal_token_secret,
-        pending,
-    )
-    .await
-    .expect("create grant");
-    Tokens {
-        access: issued.access_token,
-        refresh: issued.refresh_token,
-        scope: String::new(),
-    }
-}
-
 async fn replayed(app: &TestApp, code: &str) -> bool {
     grant::code_was_replayed(&app.state.redis_client, code)
         .await
         .expect("replay flag")
+}
+
+/// 交換の本体（許可を作り、commit のあとで二重使用を確かめる）。トークンのエンドポイントが呼ぶものと同じ。
+async fn create_for_code(
+    app: &TestApp,
+    redis: &RedisConnection,
+    code: &str,
+    pending: &PendingAuthorization,
+) -> Result<Tokens, GrantError> {
+    let issued = grant::create_grant_for_code(
+        redis,
+        &app.state.db,
+        &app.state.settings.personal_token_secret,
+        code,
+        pending,
+    )
+    .await?;
+    Ok(Tokens {
+        access: issued.access_token,
+        refresh: issued.refresh_token,
+        scope: String::new(),
+    })
+}
+
+/// 許可の行は取り消されていて、トークンの行は残っていない。
+async fn assert_grant_revoked(app: &TestApp, grant_id: Uuid) {
+    let row = personal_tokens::Entity::find_by_id(grant_id)
+        .one(&app.state.db)
+        .await
+        .expect("find grant")
+        .expect("許可の行は作られている");
+    assert!(row.revoked, "許可は取り消されている");
+    let tokens = oauth_tokens::Entity::find()
+        .filter(oauth_tokens::Column::GrantId.eq(grant_id))
+        .count(&app.state.db)
+        .await
+        .expect("count tokens");
+    assert_eq!(tokens, 0, "トークンの行は残らない");
 }
 
 /// 2 つの交換が、後から来た側の取り消しのあとで先の側が許可を作る順に進んでも、許可は残らない。
@@ -1574,15 +1651,16 @@ async fn code_replay_is_caught_when_the_second_exchange_revokes_before_the_grant
     grant::revoke_grant(&app.state.db, pending.grant_id)
         .await
         .expect("revoke before the grant exists");
-    // A が許可を作り、commit のあとで印を読む
-    let tokens = create(&app, &pending).await;
-    assert_eq!(mcp_status(&app, &tokens.access).await, StatusCode::OK);
-    assert!(replayed(&app, &code).await, "B の印が残っている");
-    grant::revoke_grant(&app.state.db, pending.grant_id)
-        .await
-        .expect("revoke after the replay flag");
+    assert!(grants_of(&app, fx.user.id).await.is_empty());
 
-    assert_dead(&app, &tokens, "A が印を見て取り消す").await;
+    // A が許可を作る。commit のあとで B の印を見つけ、自分で取り消す
+    let result = create_for_code(&app, &app.state.redis_client, &code, &pending).await;
+
+    assert!(
+        matches!(result, Err(GrantError::InvalidGrant)),
+        "A はトークンを受け取らない"
+    );
+    assert_grant_revoked(&app, pending.grant_id).await;
 }
 
 #[tokio::test]
@@ -1593,8 +1671,10 @@ async fn code_replay_is_caught_when_the_second_exchange_comes_after_the_grant() 
     let code = issue(&app, &pending).await;
 
     assert!(matches!(take(&app, &code).await, CodeState::Fresh(_)));
-    let tokens = create(&app, &pending).await;
-    // 対照: B が来なければ印は無く、トークンは通る
+    // 対照: B が来なければ印は無く、A はトークンを受け取り、トークンは通る
+    let tokens = create_for_code(&app, &app.state.redis_client, &code, &pending)
+        .await
+        .expect("印が無ければ交換は成功する");
     assert!(!replayed(&app, &code).await);
     assert_eq!(mcp_status(&app, &tokens.access).await, StatusCode::OK);
 
@@ -1605,6 +1685,26 @@ async fn code_replay_is_caught_when_the_second_exchange_comes_after_the_grant() 
 
     assert_dead(&app, &tokens, "B が取り消す").await;
     assert!(replayed(&app, &code).await);
+}
+
+/// 印を読めなかったときは、確かめられないまま有効な許可を残さない。
+#[tokio::test]
+async fn grant_is_revoked_when_the_replay_flag_cannot_be_read() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let pending = pending_for(&fx);
+    let code = issue(&app, &pending).await;
+    assert!(matches!(take(&app, &code).await, CodeState::Fresh(_)));
+    // 繋がらない Redis（閉じているポート）
+    let unreachable = RedisConnection::new("redis://127.0.0.1:1");
+
+    let result = create_for_code(&app, &unreachable, &code, &pending).await;
+
+    assert!(
+        matches!(result, Err(GrantError::Internal(_))),
+        "読めなかったことは、拒否ではなく失敗として返す"
+    );
+    assert_grant_revoked(&app, pending.grant_id).await;
 }
 
 #[tokio::test]

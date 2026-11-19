@@ -172,12 +172,25 @@ pub(crate) fn is_special_use(ip: IpAddr) -> bool {
     }
 }
 
+/// 接続してよいと確かめたアドレス。[`vet_addrs`] だけが作る。
+///
+/// 取得の関数はこの型だけを受ける。特殊用途の検査を通さずに取りに行く書き方は、型が合わない。
+pub(crate) struct VettedAddrs(Vec<SocketAddr>);
+
+impl VettedAddrs {
+    /// 手元の TCP サーバー（loopback）へ向ける単体試験のための入口。
+    #[cfg(test)]
+    fn unchecked_for_test(addrs: Vec<SocketAddr>) -> Self {
+        Self(addrs)
+    }
+}
+
 /// 名前解決の結果を確かめる。1 つでも特殊用途なら全体を拒否する。
-pub(crate) fn ensure_no_special_use(addrs: &[SocketAddr]) -> Result<(), ClientError> {
+pub(crate) fn vet_addrs(addrs: Vec<SocketAddr>) -> Result<VettedAddrs, ClientError> {
     if addrs.is_empty() || addrs.iter().any(|addr| is_special_use(addr.ip())) {
         return Err(ClientError::Unavailable);
     }
-    Ok(())
+    Ok(VettedAddrs(addrs))
 }
 
 fn string_list(value: &Value) -> Option<Vec<&str>> {
@@ -287,9 +300,16 @@ pub fn validate_document(client_id: &str, body: &[u8]) -> Result<ClientMetadata,
     })
 }
 
-/// `Cache-Control` の `max-age`（秒）。
+/// `Cache-Control` が示す保存の秒数。`max-age` の値を読む。`no-store` か `no-cache` が在れば 0
+/// （[`cache_ttl_secs`] が下限に丸める。取得回数の制限を保つため、保存しないことはしない）。
 fn max_age_of(cache_control: &str) -> Option<u64> {
-    cache_control.split(',').find_map(|directive| {
+    let directives = || cache_control.split(',').map(str::trim);
+    if directives().any(|directive| {
+        directive.eq_ignore_ascii_case("no-store") || directive.eq_ignore_ascii_case("no-cache")
+    }) {
+        return Some(0);
+    }
+    directives().find_map(|directive| {
         let (name, value) = directive.trim().split_once('=')?;
         name.trim()
             .eq_ignore_ascii_case("max-age")
@@ -308,7 +328,7 @@ pub(crate) fn cache_ttl_secs(max_age: Option<u64>) -> u64 {
 /// リダイレクトは追わず、200 以外と上限を超える本文は失敗にする。
 pub(crate) async fn fetch_document_at(
     url: &Url,
-    addrs: &[SocketAddr],
+    addrs: &VettedAddrs,
 ) -> Result<(Vec<u8>, Option<u64>), ClientError> {
     let unavailable = |what: &'static str| {
         move |error: reqwest::Error| {
@@ -320,7 +340,7 @@ pub(crate) async fn fetch_document_at(
     let client = reqwest::Client::builder()
         .user_agent("task-oauth-client-metadata")
         .no_proxy()
-        .resolve_to_addrs(host, addrs)
+        .resolve_to_addrs(host, &addrs.0)
         .redirect(Policy::none())
         .connect_timeout(FETCH_TIMEOUT)
         .timeout(FETCH_TIMEOUT)
@@ -359,6 +379,18 @@ pub(crate) async fn fetch_document_at(
         body.extend_from_slice(&chunk);
     }
     Ok((body, max_age))
+}
+
+/// 確かめたアドレスから文書を取り、検証して、メタデータとキャッシュの寿命（秒）を返す。
+/// 検証を通らない文書は、ここから先（キャッシュ）へ進まない。
+pub(crate) async fn fetch_validated(
+    client_id: &str,
+    url: &Url,
+    addrs: &VettedAddrs,
+) -> Result<(ClientMetadata, u64), ClientError> {
+    let (body, max_age) = fetch_document_at(url, addrs).await?;
+    let metadata = validate_document(client_id, &body)?;
+    Ok((metadata, cache_ttl_secs(max_age)))
 }
 
 /// メタデータのキャッシュの Redis キー。
@@ -456,13 +488,13 @@ pub async fn resolve_client(
     if !try_acquire_fetch(redis, user_id).await? {
         return Err(ClientError::Unavailable);
     }
-    let addrs = crate::favicon::resolve_public(&url)
-        .await
-        .ok_or(ClientError::Unavailable)?;
-    ensure_no_special_use(&addrs)?;
-    let (body, max_age) = fetch_document_at(&url, &addrs).await?;
-    let metadata = validate_document(client_id, &body)?;
-    cache_client(redis, &metadata, cache_ttl_secs(max_age)).await?;
+    let addrs = vet_addrs(
+        crate::favicon::resolve_public(&url)
+            .await
+            .ok_or(ClientError::Unavailable)?,
+    )?;
+    let (metadata, ttl_secs) = fetch_validated(client_id, &url, &addrs).await?;
+    cache_client(redis, &metadata, ttl_secs).await?;
     Ok(metadata)
 }
 
@@ -884,16 +916,19 @@ mod tests {
     #[test]
     fn mixed_resolution_is_rejected_as_a_whole() {
         let addr = |raw: &str| SocketAddr::new(raw.parse().expect("ip"), 443);
-        assert!(ensure_no_special_use(&[addr("1.1.1.1")]).is_ok());
-        assert!(ensure_no_special_use(&[addr("1.1.1.1"), addr("2606:4700::1111")]).is_ok());
-        assert!(matches!(
-            ensure_no_special_use(&[addr("1.1.1.1"), addr("198.18.0.1")]),
-            Err(ClientError::Unavailable)
-        ));
-        assert!(matches!(
-            ensure_no_special_use(&[]),
-            Err(ClientError::Unavailable)
-        ));
+        assert!(vet_addrs(vec![addr("1.1.1.1")]).is_ok());
+        assert!(vet_addrs(vec![addr("1.1.1.1"), addr("2606:4700::1111")]).is_ok());
+        for mixed in [
+            vec![addr("1.1.1.1"), addr("198.18.0.1")],
+            vec![addr("64:ff9b:1::1"), addr("1.1.1.1")],
+            vec![addr("127.0.0.1")],
+            vec![],
+        ] {
+            assert!(
+                matches!(vet_addrs(mixed.clone()), Err(ClientError::Unavailable)),
+                "{mixed:?}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -927,13 +962,25 @@ mod tests {
     fn max_age_is_read_from_cache_control() {
         assert_eq!(max_age_of("public, max-age=300"), Some(300));
         assert_eq!(max_age_of("Max-Age=59"), Some(59));
-        assert_eq!(max_age_of("no-store"), None);
+        // 保存を断る指定は 0 として読み、下限（60 秒）に丸める
+        assert_eq!(max_age_of("no-store"), Some(0));
+        assert_eq!(max_age_of("No-Cache, max-age=300"), Some(0));
+        assert_eq!(max_age_of("max-age=300, no-store"), Some(0));
+        assert_eq!(cache_ttl_secs(max_age_of("no-store")), 60);
+        assert_eq!(max_age_of("public"), None);
+        assert_eq!(max_age_of("private, s-maxage=10"), None);
         assert_eq!(max_age_of("max-age=soon"), None);
     }
 
     /// 1 回だけ応答するサーバーを立て、`client.invalid` をその IP に固定して GET する。
     /// （取得は https 固定だが、固定した接続先とリダイレクト非追従の挙動はスキームに依らない）
     async fn fetch_with_response(response: Vec<u8>) -> Result<(Vec<u8>, Option<u64>), ClientError> {
+        let (url, addrs) = serve_once(response).await;
+        fetch_document_at(&url, &addrs).await
+    }
+
+    /// 1 回だけ `response` を返すサーバーを立て、その URL と接続先を返す。
+    async fn serve_once(response: Vec<u8>) -> (Url, VettedAddrs) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
@@ -954,7 +1001,100 @@ mod tests {
             addr.port()
         ))
         .unwrap();
-        fetch_document_at(&url, &[addr]).await
+        (url, VettedAddrs::unchecked_for_test(vec![addr]))
+    }
+
+    /// 取得と検証を続けて通す。`document` の `client_id` には、立てたサーバーの URL を入れる。
+    async fn fetch_validated_with(
+        headers: &str,
+        document: impl FnOnce(&str) -> Value,
+    ) -> Result<(ClientMetadata, u64), ClientError> {
+        // URL はポートが決まるまで作れないので、先に待ち受けてから本文を組む
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client_id = format!("http://client.invalid:{}/oauth/metadata.json", addr.port());
+        let body = document(&client_id).to_string().into_bytes();
+        let response = http_response("200 OK", headers, &body);
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                let mut chunk = [0; 1024];
+                let count = stream.read(&mut chunk).await.unwrap();
+                if count == 0 {
+                    return;
+                }
+                request.extend_from_slice(&chunk[..count]);
+            }
+            let _ = stream.write_all(&response).await;
+        });
+        let url = Url::parse(&client_id).unwrap();
+        fetch_validated(
+            &client_id,
+            &url,
+            &VettedAddrs::unchecked_for_test(vec![addr]),
+        )
+        .await
+    }
+
+    fn valid_document(client_id: &str) -> Value {
+        serde_json::json!({
+            "client_id": client_id,
+            "client_name": "Fetched",
+            "redirect_uris": ["https://client.example/callback"],
+            "grant_types": ["authorization_code", "refresh_token"],
+        })
+    }
+
+    #[tokio::test]
+    async fn fetched_document_is_validated_and_gets_a_clamped_lifetime() {
+        let (metadata, ttl) = fetch_validated_with("Cache-Control: max-age=30\r\n", valid_document)
+            .await
+            .expect("valid document");
+        assert_eq!(metadata.client_name, "Fetched");
+        assert!(metadata.allow_refresh);
+        assert_eq!(ttl, 60, "max-age は下限に丸める");
+
+        let (_, ttl) = fetch_validated_with("", valid_document)
+            .await
+            .expect("valid document");
+        assert_eq!(ttl, 300, "max-age が無ければ既定");
+        let (_, ttl) = fetch_validated_with("Cache-Control: max-age=999999\r\n", valid_document)
+            .await
+            .expect("valid document");
+        assert_eq!(ttl, 86_400);
+        let (_, ttl) = fetch_validated_with("Cache-Control: no-store\r\n", valid_document)
+            .await
+            .expect("valid document");
+        assert_eq!(ttl, 60);
+    }
+
+    /// 取得できても、検証を通らない文書はメタデータにならない（キャッシュへ進まない）。
+    #[tokio::test]
+    async fn fetched_document_that_fails_validation_is_rejected() {
+        let other_client = |_: &str| valid_document("https://other.example/oauth/metadata.json");
+        assert!(matches!(
+            fetch_validated_with("", other_client).await,
+            Err(ClientError::InvalidDocument)
+        ));
+        let with_secret = |client_id: &str| {
+            let mut document = valid_document(client_id);
+            document["client_secret"] = "s3cret".into();
+            document
+        };
+        assert!(matches!(
+            fetch_validated_with("", with_secret).await,
+            Err(ClientError::InvalidDocument)
+        ));
+        let confidential = |client_id: &str| {
+            let mut document = valid_document(client_id);
+            document["token_endpoint_auth_method"] = "private_key_jwt".into();
+            document
+        };
+        assert!(matches!(
+            fetch_validated_with("", confidential).await,
+            Err(ClientError::InvalidDocument)
+        ));
     }
 
     fn http_response(status: &str, headers: &str, body: &[u8]) -> Vec<u8> {
