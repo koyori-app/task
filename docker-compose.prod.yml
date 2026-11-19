@@ -85,6 +85,8 @@ services:
       TOTP_ISSUER: ${TOTP_ISSUER:-TaskApp}
       # WebAuthn の RP ID。空なら APP_ORIGIN のホスト名を使う
       WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-}
+      # パスキーの追加と削除の前に求める再認証の有効期間（秒）。空は読めないので既定値をここで入れる
+      REAUTH_WINDOW_SECS: ${REAUTH_WINDOW_SECS:-300}
       # apalis ワーカーの並列度（1 以上）。空は読めないので既定値をここで入れる
       VERIFICATION_EMAIL_WORKER_CONCURRENCY: ${VERIFICATION_EMAIL_WORKER_CONCURRENCY:-1}
       PASSWORD_RESET_WORKER_CONCURRENCY: ${PASSWORD_RESET_WORKER_CONCURRENCY:-1}

@@ -2889,6 +2889,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "reauth",
+            "in": "query",
+            "description": "true なら、ログイン済みの利用者が既に結んだ連携で本人確認する（パスキーの追加と削除の再認証）。連携は足さない。ログインできるプロバイダーに限る",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -3460,6 +3469,7 @@
       "post": {
         "tags": ["Auth"],
         "summary": "パスキー登録チャレンジ発行",
+        "description": "直近の本人確認（再認証）が要る。無ければ 403（`reauth-required`）。",
         "operationId": "registration_start",
         "responses": {
           "200": {
@@ -3526,6 +3536,7 @@
       "delete": {
         "tags": ["Auth"],
         "summary": "パスキー削除",
+        "description": "直近の本人確認（再認証）が要る。無ければ 403（`reauth-required`）。",
         "operationId": "delete_passkey",
         "responses": {
           "204": {
@@ -4061,6 +4072,301 @@
           },
           "500": {
             "description": "サーバー側で問題が発生しました",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/reauth": {
+      "get": {
+        "tags": ["Auth"],
+        "summary": "再認証の要否と手段",
+        "description": "直近の本人確認が有効期間の内か（内なら切れる時刻）と、再認証に使える手段を返す。画面は、再認証を求める操作（連携の追加・初回のパスワードの設定・パスキーの追加と削除）の前にこれを引き、要れば先に本人確認を求める。",
+        "operationId": "reauth_status",
+        "responses": {
+          "200": {
+            "description": "再認証の要否と手段",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReauthStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/reauth/passkey/finish": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "パスキーで再認証",
+        "description": "自分のパスキーの署名を検めて、本人確認の印を立てる。他人のパスキーは 401。",
+        "operationId": "reauth_passkey_finish",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReauthPasskeyFinishRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "再認証に成功"
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/reauth/passkey/start": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "パスキーで再認証するチャレンジ発行",
+        "description": "自分のパスキーに限った PublicKeyCredentialRequestOptions を返す。パスキーが無ければ 404。",
+        "operationId": "reauth_passkey_start",
+        "responses": {
+          "200": {
+            "description": "PublicKeyCredentialRequestOptions (WebAuthn JSON)"
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/reauth/password": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "パスワードで再認証",
+        "description": "パスキーの追加と削除の前に求める本人確認を、パスワードで行う。成功すると、有効期間（既定 300 秒）の内は再認証を求めない。パスワードを持たない利用者は 400（`password-not-set`）。",
+        "operationId": "reauth_password",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReauthPasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "再認証に成功"
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
             "content": {
               "application/json": {
                 "schema": {
@@ -30658,6 +30964,95 @@
             "items": {
               "$ref": "#/components/schemas/CommentUser"
             }
+          }
+        }
+      },
+      "ReauthMethods": {
+        "type": "object",
+        "description": "再認証に使える手段。",
+        "required": ["password", "passkey", "oauth"],
+        "properties": {
+          "oauth": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReauthOAuthMethod"
+            },
+            "description": "再認証に使える連携（`GET /v1/auth/oauth/{provider}?reauth=true`）。ログインに使えぬ連携と、\n設定から外したプロバイダーの連携は含まない"
+          },
+          "passkey": {
+            "type": "boolean",
+            "description": "パスキーを持つか（`POST /v1/auth/reauth/passkey/start`）"
+          },
+          "password": {
+            "type": "boolean",
+            "description": "パスワードを持つか（`POST /v1/auth/reauth/password`）"
+          }
+        }
+      },
+      "ReauthOAuthMethod": {
+        "type": "object",
+        "description": "再認証に使える連携。",
+        "required": ["provider", "connection_provider"],
+        "properties": {
+          "connection_provider": {
+            "type": "string",
+            "description": "連携一覧（`GET /v1/auth/oauth/connections`）の provider と同じ、DB の provider キー"
+          },
+          "instance_url": {
+            "type": ["string", "null"],
+            "description": "GitLab self-hosted の instance URL。開始に `instance_url` として渡す"
+          },
+          "provider": {
+            "type": "string",
+            "description": "開始用の slug（`GET /v1/auth/oauth/{provider}` の provider）"
+          }
+        }
+      },
+      "ReauthPasskeyFinishRequest": {
+        "type": "object",
+        "required": ["credential"],
+        "properties": {
+          "credential": {
+            "type": "object"
+          }
+        }
+      },
+      "ReauthPasswordRequest": {
+        "type": "object",
+        "required": ["password"],
+        "properties": {
+          "password": {
+            "type": "string"
+          }
+        }
+      },
+      "ReauthStatusResponse": {
+        "type": "object",
+        "description": "再認証の要否と、使える手段。",
+        "required": ["fresh", "window_secs", "methods"],
+        "properties": {
+          "expires_at": {
+            "type": ["string", "null"],
+            "description": "有効期間の切れる時刻（RFC 3339）。`fresh` でなければ null"
+          },
+          "fresh": {
+            "type": "boolean",
+            "description": "直近の本人確認が有効期間の内か。内なら、再認証を求める操作をそのまま撃てる"
+          },
+          "methods": {
+            "$ref": "#/components/schemas/ReauthMethods"
+          },
+          "remaining_secs": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "切れるまでの残りの秒数（切り捨て）。`fresh` でなければ null。\n画面は端末の時計でなくこの値で判じる（`expires_at` は端末の時計がずれると読み違える）",
+            "minimum": 0
+          },
+          "window_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "有効期間の長さ（秒）。本人確認をした後、この間は再認証を求めない",
+            "minimum": 0
           }
         }
       },

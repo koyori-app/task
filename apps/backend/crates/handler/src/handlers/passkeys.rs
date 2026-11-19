@@ -30,6 +30,7 @@ use service::passkeys::{
     find_by_credential_id, insert_passkey_under_user_lock, is_last_auth_method, load_user_passkeys,
     model_to_passkey, passkey_to_model_fields, update_passkey_after_authentication,
 };
+use service::reauth::{mark_reauthed, require_recent_auth};
 
 type AppSession = Session<SessionRedisPool>;
 
@@ -91,12 +92,14 @@ async fn passkeys_for_email_auth(
     path = "/passkeys/registration/start",
     tag = "Auth",
     summary = "パスキー登録チャレンジ発行",
+    description = "直近の本人確認（再認証）が要る。無ければ 403（`reauth-required`）。",
     responses(
         (status = 200, description = "PublicKeyCredentialCreationOptions (WebAuthn JSON)"),
         SessionAuthErrors,
     )
 )]
 pub async fn registration_start(
+    session: AppSession,
     State(state): State<AppState>,
     user: CurrentUser,
 ) -> Result<Json<serde_json::Value>, AuthError> {
@@ -104,6 +107,8 @@ pub async fn registration_start(
         .email_verified
         .then_some(())
         .ok_or(AuthError::Forbidden)?;
+    // セッション cookie だけで鍵を足せると、cookie を盗んだ者が居座れる。直近の本人確認を求める
+    require_recent_auth(&session, state.settings.reauth_window_secs)?;
 
     let lock_acquired = passkey_challenges::acquire_registration_lock(&state.redis_client, user.id)
         .await
@@ -174,6 +179,7 @@ pub async fn registration_start(
     )
 )]
 pub async fn registration_finish(
+    session: AppSession,
     State(state): State<AppState>,
     user: CurrentUser,
     Valid(Json(payload)): Valid<Json<PasskeyRegistrationFinishRequest>>,
@@ -182,6 +188,11 @@ pub async fn registration_finish(
         .email_verified
         .then_some(())
         .ok_or(AuthError::Forbidden)?;
+    // start の後に有効期間が過ぎたら断る。次の start をすぐ始められるよう、ロックは放す
+    if let Err(e) = require_recent_auth(&session, state.settings.reauth_window_secs) {
+        let _ = passkey_challenges::release_registration_lock(&state.redis_client, user.id).await;
+        return Err(e);
+    }
 
     if !passkey_challenges::registration_lock_held(&state.redis_client, user.id)
         .await
@@ -317,7 +328,7 @@ pub async fn authentication_start(
     challenge_response(rcr, challenge_id)
 }
 
-async fn finish_passkey_authentication(
+pub(crate) async fn finish_passkey_authentication(
     state: &AppState,
     credential: &PublicKeyCredential,
     auth_state: webauthn_rs::prelude::PasskeyAuthentication,
@@ -398,6 +409,7 @@ pub async fn authentication_finish(
         session.renew();
         session.set("issued_at_ms", Utc::now().timestamp_millis());
         session.set("user_id", user.id);
+        mark_reauthed(&session);
         return Ok(StatusCode::NO_CONTENT);
     }
 
@@ -430,6 +442,7 @@ pub async fn authentication_finish(
     session.renew();
     session.set("issued_at_ms", Utc::now().timestamp_millis());
     session.set("user_id", user.id);
+    mark_reauthed(&session);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -495,16 +508,20 @@ pub async fn rename_passkey(
     path = "/passkeys/{id}",
     tag = "Auth",
     summary = "パスキー削除",
+    description = "直近の本人確認（再認証）が要る。無ければ 403（`reauth-required`）。",
     responses(
         (status = 204, description = "削除完了"),
         SessionAuthErrors,
     )
 )]
 pub async fn delete_passkey(
+    session: AppSession,
     State(state): State<AppState>,
     user: CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, AuthError> {
+    // 正規の鍵を消して締め出す手口を防ぐ。直近の本人確認を求める
+    require_recent_auth(&session, state.settings.reauth_window_secs)?;
     state
         .db
         .transaction::<_, (), AuthError>(|txn| {

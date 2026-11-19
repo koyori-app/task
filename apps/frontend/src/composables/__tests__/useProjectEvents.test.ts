@@ -6,7 +6,7 @@ import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
 import type { ProjectUuid, TenantUuid } from '@/lib/api-ids';
 import { TASK_SEARCH_PATH } from '@/lib/api-vue-query';
-import { SCHEDULE_PATH } from '@/lib/calendar/schedule';
+import { SCHEDULE_PATH, SCHEDULE_RELATIONS_PATH } from '@/lib/calendar/schedule';
 import { UNSCHEDULED_PATH } from '@/lib/gantt/unscheduled';
 import { useProjectEvents } from '../useProjectEvents';
 
@@ -112,6 +112,8 @@ describe('useProjectEvents', () => {
         SCHEDULE_PATH,
         // ガントの期間なしの数。予定の key では前方一致しないので別に落とす
         UNSCHEDULED_PATH,
+        // ガントの依存の矢印。他人が関係を足し外しした時も取り直す
+        SCHEDULE_RELATIONS_PATH,
         ACTIVITIES_PATH,
       ]),
     );

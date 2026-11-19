@@ -55,6 +55,8 @@ export type OAuthStartOptions = {
   errorRedirectAfter: string;
   /** `requires_instance_url` のプロバイダーだけ渡す。 */
   instanceUrl?: string;
+  /** 既に結んだ連携で本人確認する（連携は足さない）。 */
+  reauth?: boolean;
 };
 
 function oauthStartUrl(provider: string, options: OAuthStartOptions): string {
@@ -63,6 +65,7 @@ function oauthStartUrl(provider: string, options: OAuthStartOptions): string {
   params.set('redirect_after', options.redirectAfter);
   params.set('error_redirect_after', options.errorRedirectAfter);
   if (options.instanceUrl) params.set('instance_url', options.instanceUrl);
+  if (options.reauth) params.set('reauth', 'true');
   return `${apiBase}/v1/auth/oauth/${provider}?${params.toString()}`;
 }
 

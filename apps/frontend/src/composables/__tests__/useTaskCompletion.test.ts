@@ -85,6 +85,20 @@ describe('useTaskCompletion', () => {
     expect(writes()).toHaveLength(0);
   });
 
+  it('完了にするとガントの依存の矢印（予定の関係）を取り直す', async () => {
+    const relationsKey = [
+      'get',
+      '/v1/tenants/{tenant_id}/schedule/relations',
+      { params: { path: { tenant_id: 'tenant-1' } } },
+    ];
+    queryClient.setQueryData(relationsKey, { relations: [], truncated: false });
+
+    await completion.completeMine(task, 'user-alpha');
+    await flushPromises();
+
+    expect(queryClient.getQueryState(relationsKey)?.isInvalidated).toBe(true);
+  });
+
   it('完了にするとガントの期間なしの数を取り直す', async () => {
     const unscheduledKey = [
       'get',

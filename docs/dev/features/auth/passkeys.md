@@ -94,6 +94,73 @@ sequenceDiagram
 
 `email` を指定しても、利用者が存在しない・未確認・パスキー未登録なら同じ discoverable のチャレンジに切り替える。パスキーがある場合だけ `allowCredentials` に credential を列挙する。
 
+### 再認証
+
+パスキーの追加と削除は、直近の本人確認を求める。セッション cookie だけで通すと、cookie を盗んだ者が自分の鍵を足して居座れる（足した鍵はパスワードの変更の後も残り、パスキーのログインは TOTP も免除する）。足すのを止めても、正規の鍵を消されて締め出されるので、削除も求める。
+
+| 操作 | 再認証 |
+|---|---|
+| 登録（`registration/start` と `registration/finish`） | 要る。最初の 1 件目も要る |
+| 削除（`DELETE /v1/auth/passkeys/{id}`） | 要る |
+| 一覧・名前の変更・パスキーでのログイン | 要らない |
+
+再認証の手段を足す操作にも、同じ再認証を求める。足す操作が cookie だけで通ると、盗んだ者が、自分の連携を結ぶか自分のパスワードを付けてから、それを手段にして再認証を満たし、パスキーの追加へ進める（二手で通る）。
+
+| 操作 | 再認証 | 理由 |
+|---|---|---|
+| OAuth の連携の追加（ログイン中の `GET /v1/auth/oauth/{provider}`。`reauth=true` でないもの） | 要る。開始で断る。連携専用の `github_app` は要らない | 連携は、再認証の手段になる。`github_app` はログインにも再認証にも使えないので、足しても手段は増えない |
+| パスワードの初回設定（`POST /v1/auth/password`） | 要る | パスワードは、再認証の手段になる |
+| TOTP の登録（`setup` と `verify-setup`） | 要らない | TOTP は再認証の手段ではなく、登録で印も立たない。2FA の検証は半認証のセッション専用で、ログイン済みの cookie では呼べない |
+
+有効期間は 300 秒で、環境変数 `REAUTH_WINDOW_SECS` で変える。満たさなければ `403`（`reauth-required`）を返す。`registration/finish` は、start の後に期間が過ぎたら同じ `403` を返し、登録のロックを放す。
+
+本人確認をした時刻は、セッションの `reauthed_at_ms` に持つ。時刻を立てるのは、資格情報で本人と確かめた次の場合だけである。
+
+| 立てる | 立てない |
+|---|---|
+| パスワードのログイン（2FA が要る利用者は、2FA の検証で立てる） | OAuth の連携の追加（盗まれたセッションで自分の連携を足して、再認証を満たせてしまう） |
+| 2FA の検証（TOTP かリカバリーコード） | TOTP の登録の完了 |
+| パスキーのログイン | パスワードの初回設定（足すこと自体は再認証を要する） |
+| OAuth のログイン（連携の追加ではない） | |
+| 下の再認証の API | |
+
+手段は次の三つである。パスワードを持たない利用者は、パスキーか連携を使う。メールの確認コードは使わない。
+
+| 手段 | 呼び出し | 失敗 |
+|---|---|---|
+| パスワード | `POST /v1/auth/reauth/password`（`password`）。成功は `204` | パスワードを持たない利用者は `400`（`password-not-set`）、誤りは `400`（`invalid-current-password`） |
+| 既存のパスキー | `POST /v1/auth/reauth/passkey/start`、続けて `POST /v1/auth/reauth/passkey/finish`（`credential`）。自分のパスキーに限る。challenge は Redis に利用者ごとに 1 つ持ち、`GETDEL` で使い捨てにする。成功は `204` | パスキーが無ければ start が `404`（`passkey-not-found`）。他人のパスキーは `401`、start の無い finish は `400` |
+| 結んだ OAuth の連携 | `GET /v1/auth/oauth/{provider}?reauth=true`（ログイン済みの利用者のみ）。コールバックで、プロバイダーの利用者が、本人に結んだ連携と一致したら立てる。連携は足さず、セッションも作り直さない | ログインしていなければ開始が `401`。ログインに使えないプロバイダー（`github_app`）は `401`。別の利用者の連携は、時刻を残さずに `error_redirect_after` へ `?oauth_error=` を付けて戻し、利用者も連携も増えない |
+
+#### 要否を先に問う
+
+画面は、再認証を求める操作の前に `GET /v1/auth/reauth` を引き、要否と使える手段を知る。連携の追加は全画面の遷移なので、`403` を受けてからでは JSON の頁で止まる。先に問えば、遷移も入力もせずに本人確認を出せる。
+
+| 欄 | 中身 |
+|---|---|
+| `fresh` | 本人確認の時刻が有効期間の内か |
+| `expires_at` | 有効期間の切れる時刻（RFC 3339）。`fresh` でなければ `null` |
+| `remaining_secs` | 切れるまでの残りの秒数（切り捨て）。`fresh` でなければ `null`。画面はこの値で判じる（`expires_at` を端末の時計と比べると、端末の時計が進んでいるだけで確かめた直後を切れたと見誤る） |
+| `window_secs` | 有効期間の長さ（秒） |
+| `methods.password` | パスワードを持つか |
+| `methods.passkey` | パスキーを持つか |
+| `methods.oauth` | 再認証に使える連携（開始用の `provider`、連携一覧と同じ `connection_provider`、self-hosted の `instance_url`）。`github_app`、設定から外したプロバイダー、許可の一覧から外した instance、issuer を替える前の OIDC の連携は含まない |
+
+問うだけでは時刻を立てない。権限は他の再認証の API と同じく、ログイン中の本人（`CurrentUser`）である。
+
+画面（設定の「認証方法」）の流れは次のとおりである。
+
+1. 連携の追加（`github_app` を除く）と、パスワードの初回設定の欄を開く前に、`GET /v1/auth/reauth` を引く。残りの秒数（`remaining_secs`）が 15 秒以下なら、切れたとみなす。端末の時計は使わない。
+2. 要れば、本人確認の dialog（`ReauthDialog`）を開く。使える手段を同じ重さで並べ、選んだ手段だけをその場で開く。手段が無ければ、サインインし直す道を示す（サインインで時刻が立つ）。
+3. パスワードかパスキーで確かめたら、dialog を閉じ、押し直さずに元の操作を続ける。
+4. 連携で確かめる時は、続ける操作の種類と確かめに使った連携を sessionStorage に置いてから移る（パスワードなどの秘密は置かない）。戻った画面は、その記録があれば元の操作を続ける。`?oauth_error=` で戻れば、dialog を開き直して知らせる。
+5. パスワードの初回設定で、打っている間に期間が切れて `403` を受けたら、確かめ直して打った字のまま一度だけ撃ち直す。
+
+パスキーの追加と削除の画面は、まだ無い。作る時は、同じ `requireRecentAuth` と `ReauthDialog` を使う。
+
+OAuth の再認証では、プロバイダーにも認証を促すため、`gitlab`・`gitlab_selfhosted`・`oidc` の認可 URL に `prompt=login` を付ける。`github` と `google` には、再認証を強いる手段が無いので付けない。その場合も、連携先の本人でなければ、上の照合で断る。
+
+
 ### 検証の規則
 
 WebAuthn の設定と検証の規則は次のとおりである。
@@ -110,6 +177,7 @@ WebAuthn の設定と検証の規則は次のとおりである。
 | credential ID の長さ | 1023 byte を超える credential ID の登録は `400`（`bad-request`）（WebAuthn Level 3 の [Registering a New Credential](https://www.w3.org/TR/webauthn-3/#sctn-registering-a-new-credential) の検証の手順） |
 | 最後の認証手段の削除 | パスキーが 1 件で、`password_hash IS NULL` で、ログイン用の `oauth_connections` が 0 件なら `403`（`last-auth-method`）。`github_app` の連携はログインに使えないので数えない |
 | メール未確認 | 未確認の利用者は登録できず（`403`）、認証も通らない（`401`） |
+| 再認証 | 追加（`registration/start`・`registration/finish`）と削除、OAuth の連携の追加、パスワードの初回設定は、直近 300 秒以内の本人確認を要する。満たさなければ `403`（`reauth-required`）。[再認証](#再認証)を参照 |
 
 環境変数は次のとおりである。
 
@@ -117,6 +185,7 @@ WebAuthn の設定と検証の規則は次のとおりである。
 |---|---|
 | `WEBAUTHN_RP_ID` | WebAuthn の RP ID。省略時は origin のホスト名 |
 | `EMAIL_VERIFICATION_APP_URL` | origin の元になるフロントの URL |
+| `REAUTH_WINDOW_SECS` | 再認証の有効期間（秒）。既定は 300 |
 
 ## データ
 
@@ -147,6 +216,11 @@ WebAuthn の設定と検証の規則は次のとおりである。
 | GET | `/v1/auth/passkeys` | 登録済みのパスキーの一覧。`last_used_at` は未使用なら含まない |
 | PATCH | `/v1/auth/passkeys/{id}` | 名前を変更する（`204`） |
 | DELETE | `/v1/auth/passkeys/{id}` | 削除する（`204`）。[検証の規則](#検証の規則)の最後の認証手段の削除に当たると `403` |
+| GET | `/v1/auth/reauth` | 再認証の要否（`fresh`・`expires_at`・`window_secs`）と使える手段を返す。[要否を先に問う](#要否を先に問う)を参照 |
+| POST | `/v1/auth/reauth/password` | パスワードで再認証する（`204`）。[再認証](#再認証)を参照 |
+| POST | `/v1/auth/reauth/passkey/start` | パスキーでの再認証のチャレンジを発行する。自分のパスキーに限る |
+| POST | `/v1/auth/reauth/passkey/finish` | パスキーの署名を検めて再認証する（`204`） |
+| GET | `/v1/auth/oauth/{provider}?reauth=true` | 結んだ連携で再認証する（[OAuth](/dev/features/auth/oauth) のコールバックで完了） |
 
 `registration/start` の応答は `webauthn-rs` の `CreationChallengeResponse` をそのまま JSON にしたもので、`publicKey` の下に `challenge`・`rp`・`user`・`pubKeyCredParams` などが入る。`excludeCredentials` に登録済みの credential を渡すので、同じ認証器を二重に登録しにくい。
 
@@ -171,6 +245,7 @@ WebAuthn の設定と検証の規則は次のとおりである。
 | 操作 | 誰が | スコープ |
 |---|---|---|
 | 登録・一覧・名前の変更・削除 | ログイン中の本人（`CurrentUser`）。他人のパスキーの ID は `404`（`passkey-not-found`） | セッション専用。有効な Bearer と半認証のセッションは `403` |
+| 再認証（要否・パスワード・パスキー） | ログイン中の本人（`CurrentUser`）。他人のパスキーは `401` | セッション専用。半認証のセッションは `403` |
 | 認証の開始と完了 | 誰でも | 認証不要 |
 | 強制削除（`DELETE /v1/admin/users/{id}/passkeys/{passkey_id}`） | サービス管理者（[サービス管理者の API](/dev/features/admin#api)） | セッション専用 |
 
@@ -186,9 +261,30 @@ WebAuthn の設定と検証の規則は次のとおりである。
 |---|---|
 | ログイン画面 | パスキーでのログインボタンと、Conditional UI での候補の表示 |
 | セキュリティ設定画面 | `/settings/security` でのパスキーの一覧・追加・名前変更・削除 |
+| パスキーの追加と削除の画面 | 再認証は、連携の追加とパスワードの初回設定と同じ `ReauthDialog` を使う |
 
 ## 決定の記録
 
 | 日付 | 決定 | 理由 |
 |---|---|---|
 | 2026-11-04 | パスキーを多要素認証として扱い、ログインで TOTP を免除する | 利用者の検証を必須にして認証するので、「所持（デバイス）+ 生体または PIN」が揃う |
+
+| 2026-11-18 | 画面は操作の前に `GET /v1/auth/reauth` で要否を問い、要れば本人確認の dialog を先に出す。連携で確かめて戻った後は、押し直さずに元の操作を続ける。`github_app` の連携の追加には再認証を求めない。連携の照合が違えば、`403` の JSON ではなく元の画面へ戻す | 連携の追加は全画面の遷移なので、`403` を受けてからでは JSON の頁で止まる。`github_app` は再認証の手段にならず、足しても二手の経路にならない |
+| 2026-11-17 | OAuth の連携の追加（開始）とパスワードの初回設定にも、直近 300 秒以内の再認証を求める。TOTP の登録は求めない | 連携とパスワードは再認証の手段なので、cookie だけで足せると、自分の連携かパスワードを足して再認証を満たし、パスキーの追加へ進める（二手の経路）。TOTP は再認証の手段ではなく、印も立たないので、この経路にならない |
+| 2026-11-16 | パスキーの追加と削除に、直近 300 秒以内の再認証を求める。手段はパスワード・既存のパスキー・結んだ連携で、メールは使わない。最初の 1 件目の追加にも求める。連携の追加と TOTP の登録は、再認証として数えない | cookie を盗んだ者が自分の鍵を足して居座る、あるいは正規の鍵を消して締め出す攻撃を防ぐ。論文 *The State of Passkeys*（USENIX Security 26）が、登録に確認を求めない site の危うさを挙げる。連携や TOTP の追加を数えると、盗まれたセッションで再認証を満たせてしまう |
+
+### 参考
+
+検証の規則と、再認証・crossOrigin と topOrigin の検め・credential ID の長さの検めは、次の論文の攻撃の型でパスキーの実装を点検した結果を含む。
+
+- 論文: Louis Jannett ほか『The State of Passkeys: Studying the Adoption and Security of Passkeys on the Web』（35th USENIX Security Symposium、2026）。[発表ページ](https://www.usenix.org/conference/usenixsecurity26/presentation/jannett)。103 サイトを評価し、18 サイトで重大、53 サイトで高い重大度の攻撃が通ったと述べる。
+- きっかけ: ITmedia NEWS の記事『パスワードより安全なはずが……パスキー対応103サイトを検証→全てに脆弱性 独大学の調査結果』（2026-11-16）。[記事](https://www.itmedia.co.jp/news/article/2611/16/2000003199/)。
+
+直しと、論文の型の対応は次のとおりである。
+
+| 直し | 論文の型と章 |
+|---|---|
+| credential ID の長さの検め（TASK-546） | 型は「Length of credid」。表「Evaluation Results and Test Catalog」に載る |
+| crossOrigin と topOrigin の検め（TASK-545） | 型は「Framing」。章「CWE-1021: Improper Restriction of Rendered UI Layers or Frames」 |
+| パスキーの追加と削除の再認証（TASK-543） | 型ではなく所見。章「Part 2: How Websites Implement Passkeys」の「Confirming Passkey Registrations」と「Removing Passkeys」 |
+| ログイン開始でのメールごとの有無の扱い（TASK-544。今は直さず、課題として残す） | 型は「Allow Credentials」。章「CWE-204: Observable Response Discrepancy」 |

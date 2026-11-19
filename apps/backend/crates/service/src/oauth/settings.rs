@@ -171,6 +171,34 @@ impl OAuthSettings {
             || self.oidc.is_some()
     }
 
+    /// 結んだ連携（DB の provider キーと instance）で再認証を始められるなら、開始用の slug を返す。
+    /// ログインに使えぬ連携（`github_app`）、設定から外したプロバイダー、許可の一覧から外した instance、
+    /// issuer を替える前の OIDC の連携は、再認証に使えぬので `None`。
+    pub fn reauth_provider_slug(
+        &self,
+        db_provider: &str,
+        instance_url: Option<&str>,
+    ) -> Option<&'static str> {
+        let slug = match db_provider {
+            "github" => "github",
+            "gitlab" => "gitlab",
+            "gitlab_selfhosted" => "gitlab_selfhosted",
+            "google" => "google",
+            other if other.starts_with("oidc:") => "oidc",
+            _ => return None,
+        };
+        if !self.is_provider_configured(slug) {
+            return None;
+        }
+        if slug == "oidc" && self.db_provider_key(slug).as_deref() != Some(db_provider) {
+            return None;
+        }
+        if slug == "gitlab_selfhosted" {
+            self.gitlab_selfhosted_instance(instance_url?)?;
+        }
+        Some(slug)
+    }
+
     /// DB に保存する provider キー（汎用 OIDC は `oidc:{issuer}`）。
     pub fn db_provider_key(&self, provider_slug: &str) -> Option<String> {
         match provider_slug {
@@ -356,6 +384,66 @@ mod tests {
 
         settings.oidc = None;
         assert_eq!(settings.db_provider_key("oidc"), None);
+    }
+
+    /// 再認証に使える連携は、ログインに使えて、今も設定に在るものだけ。
+    #[test]
+    fn reauth_provider_slug_accepts_only_configured_sign_in_connections() {
+        let mut settings = OAuthSettings {
+            app_base_url: "http://localhost:3400".to_string(),
+            encryption_key: "k".repeat(32),
+            default_redirect_path: "/dashboard".to_string(),
+            github: Some(config("github")),
+            gitlab: None,
+            gitlab_selfhosted_instances: parse_gitlab_selfhosted_instances(
+                Some("https://gitlab.example.com"),
+                Some(config("shared")),
+                None,
+            )
+            .unwrap(),
+            google: None,
+            github_app: Some(config("app")),
+            oidc: Some(OidcConfig {
+                issuer_url: "https://idp.example.com".to_string(),
+                client_id: "id".to_string(),
+                client_secret: "secret".to_string(),
+            }),
+        };
+        assert_eq!(
+            settings.reauth_provider_slug("github", None),
+            Some("github")
+        );
+        // 連携専用の GitHub App はログインにも再認証にも使えない
+        assert_eq!(settings.reauth_provider_slug("github_app", None), None);
+        // 設定に無いプロバイダーは開始できない
+        assert_eq!(settings.reauth_provider_slug("gitlab", None), None);
+        assert_eq!(settings.reauth_provider_slug("google", None), None);
+        assert_eq!(settings.reauth_provider_slug("unknown", None), None);
+        // self-hosted は許可の一覧に在る instance だけ
+        assert_eq!(
+            settings.reauth_provider_slug("gitlab_selfhosted", Some("https://GitLab.example.com/")),
+            Some("gitlab_selfhosted")
+        );
+        assert_eq!(
+            settings.reauth_provider_slug("gitlab_selfhosted", Some("https://other.example.com")),
+            None
+        );
+        assert_eq!(
+            settings.reauth_provider_slug("gitlab_selfhosted", None),
+            None
+        );
+        // OIDC は今の issuer の連携だけ
+        assert_eq!(
+            settings.reauth_provider_slug("oidc:https://idp.example.com", None),
+            Some("oidc")
+        );
+        assert_eq!(
+            settings.reauth_provider_slug("oidc:https://old.example.com", None),
+            None
+        );
+
+        settings.github = None;
+        assert_eq!(settings.reauth_provider_slug("github", None), None);
     }
 
     fn config(id: &str) -> ProviderConfig {
