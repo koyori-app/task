@@ -404,9 +404,8 @@ async function complete(item: DashboardTask) {
                 <div
                   class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground"
                 >
-                  <span>{{ item.task.seq_key }}</span
-                  ><span aria-hidden="true">·</span><span>{{ item.task.project.name }}</span
-                  ><span aria-hidden="true">·</span
+                  <span>{{ item.task.seq_key }}</span><span aria-hidden="true">·</span
+                  ><span>{{ item.task.project.name }}</span><span aria-hidden="true">·</span
                   ><span class="flex items-center gap-1"
                     ><span
                       class="size-1.5 rounded-full"

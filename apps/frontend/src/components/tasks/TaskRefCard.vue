@@ -22,8 +22,7 @@ const priorityInfo = computed(() => (props.priority ? PRIORITY_CONFIG[props.prio
   <div class="task-ref-card">
     <div class="body">
       <div class="head">
-        <span class="seq">{{ seqKey }}</span
-        ><span v-if="projectName"> · {{ projectName }}</span
+        <span class="seq">{{ seqKey }}</span><span v-if="projectName"> · {{ projectName }}</span
         ><span v-if="state === 'ready' && archived" class="badge">アーカイブ済み</span>
       </div>
       <template v-if="state === 'ready'">
