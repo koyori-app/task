@@ -7,7 +7,7 @@ export type ScheduleRelation = { from_task_id: string; to_task_id: string };
 export type DependencyState = 'normal' | 'done' | 'delayed';
 
 /** 辺の端の代わり。arc の `GanttDep.blocker_at`・`blocked_at` と同じ形 */
-export type DependencyEnd =
+type DependencyEnd =
   | { row: number; day: string; label: string }
   | { edge: 'start' | 'end'; label: string };
 
