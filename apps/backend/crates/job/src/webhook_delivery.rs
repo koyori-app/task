@@ -41,14 +41,10 @@ fn delivery_client(
     url: &reqwest::Url,
     addresses: &[SocketAddr],
 ) -> Result<reqwest::Client, reqwest::Error> {
-    reqwest::Client::builder()
+    // 固定したホスト以外の名前解決は失敗する。送信先はまちまちで間隔も空くので、接続も持ち越さない
+    service::http::pinned_client_builder(url.host_str().expect("validated host"), addresses)
         .user_agent("koyori-webhook")
-        .no_proxy()
-        .resolve_to_addrs(url.host_str().expect("validated host"), addresses)
-        .redirect(reqwest::redirect::Policy::none())
         .timeout(SEND_TIMEOUT)
-        // 送信先はまちまちで間隔も空くので、接続を持ち越さない
-        .pool_max_idle_per_host(0)
         .build()
 }
 

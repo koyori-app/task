@@ -4,26 +4,27 @@
 //! サーバーが外の URL へ GET する経路になるので、次で閉じる。
 //! - 取得の前に、設定の許可リスト（[`client_is_allowed`]）と URL の形を確かめる
 //! - 名前解決は一度だけ行い、[`crate::favicon::resolve_public`]（https・443・公開アドレスだけ）と
-//!   [`is_special_use`]（IANA の特殊用途の範囲）を通ったアドレスに接続を固定する
+//!   [`vet_addrs`]（IANA の特殊用途の範囲の拒否）を通ったアドレスに接続を固定する。
+//!   固定したホスト以外の名前解決は失敗させる（[`crate::http::pinned_client_builder`]）
 //! - リダイレクトは追わない。200 以外は失敗。本文は [`MAX_DOCUMENT_BYTES`] まで
 //! - キャッシュに無い文書を取りに行く回数は、利用者ごとに [`FETCH_RATE_LIMIT`] 回 /
 //!   [`FETCH_RATE_WINDOW_SECS`] 秒まで
 //!
 //! 文書の中の URL（`jwks_uri`・`logo_uri`）は読まず、取りにも行かない。
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use common::cache::redis::RedisConnection;
 use common::settings::Settings;
-use reqwest::redirect::Policy;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use url::Url;
 use uuid::Uuid;
+
+use super::vetted::{VettedAddrs, vet_addrs};
 
 /// 読む本文の上限（CIMD の推奨の 5 キロバイト）。
 pub const MAX_DOCUMENT_BYTES: usize = 5 * 1024;
@@ -101,96 +102,6 @@ pub fn validate_client_id_url(raw: &str) -> Result<Url, ClientError> {
         return Err(ClientError::InvalidClientId);
     }
     Ok(url)
-}
-
-// IANA の特殊用途のアドレスの登録簿（2026-11-19 に取得した版）の全部と multicast。
-// https://www.iana.org/assignments/iana-ipv4-special-registry/
-// https://www.iana.org/assignments/iana-ipv6-special-registry/
-// 到達できると書かれている項目（AS112、AMT など）も含めて全部拒否する。
-// 親の範囲に含まれる細かい項目（192.0.0.0/29、2001::/32 など）は親だけを置く。
-// 登録簿が変わったら、ここを突き合わせて直す。
-const SPECIAL_USE_V4: [(Ipv4Addr, u32); 18] = [
-    (Ipv4Addr::new(0, 0, 0, 0), 8),
-    (Ipv4Addr::new(10, 0, 0, 0), 8),
-    (Ipv4Addr::new(100, 64, 0, 0), 10),
-    (Ipv4Addr::new(127, 0, 0, 0), 8),
-    (Ipv4Addr::new(169, 254, 0, 0), 16),
-    (Ipv4Addr::new(172, 16, 0, 0), 12),
-    (Ipv4Addr::new(192, 0, 0, 0), 24),
-    (Ipv4Addr::new(192, 0, 2, 0), 24),
-    (Ipv4Addr::new(192, 31, 196, 0), 24),
-    (Ipv4Addr::new(192, 52, 193, 0), 24),
-    (Ipv4Addr::new(192, 88, 99, 0), 24),
-    (Ipv4Addr::new(192, 168, 0, 0), 16),
-    (Ipv4Addr::new(192, 175, 48, 0), 24),
-    (Ipv4Addr::new(198, 18, 0, 0), 15),
-    (Ipv4Addr::new(198, 51, 100, 0), 24),
-    (Ipv4Addr::new(203, 0, 113, 0), 24),
-    // multicast
-    (Ipv4Addr::new(224, 0, 0, 0), 4),
-    // 予約済み。255.255.255.255/32 を含む
-    (Ipv4Addr::new(240, 0, 0, 0), 4),
-];
-
-const SPECIAL_USE_V6: [(Ipv6Addr, u32); 15] = [
-    (Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0), 128),
-    (Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1), 128),
-    (Ipv6Addr::new(0x64, 0xff9b, 0, 0, 0, 0, 0, 0), 96),
-    (Ipv6Addr::new(0x64, 0xff9b, 1, 0, 0, 0, 0, 0), 48),
-    (Ipv6Addr::new(0x100, 0, 0, 0, 0, 0, 0, 0), 64),
-    (Ipv6Addr::new(0x100, 0, 0, 1, 0, 0, 0, 0), 64),
-    (Ipv6Addr::new(0x2001, 0, 0, 0, 0, 0, 0, 0), 23),
-    (Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0), 32),
-    (Ipv6Addr::new(0x2002, 0, 0, 0, 0, 0, 0, 0), 16),
-    (Ipv6Addr::new(0x2620, 0x4f, 0x8000, 0, 0, 0, 0, 0), 48),
-    (Ipv6Addr::new(0x3fff, 0, 0, 0, 0, 0, 0, 0), 20),
-    (Ipv6Addr::new(0x5f00, 0, 0, 0, 0, 0, 0, 0), 16),
-    (Ipv6Addr::new(0xfc00, 0, 0, 0, 0, 0, 0, 0), 7),
-    (Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0), 10),
-    // multicast
-    (Ipv6Addr::new(0xff00, 0, 0, 0, 0, 0, 0, 0), 8),
-];
-
-/// 特殊用途のアドレスか。CIMD は、特殊用途のアドレスへ解決する URL の取得を禁じている。
-/// IPv4-mapped（`::ffff:0:0/96`）は IPv4 に戻してから判定する。
-pub(crate) fn is_special_use(ip: IpAddr) -> bool {
-    match ip.to_canonical() {
-        IpAddr::V4(ip) => {
-            let bits = ip.to_bits();
-            SPECIAL_USE_V4.iter().any(|(network, prefix)| {
-                let mask = u32::MAX << (32 - prefix);
-                bits & mask == network.to_bits() & mask
-            })
-        }
-        IpAddr::V6(ip) => {
-            let bits = ip.to_bits();
-            SPECIAL_USE_V6.iter().any(|(network, prefix)| {
-                let mask = u128::MAX << (128 - prefix);
-                bits & mask == network.to_bits() & mask
-            })
-        }
-    }
-}
-
-/// 接続してよいと確かめたアドレス。[`vet_addrs`] だけが作る。
-///
-/// 取得の関数はこの型だけを受ける。特殊用途の検査を通さずに取りに行く書き方は、型が合わない。
-pub(crate) struct VettedAddrs(Vec<SocketAddr>);
-
-impl VettedAddrs {
-    /// 手元の TCP サーバー（loopback）へ向ける単体試験のための入口。
-    #[cfg(test)]
-    fn unchecked_for_test(addrs: Vec<SocketAddr>) -> Self {
-        Self(addrs)
-    }
-}
-
-/// 名前解決の結果を確かめる。1 つでも特殊用途なら全体を拒否する。
-pub(crate) fn vet_addrs(addrs: Vec<SocketAddr>) -> Result<VettedAddrs, ClientError> {
-    if addrs.is_empty() || addrs.iter().any(|addr| is_special_use(addr.ip())) {
-        return Err(ClientError::Unavailable);
-    }
-    Ok(VettedAddrs(addrs))
 }
 
 fn string_list(value: &Value) -> Option<Vec<&str>> {
@@ -326,7 +237,7 @@ pub(crate) fn cache_ttl_secs(max_age: Option<u64>) -> u64 {
 
 /// 検証済みの IP に固定して 1 回だけ GET し、本文と `max-age` を返す。
 /// リダイレクトは追わず、200 以外と上限を超える本文は失敗にする。
-pub(crate) async fn fetch_document_at(
+pub(super) async fn fetch_document_at(
     url: &Url,
     addrs: &VettedAddrs,
 ) -> Result<(Vec<u8>, Option<u64>), ClientError> {
@@ -337,14 +248,10 @@ pub(crate) async fn fetch_document_at(
         }
     };
     let host = url.host_str().ok_or(ClientError::InvalidClientId)?;
-    let client = reqwest::Client::builder()
+    let client = crate::http::pinned_client_builder(host, addrs.as_slice())
         .user_agent("task-oauth-client-metadata")
-        .no_proxy()
-        .resolve_to_addrs(host, &addrs.0)
-        .redirect(Policy::none())
         .connect_timeout(FETCH_TIMEOUT)
         .timeout(FETCH_TIMEOUT)
-        .pool_max_idle_per_host(0)
         .build()
         .map_err(|error| ClientError::Internal(anyhow::anyhow!("http client build: {error}")))?;
     let mut response = client
@@ -383,7 +290,7 @@ pub(crate) async fn fetch_document_at(
 
 /// 確かめたアドレスから文書を取り、検証して、メタデータとキャッシュの寿命（秒）を返す。
 /// 検証を通らない文書は、ここから先（キャッシュ）へ進まない。
-pub(crate) async fn fetch_validated(
+pub(super) async fn fetch_validated(
     client_id: &str,
     url: &Url,
     addrs: &VettedAddrs,
@@ -500,8 +407,10 @@ pub async fn resolve_client(
 
 #[cfg(test)]
 mod tests {
+    use super::super::vetted::is_special_use;
     use super::super::{redirect_uri_matches, test_settings};
     use super::*;
+    use std::net::SocketAddr;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     const CLIENT_ID: &str = "https://client.example/oauth/metadata.json";
