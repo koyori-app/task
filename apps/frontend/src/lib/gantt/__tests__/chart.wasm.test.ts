@@ -10,6 +10,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import init, { render_canvas_commands, render_svg } from '@koyori-app/arc';
 
 import { chartProps, GROUP_H, HEADER_H, rowHeight, type ChartInput } from '../chart';
+import { dependencyEdges } from '../dependencies';
 import { layoutGantt, type GanttSource } from '../layout';
 import { viewTo } from '../view';
 
@@ -20,6 +21,9 @@ const TODAY = '2026-11-11';
 const LEFT = 8;
 /** canvas の色の番号（arc の `canvas.rs`） */
 const PROGRESS_LINE_COLOR = 23;
+const DEP_COLOR = 5;
+const DEP_DONE_COLOR = 25;
+const DEP_DELAYED_COLOR = 26;
 
 function task(over: Partial<GanttSource> & { id: string; seq_key: string }): GanttSource {
   return {
@@ -93,6 +97,8 @@ function input(over: Partial<ChartInput> = {}): ChartInput {
     compact: false,
     progressLine: true,
     backend: 'svg',
+    deps: [],
+    scrollContainer: null,
     ...over,
   };
 }
@@ -117,7 +123,12 @@ function render(over: Partial<ChartInput> = {}) {
     palette: p.palette,
     progress_line: p.progressLine,
   });
-  const args = [JSON.stringify(p.tasks), '[]', options, JSON.stringify(p.rows)] as const;
+  const args = [
+    JSON.stringify(p.tasks),
+    JSON.stringify(p.deps),
+    options,
+    JSON.stringify(p.rows),
+  ] as const;
   const buffer = JSON.parse(render_canvas_commands(...args)) as {
     error?: string;
     ops: unknown[];
@@ -267,5 +278,83 @@ describe('日の段の見出し（本物の wasm）', () => {
     const band = svg.indexOf('class="overflow-bg"');
     expect(svg.slice(band, band + 200)).toContain('fill="var(--koyori-color-surface)"');
     expect(svg.indexOf('>← 11/9</text>')).toBeGreaterThan(band);
+  });
+});
+
+describe('依存の矢印（本物の wasm）', () => {
+  // 行の順は late、done、ahead、stalled、future
+  const DEPS = [
+    { blocker_task_id: 'late', blocked_task_id: 'future', state: 'normal' as const },
+    { blocker_task_id: 'done', blocked_task_id: 'ahead', state: 'done' as const },
+    {
+      blocker_task_id: 'late',
+      blocked_task_id: 'stalled',
+      state: 'delayed' as const,
+      note: 'REL-1 待ち',
+    },
+  ];
+  type Op = {
+    StrokePath?: { color_id: number };
+    StrokeDashedPath?: { color_id: number; dash: string };
+  };
+
+  it('三つの状態を、普通は Dep、済みは DepDone、待ちで遅れは DepDelayed の破線で描き、添えの字を出す', () => {
+    const { svg, buffer } = render({ deps: DEPS });
+    expect(buffer.error).toBeUndefined();
+    const ops = buffer.ops as Op[];
+    const solid = ops.flatMap((op) => (op.StrokePath ? [op.StrokePath.color_id] : []));
+    const dashed = ops.flatMap((op) => (op.StrokeDashedPath ? [op.StrokeDashedPath] : []));
+    expect(solid).toContain(DEP_COLOR);
+    expect(solid).toContain(DEP_DONE_COLOR);
+    expect(dashed).toEqual([{ ...dashed[0], color_id: DEP_DELAYED_COLOR }]);
+    expect(dashed).toHaveLength(1);
+    // SVG も同じく、遅れだけが破線で、阻まれる棒の右に「<キー> 待ち」を添える
+    expect(svg.match(/stroke-dasharray="4,3"/g)?.length).toBeGreaterThanOrEqual(1);
+    expect(svg).toContain('>REL-1 待ち</text>');
+  });
+
+  it('palette の色の名で塗る（依存の三色を token から引く）', () => {
+    const { svg } = render({ deps: DEPS });
+    for (const color of [
+      'var(--koyori-color-info)',
+      'var(--koyori-color-text-muted)',
+      'var(--koyori-color-danger)',
+    ]) {
+      expect(svg).toContain(color);
+    }
+  });
+
+  it('狭い画面では矢印を描かない', () => {
+    const { buffer } = render({ deps: DEPS, compact: true });
+    const ops = buffer.ops as Op[];
+    expect(ops.some((op) => op.StrokeDashedPath)).toBe(false);
+    expect(
+      ops.some(
+        (op) =>
+          op.StrokePath &&
+          [DEP_COLOR, DEP_DONE_COLOR, DEP_DELAYED_COLOR].includes(op.StrokePath.color_id),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe('済んだ棒の「待ち」（本物の wasm）', () => {
+  it('未完了の課題が、予定開始を過ぎて済んだ課題を阻んでも、待ちの字も破線も描かない', () => {
+    // late（未完了）が done（11/9 から、済み）を阻む。done の予定開始は今日（11/11）より前
+    const base = input();
+    const { edges } = dependencyEdges({
+      relations: [{ from_task_id: 'late', to_task_id: 'done' }],
+      tasks: TASKS,
+      layout: base.layout,
+      timeZone: TZ,
+      today: TODAY,
+    });
+    const { svg, buffer } = render({ deps: edges });
+    expect(buffer.error).toBeUndefined();
+    expect(svg).not.toContain('待ち');
+    // 今日の線も 4,3 の破線なので、破線は依存の辺だけが使う canvas の StrokeDashedPath で見る
+    expect((buffer.ops as { StrokeDashedPath?: unknown }[]).some((op) => op.StrokeDashedPath)).toBe(
+      false,
+    );
   });
 });

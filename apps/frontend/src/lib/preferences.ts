@@ -31,6 +31,12 @@ export const PREFERENCE_TABLE = {
       'ガントに、今日の時点の進みを結ぶ線を出します。ガントの切り替えで変えた時も、ここに覚えます。',
     default: false,
   },
+  ganttDependencies: {
+    name: 'ガントに依存の矢印を出す',
+    description:
+      'ガントに、ブロックの関係を矢印で出します（狭い画面では行に依存の印を添えます）。ガントの切り替えで変えた時も、ここに覚えます。',
+    default: true,
+  },
 } as const satisfies SettingTable;
 
 export type PreferenceKey = keyof typeof PREFERENCE_TABLE;

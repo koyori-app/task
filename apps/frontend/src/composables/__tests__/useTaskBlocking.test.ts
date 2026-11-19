@@ -199,6 +199,42 @@ describe('useTaskBlocking', () => {
     expect(relationGets().length).toBeGreaterThan(getsBefore);
   });
 
+  describe('ガントの依存の矢印（予定の関係の口）', () => {
+    const scheduleRelationsKey = [
+      'get',
+      '/v1/tenants/{tenant_id}/schedule/relations',
+      { params: { query: { from: '2026-11-02', to: '2026-11-22' } } },
+    ];
+    const seed = () =>
+      queryClient.setQueryData(scheduleRelationsKey, { relations: [], truncated: false });
+    const invalidated = () => queryClient.getQueryState(scheduleRelationsKey)?.isInvalidated;
+
+    it('関係を足すと取り直す', async () => {
+      mountHost();
+      await flushPromises();
+      seed();
+      await expect(blocking.addRelation('blocks', 'other-1')).resolves.toBe(true);
+      expect(invalidated()).toBe(true);
+    });
+
+    it('関係を外すと取り直す', async () => {
+      mountHost();
+      await flushPromises();
+      seed();
+      await expect(blocking.removeRelation('rel-1')).resolves.toBe(true);
+      expect(invalidated()).toBe(true);
+    });
+
+    it('外そうとした関係が既に無い（404）時も取り直す', async () => {
+      mountHost();
+      await flushPromises();
+      seed();
+      control.failStatus = 404;
+      await expect(blocking.removeRelation('rel-1')).resolves.toBe(false);
+      expect(invalidated()).toBe(true);
+    });
+  });
+
   it('削除の失敗は文言を出し false で、relations は取り直さない', async () => {
     mountHost();
     await flushPromises();

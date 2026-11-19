@@ -11,6 +11,7 @@ function state(over: Partial<GanttUrlState> = {}): GanttUrlState {
     scale: 'day',
     groupBy: 'project',
     progressLine: null,
+    dependencies: null,
     selected: null,
     ...over,
   };
@@ -59,6 +60,15 @@ describe('applyGanttUrlState', () => {
     expect(urlOf(state({ progressLine: false })).searchParams.get('line')).toBe('off');
   });
 
+  it('依存の矢印は点けても切っても明に書き、URL の deps から読む（知らぬ値は覚えた値に任せる）', () => {
+    expect(urlOf(state({ dependencies: true })).searchParams.get('deps')).toBe('on');
+    expect(urlOf(state({ dependencies: false })).searchParams.get('deps')).toBe('off');
+    expect(urlOf(state()).searchParams.has('deps')).toBe(false);
+    expect(parseGanttUrlState({ deps: ['off'] }, TODAY).dependencies).toBe(false);
+    expect(parseGanttUrlState({ deps: ['on'] }, TODAY).dependencies).toBe(true);
+    expect(parseGanttUrlState({ deps: ['maybe'] }, TODAY).dependencies).toBeNull();
+  });
+
   it('書いた URL を読めば同じ状態に戻る', () => {
     const s = state({
       from: '2026-11-23',
@@ -66,6 +76,7 @@ describe('applyGanttUrlState', () => {
       scale: 'week',
       groupBy: 'assignee',
       progressLine: true,
+      dependencies: false,
       selected: 'ENG-42',
     });
     const url = urlOf(s);

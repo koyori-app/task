@@ -1112,6 +1112,28 @@ describe('useTaskDetail のキャッシュ同期', () => {
       }
     });
 
+    it('更新と削除で、ガントの依存の矢印（予定の関係）も取り直す', async () => {
+      const relationsKey = [
+        'get',
+        '/v1/tenants/{tenant_id}/schedule/relations',
+        { params: { path: { tenant_id: TENANT_ID }, query: { from: '2026-11-02' } } },
+      ] as const;
+      mountHost();
+      await flushPromises();
+      queryClient.setQueryData(relationsKey, { relations: [], truncated: false });
+
+      detail.onSaveTitle('新しいタイトル');
+      await flushPromises();
+      putControl.resolve!({ ...baseTask, title: '新しいタイトル' });
+      await flushPromises();
+      expect(queryClient.getQueryState(relationsKey)?.isInvalidated).toBe(true);
+
+      queryClient.setQueryData(relationsKey, { relations: [], truncated: false });
+      detail.confirmDelete();
+      await flushPromises();
+      expect(queryClient.getQueryState(relationsKey)?.isInvalidated).toBe(true);
+    });
+
     it('削除すると期間なしの数を取り直す', async () => {
       mountHost();
       await flushPromises();

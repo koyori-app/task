@@ -1,4 +1,4 @@
-import type { GanttRow, GanttTask, PaletteOverrides } from '@koyori-app/arc-vue';
+import type { GanttDep, GanttRow, GanttTask, PaletteOverrides } from '@koyori-app/arc-vue';
 
 import type { GanttLayout } from '@/lib/gantt/layout';
 import type { GanttScale } from '@/lib/gantt/view';
@@ -53,6 +53,11 @@ export const GANTT_PALETTE: PaletteOverrides = {
   // 行では今日の線に重なるので、字の色（白・黒）では重なった所が橙の点線に見えた
   Today: 'var(--koyori-color-info)',
   ProgressLine: 'var(--koyori-color-warning)',
+  // 依存の矢印（cmd_426 の板）。普通は info、待ちで遅れは danger の破線（破線は arc が描く）、
+  // 済みは text-muted の灰で退かせる（text-disabled は図の地との対比が 3:1 に届かない）
+  Dep: 'var(--koyori-color-info)',
+  DepDelayed: 'var(--koyori-color-danger)',
+  DepDone: 'var(--koyori-color-text-muted)',
 };
 
 /** 標準の行の高さ。arc は棒を下へ寄せる時、この高さの行と同じ隙を棒の下に残す */
@@ -90,16 +95,20 @@ export type ChartInput = {
   compact: boolean;
   progressLine: boolean;
   backend: 'svg' | 'canvas';
+  /** 依存の辺（`lib/gantt/dependencies.ts`）。狭い画面では描かず、行の添えに印を出す */
+  deps: GanttDep[];
+  /** 頁を縦に巻く外の域（`scrollParentOf`）。まだ組まれておらぬ間は null */
+  scrollContainer: HTMLElement | Window | null;
 };
 
 /**
  * arc-vue の `GanttChart` に渡す props。題の列・進みの字・凡例は隠し、左の一覧と上の凡例を
  * task の側で描く。稲妻線は点けた時だけ cmd_407 の決まり（`by_row`）で描く。
  *
- * 端末の格は常に `high` にする。arc-vue は `deviceMemory` が無いか低い端末を `low` と判じ、図だけを
- * 高さ min(70vh, 600px) の内側のスクロール域に閉じ込めて見える行だけを描く。左の一覧と狭い画面の
- * 重ね文字はその域の外にあるので、図だけが縦に動き、棒が別の課題の名と並んでしまう。図の高さを
- * 中身の高さのままにして、一覧・重ね文字・図をページの一つの縦のスクロールで一緒に動かす。
+ * 外のスクロール域（`scrollContainer`）を渡す。渡さぬと、arc-vue は低性能と判じた端末で図だけを
+ * 高さ min(70vh, 600px) の内側のスクロール域に閉じ込め、左の一覧と狭い画面の重ね文字はその外に
+ * あるので、図だけが縦に動いて棒が別の課題の名と並ぶ。渡せば図は行の高さのままで、一覧・重ね文字・
+ * 図が頁の一つの縦のスクロールで一緒に動き、低性能の端末ではその域に見える行だけを描く。
  */
 export function chartProps(input: ChartInput): {
   tasks: GanttTask[];
@@ -120,7 +129,8 @@ export function chartProps(input: ChartInput): {
   palette: PaletteOverrides;
   progressLine: 'by_row' | 'hidden';
   backend: 'svg' | 'canvas';
-  deviceTier: 'high';
+  deps: GanttDep[];
+  scrollContainer: HTMLElement | Window | null;
 } {
   return {
     tasks: input.layout.tasks,
@@ -141,6 +151,8 @@ export function chartProps(input: ChartInput): {
     palette: GANTT_PALETTE,
     progressLine: input.progressLine ? 'by_row' : 'hidden',
     backend: input.backend,
-    deviceTier: 'high',
+    // 狭い画面では矢印を描かず、行の添えに「依存 N」と「<キー> 待ち」を出す
+    deps: input.compact ? [] : input.deps,
+    scrollContainer: input.scrollContainer,
   };
 }

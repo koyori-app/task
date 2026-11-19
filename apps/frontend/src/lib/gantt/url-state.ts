@@ -23,6 +23,11 @@ export type GanttUrlState = Pick<CalendarUrlState, 'memberIds' | 'selected'> & {
    * 共有した URL を開いた者にも、開いた時の線の有無が伝わるようにするため。
    */
   progressLine: boolean | null;
+  /**
+   * 依存の矢印（狭い画面では行の依存の印）。URL に `deps` があればそれに従い、無ければ `null`
+   * （利用者ごとに覚えた値を使う）。稲妻線と同じ持ち方
+   */
+  dependencies: boolean | null;
 };
 
 export const DEFAULT_SCALE: GanttScale = 'day';
@@ -39,6 +44,7 @@ export function parseGanttUrlState(
   const rawScale = searchAll?.scale?.at(-1);
   const rawGroup = searchAll?.group?.at(-1);
   const rawLine = searchAll?.line?.at(-1);
+  const rawDeps = searchAll?.deps?.at(-1);
   return {
     from,
     memberIds,
@@ -46,10 +52,11 @@ export function parseGanttUrlState(
     scale: GANTT_SCALES.includes(rawScale as GanttScale) ? (rawScale as GanttScale) : DEFAULT_SCALE,
     groupBy: rawGroup === 'assignee' ? 'assignee' : DEFAULT_GROUP_BY,
     progressLine: rawLine === 'on' ? true : rawLine === 'off' ? false : null,
+    dependencies: rawDeps === 'on' ? true : rawDeps === 'off' ? false : null,
   };
 }
 
-/** 状態を URL へ書き戻す。扱わないキーは触らない。稲妻線は覚えた値と同じでも明に書く */
+/** 状態を URL へ書き戻す。扱わないキーは触らない。稲妻線と依存の矢印は覚えた値と同じでも明に書く */
 export function applyGanttUrlState(url: URL, state: GanttUrlState, today: string): URL {
   const next = applyCalendarUrlState(
     url,
@@ -60,6 +67,7 @@ export function applyGanttUrlState(url: URL, state: GanttUrlState, today: string
   setOrDelete(next, 'scale', state.scale === DEFAULT_SCALE ? null : state.scale);
   setOrDelete(next, 'group', state.groupBy === DEFAULT_GROUP_BY ? null : state.groupBy);
   setOrDelete(next, 'line', state.progressLine === null ? null : state.progressLine ? 'on' : 'off');
+  setOrDelete(next, 'deps', state.dependencies === null ? null : state.dependencies ? 'on' : 'off');
   return next;
 }
 

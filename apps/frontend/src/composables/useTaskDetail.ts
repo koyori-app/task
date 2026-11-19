@@ -13,6 +13,7 @@ import type { components } from '@/generated/api';
 import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
 import { TASK_RELATIONS_PATH } from '@/composables/useTaskSubtasks';
 import { UNSCHEDULED_PATH } from '@/lib/gantt/unscheduled';
+import { SCHEDULE_RELATIONS_PATH } from '@/lib/calendar/schedule';
 
 export { GET_TASK_PATH } from '@/lib/task-query';
 import { GET_TASK_PATH, fetchTask } from '@/lib/task-query';
@@ -276,6 +277,8 @@ export function useTaskDetail(params: UseTaskDetailParams) {
       queryClient.invalidateQueries({ queryKey: ['get', SCHEDULE_PATH] }),
       // 期間なしの口は別の key なので、予定の key では前方一致しない。日付を全て消すと入る
       queryClient.invalidateQueries({ queryKey: ['get', UNSCHEDULED_PATH] }),
+      // ガントの依存の矢印。完了や日付で辺の状態が変わり、関係の相手もここで変わりうる
+      queryClient.invalidateQueries({ queryKey: ['get', SCHEDULE_RELATIONS_PATH] }),
     ]);
   }
 
@@ -292,6 +295,8 @@ export function useTaskDetail(params: UseTaskDetailParams) {
     // カレンダーの再取得（全件）も待つと戻りが遅れるので待たない
     void queryClient.invalidateQueries({ queryKey: ['get', SCHEDULE_PATH] });
     void queryClient.invalidateQueries({ queryKey: ['get', UNSCHEDULED_PATH] });
+    // 消した課題の関係も消える
+    void queryClient.invalidateQueries({ queryKey: ['get', SCHEDULE_RELATIONS_PATH] });
     return Promise.all([
       queryClient.invalidateQueries({ queryKey: ['get', LIST_TASKS_PATH] }),
       queryClient.invalidateQueries({ queryKey: ['get', TASK_SEARCH_PATH] }),

@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
-import { expect, fn, waitFor, within } from 'storybook/test';
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test';
 import { provide } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
@@ -115,6 +115,15 @@ const manyTasks: ScheduleTask[] = Array.from({ length: 20 }, (_, i) =>
   }),
 );
 
+// 頁の main を巻く確かめ。行が main の高さを大きく越える数にする（範囲 7/13〜7/19 に収める）
+const mainScrollTasks: ScheduleTask[] = Array.from({ length: 60 }, (_, i) =>
+  task(200 + i, {
+    title: `巻いた先の確かめ ${i + 1}`,
+    planned_start_on: `2026-07-${13 + (i % 5)}`,
+    soft_deadline: `2026-07-${15 + (i % 5)}T00:00:00Z`,
+  }),
+);
+
 /**
  * arc-vue は `navigator.deviceMemory` と `hardwareConcurrency` で端末の格を判じる。
  * 物語の間だけ値を差し替え、終わったら外して元の値（Navigator.prototype の getter）に戻す。
@@ -168,7 +177,12 @@ const jsonResponse = (data: unknown, status = 200) =>
 function createMockFetch({
   tasks = sampleTasks,
   unscheduled = unscheduledTasks,
-}: { tasks?: ScheduleTask[]; unscheduled?: ScheduleTask[] } = {}) {
+  relations = [],
+}: {
+  tasks?: ScheduleTask[];
+  unscheduled?: ScheduleTask[];
+  relations?: { from_task_id: string; to_task_id: string }[];
+} = {}) {
   const original = globalThis.fetch;
   const membersOf = (list: ScheduleTask[]) => {
     const ids = new Set(list.flatMap((t) => t.assignees.map((a) => a.user_id)));
@@ -190,6 +204,12 @@ function createMockFetch({
           require_2fa: false,
         },
       ]);
+    }
+    if (url.pathname.endsWith('/schedule/relations')) {
+      return jsonResponse({
+        relations: relations.map((r) => ({ ...r, type: 'blocks' })),
+        truncated: false,
+      });
     }
     if (url.pathname.endsWith('/schedule/unscheduled')) {
       return jsonResponse({
@@ -333,5 +353,77 @@ export const HighDeviceScroll: Story = {
   },
   play: async ({ canvasElement }) => {
     await expectOverlayAlignedAfterScroll(canvasElement);
+  },
+};
+
+// 依存の矢印の切り替えと凡例。関係の口を引き、切れば凡例の依存の項を消す。
+// 狭い画面の依存の印は、画面の幅を差し替える単体試験（gantt-dependencies.test.ts）で縛る
+export const DependencyToggle: Story = {
+  name: '依存の矢印の切り替え',
+  decorators: [withContext()],
+  beforeEach: () =>
+    createMockFetch({
+      relations: [
+        // 待ちで遅れ: 未完了の task-4 が、今日（7/15）より前に始まる task-1 を阻む
+        { from_task_id: 'task-4', to_task_id: 'task-1' },
+        // 済み: 完了した task-3 が task-5 を阻む
+        { from_task_id: 'task-3', to_task_id: 'task-5' },
+        // 普通: task-1 が、まだ始まらぬ task-2（目安 7/21）を阻む
+        { from_task_id: 'task-1', to_task_id: 'task-2' },
+      ],
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByText('認証フローの設計')).resolves.toBeInTheDocument();
+    // 既定は点け: 凡例に依存・待ちで遅れ・済みが出る
+    await expect(canvas.findByTestId('gantt-legend-dependency')).resolves.toBeInTheDocument();
+    await expect(canvas.getByText('待ちで遅れ')).toBeInTheDocument();
+    await userEvent.click(canvas.getByRole('switch', { name: '依存の矢印' }));
+    await waitFor(() => expect(canvas.queryByTestId('gantt-legend-dependency')).toBeNull());
+  },
+};
+
+// 頁の縦のスクロールは layout の main（overflow-y: auto）が持つ。低性能の端末（deviceMemory の無い
+// Firefox・Safari を含む）では、図は外のスクロール域に見える行だけを描くので、main を巻いた先の行も
+// 描かれねばならない（外の域を window に取り違えると、巻いた先が描かれない）
+export const LowDeviceMainScroll: Story = {
+  name: '低性能の端末で頁の main を巻く',
+  decorators: [
+    () => ({ template: '<main style="height: 480px; overflow-y: auto"><story /></main>' }),
+    withContext(),
+  ],
+  beforeEach: () => {
+    const restoreDevice = emulateDevice(undefined, 2);
+    const restoreFetch = createMockFetch({ tasks: mainScrollTasks, unscheduled: [] });
+    return () => {
+      restoreFetch();
+      restoreDevice();
+    };
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByText('巻いた先の確かめ 1')).resolves.toBeInTheDocument();
+    const first = mainScrollTasks[0]!.id;
+    const last = mainScrollTasks[mainScrollTasks.length - 1]!.id;
+    const drawn = (id: string) => canvasElement.querySelector(`[data-task-id="${id}"]`) !== null;
+    await waitFor(() => expect(drawn(first)).toBe(true));
+    // 前の物語が window を巻いたままのことがある。window を頭へ戻し、その描き直しが済んでから見る
+    // （window の位置が動くと、外の域を window に取り違えた形でも描き直されてしまう）
+    window.scrollTo(0, 0);
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    // 端末は低性能と判じられ、見える行だけを描く（60 件のうち main に見える分だけ）
+    await expect((navigator as { deviceMemory?: number }).deviceMemory).toBeUndefined();
+    await expect(canvasElement.querySelectorAll('[data-task-id]').length).toBeLessThan(
+      mainScrollTasks.length,
+    );
+    await expect(drawn(last)).toBe(false);
+    // main を巻くと、main のスクロールを聞いて描き直す。arc-vue は描き直しを一つの rAF に寄せるので、
+    // 二つの rAF の後にその場で見る（待ち直すと、試験の場の iframe の resize でも描き直されてしまい、
+    // 外の域を window に取り違えた形でも通る）
+    const main = canvasElement.querySelector('main')!;
+    main.scrollTop = main.scrollHeight;
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect(drawn(last)).toBe(true);
   },
 };

@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
 import { TASK_RELATIONS_PATH } from '@/composables/useTaskSubtasks';
 import { fetchClient } from '@/lib/api-vue-query';
+import { SCHEDULE_RELATIONS_PATH } from '@/lib/calendar/schedule';
 import type { components } from '@/generated/api';
 
 const TASK_RELATION_PATH =
@@ -86,11 +87,13 @@ export function useTaskBlocking(params: UseTaskBlockingParams) {
     if (generation === viewGeneration) mutationError.value = message;
   }
 
-  // 相手側のタスクの relations も変わるので、キーは prefix で無効化する
+  // 相手側のタスクの relations も変わるので、キーは prefix で無効化する。
+  // ガントの依存の矢印は別の口（予定の関係）から引くので、それも落とす
   async function invalidateAfterMutation() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['get', TASK_RELATIONS_PATH] }),
       queryClient.invalidateQueries({ queryKey: ['get', ACTIVITIES_PATH] }),
+      queryClient.invalidateQueries({ queryKey: ['get', SCHEDULE_RELATIONS_PATH] }),
     ]);
   }
 
@@ -133,7 +136,10 @@ export function useTaskBlocking(params: UseTaskBlockingParams) {
         reportError(generation, removeErrorMessage(response.status));
         // 既に外されていた場合、手元の一覧には消えたはずの行が残っている。取り直して揃える
         if (response.status === 404) {
-          await queryClient.invalidateQueries({ queryKey: ['get', TASK_RELATIONS_PATH] });
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ['get', TASK_RELATIONS_PATH] }),
+            queryClient.invalidateQueries({ queryKey: ['get', SCHEDULE_RELATIONS_PATH] }),
+          ]);
         }
         return false;
       }

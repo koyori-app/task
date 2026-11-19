@@ -106,6 +106,9 @@ function mountPage() {
       const wanted = params.query.project_id;
       const scope = <T extends { project: { id: string } }>(list: T[]) =>
         wanted ? list.filter((task) => wanted.includes(task.project.id)) : list;
+      if (path.endsWith('/schedule/relations')) {
+        return { data: { relations: [], truncated: false } };
+      }
       if (path.endsWith('/schedule/unscheduled')) {
         const tasks = scope(UNSCHEDULED);
         return { data: { total: tasks.length, tasks, members: [], next_cursor: null } };
@@ -155,11 +158,15 @@ describe('プロジェクトのガント', () => {
     project.projectId!.value = 'p-eng';
     await flushPromises();
 
-    // 予定と期間なしの二つの口を、どちらも project_id 付きで一度ずつ引く
-    expect(GET).toHaveBeenCalledTimes(2);
+    // 予定・期間なし・関係の三つの口を、どれも project_id 付きで一度ずつ引く
+    expect(GET).toHaveBeenCalledTimes(3);
     expect(
       GET.mock.calls.map(([path]) => path as string).sort((a, b) => a.localeCompare(b)),
-    ).toEqual(['/v1/tenants/{tenant_id}/schedule', '/v1/tenants/{tenant_id}/schedule/unscheduled']);
+    ).toEqual([
+      '/v1/tenants/{tenant_id}/schedule',
+      '/v1/tenants/{tenant_id}/schedule/relations',
+      '/v1/tenants/{tenant_id}/schedule/unscheduled',
+    ]);
     for (const [, { params }] of GET.mock.calls) {
       expect(params.query.project_id).toEqual(['p-eng']);
     }
@@ -187,6 +194,11 @@ describe('プロジェクトのガント', () => {
       GANTT_PALETTE.WarnStroke,
     );
     expect(style('[data-testid="gantt-legend-today"]').background).toBe(GANTT_PALETTE.Today);
+    expect(style('[data-testid="gantt-legend-dep"]').background).toBe(GANTT_PALETTE.Dep);
+    expect(style('[data-testid="gantt-legend-dep-delayed"]').borderColor).toBe(
+      GANTT_PALETTE.DepDelayed,
+    );
+    expect(style('[data-testid="gantt-legend-dep-done"]').background).toBe(GANTT_PALETTE.DepDone);
   });
 
   it('プロジェクトが見つからない時は予定を引かず、見つからない旨を出す', async () => {
