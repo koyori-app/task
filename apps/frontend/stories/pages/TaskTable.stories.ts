@@ -858,6 +858,9 @@ function storyDecoratorReactive() {
   });
 }
 
+/** storyDecorator が今の物語に渡した QueryClient。問い合わせが静まるのを待つ物語が見る */
+let storyQueryClient: QueryClient | undefined;
+
 function storyDecorator(
   context: {
     urlPathname: string;
@@ -873,6 +876,7 @@ function storyDecorator(
           mutations: { retry: false },
         },
       });
+      storyQueryClient = queryClient;
       provide(VUE_QUERY_CLIENT, queryClient);
       provide(PAGE_CONTEXT_KEY, context);
     },
@@ -1493,13 +1497,21 @@ export const ListViewSubtasks: Story = {
       canvas.findByRole('textbox', { name: 'ログイン画面の UI 実装 のサブタスク名' }),
     ).resolves.toBeInTheDocument();
 
-    // 展開中にラベルで絞ると、親は残り、ラベルのない子は消える。
+    // 展開中にラベルで絞ると、絞り込みの間は一覧を平らに並べる（TASK-500 の絞り込み）。ラベルを持つ
+    // 親は行として残り、ラベルのない子は消え、子の枝と作成欄は描かない
     await user.click(await canvas.findByRole('button', { name: 'ラベル' }));
     await user.click(await screen.findByRole('menuitemcheckbox', { name: /bug/ }));
-    await expect(
-      canvas.findByRole('textbox', { name: 'OAuth 対応を実装する のサブタスク名' }),
-    ).resolves.toBeInTheDocument();
+    // 消えたことだけを待つと、枝が子を引き直す間の空の姿でも通る。ラベルのない親が一覧から消え
+    // （親の一覧が絞られた）、問い合わせが全部静まってから、無いことを判じる
+    await waitFor(() =>
+      expect(
+        canvas.queryByLabelText('タスク「ログイン画面の UI 実装」を選択'),
+      ).not.toBeInTheDocument(),
+    );
+    await waitFor(() => expect(storyQueryClient!.isFetching()).toBe(0));
+    await expect(canvas.getByLabelText('タスク「OAuth 対応を実装する」を選択')).toBeInTheDocument();
     await expect(canvas.queryByText('PKCE の検証を追加する')).not.toBeInTheDocument();
+    await expect(canvas.queryByRole('textbox', { name: /のサブタスク名/ })).not.toBeInTheDocument();
   },
 };
 
@@ -1760,6 +1772,9 @@ export const ColumnVisibility: Story = {
     // 列のドロップダウンを開く
     await user.click(await canvas.findByRole('button', { name: '列' }));
     const menu = within(document.body);
+    // ui-vue の menu は開くと menu-in の animation で opacity 0 から現れる。開ききるのを待ってから
+    // 押す（末尾の「開いたまま」の判じが、開く途中の姿を見ないように）
+    await waitFor(() => expect(menu.getByRole('menu', { name: '列' })).toBeVisible());
     // getCanHide: enableHiding: false の select 列は外せる列の一覧に出ない
     const priorityItem = await menu.findByRole('menuitemcheckbox', { name: 'priority' });
     await expect(menu.queryByRole('menuitemcheckbox', { name: 'select' })).not.toBeInTheDocument();
@@ -1906,7 +1921,13 @@ export const LabelsApiError: Story = {
     // ラベル取得失敗はツールバー内でエラー表示＋再試行を出す
     await expect(canvas.findByText('ラベルの取得に失敗しました')).resolves.toBeInTheDocument();
     await expect(canvas.findByRole('button', { name: '再試行' })).resolves.toBeInTheDocument();
-    await expect(canvas.queryByRole('button', { name: 'ラベル' })).not.toBeInTheDocument();
+    // 絞りの帯のラベルの釦は残る（名の一覧が無くても「ラベルなし」で絞れる。担当者の取得失敗と同じ扱い）。
+    // 取得できなかった名は並べず、「ラベルなし」だけを出す
+    await userEvent.click(canvas.getByRole('button', { name: 'ラベル' }));
+    await waitFor(() =>
+      expect(screen.getByRole('menuitemcheckbox', { name: 'ラベルなし' })).toBeVisible(),
+    );
+    await expect(screen.getAllByRole('menuitemcheckbox')).toHaveLength(1);
   },
 };
 
