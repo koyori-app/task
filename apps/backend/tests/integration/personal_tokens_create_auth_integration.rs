@@ -390,12 +390,10 @@ async fn member_token_with_write_scopes_cannot_do_admin_operations() {
         "scope や所属ではなく、ロールで拒否している"
     );
 
+    let projects_path = format!("/v1/tenants/{}/projects", tp.tenant_id);
+    let new_project = serde_json::json!({ "name": "member-made" });
     let res = app
-        .post_json_with_bearer(
-            &format!("/v1/tenants/{}/projects", tp.tenant_id),
-            serde_json::json!({ "name": "member-made" }),
-            &member_token,
-        )
+        .post_json_with_bearer(&projects_path, new_project.clone(), &member_token)
         .await;
     assert_eq!(
         res.status(),
@@ -419,6 +417,15 @@ async fn member_token_with_write_scopes_cannot_do_admin_operations() {
         .post_json_with_bearer(&members_path, add_member, &owner_token)
         .await;
     assert_eq!(res.status(), StatusCode::CREATED, "オーナーの鍵は通る");
+    // 共有プロジェクトの作成も同じ（403 が scope 不足ではなく、ロールの拒否であることの対照）
+    let res = app
+        .post_json_with_bearer(&projects_path, new_project, &owner_token)
+        .await;
+    assert_eq!(
+        res.status(),
+        StatusCode::CREATED,
+        "オーナーの鍵は共有プロジェクトを作れる"
+    );
 }
 
 /// テナントから外した Member の鍵は、そのテナント全体の操作で 403 になる。

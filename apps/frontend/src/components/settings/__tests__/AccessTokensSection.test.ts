@@ -35,14 +35,14 @@ function tenant(
   guest = false,
 ): components['schemas']['TenantListItemResponse'] {
   if (guest) {
-    // API と同じ形: 客分には require_2fa と member_role を返さない
+    // API と同じ形: 客分には owner_id・require_2fa・member_role を返さない
     return {
       id,
       display_id: 'acme',
       name,
       description: '',
       icon_url: '',
-      owner_id: ownerId,
+      owner_id: null,
       drive_quota_bytes: null,
       require_2fa: null,
       membership: 'Guest',
@@ -367,8 +367,28 @@ describe('AccessTokensSection', () => {
     expect(wrapper.text()).toContain('スコープを 1 つ以上選択してください。');
   });
 
-  it('403 のときは所属していないことを伝える', async () => {
-    stubFetch({ tokens: [], createStatus: 403 });
+  it('403 が理由を名指ししないとき（Origin の検査など）は、所属していないと言わず汎用の文を出す', async () => {
+    stubFetch({ tokens: [], createStatus: 403, createMessage: 'forbidden' });
+    const wrapper = mountSection();
+    await flushPromises();
+
+    clickBodyButton('トークンを発行');
+    await flushPromises();
+
+    await wrapper.find('#token-name').setValue('CI deploy');
+    clickScopeCheckbox('read:task');
+    await flushPromises();
+    await wrapper.find('form').trigger('submit');
+    await flushPromises();
+
+    expect(wrapper.text()).toContain(
+      'トークンを発行できませんでした。時間をおいて再度お試しください。',
+    );
+    expect(wrapper.text()).not.toContain('所属していないため');
+  });
+
+  it('403 が tenant-membership-missing のときは所属していないことを伝える', async () => {
+    stubFetch({ tokens: [], createStatus: 403, createMessage: 'tenant-membership-missing' });
     const wrapper = mountSection();
     await flushPromises();
 

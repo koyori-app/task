@@ -160,11 +160,12 @@ async function onSubmit() {
   } catch (e) {
     const err = e as { response?: { status?: number }; error?: { message?: unknown } };
     const status = err.response?.status;
-    // 候補は所属するテナントに絞ってあるので、403 の主な原因は 2FA の強制。API はどのテナントかを返さない
+    // 候補は所属するテナントに絞ってあるので、403 の主な原因は 2FA の強制。API はどのテナントかを返さない。
+    // 理由を名指しする 403 だけ原因を伝え、ほかの 403（Origin の検査など）は汎用の文にする
     submitError.value =
       status === 403 && err.error?.message === '2fa-setup-required'
         ? '選択したテナントのどれかが 2 段階認証を必須にしています。2 段階認証を設定してから、もう一度発行してください。'
-        : status === 403
+        : status === 403 && err.error?.message === 'tenant-membership-missing'
           ? '選択したテナントに所属していないため、トークンを発行できません。'
           : status === 400
             ? '入力内容を確認してください。'

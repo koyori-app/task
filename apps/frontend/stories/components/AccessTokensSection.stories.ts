@@ -25,9 +25,11 @@ const tenant = (view: TenantView, id = TENANT_ID, name = 'Acme Inc') => ({
   name,
   description: '',
   icon_url: '',
-  owner_id: view.membership === 'Owner' ? USER_ID : OTHER_USER_ID,
+  // API と同じ形: Guest には owner_id と require_2fa を返さない
+  owner_id:
+    view.membership === 'Owner' ? USER_ID : view.membership === 'Guest' ? null : OTHER_USER_ID,
   drive_quota_bytes: null,
-  require_2fa: false,
+  require_2fa: view.membership === 'Guest' ? null : false,
   membership: view.membership,
   member_role: view.member_role ?? null,
 });
