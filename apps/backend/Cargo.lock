@@ -8104,9 +8104,11 @@ dependencies = [
  "base64 0.22.1",
  "bitflags 2.13.2",
  "chrono",
+ "const-oid",
  "crossbeam-utils",
  "crypto-common 0.1.7",
  "crypto-common 0.2.2",
+ "ctutils",
  "darling 0.20.11",
  "darling_core 0.20.11",
  "deranged",
@@ -8120,6 +8122,7 @@ dependencies = [
  "futures-util",
  "getrandom 0.2.17",
  "hashbrown 0.14.5",
+ "hybrid-array",
  "hyper",
  "hyper-util",
  "idna",
@@ -8163,6 +8166,7 @@ dependencies = [
  "tracing-core",
  "url",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
