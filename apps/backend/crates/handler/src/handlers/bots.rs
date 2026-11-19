@@ -21,7 +21,7 @@ async fn authorize(state: &AppState, auth: &AuthUser, tenant_id: Uuid) -> Result
 }
 
 #[utoipa::path(get, path = "/{tenant_id}/bots", tag = "Bots",
-    params(("tenant_id" = Uuid, Path)), responses((status = 200, body = Vec<BotResponse>), crate::openapi::SessionAuthErrors))]
+    params(("tenant_id" = Uuid, Path)), responses((status = 200, body = Vec<BotResponse>, description = "BOT 一覧"), crate::openapi::SessionAuthErrors))]
 pub async fn list_bots(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -34,7 +34,7 @@ pub async fn list_bots(
 }
 
 #[utoipa::path(post, path = "/{tenant_id}/bots", tag = "Bots", request_body = CreateBotRequest,
-    params(("tenant_id" = Uuid, Path)), responses((status = 201, body = BotResponse), crate::openapi::SessionAuthErrors))]
+    params(("tenant_id" = Uuid, Path)), responses((status = 201, body = BotResponse, description = "作成した BOT"), crate::openapi::SessionAuthErrors))]
 pub async fn create_bot(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -48,7 +48,7 @@ pub async fn create_bot(
 }
 
 #[utoipa::path(patch, path = "/{tenant_id}/bots/{bot_id}", tag = "Bots", request_body = UpdateBotRequest,
-    params(("tenant_id" = Uuid, Path), ("bot_id" = Uuid, Path)), responses((status = 204), crate::openapi::SessionAuthErrors))]
+    params(("tenant_id" = Uuid, Path), ("bot_id" = Uuid, Path)), responses((status = 204, description = "更新しました"), crate::openapi::SessionAuthErrors))]
 pub async fn update_bot(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -61,7 +61,7 @@ pub async fn update_bot(
 }
 
 #[utoipa::path(get, path = "/{tenant_id}/bots/{bot_id}/tokens", tag = "Bots",
-    params(("tenant_id" = Uuid, Path), ("bot_id" = Uuid, Path)), responses((status = 200, body = Vec<PersonalTokenResponse>), crate::openapi::SessionAuthErrors))]
+    params(("tenant_id" = Uuid, Path), ("bot_id" = Uuid, Path)), responses((status = 200, body = Vec<PersonalTokenResponse>, description = "BOT のトークン一覧"), crate::openapi::SessionAuthErrors))]
 pub async fn list_bot_tokens(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -74,7 +74,7 @@ pub async fn list_bot_tokens(
 }
 
 #[utoipa::path(post, path = "/{tenant_id}/bots/{bot_id}/tokens", tag = "Bots", request_body = CreateBotTokenRequest,
-    params(("tenant_id" = Uuid, Path), ("bot_id" = Uuid, Path)), responses((status = 201, body = CreatePersonalTokenResponse), crate::openapi::SessionAuthErrors))]
+    params(("tenant_id" = Uuid, Path), ("bot_id" = Uuid, Path)), responses((status = 201, body = CreatePersonalTokenResponse, description = "発行したトークン"), crate::openapi::SessionAuthErrors))]
 pub async fn create_bot_token(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -95,7 +95,7 @@ pub async fn create_bot_token(
 }
 
 #[utoipa::path(delete, path = "/{tenant_id}/bots/{bot_id}/tokens/{token_id}", tag = "Bots",
-    params(("tenant_id" = Uuid, Path), ("bot_id" = Uuid, Path), ("token_id" = Uuid, Path)), responses((status = 204), crate::openapi::SessionAuthErrors))]
+    params(("tenant_id" = Uuid, Path), ("bot_id" = Uuid, Path), ("token_id" = Uuid, Path)), responses((status = 204, description = "失効しました"), crate::openapi::SessionAuthErrors))]
 pub async fn revoke_bot_token(
     State(state): State<AppState>,
     auth: AuthUser,

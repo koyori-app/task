@@ -750,7 +750,7 @@ fn select_token_from_headers(headers: &HeaderMap) -> Result<&str, AppError> {
         ("project_id" = Uuid, Path),
         ("X-Github-Select-Token" = String, Header),
     ),
-    responses((status = 200, body = GithubRepositoriesResponse), CrudErrors)
+    responses((status = 200, body = GithubRepositoriesResponse, description = "リポジトリ一覧"), CrudErrors)
 )]
 pub async fn list_github_repositories(
     State(state): State<AppState>,
@@ -897,7 +897,7 @@ pub async fn connect_github_repository(
         ("tenant_id" = Uuid, Path),
         ("project_id" = Uuid, Path),
     ),
-    responses((status = 200, body = GithubReusableInstallationsResponse), CrudErrors)
+    responses((status = 200, body = GithubReusableInstallationsResponse, description = "再利用できるインストール一覧"), CrudErrors)
 )]
 pub async fn list_reusable_github_installations(
     State(state): State<AppState>,
@@ -1151,7 +1151,7 @@ pub async fn github_webhook(
         ("tenant_id" = Uuid, Path),
         ("project_id" = Uuid, Path),
     ),
-    responses((status = 200, body = GithubIntegrationResponse), CrudErrors)
+    responses((status = 200, body = GithubIntegrationResponse, description = "GitHub 連携の状態"), CrudErrors)
 )]
 pub async fn get_github_integration(
     State(state): State<AppState>,

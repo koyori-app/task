@@ -26,6 +26,11 @@ pub fn register_schemas(openapi: &mut OpenApi) {
     register_schema::<payload::auth_2fa::Login2faResponse>(components);
     register_schema::<payload::auth_2fa::TotpSetupResponse>(components);
     register_schema::<payload::auth_2fa::VerifySetupResponse>(components);
+    // 説明の付いた `OrUnknown` の欄（`payload::or_unknown::described_schema`）は中身の型を
+    // 登録しない。ほかの欄に頼らず、ここで載せる
+    register_schema::<entity::tenant_members::TenantRole>(components);
+    register_schema::<payload::reviews::ReviewGate>(components);
+    register_schema::<payload::tenants::TenantMembershipKind>(components);
     register_security_schemes(components);
     register_tags(openapi);
 }
@@ -127,7 +132,8 @@ fn register_security_schemes(components: &mut utoipa::openapi::Components) {
                 .scheme(HttpAuthScheme::Bearer)
                 .bearer_format("PAT")
                 .build(),
-        ),
+        )
+        .into(),
     );
 }
 

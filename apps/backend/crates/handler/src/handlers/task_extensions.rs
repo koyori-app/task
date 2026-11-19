@@ -1257,7 +1257,7 @@ mod tests {
 }
 
 #[axum::debug_handler]
-#[utoipa::path(get, path = "/facets", tag = "Tasks", summary = "条件式の候補件数", params(("tenant_id" = Uuid, Path), ("project_id" = Uuid, Path)), responses((status = 200, body = payload::task_query::TaskFacetsResponse), CrudErrors))]
+#[utoipa::path(get, path = "/facets", tag = "Tasks", summary = "条件式の候補件数", params(("tenant_id" = Uuid, Path), ("project_id" = Uuid, Path)), responses((status = 200, body = payload::task_query::TaskFacetsResponse, description = "条件式の候補件数"), CrudErrors))]
 pub async fn list_task_facets(
     State(state): State<AppState>,
     auth: AuthUser,
