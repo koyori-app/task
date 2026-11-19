@@ -16,6 +16,8 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use serde_json::Value;
 use tower::ServiceExt;
 
+use crate::extractors::McpAudience;
+
 /// 内向きの応答として読む本文の上限。
 const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 /// JSON でないエラー本文をツールの結果へ写すときの上限（文字数）。
@@ -76,7 +78,7 @@ pub(super) struct InnerApi {
 }
 
 impl InnerApi {
-    /// `require_pat` を通った要求には必ず `Authorization` がある。無いのは配線の誤り
+    /// `require_bearer` を通った要求には必ず `Authorization` がある。無いのは配線の誤り
     pub(super) fn from_parts(router: &Router, parts: &Parts) -> Result<Self, ToolFailure> {
         let authorization = parts
             .headers
@@ -118,7 +120,9 @@ impl InnerApi {
             .method(method)
             .uri(request_target(segments, query))
             .header(AUTHORIZATION, self.authorization.clone())
-            .header(ACCEPT, "application/json");
+            .header(ACCEPT, "application/json")
+            // 内向きの呼び出しは MCP の入口宛ての要求の続きなので、OAuth のアクセストークンを通す
+            .extension(McpAudience);
         let body = match body {
             Some(value) => {
                 builder = builder.header(CONTENT_TYPE, "application/json");

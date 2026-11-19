@@ -13,7 +13,7 @@ use sea_orm::{
 use crate::AppState;
 use crate::auth_helpers::require_tenant_owner;
 use crate::error::AppError;
-use crate::extractors::{AuthMethod, AuthUser};
+use crate::extractors::{AuthMethod, AuthUser, has_tenant_access};
 use crate::openapi::{CrudErrors, PersonalTokenAuthErrors, SessionAuthErrors};
 use entity::scopes::ScopeList;
 use entity::{
@@ -63,6 +63,32 @@ async fn validate_project_ids(
     Ok(())
 }
 
+/// 利用者が、選んだテナントにトークンを結び付けられるかを確かめ、重複を落とした一覧を返す
+/// （順序は保つ）。PAT の発行と、MCP の OAuth の同意・コードの交換が同じ規則で使う。
+///
+/// 条件は、選んだ各テナントに所属していること（オーナー・Admin・Member・Viewer）と、
+/// テナントの 2FA の強制だけである。ロールで scope は絞らない。届く範囲は、要求のたびに
+/// scope・束縛・本人の今のロールで決まる
+/// （docs/dev/design/personal-access-tokens-authz.md の発行の認可）。
+/// 1 件でも通らなければ全体を拒否する。
+pub(crate) async fn ensure_can_bind_tenants(
+    state: &AppState,
+    user_id: Uuid,
+    tenant_ids: &[Uuid],
+) -> Result<Vec<Uuid>, AppError> {
+    let mut seen = std::collections::HashSet::new();
+    let tenant_ids: Vec<Uuid> = tenant_ids
+        .iter()
+        .copied()
+        .filter(|id| seen.insert(*id))
+        .collect();
+    for &tenant_id in &tenant_ids {
+        has_tenant_access(state, user_id, tenant_id, None).await?;
+    }
+    Ok(tenant_ids)
+}
+
+/// 自分の PAT を 1 件引く。OAuth の許可の行は PAT として見せない。
 async fn get_owned_token(
     state: &AppState,
     token_id: Uuid,
@@ -70,6 +96,7 @@ async fn get_owned_token(
 ) -> Result<personal_tokens::Model, AppError> {
     personal_tokens::Entity::find_by_id(token_id)
         .filter(personal_tokens::Column::UserId.eq(user_id))
+        .filter(personal_tokens::Column::OauthClientId.is_null())
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)
@@ -261,6 +288,8 @@ pub async fn list_personal_tokens(
     let tokens = personal_tokens::Entity::find()
         .filter(personal_tokens::Column::UserId.eq(auth.user_id))
         .filter(personal_tokens::Column::Revoked.eq(false))
+        // OAuth の許可の行は「連携中のアプリ」（`/v1/oauth_grants`）に出す
+        .filter(personal_tokens::Column::OauthClientId.is_null())
         .order_by_asc(personal_tokens::Column::Name)
         .order_by_asc(personal_tokens::Column::Id)
         .all(&state.db)
@@ -303,21 +332,7 @@ pub async fn create_personal_token(
     Valid(Json(payload)): Valid<Json<CreatePersonalTokenRequest>>,
 ) -> Result<(StatusCode, Json<CreatePersonalTokenResponse>), AppError> {
     auth.require_session()?;
-    // 重複は落とす（順序は保つ）。1 件でも通らなければ全体を拒否する
-    let mut seen = std::collections::HashSet::new();
-    let tenant_ids: Vec<Uuid> = payload
-        .tenant_ids
-        .iter()
-        .copied()
-        .filter(|id| seen.insert(*id))
-        .collect();
-    for &tenant_id in &tenant_ids {
-        // 発行は、選んだ各テナントに所属していること（オーナー・Admin・Member・Viewer）と、
-        // テナントの 2FA の強制だけを条件にする。ロールで scope は絞らない。届く範囲は、
-        // 要求のたびに scope・束縛・本人の今のロールで決まる
-        // （docs/dev/design/personal-access-tokens-authz.md の発行の認可）
-        auth.ensure_tenant_access(&state, tenant_id, None).await?;
-    }
+    let tenant_ids = ensure_can_bind_tenants(&state, auth.user_id, &payload.tenant_ids).await?;
 
     if let Some(ref project_ids) = payload.project_ids {
         validate_project_ids(&state, &tenant_ids, project_ids).await?;
@@ -341,6 +356,7 @@ pub async fn create_personal_token(
         user_id: Set(auth.user_id),
         scopes: Set(ScopeList(payload.scopes)),
         allowed_project_ids: Set(allowed_project_ids),
+        oauth_client_id: Set(None),
     }
     .insert(&txn)
     .await?;

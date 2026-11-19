@@ -96,6 +96,9 @@ services:
       NOTIFICATION_RETENTION_DAYS: ${NOTIFICATION_RETENTION_DAYS:-90}
       # 外部 Webhook の loopback 宛てを許す。開発・テスト用で、本番では false のままにする
       WEBHOOK_ALLOW_LOOPBACK: ${WEBHOOK_ALLOW_LOOPBACK:-false}
+      # MCP の OAuth で受けるクライアントの client_id（カンマ区切り）。空なら既定の 4 つ
+      # （claude.ai・Claude Code・ChatGPT・Codex）。* で任意、none で全部拒否
+      OAUTH_ALLOWED_CLIENT_IDS: ${OAUTH_ALLOWED_CLIENT_IDS:-}
       # タスク検索を pg_bigm（ILIKE + gin_bigm_ops）で行う。拡張を入れた DB でだけ true にする
       USE_PG_BIGM: ${USE_PG_BIGM:-}
       # GitHub App 連携（任意）。GITHUB_APP_ID が空なら連携機能ごと無効になる。

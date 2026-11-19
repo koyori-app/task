@@ -112,6 +112,70 @@ async fn revoked_tokens_disappear_from_list() {
     app.cleanup_user(user.id).await;
 }
 
+/// MCP の OAuth の許可は `personal_tokens` の行だが、PAT の一覧・単体取得・取り消しには出ない
+/// （「連携中のアプリ」の `/v1/oauth_grants` で扱う）。対照: PAT は従来どおり出る。
+#[tokio::test]
+async fn oauth_grants_are_not_personal_tokens() {
+    let mut app = TestApp::new().await;
+
+    let user = app.insert_user_default().await;
+    let tenant_id = insert_tenant(&app.state.db, user.id).await;
+    let grant_id = uuid::Uuid::new_v4();
+    backend::utils::oauth_server::grant::create_grant(
+        &app.state.db,
+        &app.state.settings.personal_token_secret,
+        &backend::utils::oauth_server::grant::PendingAuthorization {
+            grant_id,
+            user_id: user.id,
+            client_id: crate::common::TEST_OAUTH_CLIENT.to_string(),
+            client_name: "Test Client".to_string(),
+            redirect_uri: "https://client.test/callback".to_string(),
+            code_challenge: String::new(),
+            scopes: vec![Scope::ReadTask],
+            tenant_ids: vec![tenant_id],
+            allow_refresh: true,
+            issued_at_ms: chrono::Utc::now().timestamp_millis(),
+        },
+    )
+    .await
+    .expect("create grant");
+
+    app.reset_session_client();
+    app.login_session_no_content(&user.email, &user.password)
+        .await;
+    let pat_id = create_token(&app, tenant_id, "a-pat").await;
+
+    let listed = list_tokens(&app).await;
+    assert_eq!(listed.len(), 1, "許可は PAT の一覧に出ない");
+    assert_eq!(listed[0]["id"], pat_id.to_string());
+
+    let res = app
+        .get_with_session(&format!("/v1/personal_tokens/{grant_id}"))
+        .await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    let res = app
+        .delete_with_session(&format!("/v1/personal_tokens/{grant_id}"))
+        .await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    // 404 の取り消しで許可が落ちていない
+    let res = app.get_with_session("/v1/oauth_grants").await;
+    let grants = res.json::<Vec<serde_json::Value>>().await.expect("grants");
+    assert_eq!(grants.len(), 1);
+    assert_eq!(grants[0]["id"], grant_id.to_string());
+
+    // 対照: PAT は単体取得も取り消しもできる
+    let res = app
+        .get_with_session(&format!("/v1/personal_tokens/{pat_id}"))
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let res = app
+        .delete_with_session(&format!("/v1/personal_tokens/{pat_id}"))
+        .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    app.cleanup_user(user.id).await;
+}
+
 /// 未ログインは拒否される。
 #[tokio::test]
 async fn rejects_unauthenticated() {
