@@ -853,6 +853,12 @@ impl TestApp {
             .with_state(state.clone())
             .layer(Extension(state.redis_client.clone()))
             .layer(Extension(shutdown_rx))
+            // 本番（`src/server.rs`）と同じく、Cookie で認証する API に `Origin` の検査を掛ける。
+            // `/mcp` と OAuth の公開のエンドポイントは、本番と同じく検査の外に載る
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handler::middlewares::csrf::csrf_origin_check,
+            ))
             .layer(SessionLayer::new(session_store));
         let router = handler::mcp::mount(router, state.clone());
 
