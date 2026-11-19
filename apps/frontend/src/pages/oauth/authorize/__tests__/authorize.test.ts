@@ -409,6 +409,14 @@ describe('/oauth/authorize: 表示', () => {
       '選択したテナントに所属していないため、接続できません。',
     );
 
+    // 理由を名指ししない 403 は、所属のせいにしない
+    state.approveError = { status: 403, message: 'forbidden' };
+    await button(wrapper, '許可する')!.trigger('click');
+    await settle();
+    expect(wrapper.get('[role="alert"]').text()).toBe(
+      '許可できませんでした。時間をおいて、もう一度お試しください。',
+    );
+
     state.approveError = { status: 400, message: 'oauth-client-not-allowed' };
     await button(wrapper, '許可する')!.trigger('click');
     await settle();
