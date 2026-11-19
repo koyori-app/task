@@ -2,14 +2,14 @@
 title: OAuth ログイン
 description: GitHub・GitLab・Google・汎用 OIDC によるログインと新規登録、アカウントの連携
 status: implemented
-updated: 2026-11-04
+updated: 2026-11-19
 sidebar:
   order: 2
 ---
 
 ## 概要
 
-メール + パスワード認証（Argon2id）に加えて、GitHub・GitLab・Google・汎用 OIDC でのログインと新規登録ができる。Authorization Code + PKCE のみを使い、セッションは既存の Redis セッションと共通である。メール/パスワードの利用者は後から OAuth を連携でき、逆もできる。パスワードの無い OAuth 専用の利用者も許容する。PKCE や state、トークン暗号化といったプロトコル層は外部クレート `auth-core` に置き、プロバイダーの解決と利用者の照合はこのリポジトリの `service::oauth` と `handler::handlers::oauth` が担う。
+メール + パスワード認証（Argon2id）に加えて、GitHub・GitLab・Google・汎用 OIDC でのログインと新規登録ができる。Authorization Code + PKCE のみを使い、セッションは既存の Redis セッションと共通である。メール/パスワードの利用者は後から OAuth を連携でき、逆もできる。パスワードの無い OAuth 専用の利用者も許容する。PKCE や state、トークン暗号化といったプロトコル層は外部クレート `auth-core` に置き、プロバイダーの解決と利用者の照合はこのリポジトリの `service::oauth` と `handler::handlers::oauth` が担う。MCP クライアント向けの OAuth の認可サーバーは別物で、[MCP サーバーの OAuth での接続](/dev/features/mcp#oauth-での接続)に書く。
 
 ## 振る舞い
 
