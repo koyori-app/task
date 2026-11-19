@@ -1,0 +1,22 @@
+{
+  "_about": "axum_session 0.20.1 / axum_session_redispool 0.11.0 が、本番と同じ設定（backend::server::session_config）で作った物。Redis のキーは sessions:<cookie の id>、値は data と longterm だけで、期限は Redis の TTL（6 時間）に持つ。cookie は署名も暗号も無い素の id。日付は <date>、id は <id> に置いてある。",
+  "redis_key_prefix": "sessions:",
+  "redis_data_keys": [
+    "half_authed",
+    "issued_at_ms",
+    "reauthed_at_ms",
+    "user_id"
+  ],
+  "redis_value_template": "{\"data\":{\"user_id\":\"\\\"__USER_ID__\\\"\",\"issued_at_ms\":\"__NOW_MS__\",\"half_authed\":\"false\",\"reauthed_at_ms\":\"__NOW_MS__\"},\"longterm\":false}",
+  "redis_ttl_secs": 21600,
+  "login_set_cookies": {
+    "dev": [
+      "session=<id>; HttpOnly; SameSite=Lax; Path=/; Expires=<date>",
+      "store=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0; Expires=<date>"
+    ],
+    "prod": [
+      "session=<id>; HttpOnly; SameSite=None; Secure; Path=/; Expires=<date>",
+      "store=; HttpOnly; SameSite=None; Secure; Path=/; Max-Age=0; Expires=<date>"
+    ]
+  }
+}

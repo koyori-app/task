@@ -1,0 +1,171 @@
+{
+  "_about": "webauthn-rs 0.5.5（features: danger-allow-state-serialisation・danger-credential-internals・conditional-ui）と webauthn-authenticator-rs 0.5.5 の SoftToken が作った物。state は Redis に、stored は DB の passkeys 行に、credential はブラウザが返す応答に当たる。",
+  "ccr": {
+    "publicKey": {
+      "attestation": "none",
+      "authenticatorSelection": {
+        "requireResidentKey": false,
+        "residentKey": "discouraged",
+        "userVerification": "required"
+      },
+      "challenge": "yS6dXrKfaJdG9HJVzeCuRnwfn1hxj2TRPzeGRDmJRjU",
+      "extensions": {
+        "credProps": true,
+        "credentialProtectionPolicy": "userVerificationRequired",
+        "enforceCredentialProtectionPolicy": false,
+        "uvm": true
+      },
+      "pubKeyCredParams": [
+        {
+          "alg": -7,
+          "type": "public-key"
+        },
+        {
+          "alg": -257,
+          "type": "public-key"
+        }
+      ],
+      "rp": {
+        "id": "localhost",
+        "name": "TaskApp"
+      },
+      "timeout": 300000,
+      "user": {
+        "displayName": "test_96ab9a3e",
+        "id": "lquaPgJwQR-t_XVZ4KRwyQ",
+        "name": "webauthn-test-96ab9a3e-0270-411f-adfd-7559e0a470c9@example.com"
+      }
+    }
+  },
+  "credential": {
+    "extensions": {},
+    "id": "3iP2Rpuz0i3c5h6ZdNcEXChI-n1XjuPxc2awLr-QohQ",
+    "rawId": "3iP2Rpuz0i3c5h6ZdNcEXChI-n1XjuPxc2awLr-QohQ",
+    "response": {
+      "attestationObject": "o2NmbXRmcGFja2VkZ2F0dFN0bXSjY2FsZyZjc2lnWEcwRQIgHePhXR0VzfY9URRScc96COeNhstxg28jX6qFjSoqL70CIQDdEMJ5ybAMetPAbdZotuvcMb4vfLQuyJT-yw7mF472UWN4NWOBWQJlMIICYTCCAgegAwIBAgIBAjAKBggqhkjOPQQDAjCBgzELMAkGA1UEBhMCQVUxDDAKBgNVBAgMA1FMRDEiMCAGA1UECgwZV2ViYXV0aG4gQXV0aGVudGljYXRvciBSUzFCMEAGA1UEAww5RHluYW1pYyBTb2Z0dG9rZW4gQ0EgZGIxMmQzYzgtZDE5Zi00YTY3LTllYWItNzVhOGYyMzNlMWY1MB4XDTI2MTExOTE2MzcxOFoXDTI2MTEyMDE2MzcxOFowgZAxCzAJBgNVBAYTAkFVMQwwCgYDVQQIDANRTEQxIjAgBgNVBAoMGVdlYmF1dGhuIEF1dGhlbnRpY2F0b3IgUlMxKzApBgNVBAMMIkR5bmFtaWMgU29mdHRva2VuIExlYWYgQ2VydGlmaWNhdGUxIjAgBgNVBAsMGUF1dGhlbnRpY2F0b3IgQXR0ZXN0YXRpb24wWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAS4x6S-XHVDQK8PkNEAKDTIq1c90fOcwgcCUK8ftxAYv5JBFLIDgQ_dPVHwh2n-I0GZWuKlWjMW4Y7pdix538FLo10wWzAJBgNVHRMEAjAAMA4GA1UdDwEB_wQEAwIF4DAdBgNVHQ4EFgQUQVs4bboStdWg9csTx7uHenR23uYwHwYDVR0jBBgwFoAU2jmj7l5rSw0yVb_vlWAYkK_YBwkwCgYIKoZIzj0EAwIDSAAwRQIhAOfjq9H9PcXAtXt1-n4ZXGv-GA1hqsE7JWaLEuPZedzyAiBHNL8yFojqlkmalIhzJsYyAnoltIdJFYcHTRzVGG_xf2hhdXRoRGF0YVikSZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2NFAAAAAA-5vLyg1EBCu7BVm8FjHigAIN4j9kabs9It3OYemXTXBFwoSPp9V47j8XNmsC6_kKIUpQECAyYgASFYIB88hYJJcVtx9XvL5vnj9pISnmxGH5OoDOfpH9zbSKmXIlggJ0B-aSqtTJiCBwyClM5La7043mcBHR1Z1lmRmZgScy0",
+      "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uY3JlYXRlIiwiY2hhbGxlbmdlIjoieVM2ZFhyS2ZhSmRHOUhKVnplQ3VSbndmbjFoeGoyVFJQemVHUkRtSlJqVSIsIm9yaWdpbiI6Imh0dHA6Ly9sb2NhbGhvc3Q6MzAwMC8iLCJ0b2tlbkJpbmRpbmciOm51bGx9",
+      "transports": [
+        "internal"
+      ]
+    },
+    "type": "public-key"
+  },
+  "state": {
+    "rs": {
+      "allow_synchronised_authenticators": true,
+      "authenticator_attachment": null,
+      "challenge": "yS6dXrKfaJdG9HJVzeCuRnwfn1hxj2TRPzeGRDmJRjU",
+      "credential_algorithms": [
+        "ES256",
+        "RS256"
+      ],
+      "exclude_credentials": [],
+      "extensions": {
+        "credProps": true,
+        "credentialProtectionPolicy": "userVerificationRequired",
+        "enforceCredentialProtectionPolicy": false,
+        "uvm": true
+      },
+      "policy": "required",
+      "require_resident_key": false
+    }
+  },
+  "stored": {
+    "aaguid": [
+      15,
+      185,
+      188,
+      188,
+      160,
+      212,
+      64,
+      66,
+      187,
+      176,
+      85,
+      155,
+      193,
+      99,
+      30,
+      40
+    ],
+    "credential_id": [
+      222,
+      35,
+      246,
+      70,
+      155,
+      179,
+      210,
+      45,
+      220,
+      230,
+      30,
+      153,
+      116,
+      215,
+      4,
+      92,
+      40,
+      72,
+      250,
+      125,
+      87,
+      142,
+      227,
+      241,
+      115,
+      102,
+      176,
+      46,
+      191,
+      144,
+      162,
+      20
+    ],
+    "public_key": {
+      "cred": {
+        "attestation": {
+          "data": {
+            "Basic": [
+              "MIICYTCCAgegAwIBAgIBAjAKBggqhkjOPQQDAjCBgzELMAkGA1UEBhMCQVUxDDAKBgNVBAgMA1FMRDEiMCAGA1UECgwZV2ViYXV0aG4gQXV0aGVudGljYXRvciBSUzFCMEAGA1UEAww5RHluYW1pYyBTb2Z0dG9rZW4gQ0EgZGIxMmQzYzgtZDE5Zi00YTY3LTllYWItNzVhOGYyMzNlMWY1MB4XDTI2MTExOTE2MzcxOFoXDTI2MTEyMDE2MzcxOFowgZAxCzAJBgNVBAYTAkFVMQwwCgYDVQQIDANRTEQxIjAgBgNVBAoMGVdlYmF1dGhuIEF1dGhlbnRpY2F0b3IgUlMxKzApBgNVBAMMIkR5bmFtaWMgU29mdHRva2VuIExlYWYgQ2VydGlmaWNhdGUxIjAgBgNVBAsMGUF1dGhlbnRpY2F0b3IgQXR0ZXN0YXRpb24wWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAS4x6S-XHVDQK8PkNEAKDTIq1c90fOcwgcCUK8ftxAYv5JBFLIDgQ_dPVHwh2n-I0GZWuKlWjMW4Y7pdix538FLo10wWzAJBgNVHRMEAjAAMA4GA1UdDwEB_wQEAwIF4DAdBgNVHQ4EFgQUQVs4bboStdWg9csTx7uHenR23uYwHwYDVR0jBBgwFoAU2jmj7l5rSw0yVb_vlWAYkK_YBwkwCgYIKoZIzj0EAwIDSAAwRQIhAOfjq9H9PcXAtXt1-n4ZXGv-GA1hqsE7JWaLEuPZedzyAiBHNL8yFojqlkmalIhzJsYyAnoltIdJFYcHTRzVGG_xfw"
+            ]
+          },
+          "metadata": {
+            "Packed": {
+              "aaguid": "0fb9bcbc-a0d4-4042-bbb0-559bc1631e28"
+            }
+          }
+        },
+        "attestation_format": "packed",
+        "backup_eligible": false,
+        "backup_state": false,
+        "counter": 0,
+        "cred": {
+          "key": {
+            "EC_EC2": {
+              "curve": "SECP256R1",
+              "x": "HzyFgklxW3H1e8vm-eP2khKebEYfk6gM5-kf3NtIqZc",
+              "y": "J0B-aSqtTJiCBwyClM5La7043mcBHR1Z1lmRmZgScy0"
+            }
+          },
+          "type_": "ES256"
+        },
+        "cred_id": "3iP2Rpuz0i3c5h6ZdNcEXChI-n1XjuPxc2awLr-QohQ",
+        "extensions": {
+          "appid": "NotRequested",
+          "cred_props": "Ignored",
+          "cred_protect": "Ignored",
+          "hmac_create_secret": "NotRequested"
+        },
+        "registration_policy": "required",
+        "transports": [
+          "internal"
+        ],
+        "user_verified": true
+      }
+    },
+    "sign_count": 0
+  },
+  "user_id": "96ab9a3e-0270-411f-adfd-7559e0a470c9"
+}

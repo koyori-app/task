@@ -685,7 +685,25 @@ impl TestApp {
         Self::build(settings).await
     }
 
+    /// 本番と同じセッションの設定（`backend::server::session_config`）で起こす。署名も暗号も無い、
+    /// 素の cookie と素の Redis の値になる。ログイン中のセッションの持ち越しを縛る試験が使う。
+    pub async fn new_with_session_config(config: SessionConfig) -> Self {
+        init_tracing();
+        let endpoints = ensure_test_env();
+        let mut settings = settings::load_settings().expect("load settings");
+        pin_test_endpoints(&mut settings, endpoints);
+        settings.email_verification_app_url = "http://localhost:3000".to_string();
+        Self::build_with_session_config(settings, config).await
+    }
+
     async fn build(settings: settings::Settings) -> Self {
+        Self::build_with_session_config(settings, test_session_config()).await
+    }
+
+    async fn build_with_session_config(
+        settings: settings::Settings,
+        session_config: SessionConfig,
+    ) -> Self {
         // Each #[tokio::test] owns a separate runtime. Keep runtime-bound
         // connection pools scoped to the TestApp created on that runtime.
         let db = sea_orm::Database::connect(&settings.database_url)
@@ -785,7 +803,7 @@ impl TestApp {
 
         let session_store = SessionStore::<SessionRedisPool>::new(
             Some(state.redis_client.conn.clone().into()),
-            test_session_config(),
+            session_config,
         )
         .await
         .expect("session store");

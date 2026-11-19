@@ -1,0 +1,227 @@
+{
+  "_about": "webauthn-rs 0.5.5（features: danger-allow-state-serialisation・danger-credential-internals・conditional-ui）と webauthn-authenticator-rs 0.5.5 の SoftToken が作った物。state は Redis に、stored は DB の passkeys 行に、credential はブラウザが返す応答に当たる。",
+  "credential": {
+    "extensions": {
+      "appid": null,
+      "hmac_get_secret": null
+    },
+    "id": "3iP2Rpuz0i3c5h6ZdNcEXChI-n1XjuPxc2awLr-QohQ",
+    "rawId": "3iP2Rpuz0i3c5h6ZdNcEXChI-n1XjuPxc2awLr-QohQ",
+    "response": {
+      "authenticatorData": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAAAQ",
+      "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiODFma1NBM1o0cnZoc3VNQ195dDhkN0hCYk1DUWhZQzh2ako3RDZQQ3Q2NCIsIm9yaWdpbiI6Imh0dHA6Ly9sb2NhbGhvc3Q6MzAwMC8iLCJ0b2tlbkJpbmRpbmciOm51bGx9",
+      "signature": "MEUCIQC6i76SU4iKu60wPt8iMMtqElHWfZeefvf01Mews8etdwIgMP8suIZIAedx6AtCUcDCYM9nuYYKr9V-H1PQ1cdj_UM",
+      "userHandle": null
+    },
+    "type": "public-key"
+  },
+  "options": {
+    "publicKey": {
+      "allowCredentials": [
+        {
+          "id": "3iP2Rpuz0i3c5h6ZdNcEXChI-n1XjuPxc2awLr-QohQ",
+          "transports": [
+            "internal"
+          ],
+          "type": "public-key"
+        }
+      ],
+      "challenge": "81fkSA3Z4rvhsuMC_yt8d7HBbMCQhYC8vjJ7D6PCt64",
+      "rpId": "localhost",
+      "timeout": 300000,
+      "userVerification": "required"
+    }
+  },
+  "state": {
+    "ast": {
+      "allow_backup_eligible_upgrade": true,
+      "appid": null,
+      "challenge": "81fkSA3Z4rvhsuMC_yt8d7HBbMCQhYC8vjJ7D6PCt64",
+      "credentials": [
+        {
+          "attestation": {
+            "data": {
+              "Basic": [
+                "MIICYTCCAgegAwIBAgIBAjAKBggqhkjOPQQDAjCBgzELMAkGA1UEBhMCQVUxDDAKBgNVBAgMA1FMRDEiMCAGA1UECgwZV2ViYXV0aG4gQXV0aGVudGljYXRvciBSUzFCMEAGA1UEAww5RHluYW1pYyBTb2Z0dG9rZW4gQ0EgZGIxMmQzYzgtZDE5Zi00YTY3LTllYWItNzVhOGYyMzNlMWY1MB4XDTI2MTExOTE2MzcxOFoXDTI2MTEyMDE2MzcxOFowgZAxCzAJBgNVBAYTAkFVMQwwCgYDVQQIDANRTEQxIjAgBgNVBAoMGVdlYmF1dGhuIEF1dGhlbnRpY2F0b3IgUlMxKzApBgNVBAMMIkR5bmFtaWMgU29mdHRva2VuIExlYWYgQ2VydGlmaWNhdGUxIjAgBgNVBAsMGUF1dGhlbnRpY2F0b3IgQXR0ZXN0YXRpb24wWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAS4x6S-XHVDQK8PkNEAKDTIq1c90fOcwgcCUK8ftxAYv5JBFLIDgQ_dPVHwh2n-I0GZWuKlWjMW4Y7pdix538FLo10wWzAJBgNVHRMEAjAAMA4GA1UdDwEB_wQEAwIF4DAdBgNVHQ4EFgQUQVs4bboStdWg9csTx7uHenR23uYwHwYDVR0jBBgwFoAU2jmj7l5rSw0yVb_vlWAYkK_YBwkwCgYIKoZIzj0EAwIDSAAwRQIhAOfjq9H9PcXAtXt1-n4ZXGv-GA1hqsE7JWaLEuPZedzyAiBHNL8yFojqlkmalIhzJsYyAnoltIdJFYcHTRzVGG_xfw"
+              ]
+            },
+            "metadata": {
+              "Packed": {
+                "aaguid": "0fb9bcbc-a0d4-4042-bbb0-559bc1631e28"
+              }
+            }
+          },
+          "attestation_format": "packed",
+          "backup_eligible": false,
+          "backup_state": false,
+          "counter": 0,
+          "cred": {
+            "key": {
+              "EC_EC2": {
+                "curve": "SECP256R1",
+                "x": "HzyFgklxW3H1e8vm-eP2khKebEYfk6gM5-kf3NtIqZc",
+                "y": "J0B-aSqtTJiCBwyClM5La7043mcBHR1Z1lmRmZgScy0"
+              }
+            },
+            "type_": "ES256"
+          },
+          "cred_id": "3iP2Rpuz0i3c5h6ZdNcEXChI-n1XjuPxc2awLr-QohQ",
+          "extensions": {
+            "appid": "NotRequested",
+            "cred_props": "Ignored",
+            "cred_protect": "Ignored",
+            "hmac_create_secret": "NotRequested"
+          },
+          "registration_policy": "required",
+          "transports": [
+            "internal"
+          ],
+          "user_verified": true
+        }
+      ],
+      "policy": "required"
+    }
+  },
+  "stored_after": {
+    "public_key": {
+      "cred": {
+        "attestation": {
+          "data": {
+            "Basic": [
+              "MIICYTCCAgegAwIBAgIBAjAKBggqhkjOPQQDAjCBgzELMAkGA1UEBhMCQVUxDDAKBgNVBAgMA1FMRDEiMCAGA1UECgwZV2ViYXV0aG4gQXV0aGVudGljYXRvciBSUzFCMEAGA1UEAww5RHluYW1pYyBTb2Z0dG9rZW4gQ0EgZGIxMmQzYzgtZDE5Zi00YTY3LTllYWItNzVhOGYyMzNlMWY1MB4XDTI2MTExOTE2MzcxOFoXDTI2MTEyMDE2MzcxOFowgZAxCzAJBgNVBAYTAkFVMQwwCgYDVQQIDANRTEQxIjAgBgNVBAoMGVdlYmF1dGhuIEF1dGhlbnRpY2F0b3IgUlMxKzApBgNVBAMMIkR5bmFtaWMgU29mdHRva2VuIExlYWYgQ2VydGlmaWNhdGUxIjAgBgNVBAsMGUF1dGhlbnRpY2F0b3IgQXR0ZXN0YXRpb24wWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAS4x6S-XHVDQK8PkNEAKDTIq1c90fOcwgcCUK8ftxAYv5JBFLIDgQ_dPVHwh2n-I0GZWuKlWjMW4Y7pdix538FLo10wWzAJBgNVHRMEAjAAMA4GA1UdDwEB_wQEAwIF4DAdBgNVHQ4EFgQUQVs4bboStdWg9csTx7uHenR23uYwHwYDVR0jBBgwFoAU2jmj7l5rSw0yVb_vlWAYkK_YBwkwCgYIKoZIzj0EAwIDSAAwRQIhAOfjq9H9PcXAtXt1-n4ZXGv-GA1hqsE7JWaLEuPZedzyAiBHNL8yFojqlkmalIhzJsYyAnoltIdJFYcHTRzVGG_xfw"
+            ]
+          },
+          "metadata": {
+            "Packed": {
+              "aaguid": "0fb9bcbc-a0d4-4042-bbb0-559bc1631e28"
+            }
+          }
+        },
+        "attestation_format": "packed",
+        "backup_eligible": false,
+        "backup_state": false,
+        "counter": 1,
+        "cred": {
+          "key": {
+            "EC_EC2": {
+              "curve": "SECP256R1",
+              "x": "HzyFgklxW3H1e8vm-eP2khKebEYfk6gM5-kf3NtIqZc",
+              "y": "J0B-aSqtTJiCBwyClM5La7043mcBHR1Z1lmRmZgScy0"
+            }
+          },
+          "type_": "ES256"
+        },
+        "cred_id": "3iP2Rpuz0i3c5h6ZdNcEXChI-n1XjuPxc2awLr-QohQ",
+        "extensions": {
+          "appid": "NotRequested",
+          "cred_props": "Ignored",
+          "cred_protect": "Ignored",
+          "hmac_create_secret": "NotRequested"
+        },
+        "registration_policy": "required",
+        "transports": [
+          "internal"
+        ],
+        "user_verified": true
+      }
+    },
+    "sign_count": 1
+  },
+  "stored_before": {
+    "aaguid": [
+      15,
+      185,
+      188,
+      188,
+      160,
+      212,
+      64,
+      66,
+      187,
+      176,
+      85,
+      155,
+      193,
+      99,
+      30,
+      40
+    ],
+    "credential_id": [
+      222,
+      35,
+      246,
+      70,
+      155,
+      179,
+      210,
+      45,
+      220,
+      230,
+      30,
+      153,
+      116,
+      215,
+      4,
+      92,
+      40,
+      72,
+      250,
+      125,
+      87,
+      142,
+      227,
+      241,
+      115,
+      102,
+      176,
+      46,
+      191,
+      144,
+      162,
+      20
+    ],
+    "public_key": {
+      "cred": {
+        "attestation": {
+          "data": {
+            "Basic": [
+              "MIICYTCCAgegAwIBAgIBAjAKBggqhkjOPQQDAjCBgzELMAkGA1UEBhMCQVUxDDAKBgNVBAgMA1FMRDEiMCAGA1UECgwZV2ViYXV0aG4gQXV0aGVudGljYXRvciBSUzFCMEAGA1UEAww5RHluYW1pYyBTb2Z0dG9rZW4gQ0EgZGIxMmQzYzgtZDE5Zi00YTY3LTllYWItNzVhOGYyMzNlMWY1MB4XDTI2MTExOTE2MzcxOFoXDTI2MTEyMDE2MzcxOFowgZAxCzAJBgNVBAYTAkFVMQwwCgYDVQQIDANRTEQxIjAgBgNVBAoMGVdlYmF1dGhuIEF1dGhlbnRpY2F0b3IgUlMxKzApBgNVBAMMIkR5bmFtaWMgU29mdHRva2VuIExlYWYgQ2VydGlmaWNhdGUxIjAgBgNVBAsMGUF1dGhlbnRpY2F0b3IgQXR0ZXN0YXRpb24wWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAS4x6S-XHVDQK8PkNEAKDTIq1c90fOcwgcCUK8ftxAYv5JBFLIDgQ_dPVHwh2n-I0GZWuKlWjMW4Y7pdix538FLo10wWzAJBgNVHRMEAjAAMA4GA1UdDwEB_wQEAwIF4DAdBgNVHQ4EFgQUQVs4bboStdWg9csTx7uHenR23uYwHwYDVR0jBBgwFoAU2jmj7l5rSw0yVb_vlWAYkK_YBwkwCgYIKoZIzj0EAwIDSAAwRQIhAOfjq9H9PcXAtXt1-n4ZXGv-GA1hqsE7JWaLEuPZedzyAiBHNL8yFojqlkmalIhzJsYyAnoltIdJFYcHTRzVGG_xfw"
+            ]
+          },
+          "metadata": {
+            "Packed": {
+              "aaguid": "0fb9bcbc-a0d4-4042-bbb0-559bc1631e28"
+            }
+          }
+        },
+        "attestation_format": "packed",
+        "backup_eligible": false,
+        "backup_state": false,
+        "counter": 0,
+        "cred": {
+          "key": {
+            "EC_EC2": {
+              "curve": "SECP256R1",
+              "x": "HzyFgklxW3H1e8vm-eP2khKebEYfk6gM5-kf3NtIqZc",
+              "y": "J0B-aSqtTJiCBwyClM5La7043mcBHR1Z1lmRmZgScy0"
+            }
+          },
+          "type_": "ES256"
+        },
+        "cred_id": "3iP2Rpuz0i3c5h6ZdNcEXChI-n1XjuPxc2awLr-QohQ",
+        "extensions": {
+          "appid": "NotRequested",
+          "cred_props": "Ignored",
+          "cred_protect": "Ignored",
+          "hmac_create_secret": "NotRequested"
+        },
+        "registration_policy": "required",
+        "transports": [
+          "internal"
+        ],
+        "user_verified": true
+      }
+    },
+    "sign_count": 0
+  }
+}
