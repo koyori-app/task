@@ -255,10 +255,11 @@ export const RemoveMember: Story = {
     const user = userEvent.setup();
 
     await user.click(await canvas.findByLabelText('asuka.kobayashiを外す'));
-    // 確認ダイアログを経てから送る
-    await expect(
-      canvas.findByRole('dialog', { name: 'メンバーを外しますか？' }),
-    ).resolves.toBeVisible();
+    // 確認ダイアログを経てから送る。dialog は DOM に出た後に開く（open が付き、現れる）ので、
+    // 出ただけでなく開ききって見えるのを待つ
+    await waitFor(() =>
+      expect(canvas.getByRole('dialog', { name: 'メンバーを外しますか？' })).toBeVisible(),
+    );
     await user.click(canvas.getByRole('button', { name: '外す' }));
 
     await waitFor(() => expect(canvas.queryByText('asuka.kobayashi')).not.toBeInTheDocument());

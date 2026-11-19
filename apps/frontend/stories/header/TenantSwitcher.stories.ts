@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
 import { createPinia, setActivePinia } from 'pinia';
-import { expect, fn, userEvent, within } from 'storybook/test';
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test';
 import { provide } from 'vue';
 
 import TenantSwitcher from '@/components/header/TenantSwitcher.vue';
@@ -139,7 +139,9 @@ export const LinksToTenantSettings: Story = {
     await userEvent.click(page.getByRole('button', { name: /Acme/ }));
 
     // 項目は閉じていても DOM にあるので、文字ではなく役割で開くのを待つ
-    await expect(page.findByRole('menuitem', { name: 'テナント設定' })).resolves.toBeVisible();
+    // ui-vue の menu は開くと menu-in の animation で opacity 0 から現れる。項目が DOM に出た
+    // だけでは見えていないので、開ききって見えるのを待つ
+    await waitFor(() => expect(page.getByRole('menuitem', { name: 'テナント設定' })).toBeVisible());
     await expect(page.findByText(/3 人のメンバー/)).resolves.toBeInTheDocument();
     await userEvent.click(page.getByRole('menuitem', { name: 'メンバー' }));
     await expect(window.location.pathname).toBe('/acme/settings/members');
@@ -162,7 +164,11 @@ export const NoMemberships: Story = {
   play: async ({ canvasElement }) => {
     const page = within(canvasElement.ownerDocument.body);
     await userEvent.click(page.getByRole('button', { name: /所属テナントなし/ }));
-    await expect(page.findByRole('menuitem', { name: 'テナントを作成' })).resolves.toBeVisible();
+    // ui-vue の menu は開くと menu-in の animation で opacity 0 から現れる。項目が DOM に出た
+    // だけでは見えていないので、開ききって見えるのを待つ
+    await waitFor(() =>
+      expect(page.getByRole('menuitem', { name: 'テナントを作成' })).toBeVisible(),
+    );
     await expect(page.getByText('所属テナントがありません')).toBeInTheDocument();
     // テナントが決まっていないので、設定への導線は出さない（行き先を組めない）
     await expect(page.queryByRole('menuitem', { name: 'テナント設定' })).not.toBeInTheDocument();

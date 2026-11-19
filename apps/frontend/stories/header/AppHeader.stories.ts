@@ -221,7 +221,9 @@ export const TenantMenuOpen: Story = {
     await userEvent.click(await canvas.findByRole('button', { name: /Acme Inc/ }));
 
     // 項目は閉じていても DOM にあるので、文字ではなく役割で開くのを待つ
-    await expect(page.findByRole('menuitem', { name: 'テナント設定' })).resolves.toBeVisible();
+    // ui-vue の menu は開くと menu-in の animation で opacity 0 から現れる。項目が DOM に出た
+    // だけでは見えていないので、開ききって見えるのを待つ
+    await waitFor(() => expect(page.getByRole('menuitem', { name: 'テナント設定' })).toBeVisible());
     await expect(page.findByText(/4 人のメンバー/)).resolves.toBeInTheDocument();
     await expect(page.getByRole('menuitem', { name: 'メンバー' })).toBeInTheDocument();
     await expect(page.getByText('テナントを切り替え')).toBeInTheDocument();
@@ -343,7 +345,9 @@ export const WithSidebarRail: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByRole('button', { name: 'サイドバーを開閉' }));
-    await expect(await canvas.findByText('📥')).toBeVisible();
+    // 絵文字は畳む前から DOM にある。畳んだ後のアイコンだけの表示で見えるのを待つ
+    const icon = await canvas.findByText('📥');
+    await waitFor(() => expect(icon).toBeVisible());
   },
 };
 
