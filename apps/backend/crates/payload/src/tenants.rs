@@ -116,7 +116,7 @@ pub struct TenantListItemResponse {
     /// この利用者から見た関わり方（Owner / Member / Guest）
     pub membership: TenantMembershipKind,
     /// membership=Member の時だけ、その member の role（Admin / Member / Viewer）。
-    /// Owner と Guest では null。Admin 境界の口（鍵の発行など）を GUI が
+    /// Owner と Guest では null。Admin 境界の口（メンバー管理・BOT の管理など）を GUI が
     /// 選択肢を作る段で見分けるための欄。
     #[schema(nullable)]
     pub member_role: Option<TenantRole>,

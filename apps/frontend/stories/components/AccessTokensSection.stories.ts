@@ -13,7 +13,7 @@ const TOKEN_A_ID = '00000000-0000-4000-8000-000000000021';
 const TOKEN_B_ID = '00000000-0000-4000-8000-000000000022';
 const TOKEN_C_ID = '00000000-0000-4000-8000-000000000023';
 
-/** 自分から見たテナントの関わり方。発行候補の絞りは membership と member_role で決まる。 */
+/** 自分から見たテナントの関わり方。発行候補は membership で決まる（Guest は候補にならない）。 */
 type TenantView = {
   membership: 'Owner' | 'Member' | 'Guest';
   member_role?: 'Admin' | 'Member' | 'Viewer' | null;
@@ -205,12 +205,12 @@ export const Empty: Story = {
 
 export const GenerateFlow: Story = {
   name: '発行（候補 1 件は選択済み。フォーム → POST → 平文トークンを 1 度だけ表示）',
-  // 主ではなく role=Admin の member として発行する——Admin 境界の口が
-  // member_role で開くことをこの story が表す
+  // オーナーでも Admin でもない、role=Member の member として発行する。
+  // 発行はテナントに所属していればできる
   beforeEach: mockFetch({
     empty: true,
     singleTenant: true,
-    tenantView: { membership: 'Member', member_role: 'Admin' },
+    tenantView: { membership: 'Member', member_role: 'Member' },
   }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
@@ -273,16 +273,18 @@ export const GenerateForMultipleTenants: Story = {
 };
 
 export const NoOwnedTenant: Story = {
-  name: '主でも Admin でもない（発行ボタン無効）',
-  // role=Member 止まりの member。主でも Admin でもない者には発行の口が開かぬ
+  name: '所属するテナントが無い（発行ボタン無効）',
+  // プロジェクトだけに参加するテナント（membership=Guest）しか無い利用者は発行できない
   beforeEach: mockFetch({
     empty: true,
-    tenantView: { membership: 'Member', member_role: 'Member' },
+    tenantView: { membership: 'Guest' },
   }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(
-      canvas.findByText('トークンを発行できるのは、テナントオーナーと Admin だけです。'),
+      canvas.findByText(
+        'トークンを発行できるテナントがありません。テナントに所属すると発行できます。',
+      ),
     ).resolves.toBeInTheDocument();
     await expect(canvas.getByRole('button', { name: 'トークンを発行' })).toBeDisabled();
   },

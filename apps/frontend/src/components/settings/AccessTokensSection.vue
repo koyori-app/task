@@ -44,13 +44,11 @@ const createToken = useCreatePersonalTokenMutation();
 const revokeToken = useRevokePersonalTokenMutation();
 
 /**
- * PAT を発行できるのはテナントオーナーと Admin（API 側は require_tenant_admin）。
- * 選択肢もそれと同じ条件で絞る——片方だけ広げると「選べるのに 403」になる。
+ * PAT を発行できるのは、テナントに所属する利用者（API 側は ensure_tenant_access）。
+ * 客分は発行できない。選択肢もそれと同じ条件で絞る。
  */
 const issuableTenants = computed(() =>
-  (tenantsQuery.data.value ?? []).filter(
-    (t) => t.membership === 'Owner' || t.member_role === 'Admin',
-  ),
+  (tenantsQuery.data.value ?? []).filter((t) => t.membership !== 'Guest'),
 );
 const tenantItems = computed(() =>
   issuableTenants.value.map((tenant) => ({ value: tenant.id, label: tenant.name })),
@@ -162,12 +160,12 @@ async function onSubmit() {
   } catch (e) {
     const err = e as { response?: { status?: number }; error?: { message?: unknown } };
     const status = err.response?.status;
-    // 候補は Owner / Admin に絞ってあるので、403 の主な原因は 2FA の強制。API はどのテナントかを返さない
+    // 候補は所属するテナントに絞ってあるので、403 の主な原因は 2FA の強制。API はどのテナントかを返さない
     submitError.value =
       status === 403 && err.error?.message === '2fa-setup-required'
         ? '選択したテナントのどれかが 2 段階認証を必須にしています。2 段階認証を設定してから、もう一度発行してください。'
         : status === 403
-          ? 'トークンを発行できるのは、選択したテナントのオーナーと Admin だけです。'
+          ? '選択したテナントに所属していないため、トークンを発行できません。'
           : status === 400
             ? '入力内容を確認してください。'
             : 'トークンを発行できませんでした。時間をおいて再度お試しください。';
@@ -385,7 +383,7 @@ function scopeItems(scopes: string[]): DropdownItem[] {
         v-if="issuableTenants.length === 0 && !tenantsQuery.isPending.value"
         class="text-muted-foreground text-sm"
       >
-        トークンを発行できるのは、テナントオーナーと Admin だけです。
+        トークンを発行できるテナントがありません。テナントに所属すると発行できます。
       </div>
 
       <p

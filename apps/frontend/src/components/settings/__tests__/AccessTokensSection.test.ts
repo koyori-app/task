@@ -1,6 +1,6 @@
 // テストケースの一覧（docs/dev/features/account-settings.md から移した）
 // - 一覧表示（伏せ字・スコープ数・期限・最終使用）、発行リクエストの内容（90 日既定・無期限）
-// - 名前とスコープの入力チェック、403 の表示（オーナーと Admin の限定・2FA 強制の案内）、取り消しの確認ダイアログと失敗時の表示、オーナーのテナントが無い場合の無効化
+// - 名前とスコープの入力チェック、403 の表示（所属していないこと・2FA 強制の案内）、取り消しの確認ダイアログと失敗時の表示、所属するテナントが無い場合の無効化、Member と Viewer の発行
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils';
@@ -32,7 +32,23 @@ function tenant(
   memberRole: components['schemas']['TenantRole'] | null = null,
   id = TENANT_ID,
   name = 'Acme Inc',
+  guest = false,
 ): components['schemas']['TenantListItemResponse'] {
+  if (guest) {
+    // API と同じ形: 客分には require_2fa と member_role を返さない
+    return {
+      id,
+      display_id: 'acme',
+      name,
+      description: '',
+      icon_url: '',
+      owner_id: ownerId,
+      drive_quota_bytes: null,
+      require_2fa: null,
+      membership: 'Guest',
+      member_role: null,
+    };
+  }
   return {
     id,
     display_id: id === TENANT_ID ? 'acme' : 'beta',
@@ -70,6 +86,8 @@ type MockState = {
   tokens: components['schemas']['PersonalTokenResponse'][];
   tenantOwnerId?: string;
   tenantMemberRole?: components['schemas']['TenantRole'] | null;
+  /** true なら、プロジェクトだけに参加するテナント（membership が Guest）として返す */
+  tenantGuest?: boolean;
   /** true なら、オーナーのテナントを 2 つ（Acme Inc・Beta LLC）返す */
   twoTenants?: boolean;
   createStatus?: number;
@@ -93,6 +111,9 @@ function stubFetch(state: MockState) {
     if (req.method === 'GET' && pathname.endsWith('/v1/tenants')) {
       const ownerId = state.tenantOwnerId ?? USER_ID;
       const memberRole = state.tenantMemberRole ?? null;
+      if (state.tenantGuest) {
+        return jsonResponse([tenant(OTHER_USER_ID, null, TENANT_ID, 'Acme Inc', true)]);
+      }
       return jsonResponse([
         tenant(ownerId, memberRole),
         ...(state.twoTenants ? [tenant(ownerId, memberRole, SECOND_TENANT_ID, 'Beta LLC')] : []),
@@ -346,7 +367,7 @@ describe('AccessTokensSection', () => {
     expect(wrapper.text()).toContain('スコープを 1 つ以上選択してください。');
   });
 
-  it('403 のときはオーナーと Admin に限ることを伝える', async () => {
+  it('403 のときは所属していないことを伝える', async () => {
     stubFetch({ tokens: [], createStatus: 403 });
     const wrapper = mountSection();
     await flushPromises();
@@ -360,7 +381,9 @@ describe('AccessTokensSection', () => {
     await wrapper.find('form').trigger('submit');
     await flushPromises();
 
-    expect(wrapper.text()).toContain('オーナーと Admin だけです。');
+    expect(wrapper.text()).toContain(
+      '選択したテナントに所属していないため、トークンを発行できません。',
+    );
   });
 
   it('403 が 2fa-setup-required のときは 2 段階認証の設定を促す', async () => {
@@ -378,7 +401,7 @@ describe('AccessTokensSection', () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain('2 段階認証を必須にしています');
-    expect(wrapper.text()).not.toContain('オーナーと Admin だけです。');
+    expect(wrapper.text()).not.toContain('所属していないため');
   });
 
   it('取り消しは確認ダイアログを経て DELETE を送り、一覧から消す', async () => {
@@ -429,12 +452,15 @@ describe('AccessTokensSection', () => {
     expect(wrapper.text()).toContain('CLI on MacBook');
   });
 
-  it('オーナーでも Admin でもなければ、発行ボタンを無効にし理由を出す', async () => {
-    stubFetch({ tokens: [], tenantOwnerId: OTHER_USER_ID });
+  it('所属するテナントが無ければ、発行ボタンを無効にし理由を出す', async () => {
+    // プロジェクトだけに参加するテナント（Guest）は候補にならない
+    stubFetch({ tokens: [], tenantGuest: true });
     const wrapper = mountSection();
     await flushPromises();
 
-    expect(wrapper.text()).toContain('テナントオーナーと Admin だけです。');
+    expect(wrapper.text()).toContain(
+      'トークンを発行できるテナントがありません。テナントに所属すると発行できます。',
+    );
     expect(bodyButton('トークンを発行')?.disabled).toBe(true);
   });
 
@@ -510,12 +536,21 @@ describe('AccessTokensSection', () => {
     );
   });
 
-  it('role が Admin の member なら発行ボタンが有効になる', async () => {
-    stubFetch({ tokens: [], tenantOwnerId: OTHER_USER_ID, tenantMemberRole: 'Admin' });
-    const wrapper = mountSection();
-    await flushPromises();
+  it.each(['Admin', 'Member', 'Viewer'] as const)(
+    'role が %s の member なら発行ボタンが有効になり、候補にそのテナントが出る',
+    async (role) => {
+      stubFetch({ tokens: [], tenantOwnerId: OTHER_USER_ID, tenantMemberRole: role });
+      const wrapper = mountSection();
+      await flushPromises();
 
-    expect(wrapper.text()).not.toContain('テナントオーナーと Admin だけです。');
-    expect(bodyButton('トークンを発行')?.disabled).toBe(false);
-  });
+      expect(wrapper.text()).not.toContain('トークンを発行できるテナントがありません。');
+      expect(bodyButton('トークンを発行')?.disabled).toBe(false);
+
+      clickBodyButton('トークンを発行');
+      await flushPromises();
+
+      expect(wrapper.findComponent(Picker).props('selectedValues')).toEqual([TENANT_ID]);
+      expect(wrapper.text()).toContain('Acme Inc');
+    },
+  );
 });

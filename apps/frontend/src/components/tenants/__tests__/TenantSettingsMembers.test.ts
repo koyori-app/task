@@ -231,12 +231,13 @@ describe('TenantSettingsMembers', () => {
       '招待・ロール変更・所属の編集・除外',
       'BOT の管理',
       '共有プロジェクトの作成・設定変更・削除とメンバー・Webhook の管理',
-      'PAT の発行',
       'メンバーと Webhook の管理だけは続けられます',
       '自分が Admin に戻るか、テナントオーナーか他の Admin が再送するまで承諾できなくなります',
     ]) {
       expect(text).toContain(lost);
     }
+    // PAT の発行は Member と Viewer にもできるので、降格で失うものに挙げない
+    expect(text).not.toContain('PAT の発行');
     await actionButton('キャンセル').trigger('click');
     expect(updateMutateAsync).not.toHaveBeenCalled();
     expect(pickerTrigger(wrapper.element, 'adminのロール').getAttribute('aria-label')).toBe(

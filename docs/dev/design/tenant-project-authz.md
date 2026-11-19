@@ -1,7 +1,7 @@
 ---
 title: テナントとプロジェクトの認可
 description: 誰がどのテナント・プロジェクトに入れるかの判定と、継承・明示 ACE・招待の規則
-updated: 2026-11-14
+updated: 2026-11-19
 sidebar:
   order: 1
 ---
@@ -115,7 +115,7 @@ NTFS と同じく、継承を止めるのは明示の操作である。プロジ
 | `Member` | テナントに入れる |
 | `Viewer` | テナントに入れる（`Member` と同じ） |
 
-ロールを見るのは上の管理系のエンドポイント（`require_tenant_admin` / `require_project_admin`）だけで、「入れるか」の判定（`has_tenant_access` と公開規則）は「行があるか」しか見ない。テナント `Admin` でも、明示 ACE で閉じたプロジェクトに ACE が無ければ入れないし管理もできない。個人プロジェクト（Inbox）はテナントロールでは管理できず、明示 ACE で入れていても管理できるのは本人とオーナーだけである。
+ロールを見るのは上の管理系のエンドポイント（`require_tenant_admin` / `require_project_admin`）だけで、「入れるか」の判定（`has_tenant_access` と公開規則）は「行があるか」しか見ない。テナント `Admin` でも、明示 ACE で閉じたプロジェクトに ACE が無ければ入れないし管理もできない。個人プロジェクト（Inbox）はテナントロールでは管理できず、明示 ACE で入れていても管理できるのは本人とオーナーだけである。PAT の発行はロールを見ず、テナントに所属していれば許す（[個人アクセストークンの認可](/dev/design/personal-access-tokens-authz)）。
 
 ## 招待（`tenant_invitations`）
 
