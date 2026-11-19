@@ -9,6 +9,7 @@ use url::Url;
 
 pub mod client;
 pub mod grant;
+mod vetted;
 
 /// アクセストークンの接頭辞。Bearer の値がこれで始まれば PAT ではなく OAuth のトークンとして引く。
 pub const ACCESS_TOKEN_PREFIX: &str = "mcpat_";
