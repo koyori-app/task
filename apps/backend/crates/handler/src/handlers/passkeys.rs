@@ -13,8 +13,7 @@ use sea_orm::{
 };
 use serde::Serialize;
 use webauthn_rs::prelude::{
-    CredentialID, DiscoverableKey, Passkey, PublicKeyCredential, RegisterPublicKeyCredential,
-    WebauthnError,
+    CredentialID, Passkey, PublicKeyCredential, RegisterPublicKeyCredential, WebauthnError,
 };
 
 use crate::AppState;
@@ -362,7 +361,7 @@ pub async fn authentication_finish(
     let credential: PublicKeyCredential =
         serde_json::from_value(payload.credential).map_err(|_| AuthError::BadRequest)?;
 
-    // webauthn-rs 0.5.5 は認証で crossOrigin を見ない。frame の中から呼ばれた応答は断る
+    // webauthn-rs（0.5.5 と 0.6.2 で確かめた）は認証で crossOrigin を見ない。frame の中から呼ばれた応答は断る
     if !client_data_is_same_origin(&credential.response.client_data_json) {
         return Err(WebauthnError::CredentialCrossOrigin.into());
     }
@@ -398,10 +397,11 @@ pub async fn authentication_finish(
         }
 
         let mut passkey = model_to_passkey(&stored).map_err(AuthError::Internal)?;
-        let auth_result = state.webauthn.finish_discoverable_authentication(
+        // identify_discoverable_authentication が credential ID を引いたので、照らす passkey は一つで足りる
+        let auth_result = state.webauthn.finish_discoverable_authentication_v2(
             &credential,
             auth_state,
-            &[DiscoverableKey::from(&passkey)],
+            &passkey,
         )?;
 
         update_passkey_after_authentication(&state.db, stored, &mut passkey, &auth_result).await?;

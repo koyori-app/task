@@ -151,13 +151,33 @@ async fn registration_options_keep_their_shape() {
     let now: Value = start.json().await.expect("ccr json");
     let before = fixture("registration")["ccr"].clone();
 
+    // 乱数と利用者ごとの値、それに認証器へ示す署名 algorithm の一覧を除いて、上げる前と一字も違わない。
     let mask: &[&[&str]] = &[
         &["publicKey", "challenge"],
         &["publicKey", "user", "id"],
         &["publicKey", "user", "name"],
         &["publicKey", "user", "displayName"],
+        &["publicKey", "pubKeyCredParams"],
     ];
-    assert_eq!(masked(now, mask), masked(before, mask));
+    assert_eq!(masked(now.clone(), mask), masked(before.clone(), mask));
+
+    // 署名 algorithm: 上げる前に示していた物（ES256=-7・RS256=-257）はそのまま残す。webauthn-rs 0.6 は
+    // 既定の一覧へ ES384（-35）を足した。足したのは ES384 だけであることを縛る（webauthn-rs の
+    // `COSEAlgorithm::secure_algs()`。既存の passkey は影響を受けず、新しく作る passkey が ES384 に
+    // なることがありうる）。
+    let algs = |v: &Value| -> Vec<i64> {
+        v["publicKey"]["pubKeyCredParams"]
+            .as_array()
+            .expect("pubKeyCredParams")
+            .iter()
+            .map(|p| p["alg"].as_i64().expect("alg"))
+            .collect()
+    };
+    let old_algs = algs(&before);
+    let new_algs = algs(&now);
+    assert_eq!(old_algs, vec![-7, -257]);
+    assert!(old_algs.iter().all(|a| new_algs.contains(a)));
+    assert_eq!(new_algs, vec![-7, -35, -257]);
     app.cleanup_user(user.id).await;
 }
 
@@ -434,9 +454,12 @@ async fn login_cookie_and_stored_session_keep_their_shape() {
     let sample = fixture("session");
     for (label, is_prod) in [("dev", false), ("prod", true)] {
         let (cookies, ttl, keys) = login_cookies_and_ttl(is_prod).await;
-        let normalized: Vec<String> = cookies.iter().map(|c| normalized_cookie(c)).collect();
-        let expected: Vec<String> =
+        // Set-Cookie の行の並びは保証がないので、並びは問わない。
+        let mut normalized: Vec<String> = cookies.iter().map(|c| normalized_cookie(c)).collect();
+        let mut expected: Vec<String> =
             serde_json::from_value(sample["login_set_cookies"][label].clone()).unwrap();
+        normalized.sort();
+        expected.sort();
         assert_eq!(normalized, expected, "{label}: Set-Cookie の名と属性");
 
         // 期限は Redis の TTL に持つ（既定の 6 時間）。

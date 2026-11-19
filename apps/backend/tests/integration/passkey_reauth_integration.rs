@@ -86,7 +86,7 @@ async fn password_login_satisfies_reauth_and_it_expires() {
 
     // ログイン直後は、追加（start と finish）も削除も通る
     let (soft, _) = SoftToken::new(true).expect("softtoken");
-    let mut wa = WebauthnAuthenticator::new(soft);
+    let mut wa = soft;
     soft_register_finish(&app, &mut wa, "first").await;
     soft_register_finish(&app, &mut wa, "second").await;
     let ids = passkey_ids(&app).await;
@@ -212,7 +212,7 @@ async fn passkey_reauth_satisfies_the_requirement() {
     assert_eq!(none.status(), StatusCode::NOT_FOUND);
 
     let (soft, _) = SoftToken::new(true).expect("softtoken");
-    let mut wa = WebauthnAuthenticator::new(soft);
+    let mut wa = soft;
     soft_register_finish(&app, &mut wa, "key").await;
 
     let_the_window_pass().await;
@@ -287,7 +287,7 @@ async fn totp_verification_at_login_satisfies_reauth() {
         .await;
     assert_eq!(verify.status(), StatusCode::NO_CONTENT);
     let (soft, _) = SoftToken::new(true).expect("softtoken");
-    let mut wa = WebauthnAuthenticator::new(soft);
+    let mut wa = soft;
     soft_register_finish(&app, &mut wa, "after-2fa").await;
 
     app.cleanup_user(user.id).await;
@@ -313,7 +313,7 @@ async fn oauth_login_satisfies_reauth_but_linking_does_not() {
     assert_eq!(me["has_password"], serde_json::json!(false));
     verify_email(&app, user_id).await;
     let (soft, _) = SoftToken::new(true).expect("softtoken");
-    let mut wa = WebauthnAuthenticator::new(soft);
+    let mut wa = soft;
     soft_register_finish(&app, &mut wa, "first").await;
 
     let_the_window_pass().await;
@@ -448,7 +448,7 @@ async fn passkey_login_satisfies_reauth() {
     app.login_session_no_content(&user.email, &user.password)
         .await;
     let (soft, _) = SoftToken::new(true).expect("softtoken");
-    let mut wa = WebauthnAuthenticator::new(soft);
+    let mut wa = soft;
     soft_register_finish(&app, &mut wa, "key").await;
 
     // パスワードのログインの印が切れてから、パスキーだけでログインし直す
@@ -747,7 +747,7 @@ async fn reauth_status_lists_the_users_sign_in_connections_and_passkeys() {
     // パスキーを足すと、パスキーでも確かめられる
     verify_email(&app, user_id).await;
     let (soft, _) = SoftToken::new(true).expect("softtoken");
-    let mut wa = WebauthnAuthenticator::new(soft);
+    let mut wa = soft;
     soft_register_finish(&app, &mut wa, "first").await;
     assert_eq!(
         reauth_status(&app).await["methods"]["passkey"],

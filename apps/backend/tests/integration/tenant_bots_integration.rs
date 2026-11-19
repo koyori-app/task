@@ -617,7 +617,7 @@ async fn tenant_bots_passkey_with_valid_signature_cannot_issue_session() {
     use webauthn_rs::prelude::RequestChallengeResponse;
     let (mut app, owner, tenant, _) = fixture().await;
     let (soft, _) = SoftToken::new(true).unwrap();
-    let mut authenticator = WebauthnAuthenticator::new(soft);
+    let mut authenticator = soft;
     soft_register_finish(&app, &mut authenticator, "bot-boundary").await;
     for bot_case in [false, true] {
         app.reset_session_client();

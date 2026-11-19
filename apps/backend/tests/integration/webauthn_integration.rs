@@ -25,11 +25,7 @@ pub(super) fn webauthn_origin(app_url: &str) -> Url {
     Url::parse(&origin).expect("origin url")
 }
 
-pub(super) async fn soft_register_finish(
-    app: &TestApp,
-    wa: &mut WebauthnAuthenticator<SoftToken>,
-    name: &str,
-) {
+pub(super) async fn soft_register_finish(app: &TestApp, wa: &mut SoftToken, name: &str) {
     let start = app
         .post_json_with_session(
             "/v1/auth/passkeys/registration/start",
@@ -220,7 +216,7 @@ async fn webauthn_integration_suite() {
         app.login_session(&user.email, &user.password).await;
 
         let (soft, _) = SoftToken::new(true).expect("softtoken");
-        let mut wa = WebauthnAuthenticator::new(soft);
+        let mut wa = soft;
         soft_register_finish(&app, &mut wa, "login-key").await;
 
         app.reset_session_client();
@@ -277,7 +273,7 @@ async fn webauthn_integration_suite() {
         app.login_session(&user.email, &user.password).await;
 
         let (soft, _) = SoftToken::new(true).expect("softtoken");
-        let mut wa = WebauthnAuthenticator::new(soft);
+        let mut wa = soft;
         soft_register_finish(&app, &mut wa, "invalid-challenge-key").await;
 
         app.reset_session_client();
@@ -600,7 +596,7 @@ async fn authentication_finish_rejects_cross_origin_marks_before_consuming_the_c
     app.login_session_no_content(&user.email, &user.password)
         .await;
     let (soft, _) = SoftToken::new(true).expect("softtoken");
-    let mut wa = WebauthnAuthenticator::new(soft);
+    let mut wa = soft;
     soft_register_finish(&app, &mut wa, "key").await;
     app.reset_session_client();
 

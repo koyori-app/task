@@ -25,7 +25,7 @@ pub fn credential_id_len_ok(credential_id: &[u8]) -> bool {
 /// `clientDataJSON` が別の origin の frame から来た印（`crossOrigin: true` か `topOrigin`）を
 /// 持たず、読めるか。
 ///
-/// webauthn-rs 0.5.5 は `crossOrigin` を登録でしか検めず、認証では見ない（仕様の §7.2 の 13・14 は
+/// webauthn-rs は（0.5.5 と 0.6.2 の source で確かめた）`crossOrigin` を登録でしか検めず、認証では見ない（仕様の §7.2 の 13・14 は
 /// 認証でも検めるよう求める）。task は自前の frame の中で WebAuthn を呼ばないので、
 /// この印が付いた応答はすべて断る。読めない JSON も断る。
 pub fn client_data_is_same_origin(client_data_json: &[u8]) -> bool {
