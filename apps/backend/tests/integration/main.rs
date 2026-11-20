@@ -8,6 +8,7 @@ mod admin_tenants_integration;
 mod admin_users_integration;
 mod apalis_supervise_integration;
 mod auth_2fa_integration;
+mod auth_deps_compat_integration;
 mod avatar_upload_integration;
 mod custom_fields_integration;
 mod dashboard_integration;

@@ -41,6 +41,18 @@ use job::{
     webhook_delivery,
 };
 
+/// ログインのセッションの設定。本番だけ Secure と SameSite=None にする。署名の鍵と DB の暗号の鍵は
+/// 据えない（既定のまま）ので、cookie は素の id で、Redis の値は素の JSON になる。
+pub fn session_config(is_prod: bool) -> SessionConfig {
+    SessionConfig::default()
+        .with_secure(is_prod)
+        .with_cookie_same_site(if is_prod {
+            SameSite::None
+        } else {
+            SameSite::Lax
+        })
+}
+
 pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
     let log_filter = tracing_subscriber::EnvFilter::new(
         std::env::var("RUST_LOG").unwrap_or_else(|_| "info,sqlx=warn".into()),
@@ -62,17 +74,9 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
     let settings = &state.settings;
     let addr = settings.listen_addr.clone();
 
-    let session_config = SessionConfig::default()
-        .with_secure(is_prod)
-        .with_cookie_same_site(if is_prod {
-            SameSite::None
-        } else {
-            SameSite::Lax
-        });
-
     let session_store = SessionStore::<SessionRedisPool>::new(
         Some(state.redis_client.conn.clone().into()),
-        session_config,
+        session_config(is_prod),
     )
     .await?;
 
