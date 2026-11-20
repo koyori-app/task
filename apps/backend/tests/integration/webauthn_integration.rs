@@ -369,7 +369,7 @@ async fn webauthn_integration_suite() {
 // 単体試験（service/src/passkeys.rs）は判定の関数だけを縛る。ここでは、登録と認証の finish が
 // 実際にその関数を呼び、400 を返す並びになっていることを縛る（配線が外れても気づけるように）。
 
-fn b64url_encode(bytes: &[u8]) -> String {
+pub(super) fn b64url_encode(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     let mut out = String::new();
     for chunk in bytes.chunks(3) {

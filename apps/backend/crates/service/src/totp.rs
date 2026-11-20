@@ -5,7 +5,6 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
     aead::{Aead, KeyInit},
 };
-use argon2::password_hash::rand_core::{OsRng, RngCore};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use image::Luma;
@@ -53,7 +52,7 @@ pub fn encrypt_totp_secret(plain_secret: &str, key: &str) -> Result<String, Auth
     let cipher = Aes256Gcm::new_from_slice(&aes_key)
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("aes key: {e}")))?;
     let mut nonce_bytes = [0u8; NONCE_LEN];
-    OsRng.fill_bytes(&mut nonce_bytes);
+    crate::random::fill(&mut nonce_bytes);
     let nonce = Nonce::from(nonce_bytes);
     let ciphertext = cipher
         .encrypt(&nonce, plain_secret.as_bytes())
@@ -137,7 +136,7 @@ pub fn qr_code_png_data_uri(otpauth_uri: &str) -> Result<String, AuthError> {
 
 fn random_recovery_segment() -> String {
     let mut buf = [0u8; 4];
-    OsRng.fill_bytes(&mut buf);
+    crate::random::fill(&mut buf);
     buf.iter()
         .map(|b| RECOVERY_ALPHABET[(*b as usize) % RECOVERY_ALPHABET.len()] as char)
         .collect()

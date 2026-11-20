@@ -2,10 +2,7 @@ use std::sync::OnceLock;
 
 use argon2::{
     Argon2,
-    password_hash::{
-        PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
-        rand_core::{OsRng, RngCore},
-    },
+    password_hash::{PasswordHasher, PasswordVerifier, phc::PasswordHash},
 };
 
 use axum::{
@@ -300,6 +297,8 @@ impl IntoResponse for AuthError {
     }
 }
 
+/// salt の長さ（バイト）。argon2 0.5.3 の `SaltString::generate` と同じ 16 バイト（PHC の文字列では 22 字）。
+const ARGON2_SALT_LEN: usize = 16;
 const ARGON2_PRODUCTION_COSTS: (u32, u32, u32) = (131072, 3, 2);
 const ARGON2_TEST_COSTS: (u32, u32, u32) = (8192, 1, 1);
 
@@ -323,7 +322,12 @@ fn argon2_costs() -> (u32, u32, u32) {
 }
 
 pub fn argon2_params() -> Result<Argon2<'static>, AuthError> {
-    let (memory_cost, time_cost, parallelism) = argon2_costs();
+    argon2_with_costs(argon2_costs())
+}
+
+fn argon2_with_costs(
+    (memory_cost, time_cost, parallelism): (u32, u32, u32),
+) -> Result<Argon2<'static>, AuthError> {
     let params = argon2::Params::new(
         memory_cost,
         time_cost,
@@ -352,11 +356,15 @@ pub fn argon2_params() -> Result<Argon2<'static>, AuthError> {
 /// # Returns
 /// * `Ok(String)` - ハッシュ化されたパスワードを含む文字
 pub fn create_password_hash(password: &str) -> Result<String, AuthError> {
-    let salt = SaltString::generate(&mut OsRng);
-    let argon2 = argon2_params()?;
+    password_hash_with_costs(password, argon2_costs())
+}
+
+fn password_hash_with_costs(password: &str, costs: (u32, u32, u32)) -> Result<String, AuthError> {
+    let salt = crate::random::bytes::<ARGON2_SALT_LEN>();
+    let argon2 = argon2_with_costs(costs)?;
 
     let hash = argon2
-        .hash_password(password.as_bytes(), &salt)
+        .hash_password_with_salt(password.as_bytes(), &salt)
         .map_err(|e| AuthError::Internal(anyhow::anyhow!("password hash: {e}")))?;
 
     Ok(hash.to_string())
@@ -395,7 +403,7 @@ pub fn verify_password(password: &str, password_hash: &str) -> Result<bool, Auth
 /// メール認証用トークンを生成する。
 pub fn generate_email_verification_token() -> String {
     let mut buf = [0u8; 32];
-    OsRng.fill_bytes(&mut buf);
+    crate::random::fill(&mut buf);
     URL_SAFE_NO_PAD.encode(buf)
 }
 
@@ -408,7 +416,7 @@ pub const DEVICE_TOKEN_PREFIX: &str = "kdt_";
 /// `<prefix><base64url>` 形式のトークンと、DBに保存するHMACハッシュを返す。
 fn generate_prefixed_token(prefix: &str, secret: &str) -> Result<(String, String), AuthError> {
     let mut buf = [0u8; 32];
-    OsRng.fill_bytes(&mut buf);
+    crate::random::fill(&mut buf);
     let token = format!("{prefix}{}", URL_SAFE_NO_PAD.encode(buf));
     let token_hash = create_personal_token_hash(&token, secret)?;
     Ok((token, token_hash))
@@ -682,5 +690,82 @@ mod tests {
         if argon2_test_mode() {
             assert!(hash.contains("m=8192,t=1,p=1"));
         }
+    }
+
+    /// argon2 0.5.3 が作った PHC 文字列（本番の強さと、試験の強さ）。上げた後の版でも、モードに
+    /// よらず、そのまま照合できる。強さは文字列の中から読むので、今のモードと違っていても通る。
+    const SAMPLE_PASSWORD: &str = "correct horse battery staple";
+    const PHC_PRODUCTION_ARGON2_0_5_3: &str = "$argon2id$v=19$m=131072,t=3,p=2$bwD5A/9hzRwJuN7wOkPEVg$qA/s4uqZ7dmDK7boA5o6KJ4czgUturHxaXuFI97cz88";
+    const PHC_LOW_COST_ARGON2_0_5_3: &str = "$argon2id$v=19$m=8192,t=1,p=1$KBrnfqLAjUu9JcmphHH+5w$1barNo3OhDUE5H0IIa1Ouieysjwbax4EX0wPlChWYKU";
+
+    #[test]
+    fn phc_hashes_made_by_argon2_0_5_3_still_verify() {
+        for hash in [PHC_PRODUCTION_ARGON2_0_5_3, PHC_LOW_COST_ARGON2_0_5_3] {
+            assert!(verify_password(SAMPLE_PASSWORD, hash).unwrap(), "{hash}");
+            assert!(!verify_password("wrong-password", hash).unwrap(), "{hash}");
+        }
+    }
+
+    #[test]
+    fn invalid_phc_string_is_an_internal_error_not_a_mismatch() {
+        assert!(matches!(
+            verify_password(SAMPLE_PASSWORD, "not-a-phc-string"),
+            Err(AuthError::Internal(_))
+        ));
+    }
+
+    /// 新しく作る hash の既定の強さ（algorithm・version・m・t・p）と形（salt 16 バイト・出力 32 バイト）が、
+    /// 0.5.3 のときと同じ。変えるなら、既存の hash との段差（再 hash の方針）を決めてからにする。
+    #[test]
+    fn new_hashes_keep_the_default_strength_and_shape() {
+        let production =
+            password_hash_with_costs(SAMPLE_PASSWORD, ARGON2_PRODUCTION_COSTS).unwrap();
+        assert!(
+            production.starts_with("$argon2id$v=19$m=131072,t=3,p=2$"),
+            "{production}"
+        );
+        let low = password_hash_with_costs(SAMPLE_PASSWORD, ARGON2_TEST_COSTS).unwrap();
+        assert!(low.starts_with("$argon2id$v=19$m=8192,t=1,p=1$"), "{low}");
+
+        for (hash, sample) in [
+            (&production, PHC_PRODUCTION_ARGON2_0_5_3),
+            (&low, PHC_LOW_COST_ARGON2_0_5_3),
+        ] {
+            let parts: Vec<&str> = hash.split('$').collect();
+            let sample_parts: Vec<&str> = sample.split('$').collect();
+            assert_eq!(parts.len(), sample_parts.len());
+            assert_eq!(parts[4].len(), sample_parts[4].len(), "salt の長さ");
+            assert_eq!(parts[5].len(), sample_parts[5].len(), "出力の長さ");
+            assert!(verify_password(SAMPLE_PASSWORD, hash).unwrap());
+        }
+
+        // 今のモードで作る hash も、そのモードの強さになる。
+        let current = create_password_hash(SAMPLE_PASSWORD).unwrap();
+        let expected = if argon2_test_mode() {
+            "$argon2id$v=19$m=8192,t=1,p=1$"
+        } else {
+            "$argon2id$v=19$m=131072,t=3,p=2$"
+        };
+        assert!(current.starts_with(expected), "{current}");
+    }
+
+    #[test]
+    fn every_hash_and_token_draws_fresh_randomness() {
+        let first = password_hash_with_costs(SAMPLE_PASSWORD, ARGON2_TEST_COSTS).unwrap();
+        let second = password_hash_with_costs(SAMPLE_PASSWORD, ARGON2_TEST_COSTS).unwrap();
+        assert_ne!(first, second, "同じパスワードでも salt が違う");
+        assert_ne!(first.split('$').nth(4), second.split('$').nth(4));
+
+        let token = generate_email_verification_token();
+        assert_eq!(token.len(), 43, "32 バイトの base64url");
+        assert_ne!(token, generate_email_verification_token());
+
+        let (pat, pat_hash) = generate_personal_token("secret").unwrap();
+        let (other, other_hash) = generate_personal_token("secret").unwrap();
+        assert_ne!(pat, other);
+        assert_ne!(pat_hash, other_hash);
+        let (device, _) = generate_device_token("secret").unwrap();
+        assert!(device.starts_with(DEVICE_TOKEN_PREFIX));
+        assert_ne!(device, generate_device_token("secret").unwrap().0);
     }
 }
