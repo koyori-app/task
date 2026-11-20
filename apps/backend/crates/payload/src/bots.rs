@@ -27,7 +27,7 @@ pub struct BotResponse {
     pub account_kind: String,
     pub is_suspended: bool,
     /// 知らない値（新しいサーバーが足した役）でも、ほかの欄は読めるように包む
-    #[schema(inline)]
+    #[schema(schema_with = role_schema)]
     pub role: OrUnknown<TenantRole>,
 }
 
@@ -40,4 +40,11 @@ pub struct CreateBotTokenRequest {
     pub project_ids: Option<Vec<Uuid>>,
     /// 期限は必須。最長 365 日。
     pub expires_at: DateTime<Utc>,
+}
+
+/// `role` の欄のスキーマ（説明は欄の doc と同じ文）。[`crate::or_unknown::described_schema`] を見よ。
+fn role_schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+    crate::or_unknown::described_schema::<TenantRole>(
+        "知らない値（新しいサーバーが足した役）でも、ほかの欄は読めるように包む",
+    )
 }

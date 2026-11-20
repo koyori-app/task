@@ -1,17 +1,12 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "utoipa-axum",
-    "description": "Utoipa's axum bindings for seamless integration for the two",
-    "contact": {
-      "name": "Juha Kukkonen",
-      "email": "juha7kukkonen@gmail.com"
-    },
+    "title": "task",
+    "description": "task の HTTP API。",
     "license": {
-      "name": "MIT OR Apache-2.0",
-      "identifier": "MIT OR Apache-2.0"
+      "name": "GNU Affero General Public License v3.0"
     },
-    "version": "0.2.0"
+    "version": "0.1.0"
   },
   "paths": {
     "/v1/admin/audit-logs": {
@@ -3822,7 +3817,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "パスワードを再設定しました",
             "content": {
               "application/json": {
                 "schema": {
@@ -3886,7 +3881,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "受け付けました",
             "content": {
               "application/json": {
                 "schema": {
@@ -3968,7 +3963,7 @@
         },
         "responses": {
           "200": {
-            "description": ""
+            "description": "トークンは有効"
           },
           "404": {
             "description": "トークンが無効または期限切れです",
@@ -4025,7 +4020,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "パスワードを変更しました",
             "content": {
               "application/json": {
                 "schema": {
@@ -6734,7 +6729,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "BOT 一覧",
             "content": {
               "application/json": {
                 "schema": {
@@ -6828,7 +6823,7 @@
         },
         "responses": {
           "201": {
-            "description": "",
+            "description": "作成した BOT",
             "content": {
               "application/json": {
                 "schema": {
@@ -6930,7 +6925,7 @@
         },
         "responses": {
           "204": {
-            "description": ""
+            "description": "更新しました"
           },
           "401": {
             "description": "ログインまたはセッションが必要です",
@@ -7015,7 +7010,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "BOT のトークン一覧",
             "content": {
               "application/json": {
                 "schema": {
@@ -7118,7 +7113,7 @@
         },
         "responses": {
           "201": {
-            "description": "",
+            "description": "発行したトークン",
             "content": {
               "application/json": {
                 "schema": {
@@ -7219,7 +7214,7 @@
         ],
         "responses": {
           "204": {
-            "description": ""
+            "description": "失効しました"
           },
           "401": {
             "description": "ログインまたはセッションが必要です",
@@ -12319,7 +12314,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "再利用できるインストール一覧",
             "content": {
               "application/json": {
                 "schema": {
@@ -12430,7 +12425,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "GitHub 連携の状態",
             "content": {
               "application/json": {
                 "schema": {
@@ -12651,7 +12646,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "リポジトリ一覧",
             "content": {
               "application/json": {
                 "schema": {
@@ -19208,7 +19203,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "条件式の候補件数",
             "content": {
               "application/json": {
                 "schema": {
@@ -24746,7 +24741,7 @@
         "operationId": "start_watch",
         "responses": {
           "201": {
-            "description": ""
+            "description": "ウォッチしました"
           },
           "401": {
             "description": "ログインまたはセッションが必要です",
@@ -24827,7 +24822,7 @@
         "operationId": "stop_watch",
         "responses": {
           "204": {
-            "description": ""
+            "description": "ウォッチを解除しました"
           },
           "401": {
             "description": "ログインまたはセッションが必要です",
@@ -24910,7 +24905,7 @@
         "operationId": "list_watchers",
         "responses": {
           "200": {
-            "description": "",
+            "description": "ウォッチャー一覧",
             "content": {
               "application/json": {
                 "schema": {
@@ -27103,7 +27098,7 @@
         "operationId": "get_notification_settings",
         "responses": {
           "200": {
-            "description": "",
+            "description": "通知設定",
             "content": {
               "application/json": {
                 "schema": {
@@ -27191,7 +27186,7 @@
         "operationId": "update_notification_settings",
         "responses": {
           "200": {
-            "description": "",
+            "description": "更新後の通知設定",
             "content": {
               "application/json": {
                 "schema": {
@@ -27332,7 +27327,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "通知一覧",
             "content": {
               "application/json": {
                 "schema": {
@@ -27422,7 +27417,7 @@
         "operationId": "mark_all_notifications_read",
         "responses": {
           "204": {
-            "description": ""
+            "description": "すべて既読にしました"
           },
           "401": {
             "description": "ログインまたはセッションが必要です",
@@ -27505,7 +27500,7 @@
         "operationId": "mark_notification_read",
         "responses": {
           "200": {
-            "description": "",
+            "description": "既読にした通知",
             "content": {
               "application/json": {
                 "schema": {
@@ -27611,10 +27606,10 @@
           "user": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ActivityUser"
               },
               {
-                "$ref": "#/components/schemas/ActivityUser"
+                "type": "null"
               }
             ]
           }
@@ -28759,10 +28754,10 @@
           "priority": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/TaskPriority"
               },
               {
-                "$ref": "#/components/schemas/TaskPriority"
+                "type": "null"
               }
             ]
           },
@@ -29550,15 +29545,15 @@
           "from_state": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/FindingState"
                   }
                 ],
                 "x-or-unknown": true
+              },
+              {
+                "type": "null"
               }
             ],
             "description": "起票（登録）は `null`"
@@ -29940,10 +29935,10 @@
           "author": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/UserSummary"
               },
               {
-                "$ref": "#/components/schemas/UserSummary"
+                "type": "null"
               }
             ]
           },
@@ -29976,10 +29971,10 @@
           "comment": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/MatchComment"
               },
               {
-                "$ref": "#/components/schemas/MatchComment"
+                "type": "null"
               }
             ]
           },
@@ -30247,11 +30242,11 @@
           "project": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/NotificationProjectSummary",
                 "description": "`project_id` から引いた要約。引けなければ `null`"
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -30267,10 +30262,10 @@
           "task": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/NotificationTaskSummary"
               },
               {
-                "$ref": "#/components/schemas/NotificationTaskSummary"
+                "type": "null"
               }
             ]
           }
@@ -31180,22 +31175,22 @@
           "carried_by": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/UserSummary",
                 "description": "引き継ぎの写しのとき、引き継いだ利用者（`reviewer` は元のラウンドの作成者のまま）。\n写しのラウンドはレビューに数えない"
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "carried_from": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/CarriedFromRound",
                 "description": "引き継ぎの写しのとき、元のラウンド。元のラウンドが無くなっていれば `null`"
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -32420,11 +32415,11 @@
           "issue": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/TaskForgeIssue",
                 "description": "取り込み元の Issue。Issue から取り込んでいない（または連携を解除した）タスクでは null"
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -32437,11 +32432,11 @@
           "repository": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/TaskForgeRepository",
                 "description": "プロジェクトの現在の連携先。連携していなければ null（手動リンクの可否をこれで決める）"
+              },
+              {
+                "type": "null"
               }
             ]
           }
@@ -32573,10 +32568,10 @@
           "parent": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/TaskResponse"
               },
               {
-                "$ref": "#/components/schemas/TaskResponse"
+                "type": "null"
               }
             ]
           },
@@ -32622,11 +32617,11 @@
           "created_by": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/UserSummary",
                 "description": "作成者。ユーザー行が欠損している場合（FK 制約外の経路で削除された等）は null"
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -32710,11 +32705,11 @@
           "task_type": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/TaskTypeResponse",
                 "description": "タスクの種別。未設定なら null。古いサーバーの応答には無いので、無ければ null"
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -32860,11 +32855,11 @@
           "member_role": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/TenantRole",
                 "description": "membership=Member の時だけ、その member の role（Admin / Member / Viewer）。\nOwner と Guest では null。Admin 境界の口（鍵の発行など）を GUI が\n選択肢を作る段で見分けるための欄。"
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -33450,10 +33445,10 @@
           "priority": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/TaskPriority"
               },
               {
-                "$ref": "#/components/schemas/TaskPriority"
+                "type": "null"
               }
             ]
           },
@@ -33534,10 +33529,10 @@
           "role": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/TenantRole"
               },
               {
-                "$ref": "#/components/schemas/TenantRole"
+                "type": "null"
               }
             ]
           },

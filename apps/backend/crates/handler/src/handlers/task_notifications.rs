@@ -205,7 +205,7 @@ fn accessible_notification_condition(scope: &NotificationScope) -> Condition {
     condition
 }
 
-#[utoipa::path(get, path = "/{id}/watchers", tag = "Tasks", responses((status = 200, body = WatcherListResponse), CrudErrors))]
+#[utoipa::path(get, path = "/{id}/watchers", tag = "Tasks", responses((status = 200, body = WatcherListResponse, description = "ウォッチャー一覧"), CrudErrors))]
 #[axum::debug_handler]
 pub async fn list_watchers(
     State(state): State<AppState>,
@@ -248,7 +248,7 @@ pub async fn list_watchers(
     }))
 }
 
-#[utoipa::path(post, path = "/{id}/watch", tag = "Tasks", responses((status = 201), CrudErrors))]
+#[utoipa::path(post, path = "/{id}/watch", tag = "Tasks", responses((status = 201, description = "ウォッチしました"), CrudErrors))]
 #[axum::debug_handler]
 pub async fn start_watch(
     State(state): State<AppState>,
@@ -263,7 +263,7 @@ pub async fn start_watch(
     Ok(StatusCode::CREATED)
 }
 
-#[utoipa::path(delete, path = "/{id}/watch", tag = "Tasks", responses((status = 204), CrudErrors))]
+#[utoipa::path(delete, path = "/{id}/watch", tag = "Tasks", responses((status = 204, description = "ウォッチを解除しました"), CrudErrors))]
 #[axum::debug_handler]
 pub async fn stop_watch(
     State(state): State<AppState>,
@@ -363,7 +363,7 @@ async fn notification_items(
     path = "/me/notifications",
     tag = "Notifications",
     params(ListNotificationsQuery),
-    responses((status = 200, body = NotificationListResponse), CrudErrors)
+    responses((status = 200, body = NotificationListResponse, description = "通知一覧"), CrudErrors)
 )]
 #[axum::debug_handler]
 pub async fn list_notifications(
@@ -463,7 +463,7 @@ pub async fn list_notifications(
     }))
 }
 
-#[utoipa::path(patch, path = "/me/notifications/{id}/read", tag = "Notifications", responses((status = 200, body = NotificationItem), CrudErrors))]
+#[utoipa::path(patch, path = "/me/notifications/{id}/read", tag = "Notifications", responses((status = 200, body = NotificationItem, description = "既読にした通知"), CrudErrors))]
 #[axum::debug_handler]
 pub async fn mark_notification_read(
     State(state): State<AppState>,
@@ -494,7 +494,7 @@ pub async fn mark_notification_read(
         .ok_or(AppError::NotFound)
 }
 
-#[utoipa::path(patch, path = "/me/notifications/read-all", tag = "Notifications", responses((status = 204), CrudErrors))]
+#[utoipa::path(patch, path = "/me/notifications/read-all", tag = "Notifications", responses((status = 204, description = "すべて既読にしました"), CrudErrors))]
 #[axum::debug_handler]
 pub async fn mark_all_notifications_read(
     State(state): State<AppState>,
@@ -515,7 +515,7 @@ pub async fn mark_all_notifications_read(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[utoipa::path(get, path = "/me/notification-settings/{project_id}", tag = "Notifications", responses((status = 200, body = NotificationSettingsResponse), CrudErrors))]
+#[utoipa::path(get, path = "/me/notification-settings/{project_id}", tag = "Notifications", responses((status = 200, body = NotificationSettingsResponse, description = "通知設定"), CrudErrors))]
 #[axum::debug_handler]
 pub async fn get_notification_settings(
     State(state): State<AppState>,
@@ -549,7 +549,7 @@ pub async fn get_notification_settings(
     }))
 }
 
-#[utoipa::path(put, path = "/me/notification-settings/{project_id}", tag = "Notifications", responses((status = 200, body = NotificationSettingsResponse), CrudErrors))]
+#[utoipa::path(put, path = "/me/notification-settings/{project_id}", tag = "Notifications", responses((status = 200, body = NotificationSettingsResponse, description = "更新後の通知設定"), CrudErrors))]
 #[axum::debug_handler]
 pub async fn update_notification_settings(
     State(state): State<AppState>,

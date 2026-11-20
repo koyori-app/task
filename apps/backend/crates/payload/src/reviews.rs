@@ -328,7 +328,7 @@ pub struct ReviewSummaryResponse {
     /// 表示用の判定（上から順に最初に当たったもの）。クライアントは再計算しない
     ///
     /// 権威のゲートは引き続き CLI の `--head` 照合と branch protection。
-    #[schema(inline)]
+    #[schema(schema_with = gate_schema)]
     pub gate: OrUnknown<ReviewGate>,
 }
 
@@ -418,4 +418,11 @@ impl OrUnknown<FindingSeverity> {
             Self::Unknown(raw) => raw,
         }
     }
+}
+
+/// `gate` の欄のスキーマ（説明は欄の doc と同じ文）。[`crate::or_unknown::described_schema`] を見よ。
+fn gate_schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+    crate::or_unknown::described_schema::<ReviewGate>(
+        "表示用の判定（上から順に最初に当たったもの）。クライアントは再計算しない\n\n権威のゲートは引き続き CLI の `--head` 照合と branch protection。",
+    )
 }

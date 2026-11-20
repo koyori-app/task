@@ -8,6 +8,8 @@
 //!
 //! 欄には `#[schema(inline)]` を付ける。付けないと utoipa は `OrUnknown_T` という別の
 //! コンポーネントへの `$ref` を出す（目印はそちらに付くので固定テストは通るが、型名が増える）。
+//! 欄に説明（doc の注釈）を付けるなら、`inline` の代わりに [`described_schema`] を
+//! `#[schema(schema_with = …)]` で渡す。
 
 use std::borrow::Cow;
 use std::fmt;
@@ -16,7 +18,7 @@ use serde::de::{DeserializeOwned, IntoDeserializer};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use utoipa::ToSchema;
 use utoipa::openapi::extensions::ExtensionsBuilder;
-use utoipa::openapi::schema::{AllOfBuilder, Schema};
+use utoipa::openapi::schema::{AllOfBuilder, OneOfBuilder, Schema};
 use utoipa::openapi::{Ref, RefOr};
 
 /// OpenAPI で `OrUnknown` の欄に付ける目印（拡張キー）。
@@ -103,6 +105,19 @@ impl<T: ToSchema> ToSchema for OrUnknown<T> {
         schemas.push((T::name().into(), T::schema()));
         T::schemas(schemas);
     }
+}
+
+/// 説明の付いた `OrUnknown` の欄のスキーマ。欄に `#[schema(schema_with = …)]` で渡す。
+///
+/// utoipa 6 は `#[schema(inline)]` の欄に説明があると、`allOf` に `type: object` の項を足して
+/// 包む。「`T` であり、かつ object」という型になり、生成する TypeScript の型が壊れる。
+/// utoipa 5 と同じく、中身一つの `oneOf` に説明を添えた形を返す。`schema_with` の欄は `T` を
+/// components へ登録しないので、`T` はほかの欄か `handler::openapi` で登録されていること。
+pub fn described_schema<T: ToSchema>(description: &str) -> RefOr<Schema> {
+    OneOfBuilder::new()
+        .item(<OrUnknown<T> as utoipa::PartialSchema>::schema())
+        .description(Some(description))
+        .into()
 }
 
 #[cfg(test)]

@@ -3,6 +3,7 @@
 pub mod responses;
 
 use utoipa::openapi::OpenApi;
+use utoipa::openapi::info::{InfoBuilder, LicenseBuilder};
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::openapi::tag::TagBuilder;
 use utoipa::{PartialSchema, ToSchema};
@@ -26,8 +27,32 @@ pub fn register_schemas(openapi: &mut OpenApi) {
     register_schema::<payload::auth_2fa::Login2faResponse>(components);
     register_schema::<payload::auth_2fa::TotpSetupResponse>(components);
     register_schema::<payload::auth_2fa::VerifySetupResponse>(components);
+    // 説明の付いた `OrUnknown` の欄（`payload::or_unknown::described_schema`）は中身の型を
+    // 登録しない。ほかの欄に頼らず、ここで載せる
+    register_schema::<entity::tenant_members::TenantRole>(components);
+    register_schema::<payload::reviews::ReviewGate>(components);
+    register_schema::<payload::tenants::TenantMembershipKind>(components);
     register_security_schemes(components);
     register_tags(openapi);
+    register_info(openapi);
+}
+
+/// API の info を task の値で埋める。
+///
+/// `OpenApiRouter::new()` は utoipa-axum の中で `#[derive(OpenApi)]` を作るので、そのままだと
+/// info に utoipa-axum 自身の名・作者・版が入る（版は utoipa-axum を上げるたびに変わる）。
+/// 版は handler の crate の版。名は画面と MCP が名乗る名に合わせる。連絡先は repo に定めが無いので入れない。
+fn register_info(openapi: &mut OpenApi) {
+    openapi.info = InfoBuilder::new()
+        .title("task")
+        .description(Some("task の HTTP API。"))
+        .version(env!("CARGO_PKG_VERSION"))
+        .license(Some(
+            LicenseBuilder::new()
+                .name("GNU Affero General Public License v3.0")
+                .build(),
+        ))
+        .build();
 }
 
 /// Scalar のグループ表示順とタグ説明を定義する。
@@ -127,7 +152,8 @@ fn register_security_schemes(components: &mut utoipa::openapi::Components) {
                 .scheme(HttpAuthScheme::Bearer)
                 .bearer_format("PAT")
                 .build(),
-        ),
+        )
+        .into(),
     );
 }
 
@@ -286,6 +312,23 @@ mod tests {
             }
         }
         found
+    }
+
+    /// info は task の値で埋まり、版は handler の版と一致する（utoipa-axum の値を漏らさない）。
+    #[test]
+    fn info_carries_tasks_own_name_and_version() {
+        let (_, mut openapi) = OpenApiRouter::<crate::AppState>::new()
+            .merge(crate::routes::create_routes())
+            .split_for_parts();
+        super::register_schemas(&mut openapi);
+
+        assert_eq!(openapi.info.title, "task");
+        assert_eq!(openapi.info.version, env!("CARGO_PKG_VERSION"));
+        assert!(
+            openapi.info.contact.is_none(),
+            "info.contact に utoipa-axum の作者が残っています: {:?}",
+            openapi.info.contact.as_ref().map(|c| &c.name)
+        );
     }
 
     /// 応答の列挙欄は `OrUnknown<T>` で受ける。素の列挙だと、サーバーが値を足したとき

@@ -28,7 +28,7 @@ type AuthSession = axum_session::Session<SessionRedisPool>;
     path = "/password-reset/request",
     tag = "Auth",
     request_body = PasswordResetRequestBody,
-    responses((status = 200, body = MessageResponse), PasswordResetRequestErrors)
+    responses((status = 200, body = MessageResponse, description = "受け付けました"), PasswordResetRequestErrors)
 )]
 pub async fn password_reset_request(
     State(state): State<AppState>,
@@ -73,7 +73,7 @@ pub async fn password_reset_request(
     path = "/password-reset/verify",
     tag = "Auth",
     request_body = PasswordResetVerifyBody,
-    responses((status = 200), PasswordResetVerifyErrors)
+    responses((status = 200, description = "トークンは有効"), PasswordResetVerifyErrors)
 )]
 pub async fn password_reset_verify(
     State(state): State<AppState>,
@@ -98,7 +98,7 @@ pub async fn password_reset_verify(
     path = "/password-reset/complete",
     tag = "Auth",
     request_body = PasswordResetCompleteBody,
-    responses((status = 200, body = MessageResponse), PasswordResetCompleteErrors)
+    responses((status = 200, body = MessageResponse, description = "パスワードを再設定しました"), PasswordResetCompleteErrors)
 )]
 pub async fn password_reset_complete(
     State(state): State<AppState>,
@@ -189,7 +189,7 @@ fn unconfirmed_connections(state: &AppState, email_verified: bool) -> Condition 
     path = "/password/change",
     tag = "Auth",
     request_body = PasswordChangeBody,
-    responses((status = 200, body = MessageResponse), PasswordChangeErrors)
+    responses((status = 200, body = MessageResponse, description = "パスワードを変更しました"), PasswordChangeErrors)
 )]
 pub async fn password_change(
     session: AuthSession,

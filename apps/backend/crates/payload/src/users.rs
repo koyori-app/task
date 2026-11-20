@@ -67,7 +67,7 @@ pub struct UserProfileResponse {
     #[schema(nullable)]
     pub team: Option<String>,
     /// このテナントとの関わり方。オーナー・メンバー・客分（Guest）
-    #[schema(inline)]
+    #[schema(schema_with = membership_schema)]
     pub membership: OrUnknown<TenantMembershipKind>,
 }
 
@@ -155,6 +155,13 @@ pub struct UpdateProfileRequest {
     pub avatar_url: Option<String>,
     #[serde(default)]
     pub clear_avatar_url: bool,
+}
+
+/// `membership` の欄のスキーマ（説明は欄の doc と同じ文）。[`crate::or_unknown::described_schema`] を見よ。
+fn membership_schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+    crate::or_unknown::described_schema::<TenantMembershipKind>(
+        "このテナントとの関わり方。オーナー・メンバー・客分（Guest）",
+    )
 }
 
 #[cfg(test)]
