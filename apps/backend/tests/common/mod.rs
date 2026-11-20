@@ -131,7 +131,8 @@ static TEST_ENDPOINTS: OnceLock<TestEndpoints> = OnceLock::new();
 ///
 /// nextest に `TEST_DATABASE_URL` が渡されたときは、その DB `<db>` をそのまま使わず、雛形
 /// `<db>_tmpl` から枠ごとの `<db>_slot_<N>` を作り直して使う（[`prepare_slot_database`]）。
-/// 試験ごとに空の DB から始まるので、並列に回せる。`TEST_REDIS_URL` は DB 番号 `/<N>` に分ける。
+/// 試験ごとに空の DB から始まるので、並列に回せる。`TEST_REDIS_URL` は、渡された DB 番号を
+/// 起点にして枠ごとの番号に分ける（[`slot_redis_url`]）。nextest の下で枠が読めなければ止まる。
 fn ensure_test_env() -> &'static TestEndpoints {
     TEST_ENDPOINTS.get_or_init(|| {
         let explicit_pg = non_empty_env(TEST_DATABASE_URL_ENV);
@@ -170,7 +171,19 @@ fn ensure_test_env() -> &'static TestEndpoints {
 
         // nextest（1 プロセス = 1 試験）に行き先が渡されたら、枠ごとの DB を雛形から作り直して使う。
         // 自前のコンテナ（プロセスごとに専用）と `cargo test`（枠が無い）は今までどおり。
-        if !need_pg && let Some((slot, run_id)) = nextest_slot() {
+        // 枠が要るのは行き先が渡されたときだけ。そのとき枠が読めなければ、共有のまま進まず止まる
+        let slot = if !need_pg || explicit_redis_given {
+            nextest_slot().unwrap_or_else(|reason| panic!("{reason}"))
+        } else {
+            None
+        };
+        // redis は DB 番号で分ける。渡された行き先のデータは消さない（FLUSHDB しない）。
+        // Postgres が自前のコンテナでも、渡された redis は並列の試験が共有するので分ける
+        if explicit_redis_given && let Some((slot, _)) = &slot {
+            endpoints.redis_url = slot_redis_url(&endpoints.redis_url, *slot)
+                .unwrap_or_else(|reason| panic!("{TEST_REDIS_URL_ENV}: {reason}"));
+        }
+        if !need_pg && let Some((slot, run_id)) = slot {
             let names = slot_database(&endpoints.database_url, slot)
                 .unwrap_or_else(|reason| panic!("{TEST_DATABASE_URL_ENV}: {reason}"));
             let admin_url = endpoints.database_url.clone();
@@ -187,11 +200,6 @@ fn ensure_test_env() -> &'static TestEndpoints {
             .expect("prepare per-test database");
             endpoints.database_url = names.url;
             endpoints.schema_ready = true;
-            // redis は DB 番号で分ける。渡された行き先のデータは消さない（FLUSHDB しない）
-            if explicit_redis_given {
-                endpoints.redis_url = slot_redis_url(&endpoints.redis_url, slot)
-                    .unwrap_or_else(|reason| panic!("{TEST_REDIS_URL_ENV}: {reason}"));
-            }
         }
 
         // SAFETY: test process is single-threaded before Tokio workers spawn.
@@ -222,14 +230,36 @@ fn ensure_test_env() -> &'static TestEndpoints {
 
 /// nextest の枠番号と run の ID。枠番号は 0 始まりで、試験が動いている間だけ一意
 /// （終われば次の試験が再利用する）。run の ID は SQL の文字列に入れるので、字種を縛る。
-fn nextest_slot() -> Option<(u32, String)> {
-    let slot = std::env::var("NEXTEST_TEST_GLOBAL_SLOT")
-        .ok()?
-        .parse()
-        .ok()?;
-    let run_id = non_empty_env("NEXTEST_RUN_ID")
-        .filter(|id| id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))?;
-    Some((slot, run_id))
+///
+/// nextest の下でない（`cargo test`）なら `None`。nextest の下なのに枠が読めないときは `Err`
+/// にする。黙って 1 つの DB を共有すると、並列の試験がスキーマの DDL でぶつかって落ち、
+/// 原因が nextest の版だと分からない。
+pub fn nextest_slot_from(
+    under_nextest: bool,
+    slot: Option<&str>,
+    run_id: Option<&str>,
+) -> Result<Option<(u32, String)>, String> {
+    if !under_nextest {
+        return Ok(None);
+    }
+    const NEEDS: &str = "行き先を渡して nextest で回すには nextest 0.9.90 以上が要る\
+                         （試験ごとの DB を枠番号で分ける）";
+    let slot = slot
+        .and_then(|s| s.parse::<u32>().ok())
+        .ok_or_else(|| format!("NEXTEST_TEST_GLOBAL_SLOT が読めない。{NEEDS}"))?;
+    let run_id = run_id
+        .filter(|id| !id.is_empty())
+        .filter(|id| id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
+        .ok_or_else(|| format!("NEXTEST_RUN_ID が読めない。{NEEDS}"))?;
+    Ok(Some((slot, run_id.to_string())))
+}
+
+fn nextest_slot() -> Result<Option<(u32, String)>, String> {
+    nextest_slot_from(
+        std::env::var("NEXTEST").is_ok_and(|v| v == "1"),
+        std::env::var("NEXTEST_TEST_GLOBAL_SLOT").ok().as_deref(),
+        std::env::var("NEXTEST_RUN_ID").ok().as_deref(),
+    )
 }
 
 /// この試験が、雛形から作り直した自分専用の DB で動いているか。
@@ -287,16 +317,49 @@ fn with_database(url: &Url, database: &str) -> String {
 /// Valkey の DB の数（既定）。
 const REDIS_DATABASES: u32 = 16;
 
-/// redis の行き先を、枠ごとの DB 番号（`/<slot>`）に差し替える。
+/// redis の行き先を、枠ごとの DB 番号に差し替える。
+///
+/// 渡された DB 番号を起点にして、枠 `slot` は `起点 + slot` 番を使う（番号が無ければ起点は 0）。
+/// 同じ Valkey へ 2 つの run を向けるときは、起点を変えて範囲が重ならないようにできる
+/// （`/0` を 8 並列、`/8` を 8 並列）。Unix socket の行き先（`redis+unix://` / `unix://`）は
+/// パスが socket の場所なので、DB 番号はクエリの `db` に置く。
 pub fn slot_redis_url(raw: &str, slot: u32) -> Result<String, String> {
-    if slot >= REDIS_DATABASES {
+    let mut url = Url::parse(raw).map_err(|e| format!("not a URL ({e})"))?;
+    let unix_socket = matches!(url.scheme(), "redis+unix" | "valkey+unix" | "unix");
+    let given = if unix_socket {
+        url.query_pairs()
+            .find(|(key, _)| key == "db")
+            .map(|(_, value)| value.into_owned())
+    } else {
+        Some(url.path().trim_start_matches('/').to_string())
+    };
+    let base: u32 = match given.as_deref() {
+        None | Some("") => 0,
+        Some(db) => db
+            .parse()
+            .map_err(|_| format!("redis database {db:?} is not a number"))?,
+    };
+    let db = base + slot;
+    if db >= REDIS_DATABASES {
         return Err(format!(
-            "slot {slot} has no redis database: Valkey の DB は {REDIS_DATABASES} 個。\
-             `--test-threads` を {REDIS_DATABASES} 以下にする"
+            "slot {slot} from database {base} has no redis database: Valkey の DB は \
+             {REDIS_DATABASES} 個。`--test-threads` を {} 以下にする",
+            REDIS_DATABASES.saturating_sub(base)
         ));
     }
-    let mut url = Url::parse(raw).map_err(|e| format!("not a URL ({e})"))?;
-    url.set_path(&format!("/{slot}"));
+    if unix_socket {
+        let kept: Vec<(String, String)> = url
+            .query_pairs()
+            .filter(|(key, _)| key != "db")
+            .map(|(key, value)| (key.into_owned(), value.into_owned()))
+            .collect();
+        url.query_pairs_mut()
+            .clear()
+            .extend_pairs(kept)
+            .append_pair("db", &db.to_string());
+    } else {
+        url.set_path(&format!("/{db}"));
+    }
     Ok(url.into())
 }
 

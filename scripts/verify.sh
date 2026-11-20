@@ -49,20 +49,28 @@ openapi_drift() {
 
 # 統合テスト用の Postgres と Valkey を 1 組起こし、行き先を TEST_DATABASE_URL / TEST_REDIS_URL に置く。
 # ハーネスはこの行き先に試験ごとの DB を作るので、nextest を並列に回せる。
-# 行き先が既に渡されているならそれを使う。docker が無い・起動に失敗したときは何もせず戻り、
-# ハーネスが今までどおり試験ごとにコンテナを起こす。
+# 行き先が片方でも渡されているなら、それを使って何も起こさない（足りない側はハーネスが起こす）。
+# docker が無い・起動に失敗したときは 1 行出して戻り、ハーネスが試験ごとにコンテナを起こす。
 verify_containers=()
 verify_exported=0
 
+# 自分が起こしたコンテナを消す。消せなかった名は控えたままにして 1 を返す（後でもう一度試せる）。
 stop_test_services() {
-  [ ${#verify_containers[@]} -gt 0 ] || return 0
-  docker rm -f -v "${verify_containers[@]}" >/dev/null 2>&1
-  verify_containers=()
   # 消したコンテナの行き先を後の段へ渡さない
   if [ "$verify_exported" -eq 1 ]; then
     unset TEST_DATABASE_URL TEST_REDIS_URL
     verify_exported=0
   fi
+  [ ${#verify_containers[@]} -gt 0 ] || return 0
+  local name left=()
+  for name in "${verify_containers[@]}"; do
+    # 無い名の rm -f は成功する。失敗は docker に届かないなどで、コンテナが残っているかもしれない
+    docker rm -f -v "$name" >/dev/null 2>&1 || left+=("$name")
+  done
+  verify_containers=("${left[@]}")
+  [ ${#left[@]} -eq 0 ] && return 0
+  echo "verify: コンテナを消せなかった: ${left[*]}（docker rm -f -v ${left[*]}）" >&2
+  return 1
 }
 
 wait_test_service() {
@@ -75,8 +83,11 @@ wait_test_service() {
 }
 
 start_test_services() {
-  [ -n "${TEST_DATABASE_URL:-}" ] && [ -n "${TEST_REDIS_URL:-}" ] && return 0
-  command -v docker >/dev/null 2>&1 || return 0
+  [ -n "${TEST_DATABASE_URL:-}${TEST_REDIS_URL:-}" ] && return 0
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "verify: docker が無いので、統合テスト用の共有コンテナを起こさない" >&2
+    return 0
+  fi
   local pg="task-verify-pg-$$" valkey="task-verify-valkey-$$" pg_port valkey_port
   # イメージはハーネス（tests/common/mod.rs）と同じ
   # 途中で失敗しても消せるよう、起こす前に名を控える（無い名の rm -f は何もしない）
@@ -96,15 +107,23 @@ start_test_services() {
     verify_exported=1
     return 0
   fi
+  echo "verify: 統合テスト用の共有コンテナを起こせなかった。試験ごとのコンテナで回す（遅い）" >&2
   stop_test_services
 }
 trap stop_test_services EXIT
 
-# nextest の並列数。Valkey の DB は 16 個なので 16 で頭打ちにする（macOS に nproc は無い）
+# 試験ごとにコンテナを起こす経路で同時に回す数の上限（コンテナは 1 件につき最大 2 個）
+PER_TEST_CONTAINER_THREADS=6
+
+# nextest の並列数。Valkey の DB は 16 個なので 16 で頭打ちにする（macOS に nproc は無い）。
+# 行き先が両方そろっていなければ、ハーネスが試験ごとにコンテナを起こすので、数を抑える。
 test_threads() {
   local n
   n=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
   [ "$n" -gt 16 ] && n=16
+  if [ -z "${TEST_DATABASE_URL:-}" ] || [ -z "${TEST_REDIS_URL:-}" ]; then
+    [ "$n" -gt "$PER_TEST_CONTAINER_THREADS" ] && n=$PER_TEST_CONTAINER_THREADS
+  fi
   echo "$n"
 }
 
@@ -197,6 +216,12 @@ for g in "${groups[@]}"; do
   "run_$g"
 done
 [ "$ran" -eq 1 ] || echo "回す区分が無い（main との差分に backend・frontend・docs の変更が無い）"
+
+# 段の後で消せなかったコンテナをもう一度試す。残れば失敗として終える
+if ! stop_test_services; then
+  printf 'FAIL  %-18s       残ったコンテナ: %s\n' test-services "${verify_containers[*]}"
+  failed+=(test-services)
+fi
 
 if [ ${#failed[@]} -gt 0 ]; then
   for name in "${failed[@]}"; do
