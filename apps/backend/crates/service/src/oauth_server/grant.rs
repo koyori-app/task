@@ -10,7 +10,6 @@
 
 use std::sync::LazyLock;
 
-use argon2::password_hash::rand_core::{OsRng, RngCore};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{DateTime, Duration, Utc};
@@ -130,7 +129,7 @@ pub async fn issue_code(
     pending: &PendingAuthorization,
 ) -> Result<String, anyhow::Error> {
     let mut buf = [0u8; 32];
-    OsRng.fill_bytes(&mut buf);
+    crate::random::fill(&mut buf);
     let code = URL_SAFE_NO_PAD.encode(buf);
 
     let mut conn = redis
