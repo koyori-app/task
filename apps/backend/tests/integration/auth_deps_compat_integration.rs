@@ -434,9 +434,12 @@ async fn login_cookie_and_stored_session_keep_their_shape() {
     let sample = fixture("session");
     for (label, is_prod) in [("dev", false), ("prod", true)] {
         let (cookies, ttl, keys) = login_cookies_and_ttl(is_prod).await;
-        let normalized: Vec<String> = cookies.iter().map(|c| normalized_cookie(c)).collect();
-        let expected: Vec<String> =
+        // Set-Cookie の行の並びは保証がないので、並びは問わない。
+        let mut normalized: Vec<String> = cookies.iter().map(|c| normalized_cookie(c)).collect();
+        let mut expected: Vec<String> =
             serde_json::from_value(sample["login_set_cookies"][label].clone()).unwrap();
+        normalized.sort();
+        expected.sort();
         assert_eq!(normalized, expected, "{label}: Set-Cookie の名と属性");
 
         // 期限は Redis の TTL に持つ（既定の 6 時間）。
