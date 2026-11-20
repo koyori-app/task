@@ -135,6 +135,37 @@ fn slot_redis_url_counts_from_the_given_database() {
     assert!(err.contains("`--test-threads` を 8 以下"), "{err}");
 }
 
+/// 起点と枠の境界。起点が範囲の外なら、従えない「`--test-threads` を 0 以下」ではなく
+/// DB 番号の範囲を出す。足し算が溢れる値でも panic せず `Err` にする。
+#[test]
+fn slot_redis_url_refuses_databases_out_of_range() {
+    // 最後の DB（15）は枠 0 だけが使える
+    assert_eq!(
+        slot_redis_url("redis://localhost:6379/15", 0).as_deref(),
+        Ok("redis://localhost:6379/15")
+    );
+    let err = slot_redis_url("redis://localhost:6379/15", 1).expect_err("16 does not exist");
+    assert!(err.contains("`--test-threads` を 1 以下"), "{err}");
+
+    for url in [
+        "redis://localhost:6379/16",
+        "redis://localhost:6379/20",
+        "redis://localhost:6379/4294967295",
+        "redis+unix:///run/valkey.sock?db=16",
+    ] {
+        for slot in [0, 1, u32::MAX] {
+            let err = slot_redis_url(url, slot).expect_err(url);
+            assert!(err.contains("0〜15"), "{url} slot {slot}: {err}");
+            assert!(!err.contains("--test-threads"), "{url} slot {slot}: {err}");
+        }
+    }
+    // 起点が範囲の中で、枠が大きすぎる場合も溢れない
+    let err = slot_redis_url("redis://localhost:6379/1", u32::MAX).expect_err("overflow");
+    assert!(err.contains("`--test-threads` を 15 以下"), "{err}");
+    // u32 に収まらない番号は数として読めない
+    assert!(slot_redis_url("redis://localhost:6379/4294967296", 0).is_err());
+}
+
 /// Unix socket の行き先はパスが socket の場所なので、パスを保って `db` で分ける。
 #[test]
 fn slot_redis_url_keeps_the_unix_socket_path() {

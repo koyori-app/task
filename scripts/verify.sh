@@ -9,6 +9,8 @@
 #   docs      仕様書の文体の lint とそのテスト
 # 環境変数: VERIFY_BASE（changed の比較元。既定は origin/main との merge-base）
 #           VERIFY_LOG_DIR（ログの置き場。既定は <リポジトリ>/.verify）
+#           VERIFY_TEST_THREADS（統合テストの並列数の上限。既定はコア数）
+#           TEST_DATABASE_URL / TEST_REDIS_URL（統合テストの行き先。渡せばコンテナを起こさない）
 # 失敗した段があっても最後まで回し、最後に失敗した段のログの末尾を出して 1 で終える。
 set -uo pipefail
 
@@ -115,12 +117,50 @@ trap stop_test_services EXIT
 # 試験ごとにコンテナを起こす経路で同時に回す数の上限（コンテナは 1 件につき最大 2 個）
 PER_TEST_CONTAINER_THREADS=6
 
-# nextest の並列数。Valkey の DB は 16 個なので 16 で頭打ちにする（macOS に nproc は無い）。
-# 行き先が両方そろっていなければ、ハーネスが試験ごとにコンテナを起こすので、数を抑える。
+# TEST_REDIS_URL が指す DB 番号（起点）。ハーネスの slot_redis_url と同じ読み方で、TCP の行き先は
+# パス、Unix socket の行き先は db のクエリから取る。無い・読めないなら 0（読めない値はハーネスが拒む）。
+redis_base() {
+  local url=${TEST_REDIS_URL:-} db=""
+  case $url in
+    redis+unix://* | valkey+unix://* | unix://*)
+      case $url in
+        *[?\&]db=*)
+          db=${url##*[?&]db=}
+          db=${db%%&*}
+          ;;
+      esac
+      ;;
+    *://*)
+      db=${url#*://}
+      db=${db%%\?*}
+      case $db in
+        */*) db=${db#*/} ;;
+        *) db="" ;;
+      esac
+      ;;
+  esac
+  case $db in
+    '' | *[!0-9]*) echo 0 ;;
+    ??? | ???*) echo 16 ;;
+    *) echo $((10#$db)) ;;
+  esac
+}
+
+# nextest の並列数。小さい順に効く上限は次のとおり（macOS に nproc は無い）。
+# - コア数
+# - VERIFY_TEST_THREADS（渡されたとき）
+# - Valkey の DB は 16 個で、枠は「起点 + 枠番号」を使うので「16 − 起点」
+# - 行き先が両方そろっていなければ、ハーネスが試験ごとにコンテナを起こすので PER_TEST_CONTAINER_THREADS
 test_threads() {
-  local n
+  local n want=${VERIFY_TEST_THREADS:-} left
   n=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
-  [ "$n" -gt 16 ] && n=16
+  case $want in
+    '' | *[!0-9]* | 0*) ;;
+    *) [ "$n" -gt "$want" ] && n=$want ;;
+  esac
+  left=$((16 - $(redis_base)))
+  [ "$left" -lt 1 ] && left=1
+  [ "$n" -gt "$left" ] && n=$left
   if [ -z "${TEST_DATABASE_URL:-}" ] || [ -z "${TEST_REDIS_URL:-}" ]; then
     [ "$n" -gt "$PER_TEST_CONTAINER_THREADS" ] && n=$PER_TEST_CONTAINER_THREADS
   fi

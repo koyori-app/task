@@ -339,14 +339,23 @@ pub fn slot_redis_url(raw: &str, slot: u32) -> Result<String, String> {
             .parse()
             .map_err(|_| format!("redis database {db:?} is not a number"))?,
     };
-    let db = base + slot;
-    if db >= REDIS_DATABASES {
+    // 起点そのものが範囲の外なら、並列数を下げても直らない。別の文で止める
+    if base >= REDIS_DATABASES {
         return Err(format!(
-            "slot {slot} from database {base} has no redis database: Valkey の DB は \
-             {REDIS_DATABASES} 個。`--test-threads` を {} 以下にする",
-            REDIS_DATABASES.saturating_sub(base)
+            "redis database {base} does not exist: DB 番号は 0〜{} で渡す",
+            REDIS_DATABASES - 1
         ));
     }
+    let db = base
+        .checked_add(slot)
+        .filter(|db| *db < REDIS_DATABASES)
+        .ok_or_else(|| {
+            format!(
+                "slot {slot} from database {base} has no redis database: Valkey の DB は \
+                 {REDIS_DATABASES} 個。`--test-threads` を {} 以下にする",
+                REDIS_DATABASES - base
+            )
+        })?;
     if unix_socket {
         let kept: Vec<(String, String)> = url
             .query_pairs()
