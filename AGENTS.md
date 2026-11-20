@@ -71,7 +71,7 @@ cargo test --workspace --lib
   cargo test -- --test-threads=1   # CI は cargo nextest run（並列）
   ```
   - nextest に `TEST_DATABASE_URL` を渡すと、ハーネスは試験ごとに雛形 `<db>_tmpl` から専用の `<db>_slot_<N>` を作り直すので、並列に回せる（`TEST_REDIS_URL` は DB 番号 `/<N>` に分ける。Valkey の DB は 16 個なので `--test-threads` は 16 まで）。`cargo test` は 1 つの DB を共有するので `--test-threads=1` のまま。同じ行き先・同じ DB 名へ 2 つの run を同時に向けない（DB 名を変えれば可）
-  - `scripts/verify.sh backend` は Postgres と Valkey を 1 組起こして nextest を並列に回し、終わりに消す。`cargo nextest run` を直接叩くと試験ごとにコンテナを起こすので遅い。速く回すなら自分で 1 組起こして `TEST_DATABASE_URL` / `TEST_REDIS_URL` を渡す
+  - `scripts/verify.sh backend` は Postgres と Valkey を 1 組起こして nextest を並列に回し、終わりに消す。`cargo nextest run` を直接叩くと試験ごとにコンテナを起こすので遅い。速く回すなら自分で 1 組起こして `TEST_DATABASE_URL` / `TEST_REDIS_URL` を渡す（Postgres は `-c max_connections=500` で起こす。既定の 100 接続では 12 並列で「too many clients」に当たる）
   - 統合テストは `tests/integration/` 配下に集約した**単一バイナリ**。新規ファイルはそこへ置き、`main.rs` に `mod` 宣言を足す。参照は `crate::common::`（`mod common;` の宣言は不要）
   - ハーネス（`tests/common/mod.rs` の `ensure_test_env()`）が testcontainers で CI と同一イメージ（`postgres:17` / `valkey/valkey:8.1`）をランダムポートで起動する。手動の `docker run`・`apps/backend/.env` は不要。コンテナはテストプロセスの終了時にハーネス（atexit）が自動削除する
   - 行き先を自分で渡すときは、試験用と明示した `TEST_DATABASE_URL` / `TEST_REDIS_URL` を使う（CI はこの経路）。docker の無い手元で専用の Postgres / valkey を使う例:
