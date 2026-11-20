@@ -87,7 +87,7 @@ async fn insert_public_share(
 
 /// 仕様の URL でフォルダメタデータとファイル一覧が引ける（認証不要）。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn public_share_endpoints_live_at_the_documented_paths() {
     let app = TestApp::new().await;
 
@@ -144,7 +144,7 @@ async fn public_share_endpoints_live_at_the_documented_paths() {
 
 /// 存在しないトークンは 404。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn unknown_token_is_not_found() {
     let app = TestApp::new().await;
 
@@ -163,7 +163,7 @@ async fn unknown_token_is_not_found() {
 
 /// 期限切れトークンは 410 Gone（仕様 §8.3）。期限ちょうど手前は通ることも見る。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn expired_token_is_gone_but_a_live_one_still_works() {
     let app = TestApp::new().await;
 
@@ -229,7 +229,7 @@ async fn get_from(app: &TestApp, ip: &str, path: &str) -> reqwest::Response {
 /// 同じ IP・同じトークンは 3 つの公開口の合計で 121 回目から 429 + Retry-After。
 /// 別トークン・別 IP・認証済みの本文取得は巻き込まず、キーを消せば回復する。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn public_share_requests_are_rate_limited_per_ip_and_token() {
     let mut app = TestApp::new().await;
 

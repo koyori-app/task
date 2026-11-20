@@ -131,7 +131,7 @@ async fn insert_drive_file(app: &TestApp, tenant_id: Uuid, uploader_id: Uuid) ->
 }
 
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn task_extensions_integration_suite() {
     let mut app = TestApp::new().await;
     let fx = setup_task(&mut app).await;
@@ -235,7 +235,7 @@ async fn task_extensions_integration_suite() {
 }
 
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn task_extensions_negative_cases() {
     let mut app = TestApp::new().await;
     let fx = setup_task(&mut app).await;
@@ -323,7 +323,7 @@ async fn add_project_member(app: &TestApp, project_id: Uuid, user_id: Uuid) {
 }
 
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn task_extensions_acl_cases() {
     let mut app = TestApp::new().await;
     let fx = setup_task(&mut app).await; // owner としてログイン済み
@@ -422,7 +422,7 @@ async fn task_extensions_acl_cases() {
 }
 
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn task_detail_embeds_attachments_and_list_does_not() {
     let mut app = TestApp::new().await;
     let owner = app.insert_user(true, false).await;

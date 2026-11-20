@@ -121,7 +121,7 @@ fn timestamp_of(file: &serde_json::Value, field: &str) -> DateTime<Utc> {
 /// テキストファイルの本文を差し替えられる。size と updated_at が更新され、
 /// 配信エンドポイントからも新しい内容が読める。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn update_content_replaces_text_file_body() {
     let mut app = TestApp::new().await;
 
@@ -189,7 +189,7 @@ async fn update_content_replaces_text_file_body() {
 
 /// 空文字列での更新は「中身を空にする編集」として許可する。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn update_content_allows_empty_body() {
     let mut app = TestApp::new().await;
 
@@ -218,7 +218,7 @@ async fn update_content_allows_empty_body() {
 /// テキストとして扱えない MIME のファイルは編集できない（400）。
 /// 対照として同じ経路でテキストファイルは編集できることも確認する。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn update_content_rejects_non_text_mime() {
     let mut app = TestApp::new().await;
 
@@ -280,7 +280,7 @@ async fn update_content_rejects_non_text_mime() {
 
 /// 他テナントのファイル ID を自テナントのパスで指定しても 404（テナント越えを許さない）。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn update_content_does_not_cross_tenants() {
     let mut app = TestApp::new().await;
 
@@ -320,7 +320,7 @@ async fn update_content_does_not_cross_tenants() {
 
 /// プロジェクトフォルダ内のファイル編集は、そのプロジェクトのメンバーのみ許可（403 / 200）。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn update_content_enforces_project_membership() {
     let mut app = TestApp::new().await;
 
@@ -392,7 +392,7 @@ async fn update_content_enforces_project_membership() {
 
 /// 差し替えでクォータを超える場合は 413。収まる場合は 200（旧サイズを差し引いて判定している）。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn update_content_enforces_quota_on_size_delta() {
     let mut app = TestApp::new().await;
 
@@ -464,7 +464,7 @@ async fn update_content_enforces_quota_on_size_delta() {
 /// 中間キーを二重削除して壊れ得た。確定的に競合を再現するのは難しいが、`tokio::join`
 /// で 2 本同時に投げて「壊れない」ことを回帰として確認する。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn update_content_concurrent_updates_stay_consistent() {
     let mut app = TestApp::new().await;
 
@@ -560,7 +560,7 @@ async fn update_content_concurrent_updates_stay_consistent() {
 /// 配信エンドポイントは URL に tenant_id を含まずファイル ID だけで引くため、
 /// テナントレベルファイルを無条件に許可すると、ID を知る第三者が未認証で内容を取得できる。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn tenant_level_file_content_requires_tenant_access() {
     let mut app = TestApp::new().await;
 
@@ -625,7 +625,7 @@ async fn tenant_level_file_content_requires_tenant_access() {
 /// PAT で配信エンドポイントを読む場合も read:drive が必要。
 /// 共有トークン経路は PAT スコープと独立しており、未認証のまま利用できる。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn tenant_level_file_content_enforces_pat_scope_but_allows_share_token() {
     let mut app = TestApp::new().await;
 
@@ -687,7 +687,7 @@ async fn tenant_level_file_content_enforces_pat_scope_but_allows_share_token() {
 
 /// テナントレベルフォルダの共有トークンは、有効なものだけを受け入れる。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn tenant_level_folder_share_token_rejects_invalid_and_expired_tokens() {
     let mut app = TestApp::new().await;
 
@@ -747,7 +747,7 @@ async fn tenant_level_folder_share_token_rejects_invalid_and_expired_tokens() {
 /// tenant_id で突き合わせる。持ち主がオーナーとして入れる別テナントでも、
 /// 束縛外のテナントのプロジェクトファイルは読めない。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn project_file_content_rejects_pat_bound_to_other_tenant() {
     let mut app = TestApp::new().await;
 
@@ -816,7 +816,7 @@ async fn project_file_content_rejects_pat_bound_to_other_tenant() {
 /// 複数のテナントに結んだ PAT は、結んだテナントのプロジェクトファイル本体をどれも読め、
 /// 結んでいないテナントのものは読めない（URL にテナントを持たない経路の束縛判定）。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn project_file_content_follows_every_tenant_a_pat_is_bound_to() {
     let mut app = TestApp::new().await;
 
@@ -884,7 +884,7 @@ async fn project_file_content_follows_every_tenant_a_pat_is_bound_to() {
 /// プロジェクト限定の PAT は、同じテナントでも `allowed_project_ids` 外のプロジェクトの
 /// ファイル本体を読めない。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn project_file_content_rejects_pat_outside_allowed_projects() {
     let mut app = TestApp::new().await;
 
@@ -958,7 +958,7 @@ async fn project_file_content_rejects_pat_outside_allowed_projects() {
 /// クライアント申告の `Content-Type` をそのまま返すと、保存された HTML がセッション
 /// Cookie の届くオリジンで実行できてしまう（stored XSS）。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn content_delivery_does_not_render_uploaded_html() {
     let mut app = TestApp::new().await;
 
@@ -1085,7 +1085,7 @@ fn names_of(files: &[serde_json::Value]) -> Vec<&str> {
 /// 利用者入力の `%` `_` はワイルドカードにならない。件数は既定の limit（50）を越えさせ、
 /// 絞り込み後もページングと `total` が効くことを見る。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn list_files_filters_by_mime_type_prefix() {
     let mut app = TestApp::new().await;
 
@@ -1192,7 +1192,7 @@ async fn list_files_filters_by_mime_type_prefix() {
 /// `q` はファイル名の部分一致で、大文字小文字を区別せず、`%` `_` を字義どおりに扱う。
 /// 長さは 200 文字まで（201 文字で 400）。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn list_files_searches_names_case_insensitively() {
     let mut app = TestApp::new().await;
 
@@ -1254,7 +1254,7 @@ async fn list_files_searches_names_case_insensitively() {
 
 /// `sort` は既定の作成日時降順のほか、名前昇順・更新日時降順を選べる。未知の値は 400。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn list_files_sorts_by_requested_order() {
     let mut app = TestApp::new().await;
 
@@ -1373,7 +1373,7 @@ async fn read_content(app: &TestApp, file_id: Uuid) -> String {
 /// アップロード直後の `etag` は本文の SHA-256。本文取得の `ETag` ヘッダーも同じ値で、
 /// `Last-Modified` は `updated_at`（秒精度）と一致する。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn upload_etag_is_content_sha256_and_served_on_get() {
     let mut app = TestApp::new().await;
 
@@ -1427,7 +1427,7 @@ async fn upload_etag_is_content_sha256_and_served_on_get() {
 
 /// `If-None-Match` が一致すれば 304（本文なし・ETag あり）、一致しなければ 200。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn get_content_if_none_match_returns_not_modified() {
     let mut app = TestApp::new().await;
 
@@ -1484,7 +1484,7 @@ async fn get_content_if_none_match_returns_not_modified() {
 /// `If-Match` 一致で更新でき新しい etag が返る。不一致は 412 で本文は変わらない。
 /// `*` は一致扱い、ヘッダー無しは従来どおり無条件に上書きする。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn update_content_if_match_guards_overwrite() {
     let mut app = TestApp::new().await;
 
@@ -1581,7 +1581,7 @@ async fn update_content_if_match_guards_overwrite() {
 /// 同じ etag を持った 2 つの更新を同時に投げると、片方だけが通り、もう片方は 412。
 /// 比較が行ロックの後なので、後から入った側は先行の更新後の値と比べることになる。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn update_content_if_match_concurrent_one_wins() {
     let mut app = TestApp::new().await;
 
@@ -1632,7 +1632,7 @@ async fn update_content_if_match_concurrent_one_wins() {
 /// `content_hash` を持たない既存行は `"ts:<updated_at ミリ秒>-<size>"` を etag にし、
 /// `If-Match` もその値で効く。更新後はハッシュの etag に切り替わる。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn legacy_row_without_hash_uses_timestamp_etag() {
     let mut app = TestApp::new().await;
 

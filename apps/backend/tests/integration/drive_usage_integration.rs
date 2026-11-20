@@ -46,7 +46,7 @@ async fn upload_text_file(app: &TestApp, tenant_id: Uuid, file_name: &str, body:
 /// SUM が NULL になり素通りするので 1 件目までは成功し、2 件目のアップロード
 /// （クォータ事前チェックで使用量を読む）と使用量取得が 500 になっていた。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn drive_usage_sums_multiple_files() {
     let mut app = TestApp::new().await;
 

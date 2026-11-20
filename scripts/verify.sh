@@ -47,6 +47,67 @@ openapi_drift() {
   return "$status"
 }
 
+# 統合テスト用の Postgres と Valkey を 1 組起こし、行き先を TEST_DATABASE_URL / TEST_REDIS_URL に置く。
+# ハーネスはこの行き先に試験ごとの DB を作るので、nextest を並列に回せる。
+# 行き先が既に渡されているならそれを使う。docker が無い・起動に失敗したときは何もせず戻り、
+# ハーネスが今までどおり試験ごとにコンテナを起こす。
+verify_containers=()
+verify_exported=0
+
+stop_test_services() {
+  [ ${#verify_containers[@]} -gt 0 ] || return 0
+  docker rm -f -v "${verify_containers[@]}" >/dev/null 2>&1
+  verify_containers=()
+  # 消したコンテナの行き先を後の段へ渡さない
+  if [ "$verify_exported" -eq 1 ]; then
+    unset TEST_DATABASE_URL TEST_REDIS_URL
+    verify_exported=0
+  fi
+}
+
+wait_test_service() {
+  local i
+  for i in $(seq 1 60); do
+    docker exec "$@" >/dev/null 2>&1 && return 0
+    sleep 0.5
+  done
+  return 1
+}
+
+start_test_services() {
+  [ -n "${TEST_DATABASE_URL:-}" ] && [ -n "${TEST_REDIS_URL:-}" ] && return 0
+  command -v docker >/dev/null 2>&1 || return 0
+  local pg="task-verify-pg-$$" valkey="task-verify-valkey-$$" pg_port valkey_port
+  # イメージはハーネス（tests/common/mod.rs）と同じ
+  # 途中で失敗しても消せるよう、起こす前に名を控える（無い名の rm -f は何もしない）
+  verify_containers=("$pg" "$valkey")
+  # 初期化中の Postgres は TCP を聞かないので、-h を付けて本起動を待つ
+  # 既定の 100 接続では 12 並列で「too many clients」に当たる（試験のプロセスごとにプールを持つ）。
+  # 16 並列ぶんを見込んで上限を上げる
+  if docker run -d --name "$pg" -e POSTGRES_PASSWORD=postgres -p 127.0.0.1::5432 \
+    postgres:17 -c fsync=off -c max_connections=500 >/dev/null 2>&1 &&
+    docker run -d --name "$valkey" -p 127.0.0.1::6379 valkey/valkey:8.1 >/dev/null 2>&1 &&
+    wait_test_service "$pg" pg_isready -h 127.0.0.1 -U postgres &&
+    wait_test_service "$valkey" valkey-cli ping &&
+    pg_port=$(docker port "$pg" 5432/tcp | head -n 1) && [ -n "$pg_port" ] &&
+    valkey_port=$(docker port "$valkey" 6379/tcp | head -n 1) && [ -n "$valkey_port" ]; then
+    export TEST_DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:${pg_port##*:}/postgres"
+    export TEST_REDIS_URL="redis://127.0.0.1:${valkey_port##*:}"
+    verify_exported=1
+    return 0
+  fi
+  stop_test_services
+}
+trap stop_test_services EXIT
+
+# nextest の並列数。Valkey の DB は 16 個なので 16 で頭打ちにする（macOS に nproc は無い）
+test_threads() {
+  local n
+  n=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
+  [ "$n" -gt 16 ] && n=16
+  echo "$n"
+}
+
 run_backend() {
   step backend-fmt apps/backend cargo fmt --all -- --check
   if cargo hakari --version >/dev/null 2>&1; then
@@ -56,7 +117,10 @@ run_backend() {
   fi
   step clippy apps/backend cargo clippy --workspace --all-targets -- -D warnings
   if has_nextest; then
-    step backend-test apps/backend cargo nextest run --test-threads=1
+    # step の中はサブシェルなので、行き先の export はここ（親）で済ませる
+    start_test_services
+    step backend-test apps/backend cargo nextest run --test-threads="$(test_threads)"
+    stop_test_services
   else
     step backend-test apps/backend cargo test -- --test-threads=1
   fi
