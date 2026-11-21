@@ -573,7 +573,12 @@ async function confirmRemove() {
               class="flex items-center gap-3 border-b px-3.5 py-2.5 last:border-b-0"
             >
               <UserAvatar
-                :user="{ name: member.user.username, account_kind: member.user.account_kind }"
+                :user="{
+                  id: member.user.id,
+                  username: member.user.username,
+                  avatar_url: member.user.avatar_url,
+                  account_kind: member.user.account_kind,
+                }"
                 shape="lg"
                 class="text-white"
                 :style="{ background: avatarColor(member) }"
