@@ -220,6 +220,11 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::labels::import_labels)),
                 )
                 .nest(
+                    "/{project_id}/documents",
+                    OpenApiRouter::<AppState>::new()
+                        .routes(routes!(crate::handlers::documents::search_documents)),
+                )
+                .nest(
                     "/{project_id}/task-types",
                     OpenApiRouter::<AppState>::new()
                         .routes(routes!(crate::handlers::task_types::list_task_types))

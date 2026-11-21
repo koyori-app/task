@@ -36,6 +36,7 @@ mod m20261115000000_review_carry_over;
 mod m20261116000000_task_types;
 mod m20261117000000_apalis_migration_history_schema;
 mod m20261119000000_oauth_grants;
+mod m20261121000000_drive_file_sections;
 
 pub struct Migrator;
 
@@ -79,6 +80,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261116000000_task_types::Migration),
             Box::new(m20261117000000_apalis_migration_history_schema::Migration),
             Box::new(m20261119000000_oauth_grants::Migration),
+            Box::new(m20261121000000_drive_file_sections::Migration),
         ]
     }
 }

@@ -293,6 +293,26 @@ pub async fn run(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         shutdown_rx.clone(),
     ));
 
+    // 索引の無い Markdown ファイルの本文を読んで節の索引を作る（service::drive_sections）。起動時に 1 回
+    let backfill_db = state.db.clone();
+    let backfill_storage = state.storage.clone();
+    let mut backfill_shutdown = shutdown_rx.clone();
+    tokio::spawn(async move {
+        tokio::select! {
+            result = service::drive_sections::backfill_missing(&backfill_db, backfill_storage.as_ref()) => match result {
+                Ok(report) if report.indexed == 0 && report.failed == 0 => {}
+                Ok(report) => info!(
+                    indexed = report.indexed,
+                    skipped = report.skipped,
+                    failed = report.failed,
+                    "drive section index backfilled"
+                ),
+                Err(e) => warn!(error = %e, "drive section index backfill failed"),
+            },
+            _ = backfill_shutdown.changed() => {}
+        }
+    });
+
     // 保持期間を過ぎた通知の掃除（job::notification_retention）。1 日 1 回、起動直後にも走る
     tokio::spawn(notification_retention::run_sweeper(
         job_state_for_sweeper.clone(),
