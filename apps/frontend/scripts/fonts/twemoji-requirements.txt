@@ -17,6 +17,6 @@ regex==2026.9.29
 resvg-cli==0.44.0
 skia-pathops==0.9.2
 toml==0.10.2
-ufo2ft==3.10.0
+ufo2ft==3.11.0
 ufoLib2==0.19.1
 zopfli==0.4.3
