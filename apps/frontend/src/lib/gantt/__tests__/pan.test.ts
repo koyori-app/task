@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { panDays, wheelPanDelta, WHEEL_LINE_PX } from '@/lib/gantt/pan';
+import { panDays, scrollFirst, wheelPanDelta, WHEEL_LINE_PX } from '@/lib/gantt/pan';
 
 describe('panDays', () => {
   it('1 日の幅に届かぬ移動は送らず、px を貯める', () => {
@@ -22,6 +22,30 @@ describe('panDays', () => {
   it('幅が 0 や有限でなければ送らず、貯めた分も捨てる', () => {
     expect(panDays(10, 50, 0)).toEqual({ days: 0, restPx: 0 });
     expect(panDays(10, 50, Number.NaN)).toEqual({ days: 0, restPx: 0 });
+  });
+});
+
+describe('scrollFirst', () => {
+  it('巻ける間は図を巻き、日付には回さない', () => {
+    expect(scrollFirst(0, 100, 65)).toEqual({ scrollLeft: 65, restPx: 0 });
+  });
+
+  it('端を越える分だけを日付の送りに回す', () => {
+    expect(scrollFirst(65, 100, 95)).toEqual({ scrollLeft: 100, restPx: 60 });
+    expect(scrollFirst(20, 100, -50)).toEqual({ scrollLeft: 0, restPx: -30 });
+  });
+
+  it('端に着いていれば全部を日付の送りに回す', () => {
+    expect(scrollFirst(100, 100, 40)).toEqual({ scrollLeft: 100, restPx: 40 });
+    expect(scrollFirst(0, 100, -40)).toEqual({ scrollLeft: 0, restPx: -40 });
+  });
+
+  it('巻けなければそのまま返す', () => {
+    expect(scrollFirst(0, 0, 40)).toEqual({ scrollLeft: 0, restPx: 40 });
+  });
+
+  it('端を越えた位置（弾みの戻り）から逆の向きに巻かない', () => {
+    expect(scrollFirst(105, 100, 10)).toEqual({ scrollLeft: 100, restPx: 10 });
   });
 });
 

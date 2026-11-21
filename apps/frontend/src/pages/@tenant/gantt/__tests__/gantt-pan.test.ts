@@ -6,7 +6,7 @@ import { createPinia } from 'pinia';
 
 import { SCHEDULE_PATH } from '@/lib/calendar/schedule';
 import { addDays, dateInZone } from '@/lib/calendar/timeline';
-import { PAN_SETTLE_MS, PAN_SLOP_PX } from '@/lib/gantt/pan';
+import { CLICK_SUPPRESS_MS, PAN_SETTLE_MS, PAN_SLOP_PX } from '@/lib/gantt/pan';
 import { defaultFrom, viewTo } from '@/lib/gantt/view';
 
 type PageContextStub = {
@@ -53,7 +53,8 @@ vi.mock('@koyori-app/arc-vue', async () => {
       name: 'GanttChart',
       props: ['tasks', 'today', 'deps', 'scrollContainer', 'view'],
       emits: ['task-click'],
-      setup: () => () => h('div'),
+      // arc と同じく、図を横に巻く内側の域を持つ
+      setup: () => () => h('div', { class: 'koyori-gantt-scroll' }),
     }),
   };
 });
@@ -140,17 +141,34 @@ const settle = async () => {
   await new Promise((resolve) => setTimeout(resolve, PAN_SETTLE_MS + 50));
   await flushPromises();
 };
-const touch = (clientX: number) => ({
+const touch = (clientX: number, clientY = 0, primary = true) => ({
   pointerType: 'touch',
-  isPrimary: true,
-  pointerId: 1,
+  isPrimary: primary,
+  pointerId: primary ? 1 : 2,
   clientX,
+  clientY,
 });
 
+/** 離した後、実機と同じく click が別のタスクで届くまで 1 回待つ */
 async function swipe(wrapper: VueWrapper, fromX: number, toX: number) {
   await panArea(wrapper).trigger('pointerdown', touch(fromX));
   await panArea(wrapper).trigger('pointermove', touch(toX));
   await panArea(wrapper).trigger('pointerup', touch(toX));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** 図の内側の域を、巻ける幅と今の位置を持つ形にする（happy-dom は寸法を持たない） */
+function stubScroller(wrapper: VueWrapper, { max, left }: { max: number; left: number }) {
+  const el = wrapper.get('.koyori-gantt-scroll').element as HTMLElement;
+  Object.defineProperty(el, 'clientWidth', { configurable: true, value: 700 });
+  Object.defineProperty(el, 'scrollWidth', { configurable: true, value: 700 + max });
+  let scrollLeft = left;
+  Object.defineProperty(el, 'scrollLeft', {
+    configurable: true,
+    get: () => scrollLeft,
+    set: (v: number) => (scrollLeft = v),
+  });
+  return el;
 }
 
 describe('ガントの横のスクロールとスワイプ（TASK-567）', () => {
@@ -258,6 +276,94 @@ describe('ガントの横のスクロールとスワイプ（TASK-567）', () =>
     await panArea(wrapper).trigger('pointerup', mouse(100));
 
     expect(range(wrapper)).toBe(rangeText(FROM));
+  });
+
+  it('スワイプの後の click は少し遅れて来ても抑え、間を置いた click は通す', async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+
+    await swipe(wrapper, 200, 130);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await groupHeader(wrapper).trigger('click');
+    expect(groupHeader(wrapper).attributes('aria-expanded')).toBe('true');
+
+    await swipe(wrapper, 200, 130);
+    await new Promise((resolve) => setTimeout(resolve, CLICK_SUPPRESS_MS + 50));
+    await groupHeader(wrapper).trigger('click');
+    expect(groupHeader(wrapper).attributes('aria-expanded')).toBe('false');
+  });
+
+  it('縦が勝つ出だしとピンチの指では範囲が動かない', async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+
+    // 斜めの出だし（横 10 / 縦 14）は縦のスクロールとみなし、その後の横の動きも拾わない
+    await panArea(wrapper).trigger('pointerdown', touch(200, 200));
+    await panArea(wrapper).trigger('pointermove', touch(190, 186));
+    await panArea(wrapper).trigger('pointermove', touch(100, 186));
+    await panArea(wrapper).trigger('pointerup', touch(100, 186));
+    expect(range(wrapper)).toBe(rangeText(FROM));
+
+    // 2 本目の指が来たらスワイプをやめる
+    await panArea(wrapper).trigger('pointerdown', touch(200));
+    await panArea(wrapper).trigger('pointerdown', touch(300, 0, false));
+    await panArea(wrapper).trigger('pointermove', touch(130));
+    await panArea(wrapper).trigger('pointerup', touch(130));
+    expect(range(wrapper)).toBe(rangeText(FROM));
+
+    // 対照: 横が勝つ斜め（横 14 / 縦 10）は送る
+    await panArea(wrapper).trigger('pointerdown', touch(200, 200));
+    await panArea(wrapper).trigger('pointermove', touch(130, 190));
+    await panArea(wrapper).trigger('pointerup', touch(130, 190));
+    expect(range(wrapper)).toBe(rangeText(addDays(FROM, 2)));
+  });
+
+  it('図が箱より広い時は、先に図を端まで巻き、残りで日付を送る', async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    const scroller = stubScroller(wrapper, { max: 100, left: 0 });
+
+    await panArea(wrapper).trigger('wheel', { deltaX: 65 });
+    expect(scroller.scrollLeft).toBe(65);
+    expect(range(wrapper)).toBe(rangeText(FROM));
+
+    // 残り 35px を巻き切り、余る 60px で 2 日送る
+    await panArea(wrapper).trigger('wheel', { deltaX: 95 });
+    expect(scroller.scrollLeft).toBe(100);
+    expect(range(wrapper)).toBe(rangeText(addDays(FROM, 2)));
+
+    // 逆の向きも、左の端まで巻いてから前へ送る
+    await swipe(wrapper, 100, 230);
+    expect(scroller.scrollLeft).toBe(0);
+    expect(range(wrapper)).toBe(rangeText(addDays(FROM, 1)));
+  });
+
+  it('wheel の 1 日に届かぬ端数は、止まった後の操作へ持ち越さない', async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+
+    await panArea(wrapper).trigger('wheel', { deltaX: 25 });
+    await settle();
+    await panArea(wrapper).trigger('wheel', { deltaX: 25 });
+
+    expect(range(wrapper)).toBe(rangeText(FROM));
+  });
+
+  it('前の範囲が空の時は、取り直しの応答まで空の表示でなく読み込み中を出す', async () => {
+    const wrapper = mountPage({ tasks: [] });
+    await flushPromises();
+    expect(wrapper.find('[data-testid="gantt-empty"]').exists()).toBe(true);
+    const base = GET.getMockImplementation()!;
+    GET.mockImplementation((path: string, init: unknown) =>
+      isSchedule(path) ? new Promise(() => {}) : base(path, init),
+    );
+
+    await wrapper.get('button[aria-label="次の期間"]').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="gantt-empty"]').exists()).toBe(false);
+    expect(wrapper.find('[aria-label="読み込み中"]').exists()).toBe(true);
+    expect(panArea(wrapper).attributes('aria-busy')).toBe('true');
   });
 
   it('予定の無い期間でも、横の wheel で範囲を動かせる', async () => {

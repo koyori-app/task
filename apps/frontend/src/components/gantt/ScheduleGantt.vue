@@ -40,7 +40,7 @@ import {
   SCHEDULE_RELATIONS_PATH,
 } from '@/lib/calendar/schedule';
 import { dependencyEdges } from '@/lib/gantt/dependencies';
-import { scrollParentOf } from '@/lib/gantt/scroll-parent';
+import { horizontalScrollerIn, scrollParentOf } from '@/lib/gantt/scroll-parent';
 import { addDays, dateInZone } from '@/lib/calendar/timeline';
 import {
   layoutGantt,
@@ -157,6 +157,8 @@ const pan = useGanttPan({
   dayWidth: () => dayWidth.value,
   pageWidth: () => chartBoxWidth.value,
   shift: (days) => (from.value = addDays(viewFrom.value, days)),
+  // 図が箱より広い時は、先に図を横に巻く（巻き切ってから日付を送る）
+  scroller: () => horizontalScrollerIn(chartBox.value),
 });
 // 取得する範囲。送っている間は前の範囲のまま据え、操作が止まってから 1 回だけ取り直す
 const fetchRange = shallowRef({ from: viewFrom.value, to: to.value });
@@ -682,6 +684,7 @@ const LEGEND_BAR = `linear-gradient(to right, ${GANTT_PALETTE.TierLow} 40%, ${GA
     <div
       class="min-w-0 touch-pan-y touch-pinch-zoom"
       data-testid="gantt-pan"
+      :aria-busy="scheduleQuery.isFetching.value"
       @wheel="pan.onWheel"
       @pointerdown="pan.onPointerDown"
       @pointermove="pan.onPointerMove"
@@ -690,7 +693,12 @@ const LEGEND_BAR = `linear-gradient(to right, ${GANTT_PALETTE.TierLow} 40%, ${GA
       @click.capture="pan.onClickCapture"
     >
       <div
-        v-if="isTenantResolving || isProjectResolving || scheduleQuery.isLoading.value"
+        v-if="
+          isTenantResolving ||
+          isProjectResolving ||
+          scheduleQuery.isLoading.value ||
+          (scheduleQuery.isPlaceholderData.value && !layout.groups.length)
+        "
         class="flex justify-center py-8"
       >
         <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" aria-label="読み込み中" />
