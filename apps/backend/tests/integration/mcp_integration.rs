@@ -5,11 +5,13 @@
 //! - ツール: REST API を内向きに呼び直すので、scope・テナント束縛・プロジェクト束縛の拒否が
 //!   そのまま `isError: true` の結果になる。拒否と対照の成功を組で確かめる
 
-use crate::common::{TestApp, TestTenantProject, TestUser, create_status, insert_tenant};
+use crate::common::{
+    TestApp, TestTenantProject, TestUser, create_status, insert_extra_project, insert_tenant,
+};
 use axum::http::StatusCode;
 use backend::utils::desktop_auth::s256_challenge;
 use entity::scopes::Scope;
-use entity::{projects, tasks};
+use entity::{projects, tasks, users};
 use reqwest::{Client, Response, header};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::{Value, json};
@@ -529,10 +531,10 @@ async fn create_task_rejects_malformed_arguments_without_creating() {
         &app,
         &token,
         "create_task",
-        json!({ "project": fx.project_key, "title": "x", "label_ids": ["bug"] }),
+        json!({ "project": fx.project_key, "title": "x", "parent_task_id": "x" }),
     )
     .await;
-    assert_eq!(outcome.error(), "label_ids must be a UUID");
+    assert_eq!(outcome.error(), "parent_task_id must be a UUID");
 
     // priority の検証は API に任せる。API の拒否がそのまま返る
     let outcome = call(
@@ -1156,4 +1158,485 @@ async fn session_cookie_does_not_widen_the_token_scope() {
     .await;
 
     assert_eq!(outcome.error(), "403 forbidden");
+}
+
+/// プロジェクトの下に 1 件作り、ID を返す（セッションで REST API に送る）。
+async fn create_option(app: &TestApp, fx: &Fixture, collection: &str, body: Value) -> Uuid {
+    let response = app
+        .post_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{}/{collection}",
+                fx.tp.tenant_id, fx.tp.project_id
+            ),
+            body,
+        )
+        .await;
+    assert_eq!(
+        response.status(),
+        StatusCode::CREATED,
+        "create {collection}"
+    );
+    let created: Value = response.json().await.expect("created json");
+    created["id"]
+        .as_str()
+        .and_then(|id| Uuid::parse_str(id).ok())
+        .expect("created id")
+}
+
+async fn create_label(app: &TestApp, fx: &Fixture, name: &str) -> Uuid {
+    create_option(
+        app,
+        fx,
+        "labels",
+        json!({ "name": name, "color": "#336699" }),
+    )
+    .await
+}
+
+async fn create_task_type(app: &TestApp, fx: &Fixture, name: &str) -> Uuid {
+    create_option(
+        app,
+        fx,
+        "task-types",
+        json!({ "name": name, "color": "#336699" }),
+    )
+    .await
+}
+
+async fn create_milestone(app: &TestApp, fx: &Fixture, name: &str) -> Uuid {
+    create_option(
+        app,
+        fx,
+        "milestones",
+        json!({ "name": name, "due_date": "2026-12-31" }),
+    )
+    .await
+}
+
+async fn create_sprint(app: &TestApp, fx: &Fixture, name: &str) -> Uuid {
+    create_option(
+        app,
+        fx,
+        "sprints",
+        json!({ "name": name, "start_date": "2026-12-01", "end_date": "2026-12-14" }),
+    )
+    .await
+}
+
+async fn username(app: &TestApp, user_id: Uuid) -> String {
+    users::Entity::find_by_id(user_id)
+        .one(&app.state.db)
+        .await
+        .expect("find user")
+        .expect("user")
+        .username
+}
+
+async fn task_count(app: &TestApp, fx: &Fixture) -> usize {
+    tasks::Entity::find()
+        .filter(tasks::Column::ProjectId.eq(fx.tp.project_id))
+        .all(&app.state.db)
+        .await
+        .expect("tasks")
+        .len()
+}
+
+fn ids_of(items: &Value, pick: impl Fn(&Value) -> &Value) -> Vec<String> {
+    let mut ids: Vec<String> = items
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|item| pick(item).as_str().expect("id").to_string())
+        .collect();
+    ids.sort();
+    ids
+}
+
+fn sorted(ids: &[Uuid]) -> Vec<String> {
+    let mut ids: Vec<String> = ids.iter().map(Uuid::to_string).collect();
+    ids.sort();
+    ids
+}
+
+async fn get_task_json(app: &TestApp, token: &str, created: &Value, fx: &Fixture) -> Value {
+    call(
+        app,
+        token,
+        "get_task",
+        json!({ "task": format!("{}-{}", fx.project_key, created["seq_id"]) }),
+    )
+    .await
+    .json()
+}
+
+#[tokio::test]
+async fn create_task_takes_names_for_labels_assignee_type_milestone_and_sprint() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+    let bug = create_label(&app, &fx, "bug").await;
+    let ui = create_label(&app, &fx, "ui").await;
+    let feature = create_task_type(&app, &fx, "Feature").await;
+    let v1 = create_milestone(&app, &fx, "v1").await;
+    let week1 = create_sprint(&app, &fx, "week-1").await;
+    let me = username(&app, fx.user.id).await;
+
+    let created = call(
+        &app,
+        &token,
+        "create_task",
+        json!({
+            "project": fx.project_key,
+            "title": "名前で渡す",
+            "labels": ["bug", "ui"],
+            "assignees": [me],
+            "task_type": "Feature",
+            "milestone": "v1",
+            "sprint": "week-1",
+        }),
+    )
+    .await
+    .json();
+
+    let fetched = get_task_json(&app, &token, &created, &fx).await;
+    assert_eq!(
+        ids_of(&fetched["labels"], |label| &label["id"]),
+        sorted(&[bug, ui])
+    );
+    assert_eq!(
+        ids_of(&fetched["assignees"], |assignee| &assignee["user"]["id"]),
+        vec![fx.user.id.to_string()]
+    );
+    assert_eq!(fetched["task_type"]["id"], feature.to_string());
+    assert_eq!(fetched["milestone_id"], v1.to_string());
+    assert_eq!(fetched["sprint_id"], week1.to_string());
+}
+
+#[tokio::test]
+async fn create_task_matches_names_ignoring_case_and_passes_uuids_through() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+    let bug = create_label(&app, &fx, "bug").await;
+    let ui = create_label(&app, &fx, "ui").await;
+    let me = username(&app, fx.user.id).await;
+
+    let created = call(
+        &app,
+        &token,
+        "create_task",
+        json!({
+            "project": fx.project_key,
+            "title": "大文字小文字と UUID",
+            "labels": ["BUG", ui.to_string()],
+            // 同じ人を名前と UUID で 2 回渡しても 1 人になる
+            "assignees": [me.to_uppercase(), fx.user.id.to_string()],
+        }),
+    )
+    .await
+    .json();
+
+    let fetched = get_task_json(&app, &token, &created, &fx).await;
+    assert_eq!(
+        ids_of(&fetched["labels"], |label| &label["id"]),
+        sorted(&[bug, ui])
+    );
+    assert_eq!(
+        ids_of(&fetched["assignees"], |assignee| &assignee["user"]["id"]),
+        vec![fx.user.id.to_string()]
+    );
+}
+
+#[tokio::test]
+async fn update_task_adds_and_removes_labels_by_name() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+    let bug = create_label(&app, &fx, "bug").await;
+    let ui = create_label(&app, &fx, "ui").await;
+    let (reference, _) = create_task(&app, &token, &fx, "ラベルを付け外す").await;
+
+    call(
+        &app,
+        &token,
+        "update_task",
+        json!({ "task": reference, "add_labels": ["bug", "UI"] }),
+    )
+    .await
+    .json();
+    let fetched = call(&app, &token, "get_task", json!({ "task": reference }))
+        .await
+        .json();
+    assert_eq!(
+        ids_of(&fetched["labels"], |label| &label["id"]),
+        sorted(&[bug, ui])
+    );
+
+    call(
+        &app,
+        &token,
+        "update_task",
+        json!({ "task": reference, "remove_labels": ["bug"] }),
+    )
+    .await
+    .json();
+    let fetched = call(&app, &token, "get_task", json!({ "task": reference }))
+        .await
+        .json();
+    assert_eq!(
+        ids_of(&fetched["labels"], |label| &label["id"]),
+        sorted(&[ui])
+    );
+
+    // 旧名の引数も受ける
+    call(
+        &app,
+        &token,
+        "update_task",
+        json!({ "task": reference, "add_label_ids": [bug.to_string()] }),
+    )
+    .await
+    .json();
+    let fetched = call(&app, &token, "get_task", json!({ "task": reference }))
+        .await
+        .json();
+    assert_eq!(
+        ids_of(&fetched["labels"], |label| &label["id"]),
+        sorted(&[bug, ui])
+    );
+}
+
+#[tokio::test]
+async fn unknown_label_name_lists_the_candidates_without_creating() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+    create_label(&app, &fx, "bug").await;
+    create_task_type(&app, &fx, "Feature").await;
+    create_milestone(&app, &fx, "v1").await;
+
+    for (arguments, expected) in [
+        (
+            json!({ "labels": ["nope"] }),
+            "Label not found: nope (this project has bug)",
+        ),
+        (
+            json!({ "task_type": "nope" }),
+            "Type not found: nope (this project has Feature)",
+        ),
+        (
+            json!({ "milestone": "nope" }),
+            "Milestone not found: nope (this project has v1)",
+        ),
+        (
+            json!({ "sprint": "nope" }),
+            "Sprint not found: nope (this project has none)",
+        ),
+    ] {
+        let mut arguments = arguments;
+        arguments["project"] = json!(fx.project_key);
+        arguments["title"] = json!("作られない");
+        let outcome = call(&app, &token, "create_task", arguments).await;
+        assert_eq!(outcome.error(), expected);
+    }
+    assert_eq!(task_count(&app, &fx).await, 0);
+}
+
+#[tokio::test]
+async fn ambiguous_label_name_asks_for_a_uuid() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+    // 同じ綴りのラベルは作れない（プロジェクトと名前の UNIQUE）。大文字小文字違いは作れるので、
+    // どちらとも完全一致しない綴りで引くと複数に当たる
+    let first = create_label(&app, &fx, "Bug").await;
+    let second = create_label(&app, &fx, "bug").await;
+
+    let outcome = call(
+        &app,
+        &token,
+        "create_task",
+        json!({ "project": fx.project_key, "title": "作られない", "labels": ["BUG"] }),
+    )
+    .await;
+    let message = outcome.error();
+    assert!(
+        message.starts_with("Ambiguous Label: BUG (candidates: "),
+        "{message}"
+    );
+    for expected in [
+        first.to_string(),
+        second.to_string(),
+        "specify a UUID".into(),
+    ] {
+        assert!(message.contains(&expected), "{message}");
+    }
+    assert_eq!(task_count(&app, &fx).await, 0);
+
+    // 対照: UUID で渡せば作れる
+    let created = call(
+        &app,
+        &token,
+        "create_task",
+        json!({ "project": fx.project_key, "title": "UUID で渡す", "labels": [first.to_string()] }),
+    )
+    .await
+    .json();
+    let fetched = get_task_json(&app, &token, &created, &fx).await;
+    assert_eq!(
+        ids_of(&fetched["labels"], |label| &label["id"]),
+        sorted(&[first])
+    );
+}
+
+#[tokio::test]
+async fn unknown_assignee_lists_candidates_only_with_write_scope() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+    let me = username(&app, fx.user.id).await;
+
+    let outcome = call(
+        &app,
+        &token,
+        "create_task",
+        json!({ "project": fx.project_key, "title": "作られない", "assignees": ["nobody"] }),
+    )
+    .await;
+    assert_eq!(
+        outcome.error(),
+        format!("Assignable user not found: nobody (this project has {me})")
+    );
+
+    // 読むだけの PAT でも名前の解決は POST の前に走る。`?username=` は read:task で通り、
+    // 候補の全件は write:task が要るので候補なしになる
+    let reader = app
+        .insert_pat(
+            fx.user.id,
+            fx.tp.tenant_id,
+            vec![Scope::ReadProject, Scope::ReadTask],
+            None,
+        )
+        .await;
+    let outcome = call(
+        &app,
+        &reader,
+        "create_task",
+        json!({ "project": fx.project_key, "title": "作られない", "assignees": ["nobody"] }),
+    )
+    .await;
+    assert_eq!(
+        outcome.error(),
+        "Assignable user not found: nobody (this project has none)"
+    );
+    assert_eq!(task_count(&app, &fx).await, 0);
+}
+
+/// 名前は指したプロジェクトの一覧からだけ引く。同じテナントの別のプロジェクトの同名は拾わない
+#[tokio::test]
+async fn names_are_looked_up_only_in_the_given_project() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+    let other = insert_extra_project(&app, fx.tp.tenant_id).await;
+    let response = app
+        .post_json_with_session(
+            &format!("/v1/tenants/{}/projects/{other}/labels", fx.tp.tenant_id),
+            json!({ "name": "bug", "color": "#336699" }),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let outcome = call(
+        &app,
+        &token,
+        "create_task",
+        json!({ "project": fx.project_key, "title": "作られない", "labels": ["bug"] }),
+    )
+    .await;
+    assert_eq!(
+        outcome.error(),
+        "Label not found: bug (this project has none)"
+    );
+    assert_eq!(task_count(&app, &fx).await, 0);
+
+    // 対照: 指したプロジェクトに同名を作れば引ける
+    let bug = create_label(&app, &fx, "bug").await;
+    let created = call(
+        &app,
+        &token,
+        "create_task",
+        json!({ "project": fx.project_key, "title": "引ける", "labels": ["bug"] }),
+    )
+    .await
+    .json();
+    let fetched = get_task_json(&app, &token, &created, &fx).await;
+    assert_eq!(
+        ids_of(&fetched["labels"], |label| &label["id"]),
+        sorted(&[bug])
+    );
+}
+
+#[tokio::test]
+async fn milestone_and_sprint_names_need_their_read_scopes_and_uuids_do_not() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = app
+        .insert_pat(
+            fx.user.id,
+            fx.tp.tenant_id,
+            vec![Scope::ReadProject, Scope::WriteTask],
+            None,
+        )
+        .await;
+    let bug = create_label(&app, &fx, "bug").await;
+    let v1 = create_milestone(&app, &fx, "v1").await;
+    let week1 = create_sprint(&app, &fx, "week-1").await;
+    let me = username(&app, fx.user.id).await;
+
+    for (arguments, expected) in [
+        (
+            json!({ "milestone": "v1" }),
+            "403 forbidden (could not list the milestones to resolve the milestone: the token may lack the read:milestone scope, or it is not allowed in this project; if the scope is missing, pass the milestone UUID instead)",
+        ),
+        (
+            json!({ "sprint": "week-1" }),
+            "403 forbidden (could not list the sprints to resolve the sprint: the token may lack the read:sprint scope, or it is not allowed in this project; if the scope is missing, pass the sprint UUID instead)",
+        ),
+    ] {
+        let mut arguments = arguments;
+        arguments["project"] = json!(fx.project_key);
+        arguments["title"] = json!("作られない");
+        let outcome = call(&app, &token, "create_task", arguments).await;
+        assert_eq!(outcome.error(), expected);
+    }
+    assert_eq!(task_count(&app, &fx).await, 0);
+
+    // 対照: 同じ PAT でも UUID なら作れ、ラベルと担当者は名前でも引ける
+    let created = call(
+        &app,
+        &token,
+        "create_task",
+        json!({
+            "project": fx.project_key,
+            "title": "UUID で渡す",
+            "milestone": v1.to_string(),
+            "sprint": week1.to_string(),
+            "labels": ["bug"],
+            "assignees": [me],
+        }),
+    )
+    .await
+    .json();
+    assert_eq!(created["milestone_id"], v1.to_string());
+    assert_eq!(created["sprint_id"], week1.to_string());
+    let fetched = get_task_json(&app, &token, &created, &fx).await;
+    assert_eq!(
+        ids_of(&fetched["labels"], |label| &label["id"]),
+        sorted(&[bug])
+    );
+    assert_eq!(
+        ids_of(&fetched["assignees"], |assignee| &assignee["user"]["id"]),
+        vec![fx.user.id.to_string()]
+    );
 }
