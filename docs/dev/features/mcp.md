@@ -13,7 +13,7 @@ backend は MCP（Model Context Protocol）のサーバーを `POST /mcp` で公
 Claude Code などの MCP クライアントは、URL と PAT を設定するか、OAuth で接続を許可すると、タスクを読み書きできる。
 CLI を入れにくい環境で、CLI の代わりに使うためのものである。
 OAuth の認可サーバーも backend が兼ね、claude.ai、Claude Code、ChatGPT、Codex からコネクタとして接続できる。
-ツールは 25 個で、タスクを実装する流れで使うものに加えて、タスクの一括作成と削除、自分のタスク、スプリント、通知、テナントの一覧を含む。レビュー指摘の操作は範囲外である。
+ツールは 25 個で、タスクを実装する流れで使うものに加えて、タスクの一括作成と削除、自分のタスク、スプリント、通知、テナントの一覧を含み、レビュー指摘の操作は範囲外である。
 
 ## 用語
 
@@ -375,6 +375,7 @@ UUID は確かめずに API へ渡す。
 `unlink_pull_request` は、タスクにつながる PR から番号の合うものを外す。
 同じ番号が複数あれば、プロジェクトの今の連携先のものを外し、それで決まらなければ候補を並べたエラーを返す。
 PR の行は残るので、`link_pull_request` でつなぎ直せる。タイトルか本文に `KEY-N` が残っていれば、次の PR のイベントでつながり直す。
+リンクの行ごと消すので、`closes` もなくなる。つなぎ直すときに `closes` を渡し直す。
 
 `update_notification_settings` は、渡さなかった側の一覧を今の値のまま送り直す。空の配列を渡すと、その側の通知をすべて止める。
 
@@ -401,15 +402,18 @@ OAuth で接続したとき、`whoami` は許可の ID と、クライアント�
 | `list_project_options` の `sprints` | PAT か許可の持ち主 | `read:sprint` |
 | `list_project_options` の `assignable_users` | PAT か許可の持ち主 | `write:task` |
 | `list_tenants` | PAT か許可の持ち主 | `read:tenant` |
-| `list_my_tasks`、`list_notifications`、`get_notification_settings` | PAT か許可の持ち主 | `read:task` |
-| `bulk_create_tasks`、`unlink_pull_request`、`mark_notification_read`、`mark_all_notifications_read`、`update_notification_settings` | PAT か許可の持ち主 | `write:task` |
+| `list_my_tasks`、`get_notification_settings` | PAT か許可の持ち主 | `read:task` |
+| `list_notifications` | PAT か許可の持ち主 | `read:task` か `read:review` |
+| `mark_notification_read`、`mark_all_notifications_read` | PAT か許可の持ち主 | `write:task` か `write:review` |
+| `bulk_create_tasks`、`unlink_pull_request`、`update_notification_settings` | PAT か許可の持ち主 | `write:task` |
 | `delete_task` | タスクの作成者かテナントのオーナー | `write:task` |
 | `get_sprint` | PAT か許可の持ち主 | `read:sprint` |
 | `start_sprint` | PAT の持ち主 | `write:sprint` |
 | `complete_sprint` | PAT の持ち主 | `write:sprint` と `write:task` |
 
 `write:task` は `read:task` を含むので、`unlink_pull_request` と `update_notification_settings` が先に読む一覧も `write:task` で読める。
-通知の PAT での一覧と既読は、タスクの通知の種別に限る。
+PAT と許可での通知の一覧と既読は、持つ scope に応じた種別に限る。`read:task` か `write:task` でタスクの通知を、`read:review` か `write:review` でレビューの通知を扱う。
+OAuth ではレビューの scope を渡せないので、許可で扱えるのはタスクの通知だけである。
 
 引数を名前で渡すと、ID を引くための scope が追加で要る。
 
@@ -535,4 +539,5 @@ OAuth で渡せる scope は `read:tenant`、`read:project`、`read:task`、`wri
 | 2026-11-21 | CLI の残りの操作を 13 個のツールで足し、既存のツールで足りる操作には専用のツールを作らない | 同じ応答を返すツールが 2 つあると、クライアントに渡るツールの一覧が長くなるだけである。最初の 12 個もタスクの完了を `update_task` に任せている |
 | 2026-11-21 | `write:sprint` を OAuth で渡せる scope に足さない | スプリントの開始と完了は戻せない管理の操作で、エージェントが日常に呼ぶものではない。足すと同意画面と既存の許可の扱いまで変わるので、要るときに分けて決める |
 | 2026-11-21 | ツールをモジュールごとのルーターに分けて足し合わせる | ツールを足すほかの作業と、同じファイルの同じ行を触らずに済む |
+| 2026-11-21 | `unlink_pull_request` を戻せない操作に数えず、説明に破壊的と書かない | 外れるのはリンクの行だけで、PR の行は残り、`link_pull_request` で同じ PR をつなぎ直せる。消える `closes` も、つなぎ直すときに渡し直せる。戻す手段が無い `delete_task` などと同じ語を使うと、クライアントが確かめを求める操作が増え、本当に戻せない操作が目立たなくなる |
 | 2026-11-21 | `.mcp.json` をリポジトリ直下に置き、`headers` を書かず OAuth で接続する。2026-11-18 の「置かず、設定例を書く」を改める | 本番のエンドポイントが `https://task.koyori.app/api/mcp` に決まった。`headers` に `${TASK_TOKEN}` を書くと、未設定の人に設定の警告が出て接続が失敗し、OAuth に切り替わらない。同じ名前の user スコープの定義にも勝つので、OAuth で接続済みの人の接続も失敗に変わる |

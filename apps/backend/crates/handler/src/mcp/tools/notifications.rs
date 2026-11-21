@@ -127,7 +127,7 @@ impl TaskMcp {
 #[tool_router(router = notifications_router, vis = "pub(super)")]
 impl TaskMcp {
     #[tool(
-        description = "List the notifications of the token owner, newest first. Pass next_cursor of the previous result as cursor for the next page. Needs the read:task scope.",
+        description = "List the notifications of the token owner, newest first. Pass next_cursor of the previous result as cursor for the next page. Needs the read:task or read:review scope: a personal access token sees the task notifications with read:task and the review notifications with read:review.",
         annotations(read_only_hint = true)
     )]
     async fn list_notifications(
@@ -138,7 +138,9 @@ impl TaskMcp {
         finish(self.run_list_notifications(&parts, args).await)
     }
 
-    #[tool(description = "Mark one notification as read. Needs the write:task scope.")]
+    #[tool(
+        description = "Mark one notification as read. Needs the write:task scope for a task notification or write:review for a review notification."
+    )]
     async fn mark_notification_read(
         &self,
         Parameters(args): Parameters<NotificationArgs>,
@@ -156,7 +158,7 @@ impl TaskMcp {
     }
 
     #[tool(
-        description = "Mark every notification the token can see as read. Cannot be undone: there is no way to mark them unread again. Needs the write:task scope."
+        description = "Mark every notification the token can see as read. Cannot be undone: there is no way to mark them unread again. Needs the write:task or write:review scope; a personal access token marks only the kinds its scopes cover."
     )]
     async fn mark_all_notifications_read(
         &self,

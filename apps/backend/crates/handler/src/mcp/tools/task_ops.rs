@@ -16,6 +16,7 @@ use super::super::inner::ToolFailure;
 use super::super::resolve;
 use super::{
     NewTaskArgs, TaskArgs, TaskMcp, TaskPath, blank_as_none, finish, new_task_body, parse_new_task,
+    status_for_new_task,
 };
 
 #[derive(Deserialize, JsonSchema)]
@@ -154,13 +155,24 @@ impl TaskMcp {
         let api = self.inner(parts)?;
         let tenant_id = resolve::tenant_id(&api, args.tenant.as_deref()).await?;
         let project_id = resolve::project_id(&api, &tenant_id, &args.project).await?;
-        // 状態と名前の一覧は要素の間で使い回し、種類ごとに 1 回だけ引く
+        // 状態とラベルなどの一覧は要素の間で使い回し、種類ごとに 1 回だけ引く。
+        // 担当者は引けた名前ごとに取っておく
         let mut names = resolve::ProjectNames::new(&api, &tenant_id, &project_id);
         let mut statuses = None;
+        // 引数の `status` は要素より先に 1 回だけ引く。誤りを要素の失敗に見せず、
+        // 全要素が `status` を持つときも確かめる
+        let default_status = match args.status.as_deref() {
+            Some(status) => Some(
+                status_for_new_task(&api, &tenant_id, &project_id, Some(status), &mut statuses)
+                    .await?
+                    .to_string(),
+            ),
+            None => None,
+        };
         let mut bodies = Vec::with_capacity(parsed.len());
         for (index, mut task) in parsed.into_iter().enumerate() {
             if task.status.is_none() {
-                task.status.clone_from(&args.status);
+                task.status.clone_from(&default_status);
             }
             let body = new_task_body(
                 &api,
@@ -276,7 +288,7 @@ impl TaskMcp {
     }
 
     #[tool(
-        description = "Unlink a pull request from a task by its number (removes the link from every source). The pull request itself is kept and link_pull_request links it again; a KEY-N left in its title or body links it back on the next pull request event. Needs the write:task scope."
+        description = "Unlink a pull request from a task by its number (removes the link from every source). The pull request itself is kept and link_pull_request links it again (pass closes again if it was set); a KEY-N left in its title or body links it back on the next pull request event. Needs the write:task scope."
     )]
     async fn unlink_pull_request(
         &self,

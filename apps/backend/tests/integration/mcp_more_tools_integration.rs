@@ -12,12 +12,12 @@
 //! - スプリント: 表示・開始・二度目の開始の 409・完了で未完了のタスクが外れる、`sprint_id` の形、
 //!   `write:sprint` が無ければ 403（OAuth の 403 は mcp_oauth_integration.rs）
 //! - 通知: 一覧とカーソル、1 件と全件の既読、設定の表示と片側だけの更新、UUID の `project` は
-//!   テナントを読まない
+//!   テナントを読まないが束縛の外は 403、PAT の scope に応じた種別だけが見える
 //!
 //! scope を絞った PAT の試験では、`project` と `task` を UUID で渡す（キーと `KEY-N` の解決は
 //! `read:project` が要り、拒否の原因が混ざる）。
 
-use crate::common::{TestApp, insert_tenant};
+use crate::common::{TestApp, insert_extra_project, insert_tenant};
 use crate::forge_commit_links_integration::{REPO_NAME, REPO_OWNER, insert_task, setup};
 use crate::forge_manual_pull_request_links_integration::{forget_github_mock, github_mock};
 use crate::mcp_integration::{
@@ -137,6 +137,23 @@ async fn bulk_create_tasks_uses_the_default_and_named_statuses_in_input_order() 
     .json();
     assert_eq!(created["tasks"][0]["status_id"], fx.done.to_string());
     assert_eq!(created["tasks"][1]["status_id"], fx.todo.to_string());
+
+    // 引数の `status` の誤りは、全要素が `status` を持っていても、要素の失敗でなく返す
+    let before = task_count(&app, &fx).await;
+    let outcome = call(
+        &app,
+        &token,
+        "bulk_create_tasks",
+        json!({
+            "project": fx.project_key,
+            "status": "Dnoe",
+            "tasks": [{ "title": "要素は Todo", "status": "Todo" }],
+        }),
+    )
+    .await;
+    let message = outcome.error();
+    assert!(message.starts_with("Status not found: Dnoe"), "{message}");
+    assert_eq!(task_count(&app, &fx).await, before, "作らない");
 }
 
 #[tokio::test]
@@ -313,6 +330,32 @@ async fn delete_task_is_for_the_creator_and_the_tenant_owner() {
     )
     .await
     .json();
+
+    // オーナーは、ほかの人が作ったタスクも消せる
+    let by_member = call(
+        &app,
+        &member_token,
+        "create_task",
+        json!({ "project": project, "title": "メンバーが作る" }),
+    )
+    .await
+    .json();
+    let outcome = call(
+        &app,
+        &token,
+        "delete_task",
+        json!({ "task": by_member["id"], "project": project }),
+    )
+    .await;
+    assert!(!outcome.is_error, "{}", outcome.text);
+    let fetched = call(
+        &app,
+        &token,
+        "get_task",
+        json!({ "task": by_member["id"], "project": project }),
+    )
+    .await;
+    assert_eq!(fetched.error(), "404 not-found");
 }
 
 // ---- unlink_pull_request ----
@@ -494,8 +537,7 @@ async fn sprint_is_shown_started_and_completed() {
         .json();
     assert_eq!(started["status"], "active");
     let again = call(&app, &token, "start_sprint", args.clone()).await;
-    let message = again.error();
-    assert!(message.starts_with("409 "), "{message}");
+    assert_eq!(again.error(), "409 conflict");
 
     let completed = call(&app, &token, "complete_sprint", args.clone())
         .await
@@ -535,17 +577,54 @@ async fn start_sprint_needs_write_sprint() {
     assert_eq!(shown["status"], "planning", "開始されていない");
 }
 
+/// 完了は write:sprint と write:task の両方が要る。片方だけでは断り、スプリントは進行中のまま
+#[tokio::test]
+async fn complete_sprint_needs_write_sprint_and_write_task() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let sprint = create_sprint(&app, &fx, "week-1").await;
+    let args = json!({ "project": fx.tp.project_id.to_string(), "sprint_id": sprint.to_string() });
+    let token = api_pat(&app, &fx).await;
+    call(&app, &token, "start_sprint", args.clone())
+        .await
+        .json();
+
+    for scopes in [
+        vec![Scope::WriteSprint],
+        vec![Scope::WriteTask, Scope::ReadSprint],
+    ] {
+        let narrow = pat(&app, &fx, scopes.clone()).await;
+        let outcome = call(&app, &narrow, "complete_sprint", args.clone()).await;
+        assert_eq!(outcome.error(), "403 forbidden", "{scopes:?}");
+    }
+    let shown = call(&app, &token, "get_sprint", args.clone()).await.json();
+    assert_eq!(shown["status"], "active", "完了していない");
+
+    let both = pat(&app, &fx, vec![Scope::WriteSprint, Scope::WriteTask]).await;
+    let completed = call(&app, &both, "complete_sprint", args).await.json();
+    assert_eq!(completed["status"], "completed");
+}
+
 // ---- 通知 ----
 
 /// 担当の通知を 1 件直に挿す。`minutes_ago` で新旧の順を決める
 async fn insert_notification(app: &TestApp, fx: &Fixture, minutes_ago: i64) -> Uuid {
+    insert_notification_of(app, fx, minutes_ago, common::notifications::TYPE_ASSIGNED).await
+}
+
+async fn insert_notification_of(
+    app: &TestApp,
+    fx: &Fixture,
+    minutes_ago: i64,
+    notification_type: &str,
+) -> Uuid {
     let id = Uuid::new_v4();
     entity::notifications::ActiveModel {
         id: Set(id),
         user_id: Set(fx.user.id),
         task_id: Set(None),
         project_id: Set(Some(fx.tp.project_id)),
-        notification_type: Set(common::notifications::TYPE_ASSIGNED.into()),
+        notification_type: Set(notification_type.into()),
         payload: Set(json!({})),
         read_at: Set(None),
         created_at: Set((chrono::Utc::now() - chrono::Duration::minutes(minutes_ago)).into()),
@@ -730,4 +809,110 @@ async fn notification_settings_by_project_uuid_do_not_need_tenant() {
     .await;
     let message = outcome.error();
     assert!(message.ends_with("Pass `tenant`."), "{message}");
+}
+
+/// 通知設定を UUID で指すとテナントを解決しないが、束縛の外のプロジェクトは API が断る
+#[tokio::test]
+async fn notification_settings_outside_the_token_binding_are_403() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    // 持ち主が所属する別のテナントのプロジェクト
+    let other_tenant = insert_tenant(&app.state.db, fx.user.id).await;
+    let other_project = insert_extra_project(&app, other_tenant).await;
+    let token = api_pat(&app, &fx).await;
+    let outcome = call(
+        &app,
+        &token,
+        "get_notification_settings",
+        json!({ "project": other_project.to_string() }),
+    )
+    .await;
+    assert_eq!(outcome.error(), "403 forbidden");
+    let outcome = call(
+        &app,
+        &token,
+        "update_notification_settings",
+        json!({ "project": other_project.to_string(), "email_events": ["assigned"] }),
+    )
+    .await;
+    assert_eq!(outcome.error(), "403 forbidden");
+
+    // 同じテナントでも、許したプロジェクトの外は断る
+    let allowed = insert_extra_project(&app, fx.tp.tenant_id).await;
+    let narrowed = app
+        .insert_pat(
+            fx.user.id,
+            fx.tp.tenant_id,
+            vec![Scope::Api],
+            Some(vec![allowed]),
+        )
+        .await;
+    let outcome = call(
+        &app,
+        &narrowed,
+        "get_notification_settings",
+        json!({ "project": fx.tp.project_id.to_string() }),
+    )
+    .await;
+    assert_eq!(outcome.error(), "403 forbidden");
+    let outcome = call(
+        &app,
+        &narrowed,
+        "update_notification_settings",
+        json!({ "project": fx.tp.project_id.to_string(), "in_app_events": [] }),
+    )
+    .await;
+    assert_eq!(outcome.error(), "403 forbidden");
+
+    // 対照: 束縛の中のプロジェクトは通る
+    call(
+        &app,
+        &narrowed,
+        "get_notification_settings",
+        json!({ "project": allowed.to_string() }),
+    )
+    .await
+    .json();
+    call(
+        &app,
+        &token,
+        "get_notification_settings",
+        json!({ "project": fx.tp.project_id.to_string() }),
+    )
+    .await
+    .json();
+}
+
+/// 通知の一覧は read:task か read:review で通り、PAT には持つ scope の種別だけが見える
+#[tokio::test]
+async fn notifications_follow_the_task_and_review_scopes() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let task_notification = insert_notification(&app, &fx, 2).await;
+    let review_notification = insert_notification_of(
+        &app,
+        &fx,
+        1,
+        common::notifications::TYPE_REVIEW_ROUND_CREATED,
+    )
+    .await;
+
+    for (scopes, expected) in [
+        (vec![Scope::ReadTask], vec![task_notification]),
+        (vec![Scope::ReadReview], vec![review_notification]),
+        (
+            vec![Scope::Api],
+            vec![review_notification, task_notification],
+        ),
+    ] {
+        let token = pat(&app, &fx, scopes.clone()).await;
+        let listed = call(&app, &token, "list_notifications", json!({}))
+            .await
+            .json();
+        let expected: Vec<String> = expected.iter().map(Uuid::to_string).collect();
+        assert_eq!(notification_ids(&listed), expected, "{scopes:?}");
+    }
+    let token = pat(&app, &fx, vec![Scope::ReadTenant]).await;
+    let outcome = call(&app, &token, "list_notifications", json!({})).await;
+    assert_eq!(outcome.error(), "403 forbidden");
 }

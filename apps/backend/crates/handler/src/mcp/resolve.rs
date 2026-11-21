@@ -5,6 +5,8 @@
 //! `crates/cli/src/commands/tasks.rs` の `FieldResolver`）と同じ。`handler` から `cli` は
 //! 参照できないので、要る分を写している。片方を変えたら、もう片方も合わせる。
 
+use std::collections::HashMap;
+
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -398,7 +400,8 @@ impl Named {
 /// プロジェクトのラベル・種別・マイルストーン・スプリント・担当者を名前か UUID で引く
 /// （`crates/cli/src/commands/tasks.rs` の `FieldResolver`）。
 ///
-/// 一覧は種類ごとに、名前で引くときに初めて 1 回だけ取って使い回す。UUID は確かめずにそのまま返す
+/// 一覧は種類ごとに、名前で引くときに初めて 1 回だけ取って使い回す。担当者は引けた名前ごとに
+/// 結果を取っておく（一括作成で同じ名前を要素の数だけ引き直さない）。UUID は確かめずにそのまま返す
 pub(super) struct ProjectNames<'a> {
     api: &'a InnerApi,
     tenant_id: &'a str,
@@ -407,6 +410,7 @@ pub(super) struct ProjectNames<'a> {
     task_types: Option<Vec<Value>>,
     milestones: Option<Vec<Value>>,
     sprints: Option<Vec<Value>>,
+    users: HashMap<String, Uuid>,
 }
 
 impl<'a> ProjectNames<'a> {
@@ -419,6 +423,7 @@ impl<'a> ProjectNames<'a> {
             task_types: None,
             milestones: None,
             sprints: None,
+            users: HashMap::new(),
         }
     }
 
@@ -483,6 +488,9 @@ impl<'a> ProjectNames<'a> {
         if let Ok(uuid) = Uuid::parse_str(value) {
             return Ok(uuid);
         }
+        if let Some(&id) = self.users.get(value) {
+            return Ok(id);
+        }
         let matched = list_collection(
             self.api,
             self.tenant_id,
@@ -500,8 +508,9 @@ impl<'a> ProjectNames<'a> {
             .iter()
             .any(|user| str_field(user, "username").eq_ignore_ascii_case(value))
         {
-            let id = pick_named(KIND, value, &pairs(&matched, "username"))?;
-            return listed_uuid(KIND, id);
+            let id = listed_uuid(KIND, pick_named(KIND, value, &pairs(&matched, "username"))?)?;
+            self.users.insert(value.to_string(), id);
+            return Ok(id);
         }
         // 候補の列挙は `write:task` が要り、読むだけのトークンでは読めない。読めなくても
         // 「見つからない」ことは確かなので、CLI と同じく候補なし（none）で返す
@@ -731,6 +740,37 @@ mod tests {
         // UUID は一覧を引かずにそのまま返す
         let id = Uuid::from_u128(7);
         assert_eq!(names.user(&id.to_string()).await.unwrap(), id);
+    }
+
+    /// 引けた担当者は取っておき、同じ名前を引き直さない（一括作成で要素の数だけ問い合わせない）
+    #[tokio::test]
+    async fn assignee_found_once_is_not_looked_up_again() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let id = Uuid::from_u128(9);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counted = calls.clone();
+        let router = axum::Router::new().fallback(move || {
+            let counted = counted.clone();
+            async move {
+                counted.fetch_add(1, Ordering::SeqCst);
+                axum::Json(json!([{ "id": id.to_string(), "username": "alice" }]))
+            }
+        });
+        let (parts, ()) = axum::http::Request::builder()
+            .uri("/mcp")
+            .header(axum::http::header::AUTHORIZATION, "Bearer pat-1")
+            .body(())
+            .unwrap()
+            .into_parts();
+        let api = InnerApi::from_parts(&router, &parts).unwrap();
+        let mut names = ProjectNames::new(&api, "t", "p");
+        for _ in 0..3 {
+            assert_eq!(names.user("alice").await.unwrap(), id);
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     /// `?username=` は read:task と write:task のどちらでも通るので、403 の補足は両方を挙げる
