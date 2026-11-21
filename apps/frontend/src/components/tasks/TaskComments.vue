@@ -8,8 +8,9 @@ import TaskActivityEntry from '@/components/tasks/TaskActivityEntry.vue';
 import TaskCommentItem from '@/components/tasks/TaskCommentItem.vue';
 import { Button, Skeleton, Spinner } from '@koyori-app/ui-vue';
 import {
-  clearCommentDraft,
+  beginCommentDraftSend,
   getCommentDraft,
+  isCommentDraftSending,
   setCommentDraft,
 } from '@/composables/useCommentDrafts';
 import { useAuthStore } from '@/stores/auth';
@@ -148,6 +149,13 @@ const uploadFile = useProjectFileUpload(
   () => props.tenantId,
   () => props.projectId,
 );
+/** 今の宛先が送信中か（下書きと同じ置き場の印。ペインを作り直しても効く） */
+const composerSending = computed(() =>
+  isCommentDraftSending(userId.value, draftTaskKey.value, openThreadId.value),
+);
+/** 入力欄を止めるか。今の宛先が送信中か、このペインの POST が進行中 */
+const composerBusy = computed(() => !!props.submitPending || composerSending.value);
+
 /** 入力欄が貼り付けたファイルを上げている最中か。その間は送信を止める（途中の本文を送らない） */
 const composerUploading = ref(false);
 // 入力欄は一覧とスレッド・タスクの間で使い回す。下書きと同じ組で分け、前の宛先への貼り付けの
@@ -268,23 +276,21 @@ function onComposerFocusOut(event: FocusEvent) {
  */
 async function submitDraft() {
   const body = newDraft.value.trim();
-  if (!body || props.submitPending || composerUploading.value) return;
+  if (!body || composerBusy.value || composerUploading.value) return;
   // 送信先と下書きの置き場は**開始時に固定する**。送信中も「コメント一覧へ戻る」は
   // 押せるし、スレッドが消えれば watch が一覧へ戻すので、await の後に
   // openThreadId を読み直すと別の下書きを消すことになる
   const threadId = openThreadId.value;
-  const taskId = draftTaskKey.value;
-  const uid = userId.value;
-  const sent = getCommentDraft(uid, taskId, threadId);
+  // 印は同期で立てる。同じ tick の二度押しも止まる
+  const finishSend = beginCommentDraftSend(userId.value, draftTaskKey.value, threadId);
   pinnedToBottom = true;
-
-  const posted = threadId ? await props.onSubmit(body, threadId) : await props.onSubmit(body);
-  if (!posted) return;
-
-  // 送った内容がまだ置いてあるときだけ消す。一度離れて同じスレッドへ戻り、
-  // 別の下書きを書き始めていたら、それは送信済みの本文ではないので残す
-  if (getCommentDraft(uid, taskId, threadId) !== sent) return;
-  clearCommentDraft(uid, taskId, threadId);
+  let posted = false;
+  try {
+    posted = threadId ? await props.onSubmit(body, threadId) : await props.onSubmit(body);
+  } finally {
+    // 印を外すのと下書きの消去は同じ呼び出しで行う（下書きが残ったまま打てる瞬間を作らない）
+    finishSend(posted);
+  }
 }
 
 function showThread(threadId: string) {
@@ -537,7 +543,7 @@ async function deleteThread(threadId: string) {
           v-model="newDraft"
           bare
           :min-height-class="composerExpanded ? 'min-h-14' : 'min-h-9'"
-          :disabled="submitPending"
+          :disabled="composerBusy"
           :aria-label="openThread ? '返信を入力' : 'コメントを入力'"
           :placeholder="openThread ? '返信を入力…' : 'コメントを入力…'"
           :candidates="mentionCandidates"
@@ -552,18 +558,18 @@ async function deleteThread(threadId: string) {
             type="button"
             variant="ghost"
             ariaLabel="メンション"
-            :disabled="submitPending"
+            :disabled="composerBusy"
             @click="composer?.openMentionPicker()"
           >
             <template #icon><AtSign class="size-4" aria-hidden="true" /></template>
           </Button>
           <Button
             type="submit"
-            :ariaLabel="submitPending ? '送信中' : openThread ? '返信する' : 'コメントする'"
-            :disabled="submitPending || composerUploading || !newDraft.trim()"
+            :ariaLabel="composerBusy ? '送信中' : openThread ? '返信する' : 'コメントする'"
+            :disabled="composerBusy || composerUploading || !newDraft.trim()"
           >
             <template #icon>
-              <Spinner v-if="submitPending" hide-label />
+              <Spinner v-if="composerBusy" hide-label />
               <SendHorizontal v-else class="size-4" aria-hidden="true" />
             </template>
           </Button>

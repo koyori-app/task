@@ -71,12 +71,6 @@ export function useTaskComments(params: UseTaskCommentsParams) {
   const deleteError = ref<string | null>(null);
   /** 更新・削除の対象コメント ID（進行中のみ非 null）。ボタンの disabled に使う */
   const updatingCommentId = ref<string | null>(null);
-  /**
-   * 投稿の進行中か。POST の後の一覧の取り直しまで含める（mutation の isPending は POST の応答で戻る）。
-   * 取り直しを待つ間も入力欄には送った下書きが残るので、その間に打った字が下書きに混ざったり、
-   * 同じ本文を送り直したりしないよう、取り直しが終わるまで送信中として扱う
-   */
-  const submitting = ref(false);
   const deletingCommentId = ref<string | null>(null);
   /** 更新・削除に失敗したコメントの ID。エラーを当該コメントの中に出すために持つ */
   const updateErrorCommentId = ref<string | null>(null);
@@ -118,9 +112,17 @@ export function useTaskComments(params: UseTaskCommentsParams) {
     enabled: computed(() => !!tenantId.value && !!projectId.value && !!taskId.value),
   });
 
-  const createCommentMutation = apiClient.useMutation('post', LIST_COMMENTS_PATH);
-  const updateCommentMutation = apiClient.useMutation('put', COMMENT_PATH);
-  const deleteCommentMutation = apiClient.useMutation('delete', COMMENT_PATH);
+  // オフラインでは復帰を待たずに失敗にする（既定の networkMode 'online' は一時停止して、
+  // 復帰まで送信中・保存中・削除中のまま戻らない）。要求は出ていないので、押し直しても二重にならない
+  const createCommentMutation = apiClient.useMutation('post', LIST_COMMENTS_PATH, {
+    networkMode: 'always',
+  });
+  const updateCommentMutation = apiClient.useMutation('put', COMMENT_PATH, {
+    networkMode: 'always',
+  });
+  const deleteCommentMutation = apiClient.useMutation('delete', COMMENT_PATH, {
+    networkMode: 'always',
+  });
 
   function taskPathParams() {
     return {
@@ -160,15 +162,16 @@ export function useTaskComments(params: UseTaskCommentsParams) {
     // ペイン切替などで unmount しても完走した結果を対象タスクのキャッシュへ書けるよう、
     // query key は開始時点で固定する（useTaskDetail.mutateTask と同じ理由）
     const queryKey = commentsQueryKey.value;
-    submitting.value = true;
     try {
       await createCommentMutation.mutateAsync({
         params: { path: taskPathParams() },
         body: { body, parent_comment_id: parentCommentId ?? null },
       });
       // 作成レスポンス（TaskCommentResponse）は一覧のスレッド形と型が違い
-      // user 情報も含まないため、一覧を invalidate して取り直す
-      await invalidateAfterCommentMutation(queryKey);
+      // user 情報も含まないため、一覧を invalidate して取り直す。
+      // 待たない。成否は POST で決まり、取り直しの遅延・失敗・一時停止で入力欄を止めない
+      // （invalidateQueries は取り直しの失敗で reject しない）
+      void invalidateAfterCommentMutation(queryKey);
       return true;
     } catch (error) {
       // 失敗の出し先をフォームごとに分ける: 返信の失敗を最下部の新規投稿
@@ -180,8 +183,6 @@ export function useTaskComments(params: UseTaskCommentsParams) {
         submitError.value = apiErrorMessage(error, 'コメントを投稿できませんでした');
       }
       return false;
-    } finally {
-      submitting.value = false;
     }
   }
 
@@ -258,7 +259,7 @@ export function useTaskComments(params: UseTaskCommentsParams) {
     refetchComments: () => {
       void commentsQuery.refetch();
     },
-    submitPending: computed(() => submitting.value),
+    submitPending: computed(() => createCommentMutation.isPending.value),
     submitError,
     replyError,
     replyErrorThreadId,

@@ -75,9 +75,56 @@ export function clearCommentDraft(
   }
 }
 
-/** 明示的なログアウト（useAuthSession の logout）とテストで使う。メモリと sessionStorage の下書きをすべて消す */
+/*
+ * 宛先ごとの送信中の印。下書きと同じ置き場に置くので、ペイン（composable）を作り直しても効き、
+ * 送った下書きを送り直したり書き足したりできない。値は送信ごとの札で、古い送信の終わりが
+ * 新しい送信の印を外さないようにする。メモリだけに置く（リロードで消える）
+ */
+const sending = ref<Record<string, symbol>>({});
+
+export function isCommentDraftSending(
+  userId: string | null,
+  taskId: string | undefined,
+  threadId: string | null,
+): boolean {
+  return keyOf(userId, taskId, threadId) in sending.value;
+}
+
+/**
+ * 送信を始める。今の下書きを控えて印を立て、「終える」関数を返す。
+ * 終える関数は、印を外すのと、送信が通って下書きが控えと同じ時の消去を、同じ同期の呼び出しで行う。
+ * 印が外れて下書きが残ったままの状態は、途中で見えない。
+ * 宛先と控えは開始時に固定する。送信中に一覧へ戻ったりスレッドを開き直したりしても、消すのは送った宛先の下書きだけ。
+ * 下書きが控えと違えば（ログアウトで消えた後に書いたなど）、送信済みの本文ではないので残す
+ */
+export function beginCommentDraftSend(
+  userId: string | null,
+  taskId: string | undefined,
+  threadId: string | null,
+): (posted: boolean) => void {
+  const key = keyOf(userId, taskId, threadId);
+  const sent = getCommentDraft(userId, taskId, threadId);
+  const ticket = Symbol(key);
+  sending.value = { ...sending.value, [key]: ticket };
+  return (posted) => {
+    if (sending.value[key] === ticket) {
+      const rest = { ...sending.value };
+      delete rest[key];
+      sending.value = rest;
+    }
+    if (posted && getCommentDraft(userId, taskId, threadId) === sent) {
+      clearCommentDraft(userId, taskId, threadId);
+    }
+  };
+}
+
+/**
+ * 明示的なログアウト（useAuthSession の logout）とテストで使う。メモリと sessionStorage の下書きと、
+ * 送信中の印をすべて消す
+ */
 export function resetCommentDrafts() {
   memory.value = {};
+  sending.value = {};
   try {
     const s = storage();
     if (!s) return;
