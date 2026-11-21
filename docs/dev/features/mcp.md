@@ -148,7 +148,24 @@ codex mcp login task
 
 ### Claude Code での設定
 
-リポジトリの `.mcp.json` に次のように書く。
+このリポジトリは、直下の `.mcp.json` に本番のエンドポイントを置いている。
+
+```json
+{
+  "mcpServers": {
+    "task": {
+      "type": "http",
+      "url": "https://task.koyori.app/api/mcp"
+    }
+  }
+}
+```
+
+`headers` が無いので、Claude Code は OAuth で接続する。
+初めてリポジトリを開くと、このサーバーを使うかを聞かれる。承認したあと `/mcp` で `task` を選ぶと、ブラウザーで同意画面が開く。
+`claude -p` は同意画面を出せないので、先に対話のセッションの `/mcp` か `claude mcp login task` でログインしておく。
+
+PAT で接続するときは、`headers` に PAT を書く。次の例は、`headers` を書いた `.mcp.json` を置くリポジトリ向けである。このリポジトリの `.mcp.json` は `headers` を持たないので、`TASK_TOKEN` を読まない。
 
 ```json
 {
@@ -168,7 +185,14 @@ codex mcp login task
 Claude Code のクラウド環境では、環境の設定で環境変数 `TASK_TOKEN` を足し、task のホストを Allowed domains に足す。
 環境変数はその環境を使う全員が読めるので、PAT は scope とプロジェクトを絞って発行する。
 
-`headers` を書かなければ、Claude Code は OAuth で接続する。初回にブラウザーで同意画面が開く。
+`headers` に `${TASK_TOKEN}` を書いた定義では、`TASK_TOKEN` が未設定だと、Claude Code は設定の警告を出し、接続は失敗する。OAuth には切り替わらない。
+このリポジトリで PAT を使うときは、同じ名前の定義を local スコープに足す。`.mcp.json` の定義は user スコープの同じ名前の定義より優先され、local スコープの定義は `.mcp.json` の定義より優先される。user スコープに PAT で `task` を登録していても、このリポジトリでは `.mcp.json` の定義が使われる。コマンドは次のとおりである。
+
+```bash
+claude mcp add --transport http --scope local task https://task.koyori.app/api/mcp --header "Authorization: Bearer <PAT>"
+```
+
+PAT は `~/.claude.json` に平文で保存され、シェルの履歴にも残る。scope とプロジェクトを絞った PAT を使う。
 
 ### ツールの実行
 
@@ -178,9 +202,9 @@ Claude Code のクラウド環境では、環境の設定で環境変数 `TASK_T
 
 失敗は `isError: true` の結果として返す。
 文面は API の状態コードと `message` を並べたもので、例は `403 forbidden`、`404 not-found`、`409 github-integration-missing` である。
-引数の誤りは API を呼ぶ前に `label_ids must be a UUID` や `findings[1].line: range min: 1` のような文面で返す。
+引数の誤りは API を呼ぶ前に `parent_task_id must be a UUID` や `findings[1].line: range min: 1` のような文面で返す。
 
-任意の引数のうち `tenant`、`project`、`status`、`priority`、`q`、`sort`、`file`、`repo`、`from_repo`、ID、日付は、空文字を省略として読む。
+任意の引数のうち `tenant`、`project`、`status`、`priority`、`q`、`sort`、`task_type`、`milestone`、`sprint`、`file`、`repo`、`from_repo`、ID、日付は、空文字を省略として読む。
 `title`、`description`、`body`、`summary`、`note` は空文字のまま API へ渡す。
 
 ### テナントの決め方
@@ -210,8 +234,13 @@ UUID のときは `project` が必須で、無ければ `project is required whe
 見つからないときは、そのプロジェクトの状態の名前を並べたエラーを返す。
 `create_task` で `status` を省くと、プロジェクトの既定の状態を使う。
 
-ラベル、担当者、種別、マイルストーン、スプリントは ID で渡す。
-ID は `list_project_options` で引く。
+ラベル、担当者、種別、マイルストーン、スプリントは名前か UUID で指す。
+担当者はユーザー名で指す。
+名前の照合は `status` と同じで、完全一致を優先し、無ければ大文字と小文字を区別せずに探す。
+見つからないときは、そのプロジェクトの候補の名前を並べたエラーを返す。
+複数に当たるときは、候補の名前と ID を並べて UUID での指定を求める。
+UUID は確かめずに API へ渡す。
+担当者の候補の一覧は `write:task` が無いと読めないので、そのときは候補なしと返す。
 
 ## データ
 
@@ -301,8 +330,8 @@ ID は `list_project_options` で引く。
 | `list_tasks` | `project`、`q`、`is_archived`、`sort`、`limit`、`offset` | `GET …/projects/{project}/tasks` |
 | `search_tasks` | `project`、`q`、`limit`、`offset` | `GET …/tasks/search` |
 | `get_task` | `task`、`project` | `GET …/tasks/{task}` |
-| `create_task` | `project`、`title`、`description`、`status`、`priority`、`parent_task_id`、`label_ids`、`assignee_ids`、`task_type_id`、`milestone_id`、`sprint_id`、`soft_deadline`、`hard_deadline`、`planned_start_on`、`estimated_minutes` | `POST …/projects/{project}/tasks` |
-| `update_task` | `task`、`project`、`title`、`description`、`clear_description`、`status`、`priority`、`progress_pct`、`add_label_ids`、`remove_label_ids`、`is_archived` | `PUT …/tasks/{task}` |
+| `create_task` | `project`、`title`、`description`、`status`、`priority`、`parent_task_id`、`labels`、`assignees`、`task_type`、`milestone`、`sprint`、`soft_deadline`、`hard_deadline`、`planned_start_on`、`estimated_minutes` | `POST …/projects/{project}/tasks` |
+| `update_task` | `task`、`project`、`title`、`description`、`clear_description`、`status`、`priority`、`progress_pct`、`add_labels`、`remove_labels`、`is_archived` | `PUT …/tasks/{task}` |
 | `list_task_comments` | `task`、`project` | `GET …/tasks/{task}/comments` |
 | `add_task_comment` | `task`、`project`、`body`、`parent_comment_id` | `POST …/tasks/{task}/comments` |
 | `list_task_pull_requests` | `task`、`project` | `GET …/tasks/{task}/forge` |
@@ -313,6 +342,8 @@ ID は `list_project_options` で引く。
 | `submit_review` | `project`、`pr`、`head_sha`、`summary`、`findings` | `POST …/projects/{project}/reviews` |
 | `update_review_finding` | `project`、`finding_id`、`state`、`note` | `PATCH …/review-findings/{finding_id}` |
 | `carry_over_review` | `project`、`from_pr`、`to_pr`、`from_repo` | `POST …/reviews/carry-over` |
+
+`create_task` と `update_task` は、`_id` の付いた旧名（`label_ids`、`assignee_ids`、`task_type_id`、`milestone_id`、`sprint_id`、`add_label_ids`、`remove_label_ids`）も同じ引数として受ける。
 
 `list_project_options` の `kind` は `statuses`、`labels`、`task_types`、`milestones`、`sprints`、`assignable_users` のいずれかである。
 
@@ -356,6 +387,11 @@ OAuth で接続したとき、`whoami` は許可の ID と、クライアント�
 | `project` がキー、または `task` が `KEY-N` | `read:project` |
 | `tenant` が名前 | `read:tenant` |
 | `status` が名前、または `create_task` で `status` を省く | `read:task` |
+| ラベルか種別が名前 | `read:task` |
+| マイルストーンが名前 | `read:milestone` |
+| スプリントが名前 | `read:sprint` |
+
+担当者をユーザー名で渡すときは、追加の scope は要らない。
 
 ID を引く呼び出しが 403 のときは、考えられる原因を文面に添える。
 403 は scope が足りないときのほか、束縛していないテナントやプロジェクトを指したときにも返るので、原因は断定しない。
@@ -419,8 +455,6 @@ OAuth で渡せる scope は、ツールが使う `read:tenant`、`read:project`
 - `get_review_summary` は HEAD との照合をしない。CLI の `review summary` と違い、呼び出し側が `latest_head_sha` を比べる
 - 連携を張る前に記録したラウンドは、レビューのツールでは読めず、引き継ぎ元にもできない。CLI の `--repo ""` と `--from-repo ""` を使う
 - タスクの一括作成と削除、PR のリンクの解除、自分のタスク、スプリント、通知、テナントの一覧のツールは未実装である（TASK-561）
-- ラベル、担当者、種別、マイルストーン、スプリントを名前で渡すことはできない（TASK-562）
-- このリポジトリに `.mcp.json` は置いていない（TASK-564）
 - `update_task` で変えられるのは、表に挙げた項目だけである。期限、親タスク、担当者などの変更は REST API か CLI を使う
 - Claude Code のクラウド環境の network secrets で PAT を渡せるかは確かめていない
 - 動的なクライアントの登録（DCR）は受けない
@@ -433,7 +467,9 @@ OAuth で渡せる scope は、ツールが使う `read:tenant`、`read:project`
 - パスワードの再設定や一括失効などで取り消した許可の `oauth_tokens` の行は、利用者を削除するまで残る
 - リフレッシュトークンの再利用は猶予なく許可を取り消すので、応答が届かなかった再送や、同時の更新でも、接続し直しになる
 - Codex の IDE 拡張とクラウドの Codex が、どの `client_id` で接続するかは確かめていない。既定の 4 つと違えば、`OAUTH_ALLOWED_CLIENT_IDS` に足す
-- claude.ai、ChatGPT、Codex、Claude Code からの実際の接続は確かめていない
+- claude.ai、ChatGPT、Codex からの実際の接続は確かめていない
+- Claude Code から PAT で接続すること（`.mcp.json` の `headers` と、local スコープの上書きの両方）は確かめていない
+- このリポジトリの `.mcp.json` で、Claude Code のクラウド環境から接続できるかは確かめていない
 
 ## 決定の記録
 
@@ -467,3 +503,6 @@ OAuth で渡せる scope は、ツールが使う `read:tenant`、`read:project`
 | 2026-11-21 | `submit_review` は API を呼ぶ前に、CLI と同じ 3 つを確かめ、同じ文面で返す | API のエラーは入力の全体を含み、先頭 2000 字で切れると上限の値が残らない。短縮 SHA のエラーは 40 桁が要ることを示さない。空白だけの `title` は API が通す。上限と範囲は DTO の規則を走らせるだけで、写しは持たない |
 | 2026-11-21 | `get_review_summary` は API の集計をそのまま返し、HEAD との照合を足さない | ほかのツールは API の応答を削らず足さずに返す。応答に `gate`、`mergeable`、`latest_head_sha` があり、判断の材料は揃う。サーバーには作業ツリーも終了コードも無い |
 | 2026-11-21 | レビューのツールの `repo` と `from_repo` は、空文字を省略として読む | 使わない引数に空文字を入れるクライアントがある。空文字を連携前のラウンドの指定として読むと、未解決の指摘があっても一覧が空になり、エラーにならないので誤りに気づけない |
+| 2026-11-21 | ラベル、担当者、種別、マイルストーン、スプリントの名前の解決を MCP の層で行い、選び方と文面を CLI から写す | `handler` から `cli` は参照できない。`tenant`、`project`、`status` の解決もすでに写しており、名前の選別だけを共有すると写しと共有が混ざる。文面のずれは CLI と同じ表のテストで止める |
+| 2026-11-21 | 名前を受ける引数から `_id` を外し、旧名を別名として受け続ける | 名前を受ける既存の引数（`tenant`、`project`、`status`）には `_id` が付かない。CLI のフラグも `--label` などである。引数の構造体は知らない引数を捨てるので、旧名を受けないと、旧名で呼んだときにラベルの無いタスクが黙ってできる |
+| 2026-11-21 | `.mcp.json` をリポジトリ直下に置き、`headers` を書かず OAuth で接続する。2026-11-18 の「置かず、設定例を書く」を改める | 本番のエンドポイントが `https://task.koyori.app/api/mcp` に決まった。`headers` に `${TASK_TOKEN}` を書くと、未設定の人に設定の警告が出て接続が失敗し、OAuth に切り替わらない。同じ名前の user スコープの定義にも勝つので、OAuth で接続済みの人の接続も失敗に変わる |
