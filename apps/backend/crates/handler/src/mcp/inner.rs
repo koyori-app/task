@@ -5,12 +5,13 @@
 
 use axum::{
     Router,
-    body::Body,
+    body::{Body, Bytes},
     http::{
         HeaderValue, Method, Request, StatusCode,
         header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE},
         request::Parts,
     },
+    response::Response,
 };
 use rmcp::model::{CallToolResult, ContentBlock};
 use serde_json::Value;
@@ -60,6 +61,11 @@ impl From<ToolFailure> for CallToolResult {
     fn from(failure: ToolFailure) -> Self {
         CallToolResult::error(vec![ContentBlock::text(failure.text())])
     }
+}
+
+/// 本文をそのまま返す（JSON にしない）。
+pub(super) fn text(body: String) -> CallToolResult {
+    CallToolResult::success(vec![ContentBlock::text(body)])
 }
 
 /// API の応答をそのまま返す。項目は削らない。本文の無い成功（204）は `ok`
@@ -115,6 +121,33 @@ impl InnerApi {
         self.send(Method::PATCH, segments, &[], Some(body)).await
     }
 
+    /// JSON でない本文を文字列で読む。`accepts` が応答の `Content-Type` を断れば、本文を読まずに失敗する。
+    pub(super) async fn get_text(
+        &self,
+        segments: &[&str],
+        accepts: fn(&str) -> bool,
+    ) -> Result<String, ToolFailure> {
+        let response = self
+            .dispatch(Method::GET, segments, &[], "*/*", None)
+            .await?;
+        let status = response.status();
+        let content_type = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("unknown");
+        if !accepts(content_type) {
+            return Err(ToolFailure::new(format!(
+                "The content type {content_type} is not supported"
+            )));
+        }
+        let bytes = read_body(response).await?;
+        String::from_utf8(bytes.into()).map_err(|_| ToolFailure {
+            status: Some(status),
+            message: "The response is not valid UTF-8".to_string(),
+        })
+    }
+
     /// 渡すヘッダーは `Authorization`・`Accept`・（本文があれば）`Content-Type` だけ。
     /// `Cookie` と `Origin` は渡さないので、内向きの呼び出しはセッションでは認証されない
     async fn send(
@@ -124,11 +157,37 @@ impl InnerApi {
         query: &[(&str, String)],
         body: Option<&Value>,
     ) -> Result<Value, ToolFailure> {
+        let response = self
+            .dispatch(method, segments, query, "application/json", body)
+            .await?;
+        let status = response.status();
+        let bytes = read_body(response).await?;
+        if bytes.is_empty() {
+            return Ok(Value::Null);
+        }
+        serde_json::from_slice(&bytes).map_err(|error| ToolFailure {
+            status: Some(status),
+            message: format!("The response is not JSON: {error}"),
+        })
+    }
+
+    /// 要求を送り、成功の応答を本文を読まずに返す。失敗の状態は本文を読んで [`ToolFailure`] に直す。
+    ///
+    /// 渡すヘッダーは `Authorization`・`Accept`・（本文があれば）`Content-Type` だけ。
+    /// `Cookie` と `Origin` は渡さないので、内向きの呼び出しはセッションでは認証されない
+    async fn dispatch(
+        &self,
+        method: Method,
+        segments: &[&str],
+        query: &[(&str, String)],
+        accept: &'static str,
+        body: Option<&Value>,
+    ) -> Result<Response, ToolFailure> {
         let mut builder = Request::builder()
             .method(method)
             .uri(request_target(segments, query))
             .header(AUTHORIZATION, self.authorization.clone())
-            .header(ACCEPT, "application/json")
+            .header(ACCEPT, accept)
             // 内向きの呼び出しは MCP の入口宛ての要求の続きなので、OAuth のアクセストークンを通す
             .extension(McpAudience);
         let body = match body {
@@ -147,27 +206,26 @@ impl InnerApi {
             Err(never) => match never {},
         };
         let status = response.status();
-        let bytes = axum::body::to_bytes(response.into_body(), MAX_RESPONSE_BYTES)
-            .await
-            .map_err(|_| ToolFailure {
-                status: Some(status),
-                message: format!("The response is larger than {MAX_RESPONSE_BYTES} bytes"),
-            })?;
-
-        if !status.is_success() {
-            return Err(ToolFailure {
-                status: Some(status),
-                message: error_message(&bytes),
-            });
+        if status.is_success() {
+            return Ok(response);
         }
-        if bytes.is_empty() {
-            return Ok(Value::Null);
-        }
-        serde_json::from_slice(&bytes).map_err(|error| ToolFailure {
+        let bytes = read_body(response).await?;
+        Err(ToolFailure {
             status: Some(status),
-            message: format!("The response is not JSON: {error}"),
+            message: error_message(&bytes),
         })
     }
+}
+
+/// 本文を [`MAX_RESPONSE_BYTES`] まで読む。
+async fn read_body(response: Response) -> Result<Bytes, ToolFailure> {
+    let status = response.status();
+    axum::body::to_bytes(response.into_body(), MAX_RESPONSE_BYTES)
+        .await
+        .map_err(|_| ToolFailure {
+            status: Some(status),
+            message: format!("The response is larger than {MAX_RESPONSE_BYTES} bytes"),
+        })
 }
 
 /// パスとクエリを符号化してつなぐ。
@@ -274,6 +332,108 @@ mod tests {
         assert_eq!(
             seen["headers"],
             serde_json::json!(["accept", "authorization", "content-type"])
+        );
+        let seen = api.get_text(&["v1", "tenants"], |_| true).await.unwrap();
+        let seen: Value = serde_json::from_str(&seen).unwrap();
+        assert_eq!(
+            seen["headers"],
+            serde_json::json!(["accept", "authorization"])
+        );
+    }
+
+    /// 決まった状態・`Content-Type`・本文を返すルーターを呼ぶ `InnerApi`。
+    fn api_returning(status: StatusCode, content_type: &'static str, body: Vec<u8>) -> InnerApi {
+        let router = Router::new().fallback(move || {
+            let body = body.clone();
+            async move { (status, [(CONTENT_TYPE, content_type)], body) }
+        });
+        let (parts, ()) = Request::builder()
+            .uri("/mcp")
+            .header(AUTHORIZATION, "Bearer pat-1")
+            .body(())
+            .unwrap()
+            .into_parts();
+        InnerApi::from_parts(&router, &parts).unwrap()
+    }
+
+    fn is_markdown(content_type: &str) -> bool {
+        content_type == "text/markdown"
+    }
+
+    async fn text_of(
+        status: StatusCode,
+        content_type: &'static str,
+        body: Vec<u8>,
+    ) -> Result<String, String> {
+        api_returning(status, content_type, body)
+            .get_text(&["v1", "drive"], is_markdown)
+            .await
+            .map_err(|failure| failure.text())
+    }
+
+    #[tokio::test]
+    async fn get_text_returns_the_body_of_an_accepted_content_type() {
+        let body = "# 見出し\n\n本文\n";
+        assert_eq!(
+            text_of(StatusCode::OK, "text/markdown", body.into()).await,
+            Ok(body.to_string())
+        );
+    }
+
+    /// 断る種類の本文は読まない。上限を超える本文でも、文面は種類の拒否になる
+    #[tokio::test]
+    async fn get_text_refuses_other_content_types_before_reading_the_body() {
+        assert_eq!(
+            text_of(StatusCode::OK, "image/png", vec![0; 16]).await,
+            Err("The content type image/png is not supported".to_string())
+        );
+        assert_eq!(
+            text_of(StatusCode::OK, "image/png", vec![0; MAX_RESPONSE_BYTES + 1]).await,
+            Err("The content type image/png is not supported".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn get_text_rejects_a_body_that_is_not_utf8() {
+        assert_eq!(
+            text_of(StatusCode::OK, "text/markdown", vec![0xff, 0xfe]).await,
+            Err("200 The response is not valid UTF-8".to_string())
+        );
+    }
+
+    /// 失敗の状態は `send` と同じ形。`Content-Type` は見ない
+    #[tokio::test]
+    async fn get_text_keeps_the_api_wording_of_a_failure() {
+        assert_eq!(
+            text_of(
+                StatusCode::FORBIDDEN,
+                "application/json",
+                br#"{"message":"forbidden"}"#.to_vec()
+            )
+            .await,
+            Err("403 forbidden".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn get_text_reads_up_to_the_response_limit() {
+        let at_limit = text_of(
+            StatusCode::OK,
+            "text/markdown",
+            vec![b'a'; MAX_RESPONSE_BYTES],
+        )
+        .await
+        .expect("上限ちょうどは返る");
+        assert_eq!(at_limit.len(), MAX_RESPONSE_BYTES);
+
+        assert_eq!(
+            text_of(
+                StatusCode::OK,
+                "text/markdown",
+                vec![b'a'; MAX_RESPONSE_BYTES + 1]
+            )
+            .await,
+            Err("200 The response is larger than 4194304 bytes".to_string())
         );
     }
 

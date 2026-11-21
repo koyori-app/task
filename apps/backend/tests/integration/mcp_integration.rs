@@ -19,11 +19,12 @@ use uuid::Uuid;
 
 const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
 
-/// docs/dev/features/mcp.md の API の表にある 18 ツール。増減したら `tools_list_returns_every_tool` が落ちる
-const TOOL_NAMES: [&str; 18] = [
+/// docs/dev/features/mcp.md の API の表にある 20 ツール。増減したら `tools_list_returns_every_tool` が落ちる
+const TOOL_NAMES: [&str; 20] = [
     "add_task_comment",
     "carry_over_review",
     "create_task",
+    "get_document",
     "get_review_summary",
     "get_task",
     "link_pull_request",
@@ -34,6 +35,7 @@ const TOOL_NAMES: [&str; 18] = [
     "list_task_comments",
     "list_task_pull_requests",
     "list_tasks",
+    "search_documents",
     "search_tasks",
     "submit_review",
     "update_review_finding",
@@ -238,7 +240,7 @@ async fn request_without_credentials_is_401_with_www_authenticate() {
             .and_then(|value| value.to_str().ok()),
         Some(
             format!(
-                "Bearer resource_metadata=\"{origin}/.well-known/oauth-protected-resource/api/mcp\", scope=\"read:tenant read:project read:task write:task read:milestone read:sprint read:review write:review\""
+                "Bearer resource_metadata=\"{origin}/.well-known/oauth-protected-resource/api/mcp\", scope=\"read:tenant read:project read:task write:task read:milestone read:sprint read:review write:review read:drive\""
             )
             .as_str()
         )
@@ -262,7 +264,7 @@ async fn unknown_bearer_is_401() {
             .and_then(|value| value.to_str().ok()),
         Some(
             format!(
-                "Bearer error=\"invalid_token\", resource_metadata=\"{origin}/.well-known/oauth-protected-resource/api/mcp\", scope=\"read:tenant read:project read:task write:task read:milestone read:sprint read:review write:review\""
+                "Bearer error=\"invalid_token\", resource_metadata=\"{origin}/.well-known/oauth-protected-resource/api/mcp\", scope=\"read:tenant read:project read:task write:task read:milestone read:sprint read:review write:review read:drive\""
             )
             .as_str()
         )
@@ -395,9 +397,25 @@ async fn tools_list_returns_every_tool() {
             .as_bool()
     };
     assert_eq!(read_only("get_task"), Some(true));
+    assert_eq!(read_only("get_document"), Some(true));
+    assert_eq!(read_only("search_documents"), Some(true));
     assert_ne!(read_only("create_task"), Some(true));
     assert_eq!(read_only("list_review_findings"), Some(true));
     assert_ne!(read_only("submit_review"), Some(true));
+
+    // 文書を返すツールは、返す文が信頼しないデータであることを説明に書く
+    for name in ["search_documents", "get_document"] {
+        let description = tools
+            .iter()
+            .find(|tool| tool["name"] == name)
+            .expect("tool")["description"]
+            .as_str()
+            .expect("description");
+        assert!(
+            description.contains("untrusted data"),
+            "{name}: {description}"
+        );
+    }
 }
 
 #[tokio::test]
