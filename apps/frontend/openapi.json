@@ -28569,7 +28569,12 @@
           "scopes": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Scope"
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Scope"
+                }
+              ],
+              "x-or-unknown": true
             },
             "description": "要求された scope のうち、渡せるもの"
           }
@@ -31015,7 +31020,15 @@
             "format": "date-time"
           },
           "scopes": {
-            "$ref": "#/components/schemas/ScopeList"
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Scope"
+                }
+              ],
+              "x-or-unknown": true
+            }
           },
           "tenant_ids": {
             "type": "array",
