@@ -809,21 +809,30 @@ const LEGEND_BAR = `linear-gradient(to right, ${GANTT_PALETTE.TierLow} 40%, ${GA
       placement="right"
       :on-close="() => (unscheduledOpen = false)"
     >
-      <div class="flex flex-col gap-2 p-4" data-testid="gantt-unscheduled-list">
-        <h2 class="text-base font-semibold">期間の無いタスク {{ unscheduledTasks.length }} 件</h2>
-        <p class="text-xs text-muted-foreground">
+      <div class="flex min-h-0 flex-1 flex-col gap-2 p-4">
+        <h2 class="shrink-0 text-base font-semibold">
+          期間の無いタスク {{ unscheduledTasks.length }} 件
+        </h2>
+        <p class="shrink-0 text-xs text-muted-foreground">
           開始予定日も期限も無いので、図には出ません。開いて日付を入れると図に出ます。
         </p>
-        <button
-          v-for="task in unscheduledTasks"
-          :key="task.id"
-          type="button"
-          class="rounded-md px-2 py-1.5 text-left hover:bg-muted/40"
-          @click="openUnscheduled(task)"
+        <div
+          class="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto"
+          data-testid="gantt-unscheduled-list"
         >
-          <span class="block font-mono text-[11px] text-muted-foreground">{{ task.seq_key }}</span>
-          <span class="block truncate text-sm">{{ task.title }}</span>
-        </button>
+          <button
+            v-for="task in unscheduledTasks"
+            :key="task.id"
+            type="button"
+            class="rounded-md px-2 py-1.5 text-left hover:bg-muted/40"
+            @click="openUnscheduled(task)"
+          >
+            <span class="block font-mono text-[11px] text-muted-foreground">{{
+              task.seq_key
+            }}</span>
+            <span class="block truncate text-sm">{{ task.title }}</span>
+          </button>
+        </div>
       </div>
     </Drawer>
 

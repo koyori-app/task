@@ -105,6 +105,11 @@ const unscheduledTasks: ScheduleTask[] = [
   task(8, { title: '用語集', project: PROJECT_DOC }),
 ];
 
+/** 期間なし drawer の縦スクロール確かめ用 */
+const manyUnscheduledTasks: ScheduleTask[] = Array.from({ length: 150 }, (_, i) =>
+  task(900 + i, { title: `期間なし ${i + 1}` }),
+);
+
 // 縦に長い図。狭い画面（試験の既定の幅 414px）の範囲 7/13〜7/19 に収める
 const manyTasks: ScheduleTask[] = Array.from({ length: 20 }, (_, i) =>
   task(100 + i, {
@@ -386,6 +391,34 @@ export const DependencyToggle: Story = {
 // 頁の縦のスクロールは layout の main（overflow-y: auto）が持つ。低性能の端末（deviceMemory の無い
 // Firefox・Safari を含む）では、図は外のスクロール域に見える行だけを描くので、main を巻いた先の行も
 // 描かれねばならない（外の域を window に取り違えると、巻いた先が描かれない）
+export const UnscheduledDrawerScroll: Story = {
+  name: '期間なし drawer を巻く',
+  decorators: [withContext()],
+  beforeEach: () => {
+    window.scrollTo(0, 0);
+    return createMockFetch({ tasks: sampleTasks.slice(0, 2), unscheduled: manyUnscheduledTasks });
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByTestId('gantt-unscheduled'));
+    const list = await canvas.findByTestId('gantt-unscheduled-list');
+    await waitFor(() => expect(list.scrollHeight).toBeGreaterThan(list.clientHeight));
+    const lastTitle = '期間なし 150';
+    const lastButton = canvas.getByText(lastTitle).closest('button')!;
+    list.scrollTop = list.scrollHeight;
+    await waitFor(() => expect(lastButton).toBeVisible());
+    await userEvent.click(lastButton);
+  },
+};
+
+export const UnscheduledDrawerScrollNarrow: Story = {
+  name: '期間なし drawer を巻く（幅 375）',
+  decorators: [withContext()],
+  parameters: { viewport: { defaultViewport: 'mobile2' } },
+  beforeEach: UnscheduledDrawerScroll.beforeEach,
+  play: UnscheduledDrawerScroll.play,
+};
+
 export const LowDeviceMainScroll: Story = {
   name: '低性能の端末で頁の main を巻く',
   decorators: [
