@@ -16,9 +16,9 @@ export function rowHeight(compact: boolean): number {
   return compact ? 72 : 40;
 }
 
-export const WEEKDAY_LABELS = ['月', '火', '水', '木', '金', '土', '日'];
+const WEEKDAY_LABELS = ['月', '火', '水', '木', '金', '土', '日'];
 /** 土曜と日曜（arc の数え方で 0 が月曜） */
-export const WEEKEND_DAYS = [5, 6];
+const WEEKEND_DAYS = [5, 6];
 
 /** 色は library の token だけで当てる。canvas は var() を図の要素の computed style から読む */
 export const GANTT_PALETTE: PaletteOverrides = {

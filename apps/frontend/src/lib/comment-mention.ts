@@ -32,7 +32,7 @@ export interface MentionCandidate {
 const UUID_PATTERN = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
 
 /** 印の正規表現（毎回新しく作る。`g` の lastIndex を共有しないため）。 */
-export function markerPattern(): RegExp {
+function markerPattern(): RegExp {
   return new RegExp(`<@(${UUID_PATTERN})>`, 'g');
 }
 
@@ -154,10 +154,10 @@ export function filterCandidates(
  * 外から来た HTML に紛れた id を札にしてはならぬので、戻すのは版の印が既知の `1` で、
  * id が印の形（ハイフン付き UUID）の時だけとする。
  */
-export const CLIPBOARD_MENTION_ATTR = 'data-task-mention';
-export const CLIPBOARD_MENTION_ID_ATTR = 'data-user-id';
+const CLIPBOARD_MENTION_ATTR = 'data-task-mention';
+const CLIPBOARD_MENTION_ID_ATTR = 'data-user-id';
 /** 知っておる版。これ以外の値は札として読まず、素の文字に倒す。 */
-export const CLIPBOARD_MENTION_VERSION = '1';
+const CLIPBOARD_MENTION_VERSION = '1';
 
 const UUID_EXACT = new RegExp(`^${UUID_PATTERN}$`);
 

@@ -22,8 +22,6 @@
 import type { Element, Root } from 'hast';
 import { SKIP, visit } from 'unist-util-visit';
 
-export { kfmLinkFaviconSanitizeSchema } from './schema';
-export { KFM_LINK_FAVICON_CLASS } from './_class';
 import { KFM_LINK_FAVICON_CLASS } from './_class';
 
 /**
@@ -32,12 +30,12 @@ import { KFM_LINK_FAVICON_CLASS } from './_class';
  */
 const HOST_RE = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,62})(?:\.[a-z0-9](?:[a-z0-9-]{0,62}))+$/;
 
-export function faviconProxyPath(host: string): string {
+function faviconProxyPath(host: string): string {
   return `/api/v1/favicons/${host}`;
 }
 
 /** favicon の対象になる絶対 URL の host (小文字・punycode 済み)。対象外なら undefined */
-export function externalLinkHost(href: string): string | undefined {
+function externalLinkHost(href: string): string | undefined {
   let url: URL;
   try {
     url = new URL(href);

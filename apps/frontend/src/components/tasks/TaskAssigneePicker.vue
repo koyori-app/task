@@ -8,7 +8,7 @@ import type { SelectableUser } from '@/components/users/types';
 import UserSelector from '@/components/users/UserSelector.vue';
 import { useAuthStore } from '@/stores/auth';
 
-export type PickableMember = SelectableUser;
+type PickableMember = SelectableUser;
 
 /**
  * 担当者の選択。一覧の行・まとめの一覧・詳細の 3 箇所で使う。

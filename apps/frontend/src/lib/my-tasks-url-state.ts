@@ -16,7 +16,7 @@ export type MyTasksUrlState = {
   shown: number;
 };
 
-export const DEFAULT_MY_TASKS_URL_STATE: MyTasksUrlState = {
+const DEFAULT_MY_TASKS_URL_STATE: MyTasksUrlState = {
   tab: 'today',
   shown: MY_TASKS_PAGE_LIMIT,
 };

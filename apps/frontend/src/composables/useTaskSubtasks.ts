@@ -38,7 +38,7 @@ export type UseTaskSubtasksParams = {
   queryOptions?: MaybeRefOrGetter<TaskSubtaskQueryOptions | undefined>;
 };
 
-export type TaskSubtaskQueryOptions = {
+type TaskSubtaskQueryOptions = {
   staleTime?: number;
   refetchOnWindowFocus?: boolean;
 };

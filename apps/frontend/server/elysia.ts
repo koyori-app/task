@@ -57,5 +57,3 @@ export function getApp() {
 
   return app;
 }
-
-export const app = getApp();

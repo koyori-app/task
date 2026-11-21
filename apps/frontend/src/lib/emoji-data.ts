@@ -34,7 +34,7 @@ export interface EmojiEntry {
   searchText: string;
 }
 
-export interface EmojiSection {
+interface EmojiSection {
   key: string;
   label: string;
   category: EmojiCategoryKey;
@@ -70,7 +70,7 @@ function normalizeForSearch(text: string): string {
   return text.normalize('NFKC').toLowerCase();
 }
 
-export function buildEmojiDataset(
+function buildEmojiDataset(
   raw: readonly RawEmoji[],
   messages: RawMessages,
   shortcodes: RawShortcodes,

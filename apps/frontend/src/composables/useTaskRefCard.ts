@@ -12,7 +12,7 @@ import { GET_TASK_PATH, fetchTask } from '@/lib/task-query';
 /** 開いている対象だけを取得する。成功は60秒共有し、404はnullとして保持する。
  * 取得は中断せず、403・404では以前のタスク情報も隠す。失敗は次に開くと再取得する。
  */
-export const TASK_REF_CARD_STALE_TIME_MS = 60_000;
+const TASK_REF_CARD_STALE_TIME_MS = 60_000;
 export function useTaskRefCard(
   tenantId: MaybeRefOrGetter<TenantUuid | null | undefined>,
   target: MaybeRefOrGetter<TaskRefCardTarget | null>,

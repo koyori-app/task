@@ -22,7 +22,6 @@
 import type { Element, ElementContent, Root } from 'hast';
 import { visit } from 'unist-util-visit';
 
-export { KFM_TASK_OFFSET_ATTR } from './_attr';
 export { remarkKfmTaskOffset } from './_remark';
 
 function asCheckbox(node: ElementContent | undefined): Element | undefined {

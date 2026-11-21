@@ -30,7 +30,7 @@ export function viewDays(scale: GanttScale, compact: boolean): number {
  * 一日の幅の下限（px）。日の段の 30px は、日の数字と曜日が二字まで収まる幅で、幅 1280 の画面で
  * 左の一覧（320px）の右に 3 週が横に転がさずに収まる幅
  */
-export function pxPerDay(scale: GanttScale): number {
+function pxPerDay(scale: GanttScale): number {
   switch (scale) {
     case 'day':
       return 30;
@@ -45,7 +45,7 @@ export function pxPerDay(scale: GanttScale): number {
  * arc が日の左右に残す余白（px）。題の列を消した図の左の余白（棒の高さの半分。広い画面の
  * 棒 16px で 8、狭い画面の棒 12px で 6 だが、大きい方で数える）と、右の余白 20 の和。
  */
-export const CHART_CHROME_X = 8 + 20;
+const CHART_CHROME_X = 8 + 20;
 
 /**
  * 図の箱の幅に範囲の日を割った一日の幅。広い画面は下限を割らず、余れば広げて右の空きを無くす。
@@ -73,7 +73,7 @@ export function shiftView(
 }
 
 /** 狭い画面で、canvas に替える行の数の目安。これを越える行を SVG の要素にすると重い */
-export const COMPACT_SVG_MAX_ROWS = 40;
+const COMPACT_SVG_MAX_ROWS = 40;
 
 /**
  * 図を SVG で描くか canvas で描くか。広い画面は SVG（字を選べ、要素が読み上げに出る）。
@@ -95,7 +95,7 @@ export function chartBackend(options: {
  * 見えるようにする。案 A の板は 11/2〜11/22 に今日 11/8 を置き、今日の前に一週を残していた。
  * 狭い画面の日の段は一週しか描かぬので、今日の週を描く（案 A の 375 の板と同じ）。
  */
-export function leadDays(scale: GanttScale, compact: boolean): number {
+function leadDays(scale: GanttScale, compact: boolean): number {
   switch (scale) {
     case 'day':
       return compact ? 0 : 7;

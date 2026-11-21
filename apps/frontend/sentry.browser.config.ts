@@ -32,7 +32,7 @@ export const buildTracePropagationTargets = (apiBase: string | undefined): RegEx
  * 包み直し、遷移中の描画エラーも含めて常に捕捉する。init の `attachErrorHandler` は切ること
  * （残すと SDK の代入がここを通って二重に包まれる）。
  */
-export const keepSentryErrorHandler = (app: App) => {
+const keepSentryErrorHandler = (app: App) => {
   const wrap = (errorHandler: App['config']['errorHandler']) => {
     const target = { config: { errorHandler }, mixin: () => {} };
     Sentry.attachErrorHandler(target);

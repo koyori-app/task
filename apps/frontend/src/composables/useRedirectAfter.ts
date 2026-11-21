@@ -1,7 +1,7 @@
 import { usePageContext } from 'vike-vue/usePageContext';
 
 /** サインイン後の戻り先を運ぶクエリ名。 */
-export const REDIRECT_AFTER_PARAM = 'redirect_after';
+const REDIRECT_AFTER_PARAM = 'redirect_after';
 
 /**
  * 戻り先として使ってよい値だけを返す。同一オリジンの相対パス（`/` 始まり）に限り、

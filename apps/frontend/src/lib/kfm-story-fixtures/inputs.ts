@@ -232,5 +232,3 @@ export const KFM_STORY_INPUTS = {
     '![memo.caf](/v1/drive/files/7c9e6679-7425-40de-944b-e07fc1f90ae7/content)',
   ].join('\n'),
 } as const;
-
-export type KfmStoryFixtureName = keyof typeof KFM_STORY_INPUTS;

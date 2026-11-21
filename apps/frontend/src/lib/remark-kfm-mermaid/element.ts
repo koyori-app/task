@@ -27,7 +27,7 @@ import { KFM_MERMAID_TAG } from './_tag';
 
 export { KFM_MERMAID_TAG } from './_tag';
 
-export type KfmMermaidState = 'rendered' | 'error';
+type KfmMermaidState = 'rendered' | 'error';
 
 /** mermaid.render の要求する一意 id 用 (DOM id は描画後の SVG にのみ残る) */
 let renderSequence = 0;

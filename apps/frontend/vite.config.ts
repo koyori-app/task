@@ -6,8 +6,6 @@ import { sentryVitePlugin } from '@sentry/vite-plugin';
 import { analyzer, unstableRolldownAdapter } from 'vite-bundle-analyzer';
 import { visualizer } from 'rollup-plugin-visualizer';
 
-/// <reference types="@batijs/core/types" />
-
 import { devtools } from '@tanstack/devtools-vite';
 import Inspect from 'vite-plugin-inspect';
 import VueDevTools from 'vite-plugin-vue-devtools';

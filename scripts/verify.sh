@@ -5,7 +5,7 @@
 #   changed   main との差分（コミット済み + 作業ツリー）から要る区分だけを回す
 #   backend   fmt・hakari・clippy・テスト（統合テストを含む）・openapi.json のずれ
 #   cli       task-cli のテスト
-#   frontend  openapi の型生成・fmt・lint・型検査・単体テスト・API パスの引数の検査
+#   frontend  openapi の型生成・fmt・lint・未使用の検出・型検査・単体テスト・API パスの引数の検査
 #   docs      仕様書の文体の lint とそのテスト
 # 環境変数: VERIFY_BASE（changed の比較元。既定は origin/main との merge-base）
 #           VERIFY_LOG_DIR（ログの置き場。既定は <リポジトリ>/.verify）
@@ -80,6 +80,7 @@ run_frontend() {
   step openapi-types apps/frontend pnpm run openapi:generate
   step frontend-fmt apps/frontend pnpm fmt:check
   step frontend-lint apps/frontend pnpm lint
+  step knip apps/frontend pnpm knip
   step typecheck apps/frontend pnpm vue-tsc --noEmit
   step unit apps/frontend pnpm test:unit
   step api-path-params . bash scripts/api-path-params/check-api-path-params.sh apps/frontend/src

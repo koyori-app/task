@@ -53,9 +53,6 @@ export function toggleFlag(expr: string, key: TaskQueryKey, value: string, on: b
   }
   return setQualifierValues(removed, key, [...qualifierValues(removed, key), value]);
 }
-export function removeTokenAt(expr: string, index: number): string {
-  return serializeTaskQuery(tokenizeTaskQuery(expr).filter((_, i) => i !== index));
-}
 export function hasFilter(expr: string): boolean {
   return tokenizeTaskQuery(expr).some((t) => t.kind !== 'qualifier' || t.key !== 'sort');
 }

@@ -121,11 +121,6 @@ export function setMentionNames(view: EditorView, table: MentionTable): void {
   view.dispatch({ effects: namesCompartment.reconfigure(namesFacet.of(table)) });
 }
 
-/** 札の字の引き表を読む（コピーで `@名` を作る時にも使う）。 */
-export function mentionNamesOf(state: EditorState): MentionTable {
-  return state.facet(namesFacet);
-}
-
 class MentionWidget extends WidgetType {
   constructor(
     readonly id: string,
@@ -166,7 +161,7 @@ function composingGuard(run: (v: EditorView) => boolean) {
   return (v: EditorView) => (v.composing ? false : run(v));
 }
 
-export const mentionTheme = EditorView.theme({
+const mentionTheme = EditorView.theme({
   '.cm-tooltip.cm-tooltip-autocomplete': {
     zIndex: MENTION_AUTOCOMPLETE_Z_INDEX,
     border: '1px solid var(--border)',

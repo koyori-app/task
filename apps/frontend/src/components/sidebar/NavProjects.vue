@@ -6,7 +6,7 @@ import type { components } from '@/generated/api';
 
 import { Accordion, Button, SidebarLink, Skeleton } from '@koyori-app/ui-vue';
 
-export type ProjectNavItem = components['schemas']['ProjectResponse'];
+type ProjectNavItem = components['schemas']['ProjectResponse'];
 
 const props = defineProps<{
   tenantSlug: string;

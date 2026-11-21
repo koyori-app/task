@@ -6,7 +6,7 @@ export function isImeKeydown(event: KeyboardEvent): boolean {
   return event.isComposing || event.keyCode === 229;
 }
 
-export function guardImeKeydown(event: KeyboardEvent): void {
+function guardImeKeydown(event: KeyboardEvent): void {
   if (!isImeKeydown(event)) return;
   // CodeMirror は変換中の keydown も自分の処理に使うので止めない（MarkdownEditor が外へ渡さない）
   if (event.target instanceof Element && event.target.closest('.cm-editor')) return;

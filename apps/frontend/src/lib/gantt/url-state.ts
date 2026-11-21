@@ -30,8 +30,8 @@ export type GanttUrlState = Pick<CalendarUrlState, 'memberIds' | 'selected'> & {
   dependencies: boolean | null;
 };
 
-export const DEFAULT_SCALE: GanttScale = 'day';
-export const DEFAULT_GROUP_BY: GanttGroupBy = 'project';
+const DEFAULT_SCALE: GanttScale = 'day';
+const DEFAULT_GROUP_BY: GanttGroupBy = 'project';
 
 /** `searchAll` は Vike の `urlParsed.searchAll`（同じキーの複数値を持つ） */
 export function parseGanttUrlState(
