@@ -135,6 +135,13 @@ const range = (wrapper: VueWrapper) => wrapper.get('[data-testid="gantt-range"]'
 const panArea = (wrapper: VueWrapper) => wrapper.get('[data-testid="gantt-pan"]');
 const groupHeader = (wrapper: VueWrapper) =>
   wrapper.get('[data-testid="gantt-body"] button[aria-expanded]');
+/** 指やマウスで押した click（detail が 1）。キーボードで押した click は detail が 0 */
+async function tapHeader(wrapper: VueWrapper, detail = 1) {
+  groupHeader(wrapper).element.dispatchEvent(
+    new MouseEvent('click', { bubbles: true, cancelable: true, detail }),
+  );
+  await flushPromises();
+}
 const scheduleCalls = () => GET.mock.calls.filter(([path]) => isSchedule(String(path)));
 const urlFrom = () => new URL(window.location.href).searchParams.get('from');
 const settle = async () => {
@@ -243,12 +250,12 @@ describe('ガントの横のスクロールとスワイプ（TASK-567）', () =>
 
     await swipe(wrapper, 200, 130);
     expect(range(wrapper)).toBe(rangeText(addDays(FROM, 2)));
-    await groupHeader(wrapper).trigger('click');
+    await tapHeader(wrapper);
     expect(groupHeader(wrapper).attributes('aria-expanded')).toBe('true');
 
     // 対照: 動かさずに離した後の click は畳む
     await swipe(wrapper, 200, 200);
-    await groupHeader(wrapper).trigger('click');
+    await tapHeader(wrapper);
     expect(groupHeader(wrapper).attributes('aria-expanded')).toBe('false');
   });
 
@@ -257,11 +264,11 @@ describe('ガントの横のスクロールとスワイプ（TASK-567）', () =>
     await flushPromises();
 
     await swipe(wrapper, 200, 200 - PAN_SLOP_PX);
-    await groupHeader(wrapper).trigger('click');
+    await tapHeader(wrapper);
     expect(groupHeader(wrapper).attributes('aria-expanded')).toBe('false');
 
     await swipe(wrapper, 200, 200 - PAN_SLOP_PX - 1);
-    await groupHeader(wrapper).trigger('click');
+    await tapHeader(wrapper);
     expect(groupHeader(wrapper).attributes('aria-expanded')).toBe('false');
     expect(range(wrapper)).toBe(rangeText(FROM));
   });
@@ -284,13 +291,38 @@ describe('ガントの横のスクロールとスワイプ（TASK-567）', () =>
 
     await swipe(wrapper, 200, 130);
     await new Promise((resolve) => setTimeout(resolve, 50));
-    await groupHeader(wrapper).trigger('click');
+    await tapHeader(wrapper);
     expect(groupHeader(wrapper).attributes('aria-expanded')).toBe('true');
 
     await swipe(wrapper, 200, 130);
     await new Promise((resolve) => setTimeout(resolve, CLICK_SUPPRESS_MS + 50));
-    await groupHeader(wrapper).trigger('click');
+    await tapHeader(wrapper);
     expect(groupHeader(wrapper).attributes('aria-expanded')).toBe('false');
+  });
+
+  it('スワイプの直後でも、キーボードで押した click は通し、続く指の click は抑える', async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+
+    await swipe(wrapper, 200, 130);
+    await tapHeader(wrapper, 0);
+    expect(groupHeader(wrapper).attributes('aria-expanded')).toBe('false');
+
+    // キーボードの click は抑止を消さないので、スワイプ由来の click はまだ抑える
+    await tapHeader(wrapper);
+    expect(groupHeader(wrapper).attributes('aria-expanded')).toBe('false');
+  });
+
+  it('スワイプを離したら端数を捨て、次の wheel に足さない', async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+
+    // 1 日に届かぬ 28px の端数を残したまま、確定の前に離す
+    await swipe(wrapper, 200, 180 - PAN_SLOP_PX);
+    expect(range(wrapper)).toBe(rangeText(FROM));
+    await panArea(wrapper).trigger('wheel', { deltaX: 25 });
+
+    expect(range(wrapper)).toBe(rangeText(FROM));
   });
 
   it('縦が勝つ出だしとピンチの指では範囲が動かない', async () => {
@@ -311,7 +343,7 @@ describe('ガントの横のスクロールとスワイプ（TASK-567）', () =>
     await panArea(wrapper).trigger('pointerup', touch(130));
     expect(range(wrapper)).toBe(rangeText(FROM));
 
-    // 対照: 横が勝つ斜め（横 14 / 縦 10）は送る
+    // 対照: 横が勝つ斜め（横 70 / 縦 10）は送る
     await panArea(wrapper).trigger('pointerdown', touch(200, 200));
     await panArea(wrapper).trigger('pointermove', touch(130, 190));
     await panArea(wrapper).trigger('pointerup', touch(130, 190));

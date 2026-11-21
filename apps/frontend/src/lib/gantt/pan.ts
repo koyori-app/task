@@ -22,6 +22,9 @@ export function scrollFirst(
   if (!(maxScroll > 0)) return { scrollLeft, restPx: deltaPx };
   const clamp = (x: number) => Math.min(maxScroll, Math.max(0, x));
   const from = clamp(scrollLeft);
+  // 寸法は整数に丸めた値なので、実際に巻ける量は 1px 未満ずれうる。端まで 1px 未満なら端に
+  // 着いたものとし、巻けずに切り詰められる分を「巻いた」として移動量から落とさない
+  if (deltaPx > 0 ? maxScroll - from < 1 : from < 1) return { scrollLeft, restPx: deltaPx };
   const to = clamp(from + deltaPx);
   return { scrollLeft: to, restPx: deltaPx - (to - from) };
 }

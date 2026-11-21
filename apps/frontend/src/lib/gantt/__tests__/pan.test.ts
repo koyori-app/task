@@ -44,8 +44,16 @@ describe('scrollFirst', () => {
     expect(scrollFirst(0, 0, 40)).toEqual({ scrollLeft: 0, restPx: 40 });
   });
 
+  it('端まで 1px 未満なら端に着いたものとし、移動量を落とさない', () => {
+    // 丸めた寸法では最大 2 でも、実際は 1.6 までしか巻けない
+    expect(scrollFirst(1.6, 2, 0.5)).toEqual({ scrollLeft: 1.6, restPx: 0.5 });
+    expect(scrollFirst(0.4, 100, -3)).toEqual({ scrollLeft: 0.4, restPx: -3 });
+    // 1px 以上残っていれば巻く
+    expect(scrollFirst(1, 2, 0.5)).toEqual({ scrollLeft: 1.5, restPx: 0 });
+  });
+
   it('端を越えた位置（弾みの戻り）から逆の向きに巻かない', () => {
-    expect(scrollFirst(105, 100, 10)).toEqual({ scrollLeft: 100, restPx: 10 });
+    expect(scrollFirst(105, 100, 10)).toEqual({ scrollLeft: 105, restPx: 10 });
   });
 });
 

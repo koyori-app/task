@@ -19,5 +19,5 @@ export function scrollParentOf(el: Element | null): HTMLElement | Window {
 export function horizontalScrollerIn(box: HTMLElement | null): HTMLElement | null {
   if (!box) return null;
   const candidates = [box.querySelector<HTMLElement>('.koyori-gantt-scroll'), box];
-  return candidates.find((el) => !!el && el.scrollWidth - el.clientWidth > 0) ?? null;
+  return candidates.find((el) => !!el && el.scrollWidth - el.clientWidth > 1) ?? null;
 }

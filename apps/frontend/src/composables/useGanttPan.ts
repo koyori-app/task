@@ -125,14 +125,18 @@ export function useGanttPan(options: {
   function onPointerEnd(_event: PointerEvent) {
     const moved = drag?.moved ?? false;
     drag = null;
-    // タッチの click は pointerup より遅れて届くので、時刻で抑える。来なかった時も、
-    // 少し後のキーボードの Enter の click は握り潰さない
+    // 指を離したら端数を捨てる（次の wheel に足さない）
+    restPx = 0;
+    // タッチの click は pointerup より遅れて届くので、時刻で抑える
     if (moved) suppressUntil = performance.now() + CLICK_SUPPRESS_MS;
   }
 
   // スワイプの後の click で、棒・群れの見出し・重ねた行の button が動かないようにする
   function onClickCapture(event: MouseEvent) {
     if (performance.now() >= suppressUntil) return;
+    // キーボード（Enter / Space）で押した click は detail が 0。スワイプ由来ではないので通し、
+    // 抑止も消さない
+    if (event.detail === 0) return;
     event.preventDefault();
     event.stopPropagation();
     suppressUntil = 0;
