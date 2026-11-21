@@ -5,7 +5,7 @@ export type AuthorizationPreview = components['schemas']['AuthorizationPreviewRe
 export type OAuthGrant = components['schemas']['OAuthGrantResponse'];
 
 /** 同意画面のパス。 */
-export const AUTHORIZE_PATH = '/oauth/authorize';
+const AUTHORIZE_PATH = '/oauth/authorize';
 /** 保存した要求を指す query の名前。 */
 export const RESUME_PARAM = 'resume';
 
