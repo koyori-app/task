@@ -17,7 +17,7 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait,
     QueryFilter, QuerySelect, TransactionTrait,
 };
-use service::drive_sections::{BackfillReport, backfill_missing};
+use service::drive_sections::{BackfillReport, MAX_INDEXED_BYTES, backfill_missing};
 use uuid::Uuid;
 
 async fn insert_folder(
@@ -298,6 +298,17 @@ async fn search_pages_through_hits() {
     )
     .await;
     assert_eq!(zero["hits"].as_array().expect("hits").len(), 1);
+
+    // offset が末尾を越えても total は全数
+    let beyond = search_ok(
+        &app,
+        tenant_id,
+        project_id,
+        &[("q", "pageword"), ("offset", "1000")],
+    )
+    .await;
+    assert_eq!(beyond["hits"].as_array().expect("hits").len(), 0);
+    assert_eq!(beyond["total"], SECTIONS);
 
     let mut positions = Vec::new();
     for offset in ["0", "50", "100"] {
@@ -817,6 +828,8 @@ async fn search_validates_query_and_project() {
     // 語数の境界
     assert_eq!(status(["w"; 10].join(" ")).await, StatusCode::OK);
     assert_eq!(status(["w"; 11].join(" ")).await, StatusCode::BAD_REQUEST);
+    // NUL は DB のエラー（500）にせず弾く
+    assert_eq!(status("a\0b".into()).await, StatusCode::BAD_REQUEST);
     // q が無い
     let missing = search(&app, tenant_id, project_id, &[]).await;
     assert_eq!(missing.status(), StatusCode::BAD_REQUEST);
@@ -999,6 +1012,202 @@ async fn backfill_skips_a_file_updated_after_it_was_read() {
         0,
         "古い本文で索引しない"
     );
+
+    app.cleanup_user(owner.id).await;
+}
+
+/// 節の本文（位置の順）。
+async fn section_rows(app: &TestApp, file_id: Uuid) -> Vec<(i32, Vec<String>, String)> {
+    use sea_orm::QueryOrder;
+    drive_file_sections::Entity::find()
+        .filter(drive_file_sections::Column::DriveFileId.eq(file_id))
+        .order_by_asc(drive_file_sections::Column::Position)
+        .all(&app.state.db)
+        .await
+        .expect("load sections")
+        .into_iter()
+        .map(|row| (row.position, row.heading_path, row.body))
+        .collect()
+}
+
+/// NUL の多い本文でも、backfill は保存の経路と同じ索引を作る
+/// （NUL を除いた後の長さで上限を数える。生の長さで読むのを止めない）。
+#[tokio::test]
+#[serial_test::serial(drive)]
+async fn backfill_matches_the_save_path_for_a_body_full_of_nul() {
+    let mut app = app_with_empty_drive().await;
+    let (owner, tenant_id, project_id, folder) = setup(&mut app).await;
+    // 生の長さでは索引の上限の 2 倍ある NUL の前置き。上限をわずかに越えるだけでは、
+    // ストレージが小分けに返す最後のかたまりに本文が入り、生の長さで止めても読めてしまう
+    let body = format!(
+        "{}# Title\n\nnulprefixword\n",
+        "\0".repeat(MAX_INDEXED_BYTES * 2)
+    );
+    let file_id = upload_md(&app, tenant_id, Some(folder), &body).await;
+    let saved = section_rows(&app, file_id).await;
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].2, "# Title\n\nnulprefixword\n");
+    assert_eq!(total(&app, tenant_id, project_id, "nulprefixword").await, 1);
+
+    drive_file_sections::Entity::delete_many()
+        .exec(&app.state.db)
+        .await
+        .expect("delete sections");
+    let report = run_backfill(&app).await;
+    assert_eq!(
+        report,
+        BackfillReport {
+            indexed: 1,
+            skipped: 0,
+            failed: 0
+        }
+    );
+    assert_eq!(section_rows(&app, file_id).await, saved);
+    assert_eq!(total(&app, tenant_id, project_id, "nulprefixword").await, 1);
+
+    app.cleanup_user(owner.id).await;
+}
+
+/// 1 回の INSERT の行数（500）と節の上限（2000）を越える本文が、欠けも重なりも無く入る。
+#[tokio::test]
+#[serial_test::serial(drive)]
+async fn large_file_is_indexed_across_insert_chunks_and_capped() {
+    let mut app = TestApp::new().await;
+    let (owner, tenant_id, project_id, folder) = setup(&mut app).await;
+    const HEADINGS: usize = 2001;
+    let body: String = (0..HEADINGS)
+        .map(|i| format!("# h{i}\n\nchunkword{i}x\n\n"))
+        .collect();
+    let file_id = upload_md(&app, tenant_id, Some(folder), &body).await;
+
+    let rows = section_rows(&app, file_id).await;
+    assert_eq!(rows.len(), 2000);
+    assert_eq!(
+        rows.iter().map(|row| row.0).collect::<Vec<_>>(),
+        (0..2000).collect::<Vec<_>>(),
+        "位置は 0 から続く"
+    );
+    let joined: String = rows.iter().map(|row| row.2.as_str()).collect();
+    assert_eq!(joined, body, "節をつなぐと本文に戻る");
+
+    // INSERT の区切り（500 行）の前後の節
+    for i in [499usize, 500, 501, 1999] {
+        let hit = search_ok(
+            &app,
+            tenant_id,
+            project_id,
+            &[("q", &format!("chunkword{i}x"))],
+        )
+        .await;
+        assert_eq!(hit["total"], 1, "chunkword{i}x");
+        assert_eq!(hit["hits"][0]["position"], i);
+        assert_eq!(
+            hit["hits"][0]["heading_path"],
+            serde_json::json!([format!("h{i}")])
+        );
+    }
+    // 上限を越えた見出しは最後の節に入る
+    let last = search_ok(&app, tenant_id, project_id, &[("q", "chunkword2000x")]).await;
+    assert_eq!(last["total"], 1);
+    assert_eq!(last["hits"][0]["position"], 1999);
+    assert_eq!(
+        last["hits"][0]["heading_path"],
+        serde_json::json!(["h1999"])
+    );
+
+    app.cleanup_user(owner.id).await;
+}
+
+/// 抜粋は長い節の途中からでも、語の前後 100 文字で切れる（節の本文の全体は受け取らない）。
+#[tokio::test]
+#[serial_test::serial(drive)]
+async fn excerpt_is_cut_from_the_middle_of_a_long_section() {
+    let mut app = TestApp::new().await;
+    let (owner, tenant_id, project_id, folder) = setup(&mut app).await;
+    let body = format!(
+        "{} DeepNeedle 日本語の語 {}",
+        "あ".repeat(5000),
+        "い".repeat(5000)
+    );
+    upload_md(&app, tenant_id, Some(folder), &body).await;
+
+    let expected = format!(
+        "…{} DeepNeedle 日本語の語 {}…",
+        "あ".repeat(99),
+        "い".repeat(100 - " 日本語の語 ".chars().count())
+    );
+    // 大文字小文字が違っても同じ位置で切れる
+    for q in ["DeepNeedle", "deepneedle"] {
+        let hit = search_ok(&app, tenant_id, project_id, &[("q", q)]).await;
+        assert_eq!(hit["total"], 1);
+        assert_eq!(hit["hits"][0]["excerpt"], expected, "{q}");
+    }
+    // 2 つ目の語が先に現れても、1 つ目の語のまわりで切る
+    let hit = search_ok(
+        &app,
+        tenant_id,
+        project_id,
+        &[("q", "日本語の語 deepneedle")],
+    )
+    .await;
+    let excerpt = hit["hits"][0]["excerpt"].as_str().expect("excerpt");
+    assert!(excerpt.starts_with('…') && excerpt.ends_with('…'));
+    assert_eq!(
+        excerpt.chars().count(),
+        1 + 100 + "日本語の語".chars().count() + 100 + 1
+    );
+    assert!(excerpt.contains("DeepNeedle 日本語の語"));
+
+    app.cleanup_user(owner.id).await;
+}
+
+/// 公開リンクのトークンでは検索できない（検索はトークンを受け取らず、未認証として扱う）。
+#[tokio::test]
+#[serial_test::serial(drive)]
+async fn public_link_token_does_not_grant_search() {
+    let mut app = TestApp::new().await;
+    let (owner, tenant_id, project_id, folder) = setup(&mut app).await;
+    let file_id = upload_md(&app, tenant_id, Some(folder), "# a\n\ntokenword\n").await;
+    let token = format!("tok-{}", Uuid::new_v4().simple());
+    drive_folder_shares::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        folder_id: Set(folder),
+        shared_with_user_id: Set(None),
+        share_token: Set(Some(token.clone())),
+        permission: Set(drive_folder_shares::SharePermission::Viewer),
+        created_by: Set(owner.id),
+        expires_at: Set(None),
+        created_at: Set(Utc::now().into()),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert token share");
+
+    let anonymous = reqwest::Client::new();
+    let content = anonymous
+        .get(format!(
+            "{}/v1/drive/files/{file_id}/content?token={token}",
+            app.base_url()
+        ))
+        .send()
+        .await
+        .expect("content request");
+    assert_eq!(
+        content.status(),
+        StatusCode::OK,
+        "対照: トークンで本文は読める"
+    );
+    let response = anonymous
+        .get(search_url(
+            &app,
+            tenant_id,
+            project_id,
+            &[("q", "tokenword"), ("token", &token)],
+        ))
+        .send()
+        .await
+        .expect("search request");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
     app.cleanup_user(owner.id).await;
 }

@@ -8,6 +8,8 @@ pub struct Migration;
 /// `tenant_id` / `project_id` は写さない。移動は本文を読み直さずに `drive_files.project_id` を
 /// 書き換えるので、検索は `drive_files` と結合して絞る。削除は FK の CASCADE に任せる。
 /// 既存のファイルの行は、起動時の backfill（`service::drive_sections::backfill_missing`）が作る。
+/// 新しいバックエンドをマイグレーションより先に起動すると SeaORM の `sync()` が表を作るので、
+/// `IF NOT EXISTS` で受ける（trigram の索引は `sync()` が作らないので、ここで足す）。
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
@@ -15,7 +17,7 @@ impl MigrationTrait for Migration {
             .get_connection()
             .execute_unprepared(
                 r#"
-            CREATE TABLE drive_file_sections (
+            CREATE TABLE IF NOT EXISTS drive_file_sections (
                 id            UUID PRIMARY KEY,
                 drive_file_id UUID NOT NULL REFERENCES drive_files(id) ON DELETE CASCADE,
                 position      INTEGER NOT NULL,
@@ -31,7 +33,7 @@ impl MigrationTrait for Migration {
         manager
             .get_connection()
             .execute_unprepared(
-                "CREATE INDEX idx_drive_file_sections_body_trgm
+                "CREATE INDEX IF NOT EXISTS idx_drive_file_sections_body_trgm
                      ON drive_file_sections USING GIN (body gin_trgm_ops);",
             )
             .await?;
