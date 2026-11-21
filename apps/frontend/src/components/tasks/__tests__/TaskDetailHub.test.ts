@@ -271,7 +271,7 @@ describe('TaskDetailHub', () => {
 
     expect(wrapper.html()).not.toContain('--priority-color');
     const flag = wrapper.get('button[aria-label="優先度"] svg');
-    expect(flag.attributes('style')).toContain('color: #eab308');
+    expect(flag.attributes('style')).toContain('color: var(--priority-medium)');
   });
 
   it('本文のスクロール領域で切れないよう、メニューはどれもトップレイヤーに出す', () => {

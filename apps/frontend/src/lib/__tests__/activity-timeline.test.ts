@@ -244,8 +244,8 @@ describe('activityLine', () => {
   it('優先度は内部の値を出さず、日本語の名前と色にする', () => {
     expect(line('priority_changed', { from: 'critical_fire', to: 'high' })).toMatchObject({
       label: '優先度',
-      from: { text: '緊急', color: '#dc2626' },
-      to: { text: '高', color: '#f97316' },
+      from: { text: '緊急', color: 'var(--priority-critical-fire)' },
+      to: { text: '高', color: 'var(--priority-high)' },
     });
   });
 

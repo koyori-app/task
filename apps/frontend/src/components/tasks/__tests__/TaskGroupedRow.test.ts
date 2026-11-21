@@ -108,7 +108,7 @@ describe('TaskGroupedRow の優先度の表示', () => {
 
     expect(wrapper.html()).not.toContain('--priority-color');
     const flag = wrapper.get('button[aria-label="優先度"] svg');
-    expect(flag.attributes('style')).toContain('color: #eab308');
+    expect(flag.attributes('style')).toContain('color: var(--priority-medium)');
   });
 
   // 文字が先だと「重大」と「中」で旗の位置が動く

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import LoadErrorState from '@/components/LoadErrorState.vue';
-import { Loader2, Signal, SignalHigh, SignalLow, SignalMedium } from '@lucide/vue';
-import type { LucideIcon } from '@lucide/vue';
+import { Loader2 } from '@lucide/vue';
 import type {
   ColumnDef,
   ColumnFiltersState,
@@ -58,7 +57,7 @@ import { usePreference } from '@/composables/useLocalSettings';
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import { fetchClient, useAssignableUsersQuery } from '@/lib/api-vue-query';
-import { formatDeadline, taskDetailHref, taskSeqKey } from '@/lib/task-display';
+import { PRIORITY_CONFIG, formatDeadline, taskDetailHref, taskSeqKey } from '@/lib/task-display';
 import type { components } from '@/generated/api';
 import { buildTasksListQueryParams, taskListPlaceholderData } from './task-list-query';
 import { keepTaskListFocusAcrossSplit } from './task-list-split-focus';
@@ -618,15 +617,6 @@ const features = tableFeatures({
   sortFns,
 });
 type TaskTableFeatures = typeof features;
-
-const PRIORITY_CONFIG: Record<ApiPriority, { label: string; color: string; icon: LucideIcon }> = {
-  CriticalFire: { label: '緊急', color: '#dc2626', icon: Signal },
-  Critical: { label: '重大', color: '#ef4444', icon: Signal },
-  High: { label: '高', color: '#f97316', icon: SignalHigh },
-  Medium: { label: '中', color: '#eab308', icon: SignalMedium },
-  Low: { label: '低', color: '#6b7280', icon: SignalLow },
-  Trivial: { label: '些細', color: '#9ca3af', icon: SignalLow },
-};
 
 function taskKey(task: TaskRow) {
   return `${task.project_key}-${task.seq_id}`;
