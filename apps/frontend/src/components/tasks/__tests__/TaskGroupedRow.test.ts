@@ -446,7 +446,7 @@ describe('TaskGroupedRow のチェックリスト達成率', () => {
 
 // TASK-389: 一覧の期限の列も、詳細と同じ規則で最終期限との矛盾を送る前に止める
 describe('TaskGroupedRow の期限と最終期限', () => {
-  function mountDeadlines(overrides: Partial<TaskResponse>) {
+  function mountDeadlines(overrides: Partial<TaskResponse>, error?: string) {
     return mount(TaskGroupedRow, {
       props: {
         projectKey: 'TEST',
@@ -454,11 +454,27 @@ describe('TaskGroupedRow の期限と最終期限', () => {
         statuses: [status],
         projectLabels: [],
         members: [],
+        error,
         onComment: vi.fn(async () => true),
       },
       attachTo: document.body,
     });
   }
+
+  // 一覧が狭くなると期限の入力欄（広い幅の列）は隠れる。警告だけが残らず、行の失敗も隠さない
+  it('矛盾の警告は入力欄と同じ幅の条件で出し、行の失敗の文言と一緒に出せる', async () => {
+    const wrapper = mountDeadlines(
+      { hard_deadline: '2026-08-20T00:00:00.000Z' },
+      '更新に失敗しました',
+    );
+
+    await editDeadline(wrapper, '2026-08-21');
+
+    const alert = wrapper.get('[role="alert"]');
+    expect(alert.text()).toBe(DEADLINE_ORDER_MESSAGE);
+    expect(alert.classes()).toEqual(expect.arrayContaining(['hidden', '@3xl:block']));
+    expect(wrapper.text()).toContain('更新に失敗しました');
+  });
 
   async function editDeadline(wrapper: ReturnType<typeof mountDeadlines>, value: string) {
     if (!wrapper.find('input[aria-label="期限"]').exists()) {

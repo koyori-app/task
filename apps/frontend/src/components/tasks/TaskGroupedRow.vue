@@ -560,9 +560,14 @@ function selectFromKeyboard(event: KeyboardEvent) {
       </div>
     </div>
 
-    <p v-if="deadlineOrderInvalid" role="alert" class="px-3 pb-1.5 text-xs text-destructive">
+    <!-- 期限の入力欄（広い幅の列）と同じ条件で出す。一覧が狭くなったら入力欄と一緒に隠れる -->
+    <p
+      v-if="deadlineOrderInvalid"
+      role="alert"
+      class="hidden px-3 pb-1.5 text-xs text-destructive @3xl:block"
+    >
       {{ DEADLINE_ORDER_MESSAGE }}
     </p>
-    <p v-else-if="error" class="px-3 pb-1.5 text-xs text-destructive">{{ error }}</p>
+    <p v-if="error" class="px-3 pb-1.5 text-xs text-destructive">{{ error }}</p>
   </div>
 </template>
