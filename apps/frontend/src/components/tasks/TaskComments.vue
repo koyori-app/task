@@ -545,6 +545,7 @@ async function deleteThread(threadId: string) {
           :upload-file="uploadFile"
           :upload-scope="uploadScope"
           @update:uploading="composerUploading = $event"
+          @submit="submitDraft"
         />
         <div v-show="composerExpanded" class="flex items-center justify-between gap-1 p-0.5">
           <Button

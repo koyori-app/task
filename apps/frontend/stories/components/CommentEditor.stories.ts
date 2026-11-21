@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
-import { expect, userEvent, waitFor, within } from 'storybook/test';
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test';
 import { ref } from 'vue';
 
 import CommentEditor from '@/components/tasks/CommentEditor.vue';
@@ -543,5 +543,99 @@ export const PasteThenSwitchScope: Story = {
     await new Promise((resolve) => setTimeout(resolve, 100));
     await expect(out(canvasElement)).toBe('');
     await expect(uploadNote(canvasElement)).toBeNull();
+  },
+};
+
+/** `submit` の受け手。器の v-bind="args" で listener として渡る */
+const submitSpy = fn();
+
+/** Ctrl+Enter（Mac は ⌘+Enter も）は送信で、既定の空行の挿入はしない */
+export const SubmitWithModEnter: Story = {
+  args: { onSubmit: submitSpy },
+  beforeEach: () => submitSpy.mockClear(),
+  render: withValue(''),
+  play: async ({ canvasElement }) => {
+    await ready(canvasElement);
+    await userEvent.keyboard('本文');
+    await waitFor(() => expect(out(canvasElement)).toBe('本文'));
+
+    await userEvent.keyboard('{Control>}{Enter}{/Control}');
+    await waitFor(() => expect(submitSpy).toHaveBeenCalledTimes(1));
+    await expect(out(canvasElement)).toBe('本文');
+  },
+};
+
+/** 変換中の Ctrl+Enter は IME の操作で、送らず空行も入れない */
+export const ModEnterWhileComposing: Story = {
+  args: { onSubmit: submitSpy },
+  beforeEach: () => submitSpy.mockClear(),
+  render: withValue(''),
+  play: async ({ canvasElement }) => {
+    const editor = await ready(canvasElement);
+    editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }));
+    const line = editor.querySelector('.cm-line')!;
+    line.append(document.createTextNode('あ'));
+    editor.dispatchEvent(new CompositionEvent('compositionupdate', { bubbles: true, data: 'あ' }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    editor.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Enter',
+        code: 'Enter',
+        keyCode: 229,
+        ctrlKey: true,
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await expect(submitSpy).not.toHaveBeenCalled();
+    await expect(out(canvasElement)).toBe('あ');
+    editor.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: 'あ' }));
+  },
+};
+
+/**
+ * 送信中（disabled）にフォーカスが body へ落ちても、戻った時に入力欄へ返す。
+ * キーで送った後に続けて打てるようにする（ボタンで送る時はフォーカスがボタンに在るので起きない）
+ */
+export const RefocusAfterDisabled: Story = {
+  render: (args: Record<string, unknown>) => ({
+    components: { CommentEditor },
+    setup() {
+      const value = ref('');
+      const disabled = ref(false);
+      const { modelValue: _ignored, ...rest } = args;
+      return { args: rest, value, disabled };
+    },
+    template: `
+      <div style="width: 420px">
+        <CommentEditor v-model="value" v-bind="args" :disabled="disabled" aria-label="コメントを入力" />
+        <button type="button" data-testid="toggle" @click="disabled = !disabled">切り替え</button>
+        <pre data-testid="out" style="font-size: 11px; white-space: pre-wrap">{{ value }}</pre>
+      </div>`,
+  }),
+  play: async ({ canvasElement }) => {
+    const editor = await ready(canvasElement);
+    await userEvent.keyboard('送る');
+    await waitFor(() => expect(out(canvasElement)).toBe('送る'));
+
+    // フォーカスを動かさずに切り替える（送信の開始と終わり）
+    const toggle = within(canvasElement).getByTestId('toggle');
+    toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await waitFor(() =>
+      expect(content(canvasElement).getAttribute('contenteditable')).toBe('false'),
+    );
+    toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await waitFor(() =>
+      expect(content(canvasElement).getAttribute('contenteditable')).toBe('true'),
+    );
+
+    await waitFor(() =>
+      expect(editor.closest('.cm-editor')!.contains(document.activeElement)).toBe(true),
+    );
+    // 作り直した state は caret を先頭に置く（送信が通れば本文は空なので、位置は問わない）
+    await userEvent.keyboard('続き');
+    await waitFor(() => expect(out(canvasElement)).toBe('続き送る'));
   },
 };

@@ -89,7 +89,7 @@ const emit = defineEmits<{
   'update:modelValue': [value: string];
   blur: [event: FocusEvent];
   keydown: [event: KeyboardEvent];
-  /** Mod-Enter。字下げで Tab を使う文脈からキーボードだけで確定して抜けるための口 */
+  /** Mod-Enter（Mac は Ctrl-Enter も）。字下げで Tab を使う文脈からキーボードだけで確定して抜けるための口 */
   submit: [];
   /** 貼り付けたファイルを上げている最中か。呼び出し側は true の間、保存を止める */
   'update:uploading': [value: boolean];
@@ -222,7 +222,7 @@ const INDENTABLE_NODES = new Set([
  * - 複数行にまたがる選択がある、または字下げが意味を持つ文脈にいる → 字下げ
  * - それ以外 (地の文) → 何もせず既定のフォーカス移動に任せる
  *
- * 字下げ側に入った状態から抜ける手段として Mod-Enter (確定) を用意する。
+ * 字下げ側に入った状態から抜ける手段として Mod-Enter (確定。Mac は Ctrl-Enter も) を用意する。
  */
 function tabIndents(view: EditorViewType): boolean {
   const spansLines = view.state.selection.ranges.some(
@@ -231,6 +231,12 @@ function tabIndents(view: EditorViewType): boolean {
       view.state.doc.lineAt(range.from).number !== view.state.doc.lineAt(range.to).number,
   );
   return spansLines || inIndentableBlock(view);
+}
+
+/** Mod-Enter（Mac は Ctrl-Enter も）で確定する */
+function submitFromKey(): boolean {
+  emit('submit');
+  return true;
 }
 
 /**
@@ -271,13 +277,8 @@ function extensions(): Extension[] {
         run: (view) => (tabIndents(view) ? indentMore(view) : false),
         shift: (view) => (tabIndents(view) ? indentLess(view) : false),
       },
-      {
-        key: 'Mod-Enter',
-        run: () => {
-          emit('submit');
-          return true;
-        },
-      },
+      { key: 'Mod-Enter', run: submitFromKey },
+      { mac: 'Ctrl-Enter', run: submitFromKey },
       ...defaultKeymap,
       ...historyKeymap,
     ]),

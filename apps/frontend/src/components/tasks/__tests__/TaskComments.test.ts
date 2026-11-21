@@ -293,6 +293,58 @@ describe('TaskComments', () => {
       expect(onUpdate).toHaveBeenCalledWith('c-1', '直した本文');
     });
 
+    it('入力欄の submit（Ctrl+Enter）で送り、空の間とアップロード中は送らない', async () => {
+      const onSubmit = vi.fn(async () => true);
+      const wrapper = mountComments({ onSubmit });
+      const composer = () => editors(wrapper)[0]!;
+
+      composer().vm.$emit('submit');
+      await flushPromises();
+      expect(onSubmit).not.toHaveBeenCalled();
+
+      await wrapper.get('textarea[aria-label="コメントを入力"]').setValue('キーで送る');
+      composer().vm.$emit('update:uploading', true);
+      await nextTick();
+      composer().vm.$emit('submit');
+      await flushPromises();
+      expect(onSubmit).not.toHaveBeenCalled();
+
+      composer().vm.$emit('update:uploading', false);
+      await nextTick();
+      composer().vm.$emit('submit');
+      await flushPromises();
+      expect(onSubmit).toHaveBeenCalledWith('キーで送る');
+    });
+
+    it('編集の入力欄の submit（Ctrl+Enter）で保存し、アップロード中と保存中は保存しない', async () => {
+      const onUpdate = vi.fn(async () => true);
+      const wrapper = mountComments({
+        threads: [thread('c-1', '元の本文')],
+        currentUserId: user.id,
+        onUpdate,
+      });
+      await menuItems(wrapper, 'コメントを編集')[0]!.trigger('click');
+      await wrapper.get('textarea[aria-label="コメントを編集"]').setValue('直した本文');
+      const editor = () => editors(wrapper).find((e) => e.props('ariaLabel') === 'コメントを編集')!;
+
+      editor().vm.$emit('update:uploading', true);
+      await nextTick();
+      editor().vm.$emit('submit');
+      await flushPromises();
+      expect(onUpdate).not.toHaveBeenCalled();
+      editor().vm.$emit('update:uploading', false);
+
+      await wrapper.setProps({ updatingCommentId: 'c-1' });
+      editor().vm.$emit('submit');
+      await flushPromises();
+      expect(onUpdate).not.toHaveBeenCalled();
+
+      await wrapper.setProps({ updatingCommentId: null });
+      editor().vm.$emit('submit');
+      await flushPromises();
+      expect(onUpdate).toHaveBeenCalledWith('c-1', '直した本文');
+    });
+
     it('テナントとプロジェクトが分かる時だけ、入力欄と編集の入力欄へ uploadFile を渡す', async () => {
       const without = mountComments({ threads: [thread('c-1', '本文')], currentUserId: user.id });
       await menuItems(without, 'コメントを編集')[0]!.trigger('click');

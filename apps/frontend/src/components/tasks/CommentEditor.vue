@@ -29,6 +29,8 @@ import { pasteUploadExtensions, resetPasteUploads } from '@/lib/paste-upload-ext
  *
  * IME の変換中は候補を確定しない（Enter は変換の確定に使われるため、変換中は補完へ渡さない）。
  *
+ * Mod-Enter（Mac は Ctrl-Enter も）で `submit` を emit する（変換中と disabled の間は送らない）。
+ *
  * SSR しない: CodeMirror は DOM を要求するため、マウント後にクライアントで組み立てる
  * （MarkdownEditor と同じ。器の div は常に出るのでレイアウトは前後で変わらない）。
  */
@@ -76,6 +78,8 @@ const emit = defineEmits<{
   'update:modelValue': [value: string];
   /** 貼り付けたファイルを上げている最中か。呼び出し側は true の間、送信・保存を止める */
   'update:uploading': [value: boolean];
+  /** Mod-Enter。呼び出し側は送信・保存する */
+  submit: [];
 }>();
 
 const host = useTemplateRef<HTMLDivElement>('host');
@@ -85,6 +89,13 @@ let mentionTooltipParent: HTMLElement | null = null;
 
 /** 印の id を札の字へ引く表。候補（選んだばかりの者）を先に、API の表で上書きする。 */
 const nameTable = computed<MentionTable>(() => nameTableOf(props.candidates, props.mentions));
+
+/** Mod-Enter（Mac は Ctrl-Enter も）。変換中と disabled の間は送らず、空行も入れない */
+function submitFromKey(target: EditorView): boolean {
+  if (target.composing || props.disabled) return true;
+  emit('submit');
+  return true;
+}
 
 function extensions(): Extension[] {
   if (!mentionTooltipParent) {
@@ -108,7 +119,13 @@ function extensions(): Extension[] {
       names: nameTable.value,
       disabled: () => props.disabled,
     }),
-    keymap.of([...defaultKeymap, ...historyKeymap]),
+    // 既定の Mod-Enter（空行の挿入）より先に置く（先に登録した束が優先される）
+    keymap.of([
+      { key: 'Mod-Enter', run: submitFromKey },
+      { mac: 'Ctrl-Enter', run: submitFromKey },
+      ...defaultKeymap,
+      ...historyKeymap,
+    ]),
     EditorView.lineWrapping,
     theme,
     EditorState.readOnly.of(props.disabled),
@@ -189,9 +206,21 @@ watch(nameTable, (table) => {
 // disabled / placeholder の変更は state ごと作り直す（MarkdownEditor と同じ理由）。
 // uploadFile の有無も同じ（テナントとプロジェクトが mount の後で分かる所で、拡張を足し直す）。
 // 関数が入れ替わっただけ（上げる先のプロジェクトが替わった）では作り直さないよう、有無だけを見る
+/**
+ * disabled になった時に入力欄がフォーカスを持っていたか。戻った時に返す。
+ * キーで送ると、disabled で編集不可になった時点でフォーカスが body へ落ち、続きの打鍵が入らない
+ */
+let refocusOnEnable = false;
+
 watch([() => props.disabled, () => props.placeholder, () => !!props.uploadFile], () => {
   if (!view) return;
+  if (props.disabled && view.hasFocus) refocusOnEnable = true;
   view.setState(EditorState.create({ doc: props.modelValue, extensions: extensions() }));
+  if (props.disabled || !refocusOnEnable) return;
+  refocusOnEnable = false;
+  // 送信中に利用者が別の所へフォーカスを移していたら奪わない
+  const active = document.activeElement;
+  if (!active || active === document.body || active instanceof HTMLDialogElement) view.focus();
 });
 
 function focus() {

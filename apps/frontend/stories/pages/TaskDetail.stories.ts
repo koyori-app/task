@@ -2117,6 +2117,33 @@ export const CommentPost: Story = {
   },
 };
 
+export const CommentPostWithCtrlEnter: Story = {
+  name: 'コメント投稿（Ctrl+Enter）',
+  beforeEach: () => createMockFetch({ comments: sampleComments }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    const textarea = await canvas.findByRole('textbox', { name: 'コメントを入力' });
+    await user.type(textarea, 'キーで投稿するコメント');
+    await user.keyboard('{Control>}{Enter}{/Control}');
+
+    // 下書きの消去を待つ（CommentPost と同じ理由で waitFor）
+    await waitFor(() => expect(textarea.textContent).not.toContain('キーで投稿するコメント'));
+    const commentList = await waitFor(() => {
+      const list = canvasElement.querySelector('[data-activity-feed]');
+      if (!list) throw new Error('comment list not ready');
+      return list as HTMLElement;
+    });
+    await expect(
+      within(commentList).findByText('キーで投稿するコメント'),
+    ).resolves.toBeInTheDocument();
+    // 送信中に落ちたフォーカスは入力欄へ戻り、続けて打てる
+    await waitFor(() =>
+      expect(textarea.closest('.cm-editor')!.contains(document.activeElement)).toBe(true),
+    );
+  },
+};
+
 const sampleActivity = (
   id: string,
   created_at: string,
