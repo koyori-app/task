@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, mount } from '@vue/test-utils';
 
 import TaskGroupedRow from '@/components/tasks/TaskGroupedRow.vue';
+import { DEADLINE_ORDER_MESSAGE } from '@/lib/task-date';
 import type { components } from '@/generated/api';
 
 enableAutoUnmount(afterEach);
@@ -412,5 +413,56 @@ describe('TaskGroupedRow のチェックリスト達成率', () => {
     await wrapper.get('[data-row-labels] [data-checklist-progress]').trigger('click');
 
     expect(wrapper.emitted('open')).toBeUndefined();
+  });
+});
+
+// TASK-389: 一覧の期限の列も、詳細と同じ規則で最終期限との矛盾を送る前に止める
+describe('TaskGroupedRow の期限と最終期限', () => {
+  function mountDeadlines(overrides: Partial<TaskResponse>) {
+    return mount(TaskGroupedRow, {
+      props: {
+        projectKey: 'TEST',
+        task: { ...task, ...overrides },
+        statuses: [status],
+        projectLabels: [],
+        members: [],
+        onComment: vi.fn(async () => true),
+      },
+      attachTo: document.body,
+    });
+  }
+
+  async function editDeadline(wrapper: ReturnType<typeof mountDeadlines>, value: string) {
+    if (!wrapper.find('input[aria-label="期限"]').exists()) {
+      await wrapper.get('button[aria-label="期限を設定"]').trigger('click');
+    }
+    const input = wrapper.get('input[aria-label="期限"]');
+    await input.setValue(value);
+    await input.trigger('keydown', { key: 'Enter' });
+  }
+
+  it('期限が最終期限と同じ日か後なら送らずに警告し、編集を開いたままにする', async () => {
+    const wrapper = mountDeadlines({ hard_deadline: '2026-08-20T00:00:00.000Z' });
+
+    for (const value of ['2026-08-20', '2026-08-21']) {
+      await editDeadline(wrapper, value);
+      expect(wrapper.emitted('update:softDeadline'), value).toBeUndefined();
+      expect(wrapper.get('[role="alert"]').text()).toBe(DEADLINE_ORDER_MESSAGE);
+      expect(wrapper.find('input[aria-label="期限"]').exists()).toBe(true);
+    }
+
+    // 前の日なら送る
+    await editDeadline(wrapper, '2026-08-19');
+    expect(wrapper.emitted('update:softDeadline')).toEqual([['2026-08-19T00:00:00.000Z']]);
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+  });
+
+  it('保存済みの最終期限が同じ日の 12 時なら、その日の期限は止めずに送る', async () => {
+    const wrapper = mountDeadlines({ hard_deadline: '2026-08-20T12:00:00Z' });
+
+    await editDeadline(wrapper, '2026-08-20');
+
+    expect(wrapper.emitted('update:softDeadline')).toEqual([['2026-08-20T00:00:00.000Z']]);
+    expect(wrapper.text()).not.toContain(DEADLINE_ORDER_MESSAGE);
   });
 });

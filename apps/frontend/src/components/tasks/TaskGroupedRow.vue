@@ -26,6 +26,7 @@ import TaskChecklistProgress from '@/components/tasks/TaskChecklistProgress.vue'
 import TaskIdCopyButton from '@/components/tasks/TaskIdCopyButton.vue';
 import UserAvatar from '@/components/UserAvatar.vue';
 import { countChecklist } from '@/lib/task-checklist';
+import { DEADLINE_ORDER_MESSAGE, softNotBeforeHard } from '@/lib/task-date';
 
 type TaskResponse = components['schemas']['TaskResponse'];
 type LabelResponse = components['schemas']['LabelResponse'];
@@ -116,11 +117,24 @@ async function startEditingDeadline() {
   (deadlineInputRef.value?.$el as HTMLElement | undefined)?.querySelector('input')?.focus();
 }
 
+/**
+ * 下書きの期限が保存済みの最終期限と同じか後（サーバーが 400 で弾く）。変えていない値では止めない。
+ * 下書きは送る値（localDateInputToIso）にし、最終期限は保存済みの時刻のまま比べる（詳細と同じ規則）
+ */
+const deadlineOrderInvalid = computed(() => {
+  if (!editingDeadline.value) return false;
+  const raw = deadlineDraft.value.trim();
+  if (!raw || raw === isoToLocalDateInput(props.task.soft_deadline)) return false;
+  return softNotBeforeHard(localDateInputToIso(raw), props.task.hard_deadline);
+});
+
 function commitDeadline() {
   if (!editingDeadline.value) return;
-  editingDeadline.value = false;
   const raw = deadlineDraft.value.trim();
   const current = isoToLocalDateInput(props.task.soft_deadline);
+  // 矛盾していれば送らずに編集を開いたまま警告を見せる
+  if (deadlineOrderInvalid.value) return;
+  editingDeadline.value = false;
   if (raw === current) return;
   // 変換は詳細画面と同じヘルパーを使う（画面ごとに時刻の寄せ方が変わらないように）
   emit('update:softDeadline', raw ? localDateInputToIso(raw) : null);
@@ -527,6 +541,9 @@ function selectFromKeyboard(event: KeyboardEvent) {
       </div>
     </div>
 
-    <p v-if="error" class="px-3 pb-1.5 text-xs text-destructive">{{ error }}</p>
+    <p v-if="deadlineOrderInvalid" role="alert" class="px-3 pb-1.5 text-xs text-destructive">
+      {{ DEADLINE_ORDER_MESSAGE }}
+    </p>
+    <p v-else-if="error" class="px-3 pb-1.5 text-xs text-destructive">{{ error }}</p>
   </div>
 </template>

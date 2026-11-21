@@ -711,10 +711,15 @@ const deadlineOrderInvalid = computed(() => {
   if (!props.task) return false;
   const draft = draftValue.value.trim();
   if (!draft) return false;
-  if (editingField.value === 'soft_deadline')
+  // 変えていない値では警告しない（保存済みは時刻付きで、下書きは 0 時に寄るため、開いただけで真になりうる）
+  if (editingField.value === 'soft_deadline') {
+    if (draft === isoToLocalDateInput(props.task.soft_deadline)) return false;
     return softNotBeforeHard(localDateInputToIso(draft), props.task.hard_deadline);
-  if (editingField.value === 'hard_deadline')
+  }
+  if (editingField.value === 'hard_deadline') {
+    if (draft === isoToLocalDateInput(props.task.hard_deadline)) return false;
     return softNotBeforeHard(props.task.soft_deadline, localDateInputToIso(draft));
+  }
   return false;
 });
 

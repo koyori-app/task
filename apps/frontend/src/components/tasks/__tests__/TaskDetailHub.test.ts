@@ -597,6 +597,15 @@ describe('TaskDetailHub', () => {
     expect(wrapper.text()).not.toContain(DEADLINE_ORDER_MESSAGE);
   });
 
+  it('時刻付きの期限の組は、編集を開いただけでは警告しない', async () => {
+    // 期限は画面から入れた 0 時、最終期限は CLI で入れた同じ日の 12 時（サーバーが通す組）
+    const wrapper = mountDeadlines('2026-08-20T00:00:00.000Z', '2026-08-20T12:00:00Z');
+
+    await wrapper.get('button[aria-label="ハード期限を編集"]').trigger('click');
+    expect(wrapper.find('input[aria-label="ハード期限"]').exists()).toBe(true);
+    expect(wrapper.text()).not.toContain(DEADLINE_ORDER_MESSAGE);
+  });
+
   it('does not save an empty progress value as zero percent', async () => {
     const wrapper = mount(TaskDetailHub, {
       props: {

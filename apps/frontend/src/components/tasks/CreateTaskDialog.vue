@@ -822,7 +822,9 @@ async function submit(event: SubmitEvent) {
               v-model:soft-deadline="softDeadline"
               v-model:hard-deadline="hardDeadline"
               :invalid="plannedStartAfterSoft || softAfterHard"
-              :invalid-message="softAfterHard ? DEADLINE_ORDER_MESSAGE : undefined"
+              :invalid-message="
+                !plannedStartAfterSoft && softAfterHard ? DEADLINE_ORDER_MESSAGE : undefined
+              "
             />
 
             <TaskNumberChip
