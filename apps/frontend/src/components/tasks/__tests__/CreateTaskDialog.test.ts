@@ -62,6 +62,7 @@ import {
   pickerTrigger,
 } from '@/components/__tests__/picker';
 import { PRIORITY_CONFIG } from '@/lib/task-display';
+import { DEADLINE_ORDER_MESSAGE } from '@/lib/task-date';
 
 const statuses = [
   {
@@ -1083,6 +1084,44 @@ describe('CreateTaskDialog dates', () => {
 
     expect(mutateAsync).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('開始予定日は期限以前の日付にしてください');
+    wrapper.unmount();
+  });
+
+  it.each([
+    ['と同じ日', '2026-10-23'],
+    ['より後の日', '2026-10-24'],
+  ])('期限が最終期限%sなら送らずに警告する', async (_, soft) => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('期限の矛盾');
+    await pickDate('softDeadline', soft);
+    await pickDate('hardDeadline', '2026-10-23');
+    expect(datesChip().getAttribute('aria-invalid')).toBe('true');
+    expect(document.body.querySelector(DATE_PANEL)?.textContent).toContain(DEADLINE_ORDER_MESSAGE);
+
+    await submitForm();
+
+    expect(mutateAsync).not.toHaveBeenCalled();
+    const alerts = [...document.body.querySelectorAll('[role="alert"]')].map((a) => a.textContent);
+    expect(alerts.some((text) => text?.includes(DEADLINE_ORDER_MESSAGE))).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('期限が最終期限の前日なら送る', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('期限の順');
+    await pickDate('softDeadline', '2026-10-22');
+    await pickDate('hardDeadline', '2026-10-23');
+    expect(datesChip().getAttribute('aria-invalid')).toBeNull();
+
+    await submitForm();
+
+    expect(mutateAsync.mock.calls[0][0].body).toMatchObject({
+      soft_deadline: '2026-10-22T00:00:00.000Z',
+      hard_deadline: '2026-10-23T00:00:00.000Z',
+    });
+    expect(document.body.textContent).not.toContain(DEADLINE_ORDER_MESSAGE);
     wrapper.unmount();
   });
 });

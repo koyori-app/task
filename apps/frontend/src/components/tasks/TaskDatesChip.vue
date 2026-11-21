@@ -29,8 +29,10 @@ const hardDeadline = defineModel<string>('hardDeadline', { required: true });
 defineProps<{
   /** 引き金の id（ラベルの `for` などが指す）。複数の根を持つので、属性としては落ちてこない */
   id?: string;
-  /** 開始予定が期限より後 */
+  /** 日付の前後が矛盾している（開始予定が期限より後、期限が最終期限と同じか後） */
   invalid?: boolean;
+  /** invalid のときパネルに出す文言。既定は開始予定と期限の矛盾 */
+  invalidMessage?: string;
 }>();
 
 const values = computed<Record<Key, string>>(() => ({
@@ -196,7 +198,7 @@ function keepFocusOnPress(event: MouseEvent) {
 
       <div class="-mx-1.5 my-1.5 border-t" />
       <p v-if="invalid" class="px-2 pb-1 text-xs text-destructive">
-        開始予定日が期限より後になっています
+        {{ invalidMessage ?? '開始予定日が期限より後になっています' }}
       </p>
       <Calendar
         :key="active"
