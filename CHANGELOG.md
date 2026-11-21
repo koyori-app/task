@@ -2,6 +2,14 @@
 
 このファイルは git-cliff（cliff.toml）が生成する。手で編集しない。
 
+## [0.1.55](https://github.com/koyori-app/task/compare/v0.1.54...v0.1.55) - 2026-11-22
+
+MCP に OAuth を足して claude.ai などのコネクタから使えるようにし、PAT の発行をテナントの Member と Viewer にも許し、統合テストを試験ごとの DB で並列に回せるようにした
+
+### 機能追加
+
+- **auth**: PAT の発行をテナントの Member と Viewer にも許す ([TASK-566](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-566)) ([#1223](https://github.com/koyori-app/task/pull/1223))
+- **mcp**: MCP に OAuth を足し、claude.ai などのコネクタから使えるようにする ([TASK-563](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-563)) ([#1231](https://github.com/koyori-app/task/pull/1231))
 ## [0.1.54](https://github.com/koyori-app/task/compare/v0.1.53...v0.1.54) - 2026-11-20
 
 ガントに依存の矢印を表示し、パスキーの追加・削除と再認証手段の追加に直近の本人確認を求め、VRT と Storybook の試験で失敗するストーリーを修正した
