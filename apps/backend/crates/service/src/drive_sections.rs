@@ -15,7 +15,7 @@ use tracing::{debug, warn};
 
 use crate::drive_task_links::is_markdown;
 use crate::error::AppError;
-use crate::storage::{StorageBackend, StorageError};
+use crate::storage::{ByteStream, StorageBackend, StorageError};
 use entity::{drive_file_sections, drive_files};
 use payload::documents::{DocumentSearchHit, DocumentSearchResponse};
 
@@ -329,21 +329,8 @@ async fn backfill_one(
     storage: &dyn StorageBackend,
     candidate: &BackfillCandidate,
 ) -> Result<bool, anyhow::Error> {
-    let mut stream = storage.get_stream(&candidate.storage_key).await?;
-    let mut bytes = Vec::new();
-    // NUL を除いた後の長さで数える。保存の経路は NUL を除いてから上限で切るので、
-    // 生の長さで打ち切ると、NUL の多い本文で保存の経路より短い索引になる
-    let mut indexable_len = 0usize;
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk?;
-        indexable_len += chunk.iter().filter(|byte| **byte != 0).count();
-        bytes.extend_from_slice(&chunk);
-        // 索引するのは先頭だけ。上限を越えたら残りは読まない
-        if indexable_len >= MAX_INDEXED_BYTES + BACKFILL_READ_SLACK {
-            break;
-        }
-    }
-    drop(stream);
+    let stream = storage.get_stream(&candidate.storage_key).await?;
+    let bytes = read_indexable_prefix(stream).await?;
     let text = String::from_utf8_lossy(&bytes);
 
     // 本文の更新と同じ行ロックを取り、読んだ本文がまだ今の本文かを確かめる。
@@ -369,6 +356,25 @@ async fn backfill_one(
     reindex(&txn, &file, &text).await?;
     txn.commit().await?;
     Ok(true)
+}
+
+/// ストレージの本文から、索引に要る先頭だけを読む。返すバイト列は NUL を含まず、
+/// 長さは索引の上限と読んだ最後のかたまり 1 つ分を越えない。
+async fn read_indexable_prefix(mut stream: ByteStream) -> Result<Vec<u8>, StorageError> {
+    let mut bytes = Vec::new();
+    // NUL は読みながら落とし、落とした後の長さで数える。保存の経路は NUL を除いてから上限で
+    // 切るので、生の長さで打ち切ると、NUL の多い本文で保存の経路より短い索引になる。
+    // 生のまま持つと、NUL ばかりのファイルをアップロードの上限まで丸ごとメモリに載せる。
+    // NUL は UTF-8 の複数バイトの文字の一部にならないので、先に落としても文字は壊れない
+    // （壊れたバイト列の途中に NUL が挟まる本文だけ、置き換えの文字の数が保存の経路と変わりうる）
+    while let Some(chunk) = stream.next().await {
+        bytes.extend(chunk?.iter().copied().filter(|byte| *byte != 0));
+        // 索引するのは先頭だけ。上限を越えたら残りは読まない
+        if bytes.len() >= MAX_INDEXED_BYTES + BACKFILL_READ_SLACK {
+            break;
+        }
+    }
+    Ok(bytes)
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -413,7 +419,11 @@ pub async fn search<C: ConnectionTrait>(
     values.push((offset.min(i64::MAX as u64) as i64).into());
     let offset_at = values.len();
     // 抜粋の窓の起点。語を順に探し、最初に見つかった語の EXCERPT_CONTEXT_CHARS 文字前から
-    // 切り出す。どの語も見つからなければ（lower と ILIKE の食い違い）先頭から切り出す
+    // 切り出す。どの語も見つからなければ（lower と ILIKE の食い違い）先頭から切り出す。
+    // 位置は lower(body) の上で数え、元の body の substr に使う。lower が文字数を変えない
+    // 照合順序（Postgres の既定の libc）が前提。ICU の照合順序（`İ` が 2 文字になる）では、
+    // 語より前のその文字の数だけ窓がずれ、語が窓の外に出ると抜粋は窓の先頭になる。
+    // 当たる行は変わらない
     let mut hit_at = String::new();
     for term in terms {
         values.push(term.clone().into());
@@ -599,6 +609,52 @@ mod tests {
     fn inline_markup_in_heading_is_flattened() {
         let sections = split_sections("# A `c` *b*\n");
         assert_eq!(paths(&sections), vec![vec!["A c b"]]);
+    }
+
+    /// かたまりを順に返し、返した数を数える流れ
+    fn counted_stream(
+        chunks: Vec<Vec<u8>>,
+    ) -> (ByteStream, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        let polled = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = polled.clone();
+        let stream = futures::stream::iter(chunks).map(move |chunk| {
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(bytes::Bytes::from(chunk))
+        });
+        (Box::pin(stream), polled)
+    }
+
+    #[tokio::test]
+    async fn backfill_read_drops_nul_and_stops_at_the_cap() {
+        const CHUNK: usize = 64 * 1024;
+        // NUL ばかりの本文（8 MiB）は、持つ量が増えない。NUL の後ろの本文まで読む
+        let mut chunks = vec![vec![0u8; CHUNK]; 128];
+        chunks.push(b"# Title\n\nafter nul\n".to_vec());
+        let (stream, polled) = counted_stream(chunks);
+        let bytes = read_indexable_prefix(stream).await.expect("read");
+        assert_eq!(bytes, b"# Title\n\nafter nul\n");
+        assert_eq!(polled.load(std::sync::atomic::Ordering::SeqCst), 129);
+
+        // NUL を除いた長さが上限を越えたら、残りは読まない。持つのは上限とかたまり 1 つ分まで
+        let mut chunk = vec![b'a'; CHUNK];
+        chunk[0] = 0;
+        let (stream, polled) = counted_stream(vec![chunk; 64]);
+        let bytes = read_indexable_prefix(stream).await.expect("read");
+        assert!(!bytes.contains(&0));
+        assert!(bytes.len() >= MAX_INDEXED_BYTES + BACKFILL_READ_SLACK);
+        assert!(bytes.len() < MAX_INDEXED_BYTES + BACKFILL_READ_SLACK + CHUNK);
+        // 1 かたまりは NUL を除いて CHUNK - 1 バイト。16 個では上限に届かず、17 個で越える
+        assert_eq!(polled.load(std::sync::atomic::Ordering::SeqCst), 17);
+
+        // 途中の失敗は握り潰さない
+        let failing: ByteStream = Box::pin(futures::stream::iter(vec![
+            Ok(bytes::Bytes::from_static(b"abc")),
+            Err(StorageError::NotFound),
+        ]));
+        assert!(matches!(
+            read_indexable_prefix(failing).await,
+            Err(StorageError::NotFound)
+        ));
     }
 
     #[test]
