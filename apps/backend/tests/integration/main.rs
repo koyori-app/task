@@ -14,6 +14,7 @@ mod custom_fields_integration;
 mod dashboard_integration;
 mod deadline_soon_integration;
 mod desktop_auth_integration;
+mod drive_document_search_integration;
 mod drive_file_content_integration;
 mod drive_folder_boundary_integration;
 mod drive_project_id_backfill_integration;
