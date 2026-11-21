@@ -149,7 +149,7 @@ const uploadFile = useProjectFileUpload(
   () => props.tenantId,
   () => props.projectId,
 );
-/** 今の宛先が送信中か（下書きと同じ置き場の印。ペインを作り直しても効く） */
+/** 今の宛先が送信中か（下書きと同じ置き場に持つので、ペインを作り直しても効く） */
 const composerSending = computed(() =>
   isCommentDraftSending(userId.value, draftTaskKey.value, openThreadId.value),
 );
@@ -281,14 +281,14 @@ async function submitDraft() {
   // 押せるし、スレッドが消えれば watch が一覧へ戻すので、await の後に
   // openThreadId を読み直すと別の下書きを消すことになる
   const threadId = openThreadId.value;
-  // 印は同期で立てる。同じ tick の二度押しも止まる
+  // 送信中には同期で入れる。同じ tick の二度押しも止まる
   const finishSend = beginCommentDraftSend(userId.value, draftTaskKey.value, threadId);
   pinnedToBottom = true;
   let posted = false;
   try {
     posted = threadId ? await props.onSubmit(body, threadId) : await props.onSubmit(body);
   } finally {
-    // 印を外すのと下書きの消去は同じ呼び出しで行う（下書きが残ったまま打てる瞬間を作らない）
+    // 送信中の解除と下書きの消去は同じ呼び出しで行う（下書きが残ったまま打てる瞬間を作らない）
     finishSend(posted);
   }
 }

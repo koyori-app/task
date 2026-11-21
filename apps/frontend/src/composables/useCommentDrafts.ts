@@ -76,9 +76,9 @@ export function clearCommentDraft(
 }
 
 /*
- * 宛先ごとの送信中の印。下書きと同じ置き場に置くので、ペイン（composable）を作り直しても効き、
- * 送った下書きを送り直したり書き足したりできない。値は送信ごとの札で、古い送信の終わりが
- * 新しい送信の印を外さないようにする。メモリだけに置く（リロードで消える）
+ * 宛先ごとの送信中の状態。下書きと同じ置き場に置くので、ペイン（composable）を作り直しても効き、
+ * 送った下書きを送り直したり書き足したりできない。値は送信ごとの一意な token で、古い送信の終わりが
+ * 新しい送信の状態を解かないようにする。メモリだけに置く（リロードで消える）
  */
 const sending = ref<Record<string, symbol>>({});
 
@@ -91,11 +91,13 @@ export function isCommentDraftSending(
 }
 
 /**
- * 送信を始める。今の下書きを控えて印を立て、「終える」関数を返す。
- * 終える関数は、印を外すのと、送信が通って下書きが控えと同じ時の消去を、同じ同期の呼び出しで行う。
- * 印が外れて下書きが残ったままの状態は、途中で見えない。
- * 宛先と控えは開始時に固定する。送信中に一覧へ戻ったりスレッドを開き直したりしても、消すのは送った宛先の下書きだけ。
- * 下書きが控えと違えば（ログアウトで消えた後に書いたなど）、送信済みの本文ではないので残す
+ * 送信を始める。送る本文を覚えて送信中にし、「終える」関数を返す。
+ * 終える関数は、送信が通って下書きが送った本文のままなら消すのと、送信中の解除を、同じ同期の呼び出しで行う
+ * （下書きを先に消すので、送信中が解けて送った本文が残ったままの状態は途中でも見えない）。
+ * 宛先と送った本文は開始時に固定する。送信中に一覧へ戻ったりスレッドを開き直したりしても、
+ * 消すのは送った宛先の下書きだけ。下書きが送った本文と違えば、送信済みの本文ではないので残す。
+ * ログアウトのリセットの後に同じ宛先で新しい送信が始まっていたら、古い送信の終わりは何もしない
+ * （新しい送信の下書きを消したり、送信中を解いたりしない）
  */
 export function beginCommentDraftSend(
   userId: string | null,
@@ -104,23 +106,22 @@ export function beginCommentDraftSend(
 ): (posted: boolean) => void {
   const key = keyOf(userId, taskId, threadId);
   const sent = getCommentDraft(userId, taskId, threadId);
-  const ticket = Symbol(key);
-  sending.value = { ...sending.value, [key]: ticket };
+  const token = Symbol(key);
+  sending.value = { ...sending.value, [key]: token };
   return (posted) => {
-    if (sending.value[key] === ticket) {
-      const rest = { ...sending.value };
-      delete rest[key];
-      sending.value = rest;
-    }
+    if (sending.value[key] !== token) return;
     if (posted && getCommentDraft(userId, taskId, threadId) === sent) {
       clearCommentDraft(userId, taskId, threadId);
     }
+    const rest = { ...sending.value };
+    delete rest[key];
+    sending.value = rest;
   };
 }
 
 /**
  * 明示的なログアウト（useAuthSession の logout）とテストで使う。メモリと sessionStorage の下書きと、
- * 送信中の印をすべて消す
+ * 送信中の状態をすべて消す
  */
 export function resetCommentDrafts() {
   memory.value = {};

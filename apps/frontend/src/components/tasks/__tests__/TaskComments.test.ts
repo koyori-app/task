@@ -545,18 +545,22 @@ describe('TaskComments', () => {
     await openThread();
     await wrapper.get('textarea[aria-label="返信を入力"]').setValue('返信します');
     await wrapper.get('form').trigger('submit');
+    // 本物の useTaskComments と同じく、POST の間はこのペインの submitPending が true
+    await wrapper.setProps({ submitPending: true });
 
-    // 一覧へ戻ると一覧の入力欄は使え、同じスレッドを開き直すとそこは送信中
+    // 同じペインでは一覧の入力欄も止まる（1 つの composable で POST を重ねない）。
+    // 同じスレッドを開き直すと、そこも送信中
     await wrapper.get('button[aria-label="コメント一覧へ戻る"]').trigger('click');
     expect(
       wrapper.get<HTMLTextAreaElement>('textarea[aria-label="コメントを入力"]').element.disabled,
-    ).toBe(false);
+    ).toBe(true);
     await openThread();
     const reply = () =>
       wrapper.get<HTMLTextAreaElement>('textarea[aria-label="返信を入力"]').element;
     expect(reply().disabled).toBe(true);
     expect(reply().value).toBe('返信します');
 
+    await wrapper.setProps({ submitPending: false });
     resolveSubmit!(true);
     await flushPromises();
 

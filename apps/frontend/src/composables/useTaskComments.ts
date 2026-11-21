@@ -112,8 +112,9 @@ export function useTaskComments(params: UseTaskCommentsParams) {
     enabled: computed(() => !!tenantId.value && !!projectId.value && !!taskId.value),
   });
 
-  // オフラインでは復帰を待たずに失敗にする（既定の networkMode 'online' は一時停止して、
-  // 復帰まで送信中・保存中・削除中のまま戻らない）。要求は出ていないので、押し直しても二重にならない
+  // オフラインでも一時停止せずに要求を出し、通信エラーならすぐ失敗にする（既定の networkMode 'online' は
+  // 一時停止して、復帰まで送信中・保存中・削除中のまま戻らない）。回線が切れていれば要求は届かないので、
+  // 押し直しても二重にならない。回線が生きていれば届いて成功として扱う
   const createCommentMutation = apiClient.useMutation('post', LIST_COMMENTS_PATH, {
     networkMode: 'always',
   });
