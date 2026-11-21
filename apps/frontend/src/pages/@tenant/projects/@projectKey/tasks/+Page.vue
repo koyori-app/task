@@ -693,6 +693,7 @@ const columns: ColumnDef<TaskTableFeatures, TaskRow>[] = [
         h('div', { class: 'mt-0.5 flex items-center gap-1.5' }, [
           h(TaskIdCopyButton, {
             class: 'relative z-10',
+            compact: true,
             projectKey: projectKey.value,
             seqId: task.seq_id,
           }),

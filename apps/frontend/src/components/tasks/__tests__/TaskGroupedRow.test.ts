@@ -218,6 +218,8 @@ describe('TaskGroupedRow のタイトルと補足', () => {
     expect(controls[0]?.attributes('data-task-id-copy')).toBeDefined();
     expect(controls[0]?.classes()).not.toContain('max-[769px]:hidden');
     expect(controls[0]?.classes()).toEqual(expect.arrayContaining(['relative', 'z-10']));
+    // 列より広がって期限の上へ的がはみ出さない（compact）
+    expect(controls[0]?.classes()).toContain('min-w-0');
     // 文字だけの ID は残さない（コピーのボタンが ID を出す）
     expect(summary.find('.min-\\[769px\\]\\:hidden').exists()).toBe(false);
   });
@@ -227,7 +229,12 @@ describe('TaskGroupedRow のタイトルと補足', () => {
     const title = mountWith({}).get('button[data-task-title-open]');
 
     expect(title.classes()).toEqual(
-      expect.arrayContaining(['@max-3xl:after:absolute', '@max-3xl:after:inset-0']),
+      expect.arrayContaining([
+        '@max-3xl:after:absolute',
+        '@max-3xl:after:inset-0',
+        // 位置指定を持つ子（BOT のアバター）より上に置く
+        '@max-3xl:after:z-[1]',
+      ]),
     );
     expect(title.element.parentElement?.classList.contains('relative')).toBe(true);
     expect(title.element.parentElement?.querySelector('[data-row-summary]')).not.toBeNull();

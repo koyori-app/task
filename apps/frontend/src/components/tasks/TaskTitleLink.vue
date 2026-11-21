@@ -57,7 +57,7 @@ function onPlainClick(event: MouseEvent) {
     :href="taskDetailHref(tenantDisplayId, projectKey, seqId)"
     :data-task-seq-key="taskSeqKey(projectKey, seqId)"
     class="text-sm text-link hover:underline"
-    :class="[lineClass, stretch && `after:absolute after:inset-0 after:content-['']`]"
+    :class="[lineClass, stretch && `after:absolute after:inset-0 after:z-[1] after:content-['']`]"
     @click="onPlainClick"
   >
     <!--

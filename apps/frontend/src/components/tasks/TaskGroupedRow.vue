@@ -304,13 +304,14 @@ function selectFromKeyboard(event: KeyboardEvent) {
           タイトルは省略せず折り返す。同じ段にラベルを並べると、縮めないラベルに押されて
           タイトルの幅が 0 になり、読めず押せもしなくなる（TASK-484）。
           狭い幅はタイトルの after をこの列（relative）いっぱいに広げ、タイトルと 2 段目の全体で
-          詳細を開く（TASK-524）。包含ブロックは div なので、表の要素に頼らない。広い幅は 2 段目に
+          詳細を開く（TASK-524）。after は z-[1] で、位置指定を持つ子（BOT のアバターなど）より上に置く。
+          包含ブロックは div なので、表の要素に頼らない。広い幅は 2 段目に
           コピーとラベルの操作があるので広げない
         -->
         <div class="relative min-w-0 flex-1 py-2">
           <button
             type="button"
-            class="block max-w-full text-left text-sm font-medium break-words hover:underline @max-3xl:after:absolute @max-3xl:after:inset-0 @max-3xl:after:content-['']"
+            class="block max-w-full text-left text-sm font-medium break-words hover:underline @max-3xl:after:absolute @max-3xl:after:inset-0 @max-3xl:after:z-[1] @max-3xl:after:content-['']"
             data-task-title-open
             @click="emit('open', task.id)"
           >
@@ -372,10 +373,12 @@ function selectFromKeyboard(event: KeyboardEvent) {
             <div class="flex min-w-0 flex-1 items-center gap-1.5">
               <!--
                 ID はどの幅でもコピーのボタン。詳細を開く的（タイトルの after）より上に置き、
-                押してもコピーだけにする（TASK-524）
+                押してもコピーだけにする（TASK-524）。compact で、この列より広がって
+                期限などの上に的がはみ出さないようにする
               -->
               <TaskIdCopyButton
                 class="relative z-10"
+                compact
                 :project-key="projectKey"
                 :seq-id="task.seq_id"
               />

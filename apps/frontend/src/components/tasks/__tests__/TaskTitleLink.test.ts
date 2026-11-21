@@ -39,7 +39,9 @@ describe('TaskTitleLink', () => {
   // TASK-524: 狭い幅の表で、タイトルのセル全体を詳細を開く的にする
   it('stretch のときだけ after をセルいっぱいに広げる', () => {
     const stretched = mountLink({ stretch: true }).get('a').classes();
-    expect(stretched).toEqual(expect.arrayContaining(['after:absolute', 'after:inset-0']));
+    expect(stretched).toEqual(
+      expect.arrayContaining(['after:absolute', 'after:inset-0', 'after:z-[1]']),
+    );
     // 既定は広げない（`<tr>` / `<td>` を包含ブロックにすると WebKit で表全体へ広がる）
     const plain = mountLink().get('a').classes();
     expect(plain).not.toContain('after:absolute');
