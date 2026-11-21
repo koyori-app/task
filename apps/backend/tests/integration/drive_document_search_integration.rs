@@ -1142,6 +1142,22 @@ async fn excerpt_is_cut_from_the_middle_of_a_long_section() {
         assert_eq!(hit["total"], 1);
         assert_eq!(hit["hits"][0]["excerpt"], expected, "{q}");
     }
+    // 上限の長さ（255 文字）の語でも、語と前後 100 文字が抜粋に収まる
+    let long_term = "z".repeat(255);
+    upload_md(
+        &app,
+        tenant_id,
+        Some(folder),
+        &format!("{}{long_term}{}", "か".repeat(3000), "き".repeat(3000)),
+    )
+    .await;
+    let hit = search_ok(&app, tenant_id, project_id, &[("q", &long_term)]).await;
+    assert_eq!(hit["total"], 1);
+    assert_eq!(
+        hit["hits"][0]["excerpt"],
+        format!("…{}{long_term}{}…", "か".repeat(100), "き".repeat(100))
+    );
+
     // 2 つ目の語が先に現れても、1 つ目の語のまわりで切る
     let hit = search_ok(
         &app,
