@@ -170,7 +170,7 @@ fn task_ids_of(body: &serde_json::Value) -> Vec<Uuid> {
 /// アップロードで body が付き、本文更新で付け直される。manual は本文に負けず、
 /// 手動添付で body が manual に昇格する。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn body_links_follow_content_and_never_override_manual() {
     let mut app = TestApp::new().await;
     let owner = app.insert_user(false, false).await;
@@ -264,7 +264,7 @@ async fn body_links_follow_content_and_never_override_manual() {
 
 /// body の解除は 409、manual は 204。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn detach_rejects_body_links() {
     let mut app = TestApp::new().await;
     let owner = app.insert_user(false, false).await;
@@ -326,7 +326,7 @@ async fn detach_rejects_body_links() {
 
 /// コードブロック・インラインコードの中の参照、text/plain のファイルは結び付かない。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn code_and_non_markdown_are_ignored() {
     let mut app = TestApp::new().await;
     let owner = app.insert_user(false, false).await;
@@ -378,7 +378,7 @@ async fn code_and_non_markdown_are_ignored() {
 
 /// 保存した利用者が入れないプロジェクトのタスクと、別テナントのタスクは結び付かない。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn only_tasks_visible_to_the_saver_are_linked() {
     let mut app = TestApp::new().await;
     let owner = app.insert_user(false, false).await;
@@ -439,7 +439,7 @@ async fn only_tasks_visible_to_the_saver_are_linked() {
 
 /// GET /drive/files/{id}/tasks はファイルの閲覧権限を確かめ、入れないプロジェクトのタスクを隠す。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn body_links_to_projects_the_saver_cannot_see_are_kept() {
     let mut app = TestApp::new().await;
     let owner = app.insert_user(false, false).await;
@@ -498,7 +498,7 @@ async fn body_links_to_projects_the_saver_cannot_see_are_kept() {
 }
 
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn file_tasks_respects_file_and_project_access() {
     let mut app = TestApp::new().await;
     let owner = app.insert_user(false, false).await;
@@ -676,7 +676,7 @@ async fn put_content_with_bearer(
 
 /// write:task の無い PAT は保存できても body 行を作りも消しもしない（手動添付は write:task が要る）。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn saving_without_write_task_leaves_body_links_untouched() {
     let mut app = TestApp::new().await;
     let owner = app.insert_user(false, false).await;
@@ -752,7 +752,7 @@ async fn saving_without_write_task_leaves_body_links_untouched() {
 
 /// 1 ファイルの参照は 200 件で止まる（201 件目は捨てる）。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn links_are_capped_at_200_per_file() {
     let mut app = TestApp::new().await;
     let owner = app.insert_user(false, false).await;
@@ -789,7 +789,7 @@ async fn links_are_capped_at_200_per_file() {
 /// プロジェクトファイルは同じプロジェクトのタスクにだけ結ぶ（手動添付と同じ範囲）。
 /// 対照: テナント一般ファイルはどのプロジェクトのタスクにも結ぶ。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn project_file_links_only_its_own_project() {
     let mut app = TestApp::new().await;
     let owner = app.insert_user(false, false).await;
@@ -873,7 +873,7 @@ async fn insert_folder(
 /// ファイル・フォルダをプロジェクトへ移すと、移動先の外のタスクへの body 行が外れる。
 /// 対照: 移動先のプロジェクトのタスクへの行は残る。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn moving_into_a_project_drops_body_links_to_other_projects() {
     let mut app = TestApp::new().await;
     let owner = app.insert_user(false, false).await;
@@ -948,7 +948,7 @@ async fn moving_into_a_project_drops_body_links_to_other_projects() {
 /// プロジェクトファイルに別プロジェクトのタスクへの body 行が残っていれば、そのプロジェクトに
 /// 入れない人が本文を保存しても外れる。対照: 同じプロジェクトのタスクは本文どおり結ぶ。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn saving_a_project_file_drops_body_links_outside_its_project() {
     let mut app = TestApp::new().await;
     let owner = app.insert_user(false, false).await;
@@ -1010,7 +1010,7 @@ async fn saving_a_project_file_drops_body_links_outside_its_project() {
 /// filename も Content-Type も無い `file` の後ろに `name=notes.md` を送っても、表示名から
 /// MIME を決めて Markdown として扱い、本文のタスク参照を結ぶ（フィールドの順序に依らない）。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn upload_treats_bare_file_as_markdown_by_name_sent_after_it() {
     let mut app = TestApp::new().await;
     let owner = app.insert_user(false, false).await;

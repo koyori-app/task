@@ -134,7 +134,7 @@ jobs:
 
       # 統合テストは実 Postgres / Redis を使う。GitHub 側は cargo nextest だが、
       # ここでは追加のツール取得を増やさないよう cargo test を使う
-      # （--test-threads=1 はどちらも同じ）。
+      # （GitHub 側は試験ごとの DB で並列。cargo test は 1 つの DB を共有するので直列）。
       - name: Run tests
         run: cargo test --workspace -- --test-threads=1
         working-directory: apps/backend

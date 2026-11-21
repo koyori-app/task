@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use sea_orm::{
     ActiveModelTrait,
     ActiveValue::Set,
-    ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
+    ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, QueryTrait, TransactionTrait,
     sea_query::{Expr, ExprTrait, LockBehavior, LockType},
 };
 use tokio::sync::watch;
@@ -59,7 +59,32 @@ fn due() -> sea_orm::Select<webhook_deliveries::Entity> {
 /// `FOR UPDATE SKIP LOCKED` を取り直して送り、その行の更新を commit する。
 /// 他インスタンスが掴んでいる行・その間に済んだ行は取れないので飛ばす。
 pub async fn send_pending_once(state: &JobState) -> Result<usize, anyhow::Error> {
-    let ids: Vec<Uuid> = due()
+    send_due(state, None).await
+}
+
+/// 試験用の入口。[`send_pending_once`] と同じ掃き出しを、1 つのプロジェクトの Webhook に絞る。
+/// 共有 DB に他の試験が残した配送行を拾わない。
+pub async fn send_pending_for_project(
+    state: &JobState,
+    project_id: Uuid,
+) -> Result<usize, anyhow::Error> {
+    send_due(state, Some(project_id)).await
+}
+
+async fn send_due(state: &JobState, project_id: Option<Uuid>) -> Result<usize, anyhow::Error> {
+    let mut pending = due();
+    if let Some(project_id) = project_id {
+        pending = pending.filter(
+            webhook_deliveries::Column::WebhookId.in_subquery(
+                webhooks::Entity::find()
+                    .select_only()
+                    .column(webhooks::Column::Id)
+                    .filter(webhooks::Column::ProjectId.eq(project_id))
+                    .into_query(),
+            ),
+        );
+    }
+    let ids: Vec<Uuid> = pending
         .select_only()
         .column(webhook_deliveries::Column::Id)
         .order_by_asc(webhook_deliveries::Column::NextAttemptAt)

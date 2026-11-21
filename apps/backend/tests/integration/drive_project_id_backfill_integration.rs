@@ -178,7 +178,7 @@ async fn run_backfill(app: &TestApp) {
 /// ルートが 2 本あればそれぞれのルートの値になり、2 回流しても結果は変わらない
 /// （デプロイのたびに適用されても壊れない）。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn backfill_propagates_the_project_down_the_whole_subtree() {
     let app = new_app().await;
 
@@ -251,7 +251,7 @@ async fn backfill_propagates_the_project_down_the_whole_subtree() {
 /// 一般ツリーの配下に `project_id` を持つ行は、階層より厳しい判定になるだけで
 /// 漏れる向きではない。NULL へ落とすと非メンバーへ開いてしまうので backfill の対象外。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn backfill_leaves_rows_outside_project_roots_alone() {
     let app = new_app().await;
 
@@ -302,7 +302,7 @@ async fn backfill_leaves_rows_outside_project_roots_alone() {
 /// A のルートと配下のファイルが B のものになり、A のファイルが B のメンバーへ公開され、
 /// A のメンバーはアクセスを失う。backfill が新しい漏れを作ってはいけない。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn backfill_refuses_to_absorb_a_nested_foreign_project_root() {
     let app = new_app().await;
 
@@ -351,7 +351,7 @@ async fn backfill_refuses_to_absorb_a_nested_foreign_project_root() {
 /// プロジェクトルートが残りうる。ドライブ直下だけを起点にすると、その配下の NULL の
 /// 子孫が修復されないまま「成功」し、プロジェクト非メンバーから見え続ける。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn backfill_repairs_a_project_root_moved_under_a_plain_folder() {
     let app = new_app().await;
 
@@ -413,7 +413,7 @@ async fn backfill_repairs_a_project_root_moved_under_a_plain_folder() {
 /// API に深さの上限は無いので、途中で止めると残りが NULL のまま「成功」する。
 /// 実装の打ち切り値（かつては 64）をまたぐ深さで確かめる。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn backfill_reaches_folders_deeper_than_any_recursion_cutoff() {
     let app = new_app().await;
 
@@ -452,7 +452,7 @@ async fn backfill_reaches_folders_deeper_than_any_recursion_cutoff() {
 /// フォルダだけを止めてファイルを黙って上書きすると、そのファイルが別プロジェクトの
 /// メンバーへ公開される。フォルダと同じ向きの漏れなので、同じ扱いにする。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn backfill_refuses_to_absorb_a_foreign_file_inside_a_project_tree() {
     let app = new_app().await;
 
@@ -494,7 +494,7 @@ async fn backfill_refuses_to_absorb_a_foreign_file_inside_a_project_tree() {
 /// project_id が NULL の子だけを辿るため、循環して起点へ戻る最後の一歩を踏めず、
 /// そちらの `CYCLE` 句では立たない。検出は全フォルダから親を辿る別の CTE が担う。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn backfill_refuses_to_run_when_a_project_tree_has_a_cycle() {
     let app = new_app().await;
 
@@ -540,7 +540,7 @@ async fn backfill_refuses_to_run_when_a_project_tree_has_a_cycle() {
 /// 伝播用の CTE は project_id を持つフォルダからしか始まらないので、この形には
 /// 起点が無く、そちらからは存在にすら気づけない。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn backfill_refuses_to_run_when_a_plain_subtree_has_a_cycle() {
     let app = new_app().await;
 

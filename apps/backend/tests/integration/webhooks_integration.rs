@@ -370,7 +370,7 @@ async fn loopback_is_rejected_on_create_update_and_delivery_by_default() {
         .expect("store old destination");
     fx.create_task("送信しないタスク").await;
     assert_eq!(
-        job::webhook_delivery::send_pending_once(&job_state(&fx.app))
+        job::webhook_delivery::send_pending_for_project(&job_state(&fx.app), fx.project_id)
             .await
             .expect("sweep"),
         0
@@ -403,7 +403,7 @@ async fn delivery_connection_errors_do_not_expose_discord_urls() {
     let id = fx.create_webhook(&url, &["task.created"], "discord").await;
     fx.create_task("接続に失敗するタスク").await;
     assert_eq!(
-        job::webhook_delivery::send_pending_once(&job_state(&fx.app))
+        job::webhook_delivery::send_pending_for_project(&job_state(&fx.app), fx.project_id)
             .await
             .expect("sweep"),
         0
@@ -526,13 +526,6 @@ async fn review_round_enqueues_one_delivery() {
     );
     assert!(delivery.payload["project"]["key"].is_string());
     assert!(fx.deliveries(unsubscribed).await.is_empty());
-
-    // 届かない宛先の配信を残すと、他のテストの掃き出しが送信の timeout を待つ
-    webhooks::Entity::delete_many()
-        .filter(webhooks::Column::ProjectId.eq(fx.project_id))
-        .exec(&fx.app.state.db)
-        .await
-        .expect("cleanup webhooks");
 }
 
 /// 2xx で配信済みになり、署名ヘッダは HMAC-SHA256(secret, 本文) と一致する。
@@ -545,7 +538,7 @@ async fn delivers_json_with_signature() {
         .await;
     fx.create_task("署名を確かめる").await;
 
-    job::webhook_delivery::send_pending_once(&job_state(&fx.app))
+    job::webhook_delivery::send_pending_for_project(&job_state(&fx.app), fx.project_id)
         .await
         .expect("sweep");
 
@@ -592,7 +585,7 @@ async fn failure_schedules_retry_with_backoff() {
     fx.create_task("失敗する").await;
 
     let before = chrono::Utc::now();
-    job::webhook_delivery::send_pending_once(&job_state(&fx.app))
+    job::webhook_delivery::send_pending_for_project(&job_state(&fx.app), fx.project_id)
         .await
         .expect("sweep");
 
@@ -636,7 +629,7 @@ async fn five_exhausted_deliveries_deactivate_webhook() {
                 active.update(&fx.app.state.db).await.expect("advance");
             }
         }
-        job::webhook_delivery::send_pending_once(&state)
+        job::webhook_delivery::send_pending_for_project(&state, fx.project_id)
             .await
             .expect("sweep");
     }
@@ -721,15 +714,18 @@ async fn concurrent_success_and_fifth_failure_keep_webhook_active() {
         .mount(&server)
         .await;
 
+    let project_id = fx.project_id;
     let first_state = job_state(&fx.app);
-    let first =
-        tokio::spawn(async move { job::webhook_delivery::send_pending_once(&first_state).await });
+    let first = tokio::spawn(async move {
+        job::webhook_delivery::send_pending_for_project(&first_state, project_id).await
+    });
     tokio::time::timeout(Duration::from_secs(5), ready.notified())
         .await
         .expect("first delivery started");
     let second_state = job_state(&fx.app);
-    let second =
-        tokio::spawn(async move { job::webhook_delivery::send_pending_once(&second_state).await });
+    let second = tokio::spawn(async move {
+        job::webhook_delivery::send_pending_for_project(&second_state, project_id).await
+    });
     first.await.expect("first worker").expect("first sweep");
     second.await.expect("second worker").expect("second sweep");
 
@@ -771,7 +767,7 @@ async fn webhook_delete_releases_pending_delivery_without_deadlock() {
     // DELETE が親行を掴んだ後、ワーカーが子行を拾う順を再現する。
     tokio::time::timeout(
         Duration::from_secs(5),
-        job::webhook_delivery::send_pending_once(&job_state(&fx.app)),
+        job::webhook_delivery::send_pending_for_project(&job_state(&fx.app), fx.project_id),
     )
     .await
     .expect("worker must skip locked webhook")
@@ -840,7 +836,7 @@ async fn discord_format_sends_content_and_embeds_without_signature() {
         .await;
     fx.create_task("Discord に流す").await;
 
-    job::webhook_delivery::send_pending_once(&job_state(&fx.app))
+    job::webhook_delivery::send_pending_for_project(&job_state(&fx.app), fx.project_id)
         .await
         .expect("sweep");
 
@@ -869,7 +865,7 @@ async fn redeliver_creates_new_delivery() {
         .create_webhook(&server.uri(), &["task.created"], "json")
         .await;
     fx.create_task("再送する").await;
-    job::webhook_delivery::send_pending_once(&job_state(&fx.app))
+    job::webhook_delivery::send_pending_for_project(&job_state(&fx.app), fx.project_id)
         .await
         .expect("sweep");
     let original = fx.deliveries(id).await.remove(0);
@@ -982,4 +978,42 @@ async fn tenant_admin_can_create_webhooks() {
         StatusCode::CREATED,
         "テナント Admin は作れる"
     );
+}
+
+/// プロジェクトに絞った掃き出しは、他のプロジェクトの配信に触れない（TASK-487）。
+/// 共有 DB では、他の試験が残した届かない宛先の配信がこれに当たる。
+#[tokio::test]
+async fn sweep_for_a_project_leaves_other_projects_deliveries() {
+    let other = setup().await;
+    // 閉じたポート。送れば接続の拒否で attempt が進む
+    let unreachable = other
+        .create_webhook("http://127.0.0.1:1/hook", &["task.created"], "json")
+        .await;
+    other.create_task("残す配信").await;
+
+    let fx = setup().await;
+    let server = mock_server(200).await;
+    let id = fx
+        .create_webhook(&server.uri(), &["task.created"], "json")
+        .await;
+    fx.create_task("届く配信").await;
+
+    let sent = job::webhook_delivery::send_pending_for_project(&job_state(&fx.app), fx.project_id)
+        .await
+        .expect("sweep");
+    assert_eq!(sent, 1);
+    assert!(fx.deliveries(id).await[0].delivered_at.is_some());
+    assert_eq!(server.received_requests().await.expect("requests").len(), 1);
+    let left = other.deliveries(unreachable).await;
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].attempt, 0, "他のプロジェクトの配信は拾わない");
+    assert!(left[0].next_attempt_at.is_some());
+
+    // 対照: 自分のプロジェクトとして掃き出せば拾う
+    let sent =
+        job::webhook_delivery::send_pending_for_project(&job_state(&other.app), other.project_id)
+            .await
+            .expect("sweep other");
+    assert_eq!(sent, 0);
+    assert_eq!(other.deliveries(unreachable).await[0].attempt, 1);
 }

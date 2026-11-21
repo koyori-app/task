@@ -23,7 +23,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 /// PR 取得は各テストで足す（無ければ 404）
 pub(crate) async fn github_mock() -> MockServer {
     let mock_server = MockServer::start().await;
-    // SAFETY: 統合テストは --test-threads=1 で直列に走る
+    // SAFETY: nextest は 1 プロセス 1 試験、cargo test は --test-threads=1 の直列で走る
     unsafe {
         std::env::set_var("GITHUB_API_BASE_URL", mock_server.uri());
     }
@@ -32,7 +32,7 @@ pub(crate) async fn github_mock() -> MockServer {
 }
 
 pub(crate) fn forget_github_mock() {
-    // SAFETY: 統合テストは --test-threads=1 で直列に走る
+    // SAFETY: nextest は 1 プロセス 1 試験、cargo test は --test-threads=1 の直列で走る
     unsafe {
         std::env::remove_var("GITHUB_API_BASE_URL");
     }

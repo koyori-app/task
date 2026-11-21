@@ -79,7 +79,7 @@ async fn upload_status(app: &TestApp, tenant_id: Uuid, folder_id: Uuid) -> Statu
 /// プロジェクト B のフォルダへのアップロードは、B の非メンバーには 403。
 /// メンバーには 201。プロジェクトファイルの読み取り/更新/削除と同じ ACL を作成にも適用する。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn upload_into_project_folder_enforces_membership() {
     let mut app = TestApp::new().await;
 
@@ -148,7 +148,7 @@ fn hello_part() -> Part {
 /// `name` と `folder_id` を `file` の後ろに送っても反映され、フォルダの ACL も効く。
 /// 以前は `file` を読んだ時点で挿入まで済ませていたので、後ろのフィールドは黙って捨てられていた。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn upload_applies_name_and_folder_sent_after_file() {
     let mut app = TestApp::new().await;
 
@@ -197,7 +197,7 @@ async fn upload_applies_name_and_folder_sent_after_file() {
 
 /// `file` が 2 つあるリクエストは 400 で、どちらのファイルも作らない。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn upload_with_two_file_fields_is_400() {
     let mut app = TestApp::new().await;
     let owner = app.insert_user(false, false).await;

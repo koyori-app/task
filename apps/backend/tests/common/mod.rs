@@ -106,6 +106,8 @@ pub const TEST_ALLOW_NON_LOOPBACK_ENV: &str = "TEST_ALLOW_NON_LOOPBACK";
 pub struct TestEndpoints {
     pub database_url: String,
     pub redis_url: String,
+    /// 行き先が、スキーマを作り終えた雛形から複製した DB か（`ensure_schema` を省く）
+    pub schema_ready: bool,
 }
 
 static TEST_ENDPOINTS: OnceLock<TestEndpoints> = OnceLock::new();
@@ -126,6 +128,11 @@ static TEST_ENDPOINTS: OnceLock<TestEndpoints> = OnceLock::new();
 ///
 /// 行き先が loopback（または Unix socket）でなければ、`TEST_ALLOW_NON_LOOPBACK=1` が無い限り
 /// 繋ぐ前に止まる。
+///
+/// nextest に `TEST_DATABASE_URL` が渡されたときは、その DB `<db>` をそのまま使わず、雛形
+/// `<db>_tmpl` から枠ごとの `<db>_slot_<N>` を作り直して使う（[`prepare_slot_database`]）。
+/// 試験ごとに空の DB から始まるので、並列に回せる。`TEST_REDIS_URL` は、渡された DB 番号を
+/// 起点にして枠ごとの番号に分ける（[`slot_redis_url`]）。nextest の下で枠が読めなければ止まる。
 fn ensure_test_env() -> &'static TestEndpoints {
     TEST_ENDPOINTS.get_or_init(|| {
         let explicit_pg = non_empty_env(TEST_DATABASE_URL_ENV);
@@ -141,13 +148,15 @@ fn ensure_test_env() -> &'static TestEndpoints {
         } else {
             (None, None)
         };
-        let endpoints = TestEndpoints {
+        let explicit_redis_given = explicit_redis.is_some();
+        let mut endpoints = TestEndpoints {
             database_url: explicit_pg
                 .or(container_pg)
                 .expect("postgres url for tests"),
             redis_url: explicit_redis
                 .or(container_redis)
                 .expect("redis url for tests"),
+            schema_ready: false,
         };
 
         let allow_non_loopback = std::env::var(TEST_ALLOW_NON_LOOPBACK_ENV).is_ok_and(|v| v == "1");
@@ -158,6 +167,39 @@ fn ensure_test_env() -> &'static TestEndpoints {
             if let Err(reason) = check_test_endpoint(url, allow_non_loopback) {
                 panic!("{name}: {reason}");
             }
+        }
+
+        // nextest（1 プロセス = 1 試験）に行き先が渡されたら、枠ごとの DB を雛形から作り直して使う。
+        // 自前のコンテナ（プロセスごとに専用）と `cargo test`（枠が無い）は今までどおり。
+        // 枠が要るのは行き先が渡されたときだけ。そのとき枠が読めなければ、共有のまま進まず止まる
+        let slot = if !need_pg || explicit_redis_given {
+            nextest_slot().unwrap_or_else(|reason| panic!("{reason}"))
+        } else {
+            None
+        };
+        // redis は DB 番号で分ける。渡された行き先のデータは消さない（FLUSHDB しない）。
+        // Postgres が自前のコンテナでも、渡された redis は並列の試験が共有するので分ける
+        if explicit_redis_given && let Some((slot, _)) = &slot {
+            endpoints.redis_url = slot_redis_url(&endpoints.redis_url, *slot)
+                .unwrap_or_else(|reason| panic!("{TEST_REDIS_URL_ENV}: {reason}"));
+        }
+        if !need_pg && let Some((slot, run_id)) = slot {
+            let names = slot_database(&endpoints.database_url, slot)
+                .unwrap_or_else(|reason| panic!("{TEST_DATABASE_URL_ENV}: {reason}"));
+            let admin_url = endpoints.database_url.clone();
+            // 試験のランタイム上では block_on できないので、専用スレッドのランタイムで最後まで回す
+            let names = std::thread::spawn(move || {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("runtime to prepare per-test database")
+                    .block_on(prepare_slot_database(&admin_url, &names, &run_id));
+                names
+            })
+            .join()
+            .expect("prepare per-test database");
+            endpoints.database_url = names.url;
+            endpoints.schema_ready = true;
         }
 
         // SAFETY: test process is single-threaded before Tokio workers spawn.
@@ -184,6 +226,302 @@ fn ensure_test_env() -> &'static TestEndpoints {
 
         endpoints
     })
+}
+
+/// nextest の枠番号と run の ID。枠番号は 0 始まりで、試験が動いている間だけ一意
+/// （終われば次の試験が再利用する）。run の ID は SQL の文字列に入れるので、字種を縛る。
+///
+/// nextest の下でない（`cargo test`）なら `None`。nextest の下なのに枠が読めないときは `Err`
+/// にする。黙って 1 つの DB を共有すると、並列の試験がスキーマの DDL でぶつかって落ち、
+/// 原因が nextest の版だと分からない。
+pub fn nextest_slot_from(
+    under_nextest: bool,
+    slot: Option<&str>,
+    run_id: Option<&str>,
+) -> Result<Option<(u32, String)>, String> {
+    if !under_nextest {
+        return Ok(None);
+    }
+    const NEEDS: &str = "行き先を渡して nextest で回すには nextest 0.9.90 以上が要る\
+                         （試験ごとの DB を枠番号で分ける）";
+    let slot = slot
+        .and_then(|s| s.parse::<u32>().ok())
+        .ok_or_else(|| format!("NEXTEST_TEST_GLOBAL_SLOT が読めない。{NEEDS}"))?;
+    let run_id = run_id
+        .filter(|id| !id.is_empty())
+        .filter(|id| id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
+        .ok_or_else(|| format!("NEXTEST_RUN_ID が読めない。{NEEDS}"))?;
+    Ok(Some((slot, run_id.to_string())))
+}
+
+fn nextest_slot() -> Result<Option<(u32, String)>, String> {
+    nextest_slot_from(
+        std::env::var("NEXTEST").is_ok_and(|v| v == "1"),
+        std::env::var("NEXTEST_TEST_GLOBAL_SLOT").ok().as_deref(),
+        std::env::var("NEXTEST_RUN_ID").ok().as_deref(),
+    )
+}
+
+/// この試験が、雛形から作り直した自分専用の DB で動いているか。
+pub fn per_test_database() -> bool {
+    ensure_test_env().schema_ready
+}
+
+/// nextest の枠（`NEXTEST_TEST_GLOBAL_SLOT`）ごとの DB の名と行き先。
+#[derive(Debug, PartialEq, Eq)]
+pub struct SlotDatabase {
+    /// スキーマを作り終えた雛形の DB の名
+    pub template: String,
+    /// 枠の DB の名。試験ごとに雛形から作り直す
+    pub database: String,
+    /// 枠の DB の行き先
+    pub url: String,
+}
+
+/// Postgres の識別子の上限（バイト）。超えた分は黙って切り詰められ、別の枠と同じ名になる。
+const PG_IDENTIFIER_MAX: usize = 63;
+
+/// 渡された行き先の DB 名 `<db>` から、雛形 `<db>_tmpl` と枠 `<db>_slot_<slot>` を作る。
+pub fn slot_database(raw: &str, slot: u32) -> Result<SlotDatabase, String> {
+    let url = Url::parse(raw).map_err(|e| format!("not a URL ({e})"))?;
+    let base = url.path().trim_start_matches('/');
+    if base.is_empty() || !base.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+        return Err(format!(
+            "database name {base:?} must be non-empty and consist of [A-Za-z0-9_] \
+             to derive per-test databases"
+        ));
+    }
+    let template = format!("{base}_tmpl");
+    let database = format!("{base}_slot_{slot}");
+    for name in [&template, &database] {
+        if name.len() > PG_IDENTIFIER_MAX {
+            return Err(format!(
+                "database name {name:?} exceeds {PG_IDENTIFIER_MAX} bytes"
+            ));
+        }
+    }
+    Ok(SlotDatabase {
+        url: with_database(&url, &database),
+        template,
+        database,
+    })
+}
+
+/// パス（DB 名）だけを差し替える。クエリは保つ。
+fn with_database(url: &Url, database: &str) -> String {
+    let mut url = url.clone();
+    url.set_path(&format!("/{database}"));
+    url.into()
+}
+
+/// Valkey の DB の数（既定）。
+const REDIS_DATABASES: u32 = 16;
+
+/// redis の行き先を、枠ごとの DB 番号に差し替える。
+///
+/// 渡された DB 番号を起点にして、枠 `slot` は `起点 + slot` 番を使う（番号が無ければ起点は 0）。
+/// 同じ Valkey へ 2 つの run を向けるときは、起点を変えて範囲が重ならないようにできる
+/// （`/0` を 8 並列、`/8` を 8 並列）。Unix socket の行き先（`redis+unix://` / `unix://`）は
+/// パスが socket の場所なので、DB 番号はクエリの `db` に置く。
+pub fn slot_redis_url(raw: &str, slot: u32) -> Result<String, String> {
+    let mut url = Url::parse(raw).map_err(|e| format!("not a URL ({e})"))?;
+    let unix_socket = matches!(url.scheme(), "redis+unix" | "valkey+unix" | "unix");
+    let given = if unix_socket {
+        url.query_pairs()
+            .find(|(key, _)| key == "db")
+            .map(|(_, value)| value.into_owned())
+    } else {
+        Some(url.path().trim_start_matches('/').to_string())
+    };
+    let base: u32 = match given.as_deref() {
+        None | Some("") => 0,
+        Some(db) => db
+            .parse()
+            .map_err(|_| format!("redis database {db:?} is not a number"))?,
+    };
+    // 起点そのものが範囲の外なら、並列数を下げても直らない。別の文で止める
+    if base >= REDIS_DATABASES {
+        return Err(format!(
+            "redis database {base} does not exist: DB 番号は 0〜{} で渡す",
+            REDIS_DATABASES - 1
+        ));
+    }
+    let db = base
+        .checked_add(slot)
+        .filter(|db| *db < REDIS_DATABASES)
+        .ok_or_else(|| {
+            format!(
+                "slot {slot} from database {base} has no redis database: Valkey の DB は \
+                 {REDIS_DATABASES} 個。`--test-threads` を {} 以下にする",
+                REDIS_DATABASES - base
+            )
+        })?;
+    if unix_socket {
+        let kept: Vec<(String, String)> = url
+            .query_pairs()
+            .filter(|(key, _)| key != "db")
+            .map(|(key, value)| (key.into_owned(), value.into_owned()))
+            .collect();
+        url.query_pairs_mut()
+            .clear()
+            .extend_pairs(kept)
+            .append_pair("db", &db.to_string());
+    } else {
+        url.set_path(&format!("/{db}"));
+    }
+    Ok(url.into())
+}
+
+/// 雛形の作り直しを直列にする advisory lock の鍵（"tasktmpl"）。
+/// advisory lock は DB ごとなので、行き先の DB 名が違う run とは干渉しない。
+const SLOT_TEMPLATE_LOCK: i64 = 0x7461_736b_746d_706c;
+
+async fn slot_admin_bool(db: &DatabaseConnection, sql: &str) -> bool {
+    db.query_one_raw(sea_orm::Statement::from_string(
+        sea_orm::DbBackend::Postgres,
+        sql.to_owned(),
+    ))
+    .await
+    .unwrap_or_else(|e| panic!("{sql}: {e}"))
+    .and_then(|row| row.try_get_by_index::<bool>(0).ok())
+    .unwrap_or_else(|| panic!("{sql}: no boolean row"))
+}
+
+async fn slot_admin_exec(db: &DatabaseConnection, sql: &str) {
+    db.execute_unprepared(sql)
+        .await
+        .unwrap_or_else(|e| panic!("{sql}: {e}"));
+}
+
+/// 雛形の印（`COMMENT ON DATABASE`）がこの run の物か。
+async fn slot_template_is_current(db: &DatabaseConnection, template: &str, run_id: &str) -> bool {
+    slot_admin_bool(
+        db,
+        &format!(
+            "SELECT COALESCE((SELECT shobj_description(oid, 'pg_database') = '{run_id}' \
+             FROM pg_database WHERE datname = '{template}'), false)"
+        ),
+    )
+    .await
+}
+
+/// 雛形から、この試験だけが使う枠の DB を作り直す。
+///
+/// 雛形は run（`run_id`）ごとに 1 回だけ作る。最初に来たプロセスが排他ロックの下でスキーマを
+/// 作り、印を置く。他のプロセスは共有ロックの下で印を読み、雛形を複製する。途中で落ちた雛形は
+/// 印が無いので、次のプロセスが作り直す。
+async fn prepare_slot_database(admin_url: &str, names: &SlotDatabase, run_id: &str) {
+    let SlotDatabase {
+        template, database, ..
+    } = names;
+    // advisory lock はセッション単位。取る・放すを同じ接続で行うため、接続は 1 本に限る
+    let mut options = sea_orm::ConnectOptions::new(admin_url);
+    options
+        .max_connections(1)
+        .min_connections(1)
+        .sqlx_logging(false);
+    let admin = sea_orm::Database::connect(options)
+        .await
+        .expect("connect to prepare per-test database");
+
+    loop {
+        slot_admin_exec(
+            &admin,
+            &format!("SELECT pg_advisory_lock_shared({SLOT_TEMPLATE_LOCK})"),
+        )
+        .await;
+        if slot_template_is_current(&admin, template, run_id).await {
+            break;
+        }
+        assert!(
+            slot_admin_bool(
+                &admin,
+                &format!("SELECT pg_advisory_unlock_shared({SLOT_TEMPLATE_LOCK})"),
+            )
+            .await,
+            "release shared template lock"
+        );
+        slot_admin_exec(
+            &admin,
+            &format!("SELECT pg_advisory_lock({SLOT_TEMPLATE_LOCK})"),
+        )
+        .await;
+        // 待つ間に別のプロセスが作り終えていれば、作り直さない
+        if !slot_template_is_current(&admin, template, run_id).await {
+            build_slot_template(&admin, admin_url, template, run_id).await;
+        }
+        assert!(
+            slot_admin_bool(
+                &admin,
+                &format!("SELECT pg_advisory_unlock({SLOT_TEMPLATE_LOCK})"),
+            )
+            .await,
+            "release exclusive template lock"
+        );
+    }
+
+    // CREATE / DROP DATABASE はトランザクションの中で流せないので、1 文ずつ流す
+    slot_admin_exec(
+        &admin,
+        &format!(r#"DROP DATABASE IF EXISTS "{database}" WITH (FORCE)"#),
+    )
+    .await;
+    slot_admin_exec(
+        &admin,
+        &format!(r#"CREATE DATABASE "{database}" TEMPLATE "{template}""#),
+    )
+    .await;
+    assert!(
+        slot_admin_bool(
+            &admin,
+            &format!("SELECT pg_advisory_unlock_shared({SLOT_TEMPLATE_LOCK})"),
+        )
+        .await,
+        "release shared template lock"
+    );
+    admin.close().await.expect("close admin connection");
+}
+
+/// 雛形を作り直す。呼ぶ側が排他ロックを持つ。
+async fn build_slot_template(
+    admin: &DatabaseConnection,
+    admin_url: &str,
+    template: &str,
+    run_id: &str,
+) {
+    slot_admin_exec(
+        admin,
+        &format!(r#"DROP DATABASE IF EXISTS "{template}" WITH (FORCE)"#),
+    )
+    .await;
+    slot_admin_exec(admin, &format!(r#"CREATE DATABASE "{template}""#)).await;
+
+    let template_url = with_database(
+        &Url::parse(admin_url).expect("admin url was parsed before"),
+        template,
+    );
+    let mut options = sea_orm::ConnectOptions::new(&template_url);
+    options.sqlx_logging(false);
+    let db = sea_orm::Database::connect(options)
+        .await
+        .expect("connect template database");
+    apply_schema(&db).await;
+    // apalis の表。`TestApp` の `setup_*_storage` が呼ぶ物と同じで、複製後は適用済みの確認だけになる
+    let pool = setup_pool(&template_url).await.expect("template pg pool");
+    apalis_postgres::PostgresStorage::setup(&pool)
+        .await
+        .expect("setup apalis schema in template");
+    pool.close().await;
+    slot_admin_exec(&db, "ANALYZE").await;
+    // 接続が残ると複製（CREATE DATABASE … TEMPLATE）が失敗する
+    db.close().await.expect("close template connection");
+
+    // 印は最後に置く。ここまでに落ちた雛形は、次のプロセスが作り直す
+    slot_admin_exec(
+        admin,
+        &format!(r#"COMMENT ON DATABASE "{template}" IS '{run_id}'"#),
+    )
+    .await;
 }
 
 fn non_empty_env(key: &str) -> Option<String> {
@@ -324,44 +662,50 @@ fn test_session_config() -> SessionConfig {
         .with_database_key(Key::from(&[8u8; 64]))
 }
 
-async fn ensure_schema(db: &DatabaseConnection) {
-    SCHEMA_READY
-        .get_or_init(|| async {
-            // Sea-ORM の sync() は CREATE UNIQUE INDEX 由来のインデックスを
-            // ALTER TABLE DROP CONSTRAINT で削除しようとして失敗するため、
-            // 事前に DROP して sync() が素通りできるようにする
-            let _ = db
-                .execute_unprepared("DROP INDEX IF EXISTS idx_sprints_active_per_project")
-                .await;
-            // 使い回す DB に残った旧形の projects の UNIQUE。本番は
-            // m20261105010000_projects_key_unique_per_tenant が消す
-            let _ = db
-                .execute_unprepared(
-                    r#"
+async fn ensure_schema(db: &DatabaseConnection, endpoints: &TestEndpoints) {
+    // 雛形から複製した DB はスキーマを持っている
+    if endpoints.schema_ready {
+        return;
+    }
+    SCHEMA_READY.get_or_init(|| apply_schema(db)).await;
+}
+
+async fn apply_schema(db: &DatabaseConnection) {
+    // Sea-ORM の sync() は CREATE UNIQUE INDEX 由来のインデックスを
+    // ALTER TABLE DROP CONSTRAINT で削除しようとして失敗するため、
+    // 事前に DROP して sync() が素通りできるようにする
+    let _ = db
+        .execute_unprepared("DROP INDEX IF EXISTS idx_sprints_active_per_project")
+        .await;
+    // 使い回す DB に残った旧形の projects の UNIQUE。本番は
+    // m20261105010000_projects_key_unique_per_tenant が消す
+    let _ = db
+        .execute_unprepared(
+            r#"
 DROP INDEX IF EXISTS idx_projects_personal_owner;
 DROP INDEX IF EXISTS "idx-projects-idx_projects_personal_owner";
 DROP INDEX IF EXISTS "idx-projects-projects_key_tenant_unique";
 "#,
-                )
-                .await;
-            // 行の残った DB へ sync() が NOT NULL 列を既定値なしで足すと落ちるため、先に足しておく
-            let _ = db
+        )
+        .await;
+    // 行の残った DB へ sync() が NOT NULL 列を既定値なしで足すと落ちるため、先に足しておく
+    let _ = db
                 .execute_unprepared(
                     "ALTER TABLE IF EXISTS task_attachments ADD COLUMN IF NOT EXISTS source VARCHAR(16) NOT NULL DEFAULT 'manual'",
                 )
                 .await;
-            let _ = db
+    let _ = db
                 .execute_unprepared(
                     "ALTER TABLE IF EXISTS projects ADD COLUMN IF NOT EXISTS inherit_tenant_members BOOLEAN NOT NULL DEFAULT true",
                 )
                 .await;
 
-            db.get_schema_registry("entity::*")
-                .sync(db)
-                .await
-                .expect("sync schema");
+    db.get_schema_registry("entity::*")
+        .sync(db)
+        .await
+        .expect("sync schema");
 
-            db.execute_unprepared(
+    db.execute_unprepared(
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;
                  ALTER TABLE users ADD COLUMN IF NOT EXISTS is_suspended BOOLEAN NOT NULL DEFAULT false;
                  ALTER TABLE users ADD COLUMN IF NOT EXISTS sessions_revoked_at TIMESTAMPTZ;
@@ -372,8 +716,8 @@ DROP INDEX IF EXISTS "idx-projects-projects_key_tenant_unique";
             .await
             .expect("prepare user columns for integration tests");
 
-            db.execute_unprepared(
-                r#"
+    db.execute_unprepared(
+        r#"
 ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS require_2fa BOOLEAN NOT NULL DEFAULT false;
 UPDATE users SET totp_enabled = false WHERE totp_enabled IS NULL;
@@ -397,12 +741,12 @@ CREATE TABLE IF NOT EXISTS recovery_codes (
 
 CREATE INDEX IF NOT EXISTS idx_recovery_codes_user ON recovery_codes(user_id);
 "#,
-            )
-            .await
-            .expect("prepare 2fa schema");
+    )
+    .await
+    .expect("prepare 2fa schema");
 
-            db.execute_unprepared(
-                r#"
+    db.execute_unprepared(
+        r#"
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS sprint_id UUID REFERENCES sprints(id) ON DELETE SET NULL;
 
@@ -410,54 +754,52 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_sprints_active_per_project
     ON sprints(project_id)
     WHERE status = 'active';
 "#,
-            )
-            .await
-            .expect("prepare sprints schema");
+    )
+    .await
+    .expect("prepare sprints schema");
 
-            db.execute_unprepared(
-                r#"
+    db.execute_unprepared(
+        r#"
 ALTER TABLE projects
     ADD COLUMN IF NOT EXISTS is_personal BOOLEAN NOT NULL DEFAULT false,
     ADD COLUMN IF NOT EXISTS personal_owner_id UUID REFERENCES users(id) ON DELETE CASCADE;
 "#,
-            )
-            .await
-            .expect("prepare personal project columns");
+    )
+    .await
+    .expect("prepare personal project columns");
 
-            // sync() は既定値を作らないので、m20261111000000_project_member_inheritance と同じ既定値を置く
-            db.execute_unprepared(
-                "ALTER TABLE projects ALTER COLUMN inherit_tenant_members SET DEFAULT true",
-            )
-            .await
-            .expect("prepare project inheritance column");
+    // sync() は既定値を作らないので、m20261111000000_project_member_inheritance と同じ既定値を置く
+    db.execute_unprepared(
+        "ALTER TABLE projects ALTER COLUMN inherit_tenant_members SET DEFAULT true",
+    )
+    .await
+    .expect("prepare project inheritance column");
 
-            // sync() は entity 定義からカラムデフォルトを作らないため、
-            // `ensure_system_settings_row` の `INSERT INTO system_settings (singleton)` が
-            // NOT NULL 制約違反 (23502) になる。マイグレーション
-            // （m20260520000000_initial_schema.rs）と同じデフォルトを付与する。
-            db.execute_unprepared(
-                r#"
+    // sync() は entity 定義からカラムデフォルトを作らないため、
+    // `ensure_system_settings_row` の `INSERT INTO system_settings (singleton)` が
+    // NOT NULL 制約違反 (23502) になる。マイグレーション
+    // （m20260520000000_initial_schema.rs）と同じデフォルトを付与する。
+    db.execute_unprepared(
+        r#"
 ALTER TABLE system_settings
     ALTER COLUMN user_registration_enabled SET DEFAULT true,
     ALTER COLUMN drive_default_quota_mb SET DEFAULT 10240,
     ALTER COLUMN updated_at SET DEFAULT now(),
     ALTER COLUMN drive_system_max_quota_mb SET DEFAULT 102400;
 "#,
-            )
-            .await
-            .expect("prepare system_settings defaults");
+    )
+    .await
+    .expect("prepare system_settings defaults");
 
-            // 同上。マイグレーション（m20261016010000_task_attachments_source.rs）と同じ既定値
-            db.execute_unprepared(
-                "ALTER TABLE task_attachments ALTER COLUMN source SET DEFAULT 'manual';",
-            )
-            .await
-            .expect("prepare task_attachments defaults");
+    // 同上。マイグレーション（m20261016010000_task_attachments_source.rs）と同じ既定値
+    db.execute_unprepared("ALTER TABLE task_attachments ALTER COLUMN source SET DEFAULT 'manual';")
+        .await
+        .expect("prepare task_attachments defaults");
 
-            // search_vector は GENERATED ALWAYS AS の tsvector カラムで entity 定義に無いため
-            // sync() が作らない。手動で追加する。
-            db.execute_unprepared(
-                r#"
+    // search_vector は GENERATED ALWAYS AS の tsvector カラムで entity 定義に無いため
+    // sync() が作らない。手動で追加する。
+    db.execute_unprepared(
+        r#"
 ALTER TABLE tasks
     ADD COLUMN IF NOT EXISTS search_vector tsvector
     GENERATED ALWAYS AS (
@@ -466,22 +808,19 @@ ALTER TABLE tasks
     ) STORED;
 CREATE INDEX IF NOT EXISTS idx_tasks_search_vector ON tasks USING GIN(search_vector);
 "#,
-            )
-            .await
-            .expect("prepare search_vector column");
+    )
+    .await
+    .expect("prepare search_vector column");
 
-            // pg_trgm の拡張と title の trigram index も migration（m20261020000000）にしか無い
-            db.execute_unprepared(
-                r#"
+    // pg_trgm の拡張と title の trigram index も migration（m20261020000000）にしか無い
+    db.execute_unprepared(
+        r#"
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE INDEX IF NOT EXISTS idx_tasks_title_trgm ON tasks USING GIN (title gin_trgm_ops);
 "#,
-            )
-            .await
-            .expect("prepare pg_trgm index");
-
-        })
-        .await;
+    )
+    .await
+    .expect("prepare pg_trgm index");
 }
 
 #[derive(Clone, Debug)]
@@ -748,7 +1087,7 @@ impl TestApp {
         let db = sea_orm::Database::connect(&settings.database_url)
             .await
             .expect("connect database");
-        ensure_schema(&db).await;
+        ensure_schema(&db, ensure_test_env()).await;
 
         // 実 SMTP へは繋がない。送信済みメールは `sent_mails()` で読む
         let (smtp_client, sent_mails) = SmtpClient::capture();

@@ -20,7 +20,7 @@ const OVER_AXUM_DEFAULT: usize = 3 * 1024 * 1024;
 
 /// 2 MB を超えるファイルもアップロードでき、本文の更新も通る。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn upload_and_update_content_over_axum_default_body_limit() {
     let mut app = TestApp::new().await;
     let owner = app.insert_user(false, false).await;
@@ -77,7 +77,7 @@ async fn upload_and_update_content_over_axum_default_body_limit() {
 /// Content-Length があると `RequestBodyLimitLayer` がハンドラーより前に 413 を返すので、
 /// 長さを申告しないストリームで送り、multipart の読み取りエラーの分類を確かめる。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn upload_over_upload_max_size_is_413() {
     let app = TestApp::new().await;
     let owner = app.insert_user(false, false).await;
@@ -167,7 +167,7 @@ fn upload_request(tenant_id: uuid::Uuid, token: &str, file_len: usize) -> Reques
 /// 本文の上限が設定値ちょうどだと、multipart の境界・ヘッダーの分だけ
 /// Content-Length が上限を超え、ちょうどのファイルまで 413 になっていた。
 #[tokio::test]
-#[serial_test::file_serial(drive)]
+#[serial_test::serial(drive)]
 async fn upload_exactly_upload_max_size_is_accepted_and_one_byte_over_is_413() {
     let app = TestApp::new().await;
     let owner = app.insert_user(false, false).await;

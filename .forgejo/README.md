@@ -35,7 +35,8 @@ Forgejo は `.forgejo/workflows` があればそちらだけを読み、`.github
 - `sccache` を使わない。GitHub Actions のキャッシュ API に乗る仕組みで、
   instance 側の対応が読めないため（cargo のキャッシュだけで足りる）
 - `cargo nextest` ではなく `cargo test` を使う。追加のツール取得を増やさないため
-  （`--test-threads=1` はどちらも同じ）
+  （GitHub 側は nextest が試験ごとの DB で並列に回す。こちらは 1 つの DB を共有するので
+  `--test-threads=1` の直列）
 - `cargo build --release` は入れていない。デバッグビルドで clippy と test が通って
   おり、リリースビルドは GitHub 側の Backend Build と Docker Build が見る
 - VRT / Argos / Chromatic / opencode / PR コメント系は移していない。外部 SaaS か

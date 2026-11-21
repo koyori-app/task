@@ -93,6 +93,7 @@ mod tenant_members_integration;
 mod tenant_require_2fa_integration;
 mod tenant_token_unbind_concurrency_integration;
 mod tenants_integration;
+mod test_database_isolation_integration;
 mod test_env_guard_integration;
 mod time_tracking_integration;
 mod user_profile_integration;
