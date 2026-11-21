@@ -165,6 +165,9 @@ async fn orphaned_job_of_dead_generation_is_requeued_and_rerun_by_next_generatio
         worker_ids(db, &queue).await.contains(&id2)
     })
     .await;
+    // 登録の直後に止めると heartbeat が回らず、回収が起きない。1 回目の heartbeat を待つ
+    // （止めた worker の heartbeat が止まる理由の調査は TASK-575）
+    tokio::time::sleep(KEEP_ALIVE + Duration::from_millis(500)).await;
     ctx2.pause().expect("pause generation 2");
     // 取り込みを止めてから旧世代の行を回収対象にする。回収は heartbeat 側（KEEP_ALIVE ごと）が行う
     db.execute_raw(Statement::from_sql_and_values(

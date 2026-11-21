@@ -116,13 +116,6 @@ async fn creates_in_order_with_activities_and_webhooks() {
         .await
         .unwrap();
     assert_eq!(deliveries, 2);
-
-    // 届かない宛先の配信を残すと、他のテストの掃き出しが送信の timeout を待つ
-    entity::webhooks::Entity::delete_many()
-        .filter(entity::webhooks::Column::ProjectId.eq(fx.tp.project_id))
-        .exec(&fx.app.state.db)
-        .await
-        .unwrap();
 }
 
 #[tokio::test]

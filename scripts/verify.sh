@@ -9,6 +9,8 @@
 #   docs      仕様書の文体の lint とそのテスト
 # 環境変数: VERIFY_BASE（changed の比較元。既定は origin/main との merge-base）
 #           VERIFY_LOG_DIR（ログの置き場。既定は <リポジトリ>/.verify）
+#           VERIFY_TEST_THREADS（統合テストの並列数の上限。既定はコア数）
+#           TEST_DATABASE_URL / TEST_REDIS_URL（統合テストの行き先。渡せばコンテナを起こさない）
 # 失敗した段があっても最後まで回し、最後に失敗した段のログの末尾を出して 1 で終える。
 set -uo pipefail
 
@@ -47,6 +49,124 @@ openapi_drift() {
   return "$status"
 }
 
+# 統合テスト用の Postgres と Valkey を 1 組起こし、行き先を TEST_DATABASE_URL / TEST_REDIS_URL に置く。
+# ハーネスはこの行き先に試験ごとの DB を作るので、nextest を並列に回せる。
+# 行き先が片方でも渡されているなら、それを使って何も起こさない（足りない側はハーネスが起こす）。
+# docker が無い・起動に失敗したときは 1 行出して戻り、ハーネスが試験ごとにコンテナを起こす。
+verify_containers=()
+verify_exported=0
+
+# 自分が起こしたコンテナを消す。消せなかった名は控えたままにして 1 を返す（後でもう一度試せる）。
+stop_test_services() {
+  # 消したコンテナの行き先を後の段へ渡さない
+  if [ "$verify_exported" -eq 1 ]; then
+    unset TEST_DATABASE_URL TEST_REDIS_URL
+    verify_exported=0
+  fi
+  [ ${#verify_containers[@]} -gt 0 ] || return 0
+  local name left=()
+  for name in "${verify_containers[@]}"; do
+    # 無い名の rm -f は成功する。失敗は docker に届かないなどで、コンテナが残っているかもしれない
+    docker rm -f -v "$name" >/dev/null 2>&1 || left+=("$name")
+  done
+  verify_containers=("${left[@]}")
+  [ ${#left[@]} -eq 0 ] && return 0
+  echo "verify: コンテナを消せなかった: ${left[*]}（docker rm -f -v ${left[*]}）" >&2
+  return 1
+}
+
+wait_test_service() {
+  local i
+  for i in $(seq 1 60); do
+    docker exec "$@" >/dev/null 2>&1 && return 0
+    sleep 0.5
+  done
+  return 1
+}
+
+start_test_services() {
+  [ -n "${TEST_DATABASE_URL:-}${TEST_REDIS_URL:-}" ] && return 0
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "verify: docker が無いので、統合テスト用の共有コンテナを起こさない" >&2
+    return 0
+  fi
+  local pg="task-verify-pg-$$" valkey="task-verify-valkey-$$" pg_port valkey_port
+  # イメージはハーネス（tests/common/mod.rs）と同じ
+  # 途中で失敗しても消せるよう、起こす前に名を控える（無い名の rm -f は何もしない）
+  verify_containers=("$pg" "$valkey")
+  # 初期化中の Postgres は TCP を聞かないので、-h を付けて本起動を待つ
+  # 既定の 100 接続では 12 並列で「too many clients」に当たる（試験のプロセスごとにプールを持つ）。
+  # 16 並列ぶんを見込んで上限を上げる
+  if docker run -d --name "$pg" -e POSTGRES_PASSWORD=postgres -p 127.0.0.1::5432 \
+    postgres:17 -c fsync=off -c max_connections=500 >/dev/null 2>&1 &&
+    docker run -d --name "$valkey" -p 127.0.0.1::6379 valkey/valkey:8.1 >/dev/null 2>&1 &&
+    wait_test_service "$pg" pg_isready -h 127.0.0.1 -U postgres &&
+    wait_test_service "$valkey" valkey-cli ping &&
+    pg_port=$(docker port "$pg" 5432/tcp | head -n 1) && [ -n "$pg_port" ] &&
+    valkey_port=$(docker port "$valkey" 6379/tcp | head -n 1) && [ -n "$valkey_port" ]; then
+    export TEST_DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:${pg_port##*:}/postgres"
+    export TEST_REDIS_URL="redis://127.0.0.1:${valkey_port##*:}"
+    verify_exported=1
+    return 0
+  fi
+  echo "verify: 統合テスト用の共有コンテナを起こせなかった。試験ごとのコンテナで回す（遅い）" >&2
+  stop_test_services
+}
+trap stop_test_services EXIT
+
+# 試験ごとにコンテナを起こす経路で同時に回す数の上限（コンテナは 1 件につき最大 2 個）
+PER_TEST_CONTAINER_THREADS=6
+
+# TEST_REDIS_URL が指す DB 番号（起点）。ハーネスの slot_redis_url と同じ読み方で、TCP の行き先は
+# パス、Unix socket の行き先は db のクエリから取る。無い・読めないなら 0（読めない値はハーネスが拒む）。
+redis_base() {
+  local url=${TEST_REDIS_URL:-} db=""
+  case $url in
+    redis+unix://* | valkey+unix://* | unix://*)
+      case $url in
+        *[?\&]db=*)
+          db=${url##*[?&]db=}
+          db=${db%%&*}
+          ;;
+      esac
+      ;;
+    *://*)
+      db=${url#*://}
+      db=${db%%\?*}
+      case $db in
+        */*) db=${db#*/} ;;
+        *) db="" ;;
+      esac
+      ;;
+  esac
+  case $db in
+    '' | *[!0-9]*) echo 0 ;;
+    ??? | ???*) echo 16 ;;
+    *) echo $((10#$db)) ;;
+  esac
+}
+
+# nextest の並列数。小さい順に効く上限は次のとおり（macOS に nproc は無い）。
+# - コア数
+# - VERIFY_TEST_THREADS（渡されたとき）
+# - Valkey の DB は 16 個で、枠は「起点 + 枠番号」を使うので「16 − 起点」
+# - 行き先が両方そろっていなければ、ハーネスが試験ごとにコンテナを起こすので PER_TEST_CONTAINER_THREADS
+test_threads() {
+  local n want=${VERIFY_TEST_THREADS:-} left
+  n=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
+  case $want in
+    '' | *[!0-9]* | 0*) ;;
+    *) [ "$n" -gt "$want" ] && n=$want ;;
+  esac
+  left=$((16 - $(redis_base)))
+  [ "$left" -lt 1 ] && left=1
+  [ "$n" -gt "$left" ] && n=$left
+  if [ -z "${TEST_DATABASE_URL:-}" ] || [ -z "${TEST_REDIS_URL:-}" ]; then
+    [ "$n" -gt "$PER_TEST_CONTAINER_THREADS" ] && n=$PER_TEST_CONTAINER_THREADS
+  fi
+  echo "$n"
+}
+
 run_backend() {
   step backend-fmt apps/backend cargo fmt --all -- --check
   if cargo hakari --version >/dev/null 2>&1; then
@@ -56,7 +176,10 @@ run_backend() {
   fi
   step clippy apps/backend cargo clippy --workspace --all-targets -- -D warnings
   if has_nextest; then
-    step backend-test apps/backend cargo nextest run --test-threads=1
+    # step の中はサブシェルなので、行き先の export はここ（親）で済ませる
+    start_test_services
+    step backend-test apps/backend cargo nextest run --test-threads="$(test_threads)"
+    stop_test_services
   else
     step backend-test apps/backend cargo test -- --test-threads=1
   fi
@@ -134,6 +257,12 @@ for g in "${groups[@]}"; do
   "run_$g"
 done
 [ "$ran" -eq 1 ] || echo "回す区分が無い（main との差分に backend・frontend・docs の変更が無い）"
+
+# 段の後で消せなかったコンテナをもう一度試す。残れば失敗として終える
+if ! stop_test_services; then
+  printf 'FAIL  %-18s       残ったコンテナ: %s\n' test-services "${verify_containers[*]}"
+  failed+=(test-services)
+fi
 
 if [ ${#failed[@]} -gt 0 ]; then
   for name in "${failed[@]}"; do
