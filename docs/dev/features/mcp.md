@@ -13,7 +13,7 @@ backend は MCP（Model Context Protocol）のサーバーを `POST /mcp` で公
 Claude Code などの MCP クライアントは、URL と PAT を設定するか、OAuth で接続を許可すると、タスクを読み書きできる。
 CLI を入れにくい環境で、CLI の代わりに使うためのものである。
 OAuth の認可サーバーも backend が兼ね、claude.ai、Claude Code、ChatGPT、Codex からコネクタとして接続できる。
-ツールはタスクを実装する流れで使う 12 個に限り、レビュー指摘の操作は範囲外である。
+ツールは 25 個で、タスクを実装する流れで使うものに加えて、タスクの一括作成と削除、自分のタスク、スプリント、通知、テナントの一覧を含む。レビュー指摘の操作は範囲外である。
 
 ## 用語
 
@@ -173,6 +173,7 @@ Claude Code のクラウド環境では、環境の設定で環境変数 `TASK_T
 ### ツールの実行
 
 ツールは REST API を backend の中で呼び直し、API の応答の JSON をそのまま文字列で返す。
+本文の無い成功（204）は `ok` を返す。
 呼び直すときに元の要求から引き継ぐヘッダーは `Authorization` だけで、Cookie は渡さない。
 そのため、ツールでできる操作は PAT か許可の scope、テナントの束縛、プロジェクトの束縛で決まり、PAT で REST API を直接呼んだときと同じになる。
 
@@ -180,12 +181,13 @@ Claude Code のクラウド環境では、環境の設定で環境変数 `TASK_T
 文面は API の状態コードと `message` を並べたもので、例は `403 forbidden`、`404 not-found`、`409 github-integration-missing` である。
 引数の誤りは API を呼ぶ前に `parent_task_id must be a UUID` のような文面で返す。
 
-任意の引数のうち `tenant`、`project`、`status`、`priority`、`q`、`sort`、`task_type`、`milestone`、`sprint`、ID、日付は、空文字を省略として読む。
+任意の引数のうち `tenant`、`project`、`status`、`priority`、`q`、`sort`、`filter`、`cursor`、`task_type`、`milestone`、`sprint`、ID、日付は、空文字を省略として読む。
 `title`、`description`、`body` は空文字のまま API へ渡す。
 
 ### テナントの決め方
 
-`whoami` を除く全ツールは引数 `tenant` を受ける。
+`whoami`、`list_tenants`、`list_notifications`、`mark_notification_read`、`mark_all_notifications_read` を除く全ツールは引数 `tenant` を受ける。
+`get_notification_settings` と `update_notification_settings` は、`project` が UUID のとき `tenant` を読まない。
 
 | `tenant` | テナント |
 |---|---|
@@ -217,6 +219,10 @@ UUID のときは `project` が必須で、無ければ `project is required whe
 複数に当たるときは、候補の名前と ID を並べて UUID での指定を求める。
 UUID は確かめずに API へ渡す。
 担当者の候補の一覧は `write:task` が無いと読めないので、そのときは候補なしと返す。
+
+スプリントのツールの `sprint_id` と、通知の `notification_id` は UUID で指す。
+個人プロジェクトはプロジェクトの一覧に出ないので、個人プロジェクトのタスクは `KEY-N` で指せない。
+`list_my_tasks` の応答の `id` と `project.id` を、`task` と `project` に渡す。
 
 ## データ
 
@@ -312,6 +318,19 @@ UUID は確かめずに API へ渡す。
 | `add_task_comment` | `task`、`project`、`body`、`parent_comment_id` | `POST …/tasks/{task}/comments` |
 | `list_task_pull_requests` | `task`、`project` | `GET …/tasks/{task}/forge` |
 | `link_pull_request` | `task`、`project`、`number`、`closes` | `POST …/tasks/{task}/forge/pull-requests` |
+| `list_tenants` | なし | `GET /v1/tenants` |
+| `bulk_create_tasks` | `project`、`tasks`（`create_task` と同じ項目の配列）、`status` | `POST …/projects/{project}/tasks/bulk-create` |
+| `delete_task` | `task`、`project` | `DELETE …/tasks/{task}` |
+| `unlink_pull_request` | `task`、`project`、`number` | `GET …/tasks/{task}/forge`、`DELETE …/tasks/{task}/forge/pull-requests/{id}` |
+| `list_my_tasks` | `filter`、`done`、`limit`、`offset` | `GET /v1/tenants/{tenant}/users/me/tasks` |
+| `get_sprint` | `project`、`sprint_id` | `GET …/projects/{project}/sprints/{id}` |
+| `start_sprint` | `project`、`sprint_id` | `POST …/sprints/{id}/start` |
+| `complete_sprint` | `project`、`sprint_id` | `POST …/sprints/{id}/complete` |
+| `list_notifications` | `unread`、`limit`、`cursor` | `GET /v1/users/me/notifications` |
+| `mark_notification_read` | `notification_id` | `PATCH /v1/users/me/notifications/{id}/read` |
+| `mark_all_notifications_read` | なし | `PATCH /v1/users/me/notifications/read-all` |
+| `get_notification_settings` | `project` | `GET /v1/users/me/notification-settings/{project}` |
+| `update_notification_settings` | `project`、`in_app_events`、`email_events` | 上の `GET` と `PUT` |
 
 `create_task` と `update_task` は、`_id` の付いた旧名（`label_ids`、`assignee_ids`、`task_type_id`、`milestone_id`、`sprint_id`、`add_label_ids`、`remove_label_ids`）も同じ引数として受ける。
 
@@ -323,6 +342,22 @@ UUID は確かめずに API へ渡す。
 `update_task` は渡した項目だけを変える。
 `soft_deadline` と `hard_deadline` は RFC 3339 か `YYYY-MM-DD` で渡し、`YYYY-MM-DD` はその日の始まりの UTC として読む。
 `priority` の値は API が検証する。
+
+`bulk_create_tasks` は 1 回に 100 件までを、全件作るか 1 件も作らないかで作る。
+要素は `create_task` から `project` と `tenant` を除いた項目を持ち、名前の引き方も同じである。
+要素の状態は、要素の `status`、引数の `status`、プロジェクトの既定の状態の順に決まる。
+要素の失敗は `tasks[1]: parent_task_id must be a UUID` のように、0 から数えた要素の位置を付けて返す。
+
+`unlink_pull_request` は、タスクにつながる PR から番号の合うものを外す。
+同じ番号が複数あれば、プロジェクトの今の連携先のものを外し、それで決まらなければ候補を並べたエラーを返す。
+PR の行は残るので、`link_pull_request` でつなぎ直せる。タイトルか本文に `KEY-N` が残っていれば、次の PR のイベントでつながり直す。
+
+`update_notification_settings` は、渡さなかった側の一覧を今の値のまま送り直す。空の配列を渡すと、その側の通知をすべて止める。
+
+次の操作は戻せない。
+`delete_task` で消したタスクを戻す API は無い。
+`start_sprint` で始めたスプリントは計画中に戻せず、`complete_sprint` で終えたスプリントは再開できない。完了で未完了のタスクはスプリントから外れる。
+`mark_all_notifications_read` で既読にした通知は未読に戻せない。
 
 OAuth で接続したとき、`whoami` は許可の ID と、クライアントの名前を返す。
 
@@ -341,6 +376,16 @@ OAuth で接続したとき、`whoami` は許可の ID と、クライアント�
 | `list_project_options` の `milestones` | PAT か許可の持ち主 | `read:milestone` |
 | `list_project_options` の `sprints` | PAT か許可の持ち主 | `read:sprint` |
 | `list_project_options` の `assignable_users` | PAT か許可の持ち主 | `write:task` |
+| `list_tenants` | PAT か許可の持ち主 | `read:tenant` |
+| `list_my_tasks`、`list_notifications`、`get_notification_settings` | PAT か許可の持ち主 | `read:task` |
+| `bulk_create_tasks`、`unlink_pull_request`、`mark_notification_read`、`mark_all_notifications_read`、`update_notification_settings` | PAT か許可の持ち主 | `write:task` |
+| `delete_task` | タスクの作成者かテナントのオーナー | `write:task` |
+| `get_sprint` | PAT か許可の持ち主 | `read:sprint` |
+| `start_sprint` | PAT の持ち主 | `write:sprint` |
+| `complete_sprint` | PAT の持ち主 | `write:sprint` と `write:task` |
+
+`write:task` は `read:task` を含むので、`unlink_pull_request` と `update_notification_settings` が先に読む一覧も `write:task` で読める。
+通知の PAT での一覧と既読は、タスクの通知の種別に限る。
 
 引数を名前で渡すと、ID を引くための scope が追加で要る。
 
@@ -371,7 +416,8 @@ OAuth の同意と許可の管理は次のとおりである。
 テナントが 2FA を必須にしていれば、2FA を設定した利用者だけが同意できる。
 選んだテナントのうち 1 つでも条件を満たさなければ、全体を断る。
 
-OAuth で渡せる scope は、ツールが使う `read:tenant`、`read:project`、`read:task`、`write:task`、`read:milestone`、`read:sprint` の 6 つに限る。
+OAuth で渡せる scope は `read:tenant`、`read:project`、`read:task`、`write:task`、`read:milestone`、`read:sprint` の 6 つに限る。
+`write:sprint` は渡せないので、`start_sprint` と `complete_sprint` は PAT でだけ使える。
 利用者は同意画面で、クライアントが求めた scope の一部だけを許可できる。
 
 届く範囲は、要求のたびに、許可の scope、テナントの束縛、本人のその時点の所属とロールで決まる。
@@ -414,7 +460,9 @@ OAuth で渡せる scope は、ツールが使う `read:tenant`、`read:project`
 ## 未実装と既知の制限
 
 - レビュー指摘のツールは未実装である（TASK-560）
-- タスクの一括作成と削除、PR のリンクの解除、自分のタスク、スプリント、通知、テナントの一覧のツールは未実装である（TASK-561）
+- OAuth の接続では、`start_sprint` と `complete_sprint` が 403 `forbidden` になる
+- CLI の `sprints list`、`sprints burndown`、`my complete` に当たる専用のツールは無い。`list_project_options` の `sprints`、`get_sprint`、`update_task` を使う
+- `list_my_tasks` の `today` と `week` は UTC で決まる
 - このリポジトリに `.mcp.json` は置いていない（TASK-564）
 - `update_task` で変えられるのは、表に挙げた項目だけである。期限、親タスク、担当者などの変更は REST API か CLI を使う
 - Claude Code のクラウド環境の network secrets で PAT を渡せるかは確かめていない
@@ -459,3 +507,6 @@ OAuth で渡せる scope は、ツールが使う `read:tenant`、`read:project`
 | 2026-11-19 | 連携中のアプリを、アカウント設定の新しいページ `/settings/apps` に置く | PAT は利用者が発行するもので、許可はクライアントが求めて利用者が与えるものである。一覧を分けると、解除する対象を探しやすい |
 | 2026-11-21 | ラベル、担当者、種別、マイルストーン、スプリントの名前の解決を MCP の層で行い、選び方と文面を CLI から写す | `handler` から `cli` は参照できない。`tenant`、`project`、`status` の解決もすでに写しており、名前の選別だけを共有すると写しと共有が混ざる。文面のずれは CLI と同じ表のテストで止める |
 | 2026-11-21 | 名前を受ける引数から `_id` を外し、旧名を別名として受け続ける | 名前を受ける既存の引数（`tenant`、`project`、`status`）には `_id` が付かない。CLI のフラグも `--label` などである。引数の構造体は知らない引数を捨てるので、旧名を受けないと、旧名で呼んだときにラベルの無いタスクが黙ってできる |
+| 2026-11-21 | CLI の残りの操作を 13 個のツールで足し、既存のツールで足りる操作には専用のツールを作らない | 同じ応答を返すツールが 2 つあると、クライアントに渡るツールの一覧が長くなるだけである。最初の 12 個もタスクの完了を `update_task` に任せている |
+| 2026-11-21 | `write:sprint` を OAuth で渡せる scope に足さない | スプリントの開始と完了は戻せない管理の操作で、エージェントが日常に呼ぶものではない。足すと同意画面と既存の許可の扱いまで変わるので、要るときに分けて決める |
+| 2026-11-21 | ツールをモジュールごとのルーターに分けて足し合わせる | ツールを足すほかの作業と、同じファイルの同じ行を触らずに済む |
