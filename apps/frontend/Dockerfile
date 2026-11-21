@@ -12,7 +12,7 @@
 # major の更新では、どちらの PR も単独では version-sync が落ちる。手で揃えること。
 
 ########## builder ##########
-FROM node:24-bookworm-slim AS builder
+FROM node:26-bookworm-slim AS builder
 # pnpm の版はルート package.json の packageManager フィールドに従わせる（二重管理を避ける）
 RUN corepack enable
 WORKDIR /repo
