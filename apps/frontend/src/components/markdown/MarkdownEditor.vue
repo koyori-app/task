@@ -16,6 +16,7 @@ import { computed, onBeforeUnmount, onMounted, shallowRef, useTemplateRef, watch
 
 import type { MentionCandidate, MentionTable } from '@/lib/comment-mention';
 import type { UploadedFile } from '@/lib/drive-upload';
+import { ignoreRepeatedModEnter } from '@/lib/mod-enter-repeat';
 import { pasteUploadExtensions, resetPasteUploads } from '@/lib/paste-upload-extension';
 import { isImeKeydown } from '@/lib/ime-keydown-guard';
 import {
@@ -269,6 +270,7 @@ function extensions(): Extension[] {
           inCode,
         })
       : []),
+    ignoreRepeatedModEnter,
     // Escape は呼び出し側 (編集の取り消し) に渡すため CodeMirror の既定に載せない
     keymap.of([
       // 既定より先に置く (先に登録した束が優先される)

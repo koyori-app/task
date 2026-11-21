@@ -596,10 +596,10 @@ export const ModEnterWhileComposing: Story = {
 };
 
 /**
- * 送信中（disabled）にフォーカスが body へ落ちても、戻った時に入力欄へ返す。
- * キーで送った後に続けて打てるようにする（ボタンで送る時はフォーカスがボタンに在るので起きない）
+ * 送信中（disabled）もフォーカスは入力欄に残り、その間の打鍵は本文にも body（一覧の単打ショートカット）にも
+ * 届かない。戻った後は caret の位置もそのままで、続きが末尾に入る（送信が失敗して下書きが残った時）
  */
-export const RefocusAfterDisabled: Story = {
+export const KeepsFocusAndCaretWhileDisabled: Story = {
   render: (args: Record<string, unknown>) => ({
     components: { CommentEditor },
     setup() {
@@ -622,20 +622,52 @@ export const RefocusAfterDisabled: Story = {
 
     // フォーカスを動かさずに切り替える（送信の開始と終わり）
     const toggle = within(canvasElement).getByTestId('toggle');
+    const inEditor = () => editor.closest('.cm-editor')!.contains(document.activeElement);
     toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await waitFor(() =>
-      expect(content(canvasElement).getAttribute('contenteditable')).toBe('false'),
-    );
-    toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await waitFor(() =>
-      expect(content(canvasElement).getAttribute('contenteditable')).toBe('true'),
-    );
+    await waitFor(() => expect(content(canvasElement).getAttribute('aria-readonly')).toBe('true'));
+    await expect(inEditor()).toBe(true);
+    // 送信中の打鍵は本文に入らず、フォーカスも入力欄から動かない
+    await userEvent.keyboard('t');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await expect(out(canvasElement)).toBe('送る');
+    await expect(inEditor()).toBe(true);
 
-    await waitFor(() =>
-      expect(editor.closest('.cm-editor')!.contains(document.activeElement)).toBe(true),
-    );
-    // 作り直した state は caret を先頭に置く（送信が通れば本文は空なので、位置は問わない）
+    toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await waitFor(() => expect(content(canvasElement).getAttribute('aria-readonly')).toBeNull());
+    await expect(inEditor()).toBe(true);
     await userEvent.keyboard('続き');
-    await waitFor(() => expect(out(canvasElement)).toBe('続き送る'));
+    await waitFor(() => expect(out(canvasElement)).toBe('送る続き'));
+  },
+};
+
+/** Ctrl+Enter の押しっぱなし（repeat）は送らない。離して押し直せば送る */
+export const RepeatedModEnterDoesNotSubmit: Story = {
+  args: { onSubmit: submitSpy },
+  beforeEach: () => submitSpy.mockClear(),
+  render: withValue(''),
+  play: async ({ canvasElement }) => {
+    const editor = await ready(canvasElement);
+    await userEvent.keyboard('本文');
+    await waitFor(() => expect(out(canvasElement)).toBe('本文'));
+    const press = (repeat: boolean) => {
+      const event = new KeyboardEvent('keydown', {
+        key: 'Enter',
+        code: 'Enter',
+        ctrlKey: true,
+        repeat,
+        bubbles: true,
+        cancelable: true,
+      });
+      editor.dispatchEvent(event);
+      return event;
+    };
+
+    const repeated = press(true);
+    await expect(repeated.defaultPrevented).toBe(true);
+    await expect(submitSpy).not.toHaveBeenCalled();
+    await expect(out(canvasElement)).toBe('本文');
+
+    press(false);
+    await expect(submitSpy).toHaveBeenCalledTimes(1);
   },
 };

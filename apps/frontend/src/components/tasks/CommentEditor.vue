@@ -13,6 +13,7 @@ import {
   setMentionNames,
 } from '@/lib/comment-mention-extensions';
 import type { UploadedFile } from '@/lib/drive-upload';
+import { ignoreRepeatedModEnter } from '@/lib/mod-enter-repeat';
 import { pasteUploadExtensions, resetPasteUploads } from '@/lib/paste-upload-extension';
 
 /**
@@ -119,6 +120,7 @@ function extensions(): Extension[] {
       names: nameTable.value,
       disabled: () => props.disabled,
     }),
+    ignoreRepeatedModEnter,
     // 既定の Mod-Enter（空行の挿入）より先に置く（先に登録した束が優先される）
     keymap.of([
       { key: 'Mod-Enter', run: submitFromKey },
@@ -128,8 +130,9 @@ function extensions(): Extension[] {
     ]),
     EditorView.lineWrapping,
     theme,
+    // disabled の間も editable は保ち、readOnly だけで編集を止める。contenteditable を外すと
+    // フォーカスが body へ落ち、キーで送った直後の打鍵が一覧の単打ショートカット（T など）に届く
     EditorState.readOnly.of(props.disabled),
-    EditorView.editable.of(!props.disabled),
     ...(props.placeholder ? [placeholderExt(props.placeholder)] : []),
     EditorView.contentAttributes.of({
       ...(props.ariaLabel ? { 'aria-label': props.ariaLabel } : {}),
@@ -206,21 +209,13 @@ watch(nameTable, (table) => {
 // disabled / placeholder の変更は state ごと作り直す（MarkdownEditor と同じ理由）。
 // uploadFile の有無も同じ（テナントとプロジェクトが mount の後で分かる所で、拡張を足し直す）。
 // 関数が入れ替わっただけ（上げる先のプロジェクトが替わった）では作り直さないよう、有無だけを見る
-/**
- * disabled になった時に入力欄がフォーカスを持っていたか。戻った時に返す。
- * キーで送ると、disabled で編集不可になった時点でフォーカスが body へ落ち、続きの打鍵が入らない
- */
-let refocusOnEnable = false;
-
+// caret の位置は引き継ぐ。送信・保存が失敗して下書きが残った時に、続きが先頭に入らないようにする
+// （本文が外から差し替わっていたら位置が合わないので、同じ本文の時だけ）
 watch([() => props.disabled, () => props.placeholder, () => !!props.uploadFile], () => {
   if (!view) return;
-  if (props.disabled && view.hasFocus) refocusOnEnable = true;
-  view.setState(EditorState.create({ doc: props.modelValue, extensions: extensions() }));
-  if (props.disabled || !refocusOnEnable) return;
-  refocusOnEnable = false;
-  // 送信中に利用者が別の所へフォーカスを移していたら奪わない
-  const active = document.activeElement;
-  if (!active || active === document.body || active instanceof HTMLDialogElement) view.focus();
+  const doc = props.modelValue;
+  const selection = doc === view.state.doc.toString() ? view.state.selection : undefined;
+  view.setState(EditorState.create({ doc, selection, extensions: extensions() }));
 });
 
 function focus() {

@@ -388,6 +388,8 @@ function requestCreate() {
 // input の暗黙の送信は Enter だけで、Ctrl / ⌘ 付きでは起きない
 function onTitleKeydown(event: KeyboardEvent) {
   if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey)) return;
+  // 説明の欄（CodeMirror の Mod-Enter）と同じく、Shift / Alt を足した組み合わせでは作らない
+  if (event.shiftKey || event.altKey) return;
   if (isImeKeydown(event) || event.repeat) return;
   event.preventDefault();
   requestCreate();

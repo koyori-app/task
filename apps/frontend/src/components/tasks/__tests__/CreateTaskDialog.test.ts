@@ -320,6 +320,8 @@ describe('CreateTaskDialog の Ctrl+Enter で作成', () => {
     ['変換中（isComposing）', { isComposing: true }],
     ['変換中（keyCode 229）', { keyCode: 229 }],
     ['押しっぱなし', { repeat: true }],
+    ['Shift を足した', { shiftKey: true }],
+    ['Alt を足した', { altKey: true }],
   ])('%s の Ctrl+Enter では作成しない', async (_, init) => {
     mountDialog(queryClient);
     await nextTick();
