@@ -504,3 +504,158 @@ async fn review_tools_respect_allowed_project_ids() {
         .is_empty()
     );
 }
+
+#[tokio::test]
+async fn finding_of_another_project_is_not_reachable_through_this_project() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+    let other_project = crate::common::insert_extra_project(&app, fx.tp.tenant_id).await;
+    let created = call(
+        &app,
+        &token,
+        "submit_review",
+        json!({
+            "project": other_project.to_string(),
+            "pr": 5,
+            "head_sha": HEAD,
+            "findings": [finding("low", "別のプロジェクトの指摘")],
+        }),
+    )
+    .await
+    .json();
+    let finding_id = created["findings"][0]["id"].clone();
+    let update = |project: String| {
+        let arguments = json!({ "project": project, "finding_id": finding_id, "state": "fixed" });
+        call(&app, &token, "update_review_finding", arguments)
+    };
+
+    // 指摘の ID だけでは動かせない。パスのプロジェクトの指摘に限る
+    assert_eq!(
+        update(fx.tp.project_id.to_string()).await.error(),
+        "404 not-found"
+    );
+    let untouched = findings(
+        &app,
+        &token,
+        json!({ "project": other_project.to_string(), "pr": 5 }),
+    )
+    .await;
+    assert_eq!(untouched[0]["state"], "open");
+
+    // 対照: 指摘のあるプロジェクトを指せば通る
+    let fixed = update(other_project.to_string()).await.json();
+    assert_eq!(fixed["state"], "fixed", "{fixed}");
+}
+
+#[tokio::test]
+async fn review_tools_refuse_a_tenant_outside_the_token_binding() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+    // 持ち主は同じ。束縛していないテナントは、所属していても PAT では触れない
+    let other_tenant = crate::common::insert_tenant(&app.state.db, fx.user.id).await;
+    let other_project = crate::common::insert_extra_project(&app, other_tenant).await;
+    let outside = |extra: Value| {
+        let mut arguments = json!({
+            "project": other_project.to_string(),
+            "tenant": other_tenant.to_string(),
+        });
+        for (key, value) in extra.as_object().expect("object") {
+            arguments[key] = value.clone();
+        }
+        arguments
+    };
+
+    let outcome = call(
+        &app,
+        &token,
+        "list_review_findings",
+        outside(json!({ "pr": 5 })),
+    )
+    .await;
+    assert_eq!(outcome.error(), "403 forbidden");
+    let outcome = call(
+        &app,
+        &token,
+        "submit_review",
+        outside(json!({ "pr": 5, "head_sha": HEAD })),
+    )
+    .await;
+    assert_eq!(outcome.error(), "403 forbidden");
+
+    // 対照: 束縛したテナントは `tenant` を渡しても通る
+    let listed = findings(
+        &app,
+        &token,
+        json!({
+            "project": fx.tp.project_id.to_string(),
+            "tenant": fx.tp.tenant_id.to_string(),
+            "pr": 5,
+        }),
+    )
+    .await;
+    assert!(listed.is_empty());
+}
+
+#[tokio::test]
+async fn update_review_finding_names_the_limit_of_the_note() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+    let created = submit(&app, &token, &fx, 5, json!([finding("low", "題")]))
+        .await
+        .json();
+    let finding_id = created["findings"][0]["id"].clone();
+    let update = |state: &'static str, length: usize| {
+        let arguments = json!({
+            "project": fx.project_key,
+            "finding_id": finding_id,
+            "state": state,
+            "note": "あ".repeat(length),
+        });
+        call(&app, &token, "update_review_finding", arguments)
+    };
+
+    // 上限の値が文面に残り、状態コードで始まらない（API を呼んでいない）
+    assert_eq!(
+        update("fixed", 2001).await.error(),
+        "finding update does not satisfy the API's limits:\n  note: length max: 2000"
+    );
+    let untouched = findings(&app, &token, json!({ "project": fx.project_key, "pr": 5 })).await;
+    assert_eq!(untouched[0]["state"], "open");
+
+    // 対照: 上限ちょうどは通る
+    let fixed = update("fixed", 2000).await.json();
+    assert_eq!(fixed["state"], "fixed", "{fixed}");
+}
+
+#[tokio::test]
+async fn submit_review_reads_head_sha_without_the_surrounding_whitespace() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+
+    let created = call(
+        &app,
+        &token,
+        "submit_review",
+        json!({ "project": fx.project_key, "pr": 5, "head_sha": format!(" {HEAD}\n") }),
+    )
+    .await
+    .json();
+    assert_eq!(created["head_sha"], HEAD, "{created}");
+
+    // 空白を落としても 40 桁でなければ弾く
+    let outcome = call(
+        &app,
+        &token,
+        "submit_review",
+        json!({ "project": fx.project_key, "pr": 5, "head_sha": " 60cdd77 " }),
+    )
+    .await;
+    assert_eq!(
+        outcome.error(),
+        "`head_sha` must be the full 40-character commit SHA (got: 60cdd77)"
+    );
+}

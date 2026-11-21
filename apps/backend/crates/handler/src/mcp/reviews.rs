@@ -23,7 +23,8 @@ use super::inner::{InnerApi, ToolFailure};
 use super::resolve;
 use super::tools::{TaskMcp, blank_as_none, finish, parse_uuid, to_body};
 
-/// 指摘の重大度。`entity` の enum は `JsonSchema` を持たないので写しを置く
+// 指摘の重大度。`entity` の enum は `JsonSchema` を持たないので写しを置く。
+// 型の `///` はスキーマの `description` になってクライアントへ渡るので、`//` で書く
 #[derive(Deserialize, JsonSchema, Clone, Copy)]
 #[cfg_attr(test, derive(serde::Serialize))]
 #[serde(rename_all = "snake_case")]
@@ -51,7 +52,7 @@ impl SeverityArg {
     }
 }
 
-/// 指摘の状態。`SeverityArg` と同じく `entity` の写し
+// 指摘の状態。`SeverityArg` と同じく `entity` の写し
 #[derive(Deserialize, JsonSchema, Clone, Copy)]
 #[cfg_attr(test, derive(serde::Serialize))]
 #[serde(rename_all = "snake_case")]
@@ -205,6 +206,7 @@ fn csv<T>(values: Option<Vec<T>>, spell: fn(T) -> &'static str) -> Option<String
 /// 短縮 SHA は理由の無い `regex` になり、空白だけの題は通ってしまう。
 /// 上限と範囲は DTO の `Validate` を走らせるだけで、写しは持たない
 fn check_submit(request: &CreateReviewRequest) -> Result<(), ToolFailure> {
+    // `head_sha` は `run_submit_review` が前後の空白を落としてから渡す（CLI と同じ）
     if !common::validation::COMMIT_SHA_REGEX.is_match(&request.head_sha) {
         return Err(ToolFailure::new(format!(
             "`head_sha` must be the full 40-character commit SHA (got: {})",
@@ -220,17 +222,44 @@ fn check_submit(request: &CreateReviewRequest) -> Result<(), ToolFailure> {
             }
         }
     }
+    check_limits("review", request)
+}
+
+/// DTO の `Validate` を走らせ、違反をフィールドのパス付きで返す。
+///
+/// API に任せると、400 の本文は入力の値を含む素の文字列で、長い値が先頭 2000 字
+/// （`inner::MAX_ERROR_CHARS`）を使い切って上限の値が残らない
+fn check_limits(what: &str, request: &impl Validate) -> Result<(), ToolFailure> {
     let Err(errors) = request.validate() else {
         return Ok(());
     };
     let mut lines = Vec::new();
     violations(&errors, "", &mut lines);
     // `ValidationErrors` の順は不定なので、決まった順にする
-    lines.sort();
+    lines.sort_by_cached_key(|line| natural_key(line));
     Err(ToolFailure::new(format!(
-        "review does not satisfy the API's limits:\n{}",
+        "{what} does not satisfy the API's limits:\n{}",
         lines.join("\n")
     )))
+}
+
+/// 数字の並びを数として比べる鍵。文字列順では `findings[10]` が `findings[2]` より前に来る
+fn natural_key(line: &str) -> Vec<Result<u64, String>> {
+    let mut key = Vec::new();
+    let mut rest = line;
+    while !rest.is_empty() {
+        let digits = rest.starts_with(|c: char| c.is_ascii_digit());
+        let end = rest
+            .find(|c: char| c.is_ascii_digit() != digits)
+            .unwrap_or(rest.len());
+        let (chunk, tail) = rest.split_at(end);
+        key.push(match chunk.parse::<u64>() {
+            Ok(number) if digits => Ok(number),
+            _ => Err(chunk.to_string()),
+        });
+        rest = tail;
+    }
+    key
 }
 
 /// `findings[0].line` の形になるよう、入れ子とリストを辿ってパスを組み立てる。
@@ -340,7 +369,8 @@ impl TaskMcp {
     ) -> Result<Value, ToolFailure> {
         let request = CreateReviewRequest {
             pr_number: args.pr,
-            head_sha: args.head_sha,
+            // 末尾に改行の付いた 40 桁は、弾いても文面から理由が読めない
+            head_sha: args.head_sha.trim().to_string(),
             summary: args.summary.unwrap_or_default(),
             findings: args
                 .findings
@@ -382,10 +412,12 @@ impl TaskMcp {
         args: UpdateReviewFindingArgs,
     ) -> Result<Value, ToolFailure> {
         let finding_id = parse_uuid("finding_id", &args.finding_id)?.to_string();
-        let body = to_body(&UpdateFindingStateRequest {
+        let request = UpdateFindingStateRequest {
             state: args.state.into(),
             note: args.note,
-        })?;
+        };
+        check_limits("finding update", &request)?;
+        let body = to_body(&request)?;
 
         let api = self.inner(parts)?;
         let (tenant_id, project_id) =
@@ -650,6 +682,35 @@ mod tests {
             check_submit(&bad).unwrap_err().message,
             "review does not satisfy the API's limits:\n  findings[0].title: length min: 1 max: 200\n  findings[1].line: range min: 1\n  pr: range min: 1"
         );
+    }
+
+    /// 行は指摘の番号の順に並ぶ（文字列順では `findings[10]` が `findings[2]` より前に来る）
+    #[test]
+    fn violations_follow_the_order_of_the_findings() {
+        let findings = (0..12)
+            .map(|index| finding("t", "b", [2, 10, 11].contains(&index).then_some(0)))
+            .collect();
+        assert_eq!(
+            check_submit(&request(1, HEAD, findings))
+                .unwrap_err()
+                .message,
+            "review does not satisfy the API's limits:\n  findings[2].line: range min: 1\n  findings[10].line: range min: 1\n  findings[11].line: range min: 1"
+        );
+    }
+
+    #[test]
+    fn note_is_checked_against_the_limit_of_the_api() {
+        let update = |length: usize| UpdateFindingStateRequest {
+            state: FindingState::Fixed,
+            note: Some("あ".repeat(length)),
+        };
+        assert_eq!(
+            check_limits("finding update", &update(2001))
+                .unwrap_err()
+                .message,
+            "finding update does not satisfy the API's limits:\n  note: length max: 2000"
+        );
+        assert_eq!(check_limits("finding update", &update(2000)), Ok(()));
     }
 
     #[test]

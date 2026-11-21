@@ -378,6 +378,14 @@ async fn tools_list_returns_every_tool() {
     names.sort_unstable();
     assert_eq!(names, TOOL_NAMES);
 
+    // 説明と引数のスキーマはクライアントの AI が読むので英語で書く。引数の型の `///` は
+    // スキーマの `description` になるので、実装の覚え書き（日本語）を書くとここに出る
+    for tool in tools {
+        let text = tool.to_string();
+        let foreign: String = text.chars().filter(|c| !c.is_ascii()).take(40).collect();
+        assert!(foreign.is_empty(), "{}: {foreign}", tool["name"]);
+    }
+
     // 読み取りのツールには readOnlyHint が付き、書き込みのツールには付かない
     let read_only = |name: &str| {
         tools

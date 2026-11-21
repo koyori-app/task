@@ -357,7 +357,8 @@ UUID は確かめずに API へ渡す。
 レビューのツールは PR を番号の `pr` で指す。規則は[レビュー指摘](/dev/features/review-findings)にある。
 `list_review_findings` の `state` と `severity` は配列で渡す。
 `submit_review` の `findings` の各要素は `severity`、`title`、`body`、`file`、`line` を持つ。
-`submit_review` は API を呼ぶ前に、`head_sha` が 40 桁の小文字 16 進であること、`title` と `body` が空白だけでないこと、起票の上限と範囲を確かめる。
+`submit_review` は API を呼ぶ前に、`head_sha` が 40 桁の小文字 16 進であること、`title` と `body` が空白だけでないこと、起票の上限と範囲を確かめる。`head_sha` の前後の空白は落として読む。
+`update_review_finding` は API を呼ぶ前に、`note` の上限を確かめる。
 `get_review_summary` は API の集計をそのまま返す。PR の HEAD との照合は、呼び出し側が `latest_head_sha` で行う。
 
 OAuth で接続したとき、`whoami` は許可の ID と、クライアントの名前を返す。
@@ -499,7 +500,7 @@ OAuth で渡せる scope は、ツールが使う `read:tenant`、`read:project`
 | 2026-11-19 | 寿命はアクセストークン 1 時間、リフレッシュトークン 90 日で、使うたびに延ばす | アクセストークンは短くする。90 日は Device Token と PAT の既定に合わせた。使い続ける限り接続し直しを求めない |
 | 2026-11-19 | 連携中のアプリを、アカウント設定の新しいページ `/settings/apps` に置く | PAT は利用者が発行するもので、許可はクライアントが求めて利用者が与えるものである。一覧を分けると、解除する対象を探しやすい |
 | 2026-11-21 | レビュー指摘のツールを 6 個足す | CLI の `review` の起票、一覧、ラウンド、状態遷移、集計、引き継ぎを、CLI を入れにくい環境でも行える。形はほかのツールと同じで、REST API を呼び直す |
-| 2026-11-21 | OAuth で渡せる scope に `read:review` と `write:review` を足し、loopback の同意画面では `write:review` もチェックを外して始める | 渡せる scope はツールが使うものと定めている。足さなければ、一覧に並ぶのに OAuth では 1 つも通らないツールが 6 個できる。`write:review` は繰り延べで通常タスクを作れるので、`write:task` と同じ扱いにする |
+| 2026-11-21 | OAuth で渡せる scope に `read:review` と `write:review` を足し、loopback の同意画面では `write:review` もチェックを外して始める | 渡せる scope はツールが使うものと定めている。足さなければ、一覧に並ぶのに OAuth では 1 つも通らないツールが 6 個できる。`write:review` は繰り延べで通常タスクを作れる。起票と状態遷移のあとには、マージ可になった PR への Approve と、未解決の High / Medium がある PR への変更要求が、レビュワー本人の名義で GitHub に出る。そのため `write:task` と同じ扱いにする |
 | 2026-11-21 | `submit_review` は API を呼ぶ前に、CLI と同じ 3 つを確かめ、同じ文面で返す | API のエラーは入力の全体を含み、先頭 2000 字で切れると上限の値が残らない。短縮 SHA のエラーは 40 桁が要ることを示さない。空白だけの `title` は API が通す。上限と範囲は DTO の規則を走らせるだけで、写しは持たない |
 | 2026-11-21 | `get_review_summary` は API の集計をそのまま返し、HEAD との照合を足さない | ほかのツールは API の応答を削らず足さずに返す。応答に `gate`、`mergeable`、`latest_head_sha` があり、判断の材料は揃う。サーバーには作業ツリーも終了コードも無い |
 | 2026-11-21 | レビューのツールの `repo` と `from_repo` は、空文字を省略として読む | 使わない引数に空文字を入れるクライアントがある。空文字を連携前のラウンドの指定として読むと、未解決の指摘があっても一覧が空になり、エラーにならないので誤りに気づけない |
