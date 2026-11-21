@@ -148,7 +148,24 @@ codex mcp login task
 
 ### Claude Code での設定
 
-リポジトリの `.mcp.json` に次のように書く。
+このリポジトリは、直下の `.mcp.json` に本番のエンドポイントを置いている。
+
+```json
+{
+  "mcpServers": {
+    "task": {
+      "type": "http",
+      "url": "https://task.koyori.app/api/mcp"
+    }
+  }
+}
+```
+
+`headers` が無いので、Claude Code は OAuth で接続する。
+初めてリポジトリを開くと、このサーバーを使うかを聞かれる。承認したあと `/mcp` で `task` を選ぶと、ブラウザーで同意画面が開く。
+`claude -p` は同意画面を出せないので、先に対話のセッションの `/mcp` か `claude mcp login task` でログインしておく。
+
+PAT で接続するときは、`headers` に PAT を書く。次の例は、`headers` を書いた `.mcp.json` を置くリポジトリ向けである。このリポジトリの `.mcp.json` は `headers` を持たないので、`TASK_TOKEN` を読まない。
 
 ```json
 {
@@ -168,7 +185,14 @@ codex mcp login task
 Claude Code のクラウド環境では、環境の設定で環境変数 `TASK_TOKEN` を足し、task のホストを Allowed domains に足す。
 環境変数はその環境を使う全員が読めるので、PAT は scope とプロジェクトを絞って発行する。
 
-`headers` を書かなければ、Claude Code は OAuth で接続する。初回にブラウザーで同意画面が開く。
+`headers` に `${TASK_TOKEN}` を書いた定義では、`TASK_TOKEN` が未設定だと、Claude Code は設定の警告を出し、接続は失敗する。OAuth には切り替わらない。
+このリポジトリで PAT を使うときは、同じ名前の定義を local スコープに足す。`.mcp.json` の定義は user スコープの同じ名前の定義より優先され、local スコープの定義は `.mcp.json` の定義より優先される。user スコープに PAT で `task` を登録していても、このリポジトリでは `.mcp.json` の定義が使われる。コマンドは次のとおりである。
+
+```bash
+claude mcp add --transport http --scope local task https://task.koyori.app/api/mcp --header "Authorization: Bearer <PAT>"
+```
+
+PAT は `~/.claude.json` に平文で保存され、シェルの履歴にも残る。scope とプロジェクトを絞った PAT を使う。
 
 ### ツールの実行
 
@@ -415,7 +439,6 @@ OAuth で渡せる scope は、ツールが使う `read:tenant`、`read:project`
 
 - レビュー指摘のツールは未実装である（TASK-560）
 - タスクの一括作成と削除、PR のリンクの解除、自分のタスク、スプリント、通知、テナントの一覧のツールは未実装である（TASK-561）
-- このリポジトリに `.mcp.json` は置いていない（TASK-564）
 - `update_task` で変えられるのは、表に挙げた項目だけである。期限、親タスク、担当者などの変更は REST API か CLI を使う
 - Claude Code のクラウド環境の network secrets で PAT を渡せるかは確かめていない
 - 動的なクライアントの登録（DCR）は受けない
@@ -428,7 +451,9 @@ OAuth で渡せる scope は、ツールが使う `read:tenant`、`read:project`
 - パスワードの再設定や一括失効などで取り消した許可の `oauth_tokens` の行は、利用者を削除するまで残る
 - リフレッシュトークンの再利用は猶予なく許可を取り消すので、応答が届かなかった再送や、同時の更新でも、接続し直しになる
 - Codex の IDE 拡張とクラウドの Codex が、どの `client_id` で接続するかは確かめていない。既定の 4 つと違えば、`OAUTH_ALLOWED_CLIENT_IDS` に足す
-- claude.ai、ChatGPT、Codex、Claude Code からの実際の接続は確かめていない
+- claude.ai、ChatGPT、Codex からの実際の接続は確かめていない
+- Claude Code から PAT で接続すること（`.mcp.json` の `headers` と、local スコープの上書きの両方）は確かめていない
+- このリポジトリの `.mcp.json` で、Claude Code のクラウド環境から接続できるかは確かめていない
 
 ## 決定の記録
 
@@ -459,3 +484,4 @@ OAuth で渡せる scope は、ツールが使う `read:tenant`、`read:project`
 | 2026-11-19 | 連携中のアプリを、アカウント設定の新しいページ `/settings/apps` に置く | PAT は利用者が発行するもので、許可はクライアントが求めて利用者が与えるものである。一覧を分けると、解除する対象を探しやすい |
 | 2026-11-21 | ラベル、担当者、種別、マイルストーン、スプリントの名前の解決を MCP の層で行い、選び方と文面を CLI から写す | `handler` から `cli` は参照できない。`tenant`、`project`、`status` の解決もすでに写しており、名前の選別だけを共有すると写しと共有が混ざる。文面のずれは CLI と同じ表のテストで止める |
 | 2026-11-21 | 名前を受ける引数から `_id` を外し、旧名を別名として受け続ける | 名前を受ける既存の引数（`tenant`、`project`、`status`）には `_id` が付かない。CLI のフラグも `--label` などである。引数の構造体は知らない引数を捨てるので、旧名を受けないと、旧名で呼んだときにラベルの無いタスクが黙ってできる |
+| 2026-11-21 | `.mcp.json` をリポジトリ直下に置き、`headers` を書かず OAuth で接続する。2026-11-18 の「置かず、設定例を書く」を改める | 本番のエンドポイントが `https://task.koyori.app/api/mcp` に決まった。`headers` に `${TASK_TOKEN}` を書くと、未設定の人に設定の警告が出て接続が失敗し、OAuth に切り替わらない。同じ名前の user スコープの定義にも勝つので、OAuth で接続済みの人の接続も失敗に変わる |
