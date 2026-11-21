@@ -28,7 +28,11 @@ const ALL_SCOPES = [
   'write:task',
   'read:milestone',
   'read:sprint',
+  'read:review',
+  'write:review',
 ] as const;
+const WRITE_SCOPES = ['write:task', 'write:review'] as const;
+const READ_SCOPES = ALL_SCOPES.filter((scope) => !scope.startsWith('write:'));
 
 /** クライアントが付けてくる生の query。`:` を含むので、そのままではサインインの戻り先にできない */
 const RAW_QUERY =
@@ -513,7 +517,7 @@ describe('/oauth/authorize: scope', () => {
 });
 
 describe('/oauth/authorize: loopback のクライアント', () => {
-  it('注意書きとポートまでの戻り先を出し、テナント未選択・write:task を外した状態で始める', async () => {
+  it('注意書きとポートまでの戻り先を出し、テナント未選択・書き込みの scope を外した状態で始める', async () => {
     const { calls } = stubFetch({ preview: loopbackPreview });
 
     const wrapper = await openPage(RAW_QUERY);
@@ -526,8 +530,10 @@ describe('/oauth/authorize: loopback のクライアント', () => {
     // 候補が 1 件でも未選択で、承認ボタンは押せない
     expect(wrapper.findComponent(Picker).props('selectedValues')).toEqual([]);
     expect(button(wrapper, '許可する')!.attributes('disabled')).toBeDefined();
-    expect(scopeCheckbox(wrapper, 'write:task').checked).toBe(false);
-    for (const scope of ALL_SCOPES.filter((s) => s !== 'write:task')) {
+    for (const scope of WRITE_SCOPES) {
+      expect(scopeCheckbox(wrapper, scope).checked, scope).toBe(false);
+    }
+    for (const scope of READ_SCOPES) {
       expect(scopeCheckbox(wrapper, scope).checked, scope).toBe(true);
     }
 
@@ -535,7 +541,7 @@ describe('/oauth/authorize: loopback のクライアント', () => {
     await settle();
     expect(calls.approve).toHaveLength(0);
 
-    // テナントを選ぶと承認でき、送る scopes に write:task は無い
+    // テナントを選ぶと承認でき、送る scopes に書き込みの scope は無い
     selectTenants(wrapper, [TENANT_ID]);
     await flushPromises();
     expect(button(wrapper, '許可する')!.attributes('disabled')).toBeUndefined();
@@ -545,7 +551,7 @@ describe('/oauth/authorize: loopback のクライアント', () => {
     expect(calls.approve).toHaveLength(1);
     const body = calls.approve[0] as { tenant_ids: string[]; scopes: string[] };
     expect(body.tenant_ids).toEqual([TENANT_ID]);
-    expect(body.scopes).toEqual(ALL_SCOPES.filter((s) => s !== 'write:task'));
+    expect(body.scopes).toEqual(READ_SCOPES);
   });
 
   it('write:task は、自分でチェックを入れれば送る', async () => {
@@ -553,6 +559,23 @@ describe('/oauth/authorize: loopback のクライアント', () => {
     const wrapper = await openPage(RAW_QUERY);
 
     scopeCheckbox(wrapper, 'write:task').click();
+    selectTenants(wrapper, [TENANT_ID]);
+    await flushPromises();
+    await button(wrapper, '許可する')!.trigger('click');
+    await settle();
+
+    // チェックを入れていない write:review は外れたまま
+    expect((calls.approve[0] as { scopes: string[] }).scopes).toEqual(
+      ALL_SCOPES.filter((scope) => scope !== 'write:review'),
+    );
+  });
+
+  it('write:review も、自分でチェックを入れれば送る', async () => {
+    const { calls } = stubFetch({ preview: loopbackPreview });
+    const wrapper = await openPage(RAW_QUERY);
+
+    scopeCheckbox(wrapper, 'write:task').click();
+    scopeCheckbox(wrapper, 'write:review').click();
     selectTenants(wrapper, [TENANT_ID]);
     await flushPromises();
     await button(wrapper, '許可する')!.trigger('click');
@@ -577,6 +600,7 @@ describe('/oauth/authorize: loopback のクライアント', () => {
     expect(wrapper.find('[data-testid="loopback-warning"]').exists()).toBe(false);
     expect(wrapper.findComponent(Picker).props('selectedValues')).toEqual([TENANT_ID]);
     expect(scopeCheckbox(wrapper, 'write:task').checked).toBe(true);
+    expect(scopeCheckbox(wrapper, 'write:review').checked).toBe(true);
     expect(button(wrapper, '許可する')!.attributes('disabled')).toBeUndefined();
   });
 });

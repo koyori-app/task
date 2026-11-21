@@ -10,7 +10,7 @@ sidebar:
 
 ## 概要
 
-PR レビューの指摘を task 自身のデータとして管理する機能である。レビュワーは AI と人間のどちらもあり得て、全機能で両者を同格に扱う。AI は PAT + CLI、人間はセッション + Web UI が主経路で、モデル・権限規則は共通である。GitHub 側に置くのは bot の要約コメント 1 本と、マージ可になったときのレビュワー本人の Approve、未解決の High / Medium があるときの指摘を出した本人の変更要求だけで、詳細は[要約コメントと Approve](/dev/features/review-findings/github-comment) に書く。GitHub 連携（`github_integrations`、1 プロジェクト = 1 リポジトリ）、GitHub App、PAT スコープに依存し、連携が無くても起票・管理はできる。
+PR レビューの指摘を task 自身のデータとして管理する機能である。レビュワーは AI と人間のどちらもあり得て、全機能で両者を同格に扱う。AI は PAT + CLI、人間はセッション + Web UI が主経路で、モデル・権限規則は共通である。CLI と同じ操作は [MCP サーバー](/dev/features/mcp)のツールでもできる。GitHub 側に置くのは bot の要約コメント 1 本と、マージ可になったときのレビュワー本人の Approve、未解決の High / Medium があるときの指摘を出した本人の変更要求だけで、詳細は[要約コメントと Approve](/dev/features/review-findings/github-comment) に書く。GitHub 連携（`github_integrations`、1 プロジェクト = 1 リポジトリ）、GitHub App、PAT スコープに依存し、連携が無くても起票・管理はできる。
 
 ## 用語
 

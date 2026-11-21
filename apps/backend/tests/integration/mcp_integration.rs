@@ -19,18 +19,24 @@ use uuid::Uuid;
 
 const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
 
-/// docs/dev/features/mcp.md の API の表にある 12 ツール。増減したら `tools_list_returns_the_twelve_tools` が落ちる
-const TOOL_NAMES: [&str; 12] = [
+/// docs/dev/features/mcp.md の API の表にある 18 ツール。増減したら `tools_list_returns_every_tool` が落ちる
+const TOOL_NAMES: [&str; 18] = [
     "add_task_comment",
+    "carry_over_review",
     "create_task",
+    "get_review_summary",
     "get_task",
     "link_pull_request",
     "list_project_options",
     "list_projects",
+    "list_review_findings",
+    "list_review_rounds",
     "list_task_comments",
     "list_task_pull_requests",
     "list_tasks",
     "search_tasks",
+    "submit_review",
+    "update_review_finding",
     "update_task",
     "whoami",
 ];
@@ -52,7 +58,7 @@ fn tools_list_body() -> Value {
     json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" })
 }
 
-fn tool_call_body(name: &str, arguments: Value) -> Value {
+pub(super) fn tool_call_body(name: &str, arguments: Value) -> Value {
     json!({
         "jsonrpc": "2.0",
         "id": 3,
@@ -93,18 +99,18 @@ async fn mcp_with(
 }
 
 /// ツールの結果。`is_error` と、本文の文字列（成功は API の JSON、失敗はエラー文）。
-struct ToolOutcome {
-    is_error: bool,
-    text: String,
+pub(super) struct ToolOutcome {
+    pub(super) is_error: bool,
+    pub(super) text: String,
 }
 
 impl ToolOutcome {
-    fn json(&self) -> Value {
+    pub(super) fn json(&self) -> Value {
         assert!(!self.is_error, "ツールが失敗した: {}", self.text);
         serde_json::from_str(&self.text).expect("tool result json")
     }
 
-    fn error(&self) -> &str {
+    pub(super) fn error(&self) -> &str {
         assert!(self.is_error, "ツールが成功した: {}", self.text);
         &self.text
     }
@@ -125,21 +131,21 @@ async fn outcome_of(response: Response) -> ToolOutcome {
     }
 }
 
-async fn call(app: &TestApp, token: &str, name: &str, arguments: Value) -> ToolOutcome {
+pub(super) async fn call(app: &TestApp, token: &str, name: &str, arguments: Value) -> ToolOutcome {
     outcome_of(app.mcp(Some(token), tool_call_body(name, arguments)).await).await
 }
 
-struct Fixture {
-    user: TestUser,
-    tp: TestTenantProject,
-    project_key: String,
+pub(super) struct Fixture {
+    pub(super) user: TestUser,
+    pub(super) tp: TestTenantProject,
+    pub(super) project_key: String,
     todo: Uuid,
     done: Uuid,
 }
 
 /// ユーザー・テナント・プロジェクトと状態 2 つ（`Todo` が既定、`Done` が完了）を作る。
 /// 状態の作成にセッションが要るので、`app` のクライアントはログイン済みになる。
-async fn fixture(app: &mut TestApp) -> Fixture {
+pub(super) async fn fixture(app: &mut TestApp) -> Fixture {
     let user = app.insert_user_default().await;
     let tp = app.insert_tenant_project(user.id).await;
     app.login_session_no_content(&user.email, &user.password)
@@ -165,7 +171,7 @@ async fn project_key(app: &TestApp, project_id: Uuid) -> String {
         .key
 }
 
-async fn api_pat(app: &TestApp, fx: &Fixture) -> String {
+pub(super) async fn api_pat(app: &TestApp, fx: &Fixture) -> String {
     app.insert_pat(fx.user.id, fx.tp.tenant_id, vec![Scope::Api], None)
         .await
 }
@@ -232,7 +238,7 @@ async fn request_without_credentials_is_401_with_www_authenticate() {
             .and_then(|value| value.to_str().ok()),
         Some(
             format!(
-                "Bearer resource_metadata=\"{origin}/.well-known/oauth-protected-resource/api/mcp\", scope=\"read:tenant read:project read:task write:task read:milestone read:sprint\""
+                "Bearer resource_metadata=\"{origin}/.well-known/oauth-protected-resource/api/mcp\", scope=\"read:tenant read:project read:task write:task read:milestone read:sprint read:review write:review\""
             )
             .as_str()
         )
@@ -256,7 +262,7 @@ async fn unknown_bearer_is_401() {
             .and_then(|value| value.to_str().ok()),
         Some(
             format!(
-                "Bearer error=\"invalid_token\", resource_metadata=\"{origin}/.well-known/oauth-protected-resource/api/mcp\", scope=\"read:tenant read:project read:task write:task read:milestone read:sprint\""
+                "Bearer error=\"invalid_token\", resource_metadata=\"{origin}/.well-known/oauth-protected-resource/api/mcp\", scope=\"read:tenant read:project read:task write:task read:milestone read:sprint read:review write:review\""
             )
             .as_str()
         )
@@ -356,7 +362,7 @@ async fn get_and_delete_are_405() {
 }
 
 #[tokio::test]
-async fn tools_list_returns_the_twelve_tools() {
+async fn tools_list_returns_every_tool() {
     let mut app = TestApp::new().await;
     let fx = fixture(&mut app).await;
     let token = api_pat(&app, &fx).await;
@@ -372,6 +378,14 @@ async fn tools_list_returns_the_twelve_tools() {
     names.sort_unstable();
     assert_eq!(names, TOOL_NAMES);
 
+    // 説明と引数のスキーマはクライアントの AI が読むので英語で書く。引数の型の `///` は
+    // スキーマの `description` になるので、実装の覚え書き（日本語）を書くとここに出る
+    for tool in tools {
+        let text = tool.to_string();
+        let foreign: String = text.chars().filter(|c| !c.is_ascii()).take(40).collect();
+        assert!(foreign.is_empty(), "{}: {foreign}", tool["name"]);
+    }
+
     // 読み取りのツールには readOnlyHint が付き、書き込みのツールには付かない
     let read_only = |name: &str| {
         tools
@@ -382,6 +396,8 @@ async fn tools_list_returns_the_twelve_tools() {
     };
     assert_eq!(read_only("get_task"), Some(true));
     assert_ne!(read_only("create_task"), Some(true));
+    assert_eq!(read_only("list_review_findings"), Some(true));
+    assert_ne!(read_only("submit_review"), Some(true));
 }
 
 #[tokio::test]
