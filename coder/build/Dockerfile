@@ -3,7 +3,7 @@
 # /home/coder はワークスペースごとのボリュームで覆われるので、ここで入れるものは
 # /home/coder の外に置く。自己更新するツール（Claude Code / Codex / Cursor CLI）は
 # main.tf の startup_script がホームへ入れる。
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 # rust-toolchain.toml と同じ版にする。Renovate が rust-toolchain.toml・apps/backend/Dockerfile と
 # 同じ PR で上げる（.github/renovate.json5 の rust-toolchain の群れ）。
