@@ -11,11 +11,11 @@ use sea_orm::{
     FromQueryResult, PaginatorTrait, QueryFilter, QuerySelect, Statement, TransactionTrait,
     prelude::{DateTimeWithTimeZone, Uuid},
 };
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::drive_task_links::is_markdown;
 use crate::error::AppError;
-use crate::storage::StorageBackend;
+use crate::storage::{StorageBackend, StorageError};
 use entity::{drive_file_sections, drive_files};
 use payload::documents::{DocumentSearchHit, DocumentSearchResponse};
 
@@ -29,6 +29,13 @@ pub const MAX_HEADING_CHARS: usize = 200;
 pub const EXCERPT_CONTEXT_CHARS: usize = 100;
 /// 語が見つからなかったときに抜粋として返す先頭の文字数
 const EXCERPT_FALLBACK_CHARS: usize = 200;
+/// 検索語の全体の文字数の上限（タスクの類似検索の題と同じ）。語 1 つの長さの上限でもある
+pub const MAX_QUERY_CHARS: usize = 255;
+/// 検索が DB から受け取る、節の本文の窓の文字数。最も長い語とその前後の文脈が収まる
+const EXCERPT_WINDOW_CHARS: usize = EXCERPT_CONTEXT_CHARS * 2 + MAX_QUERY_CHARS;
+/// backfill が、索引の上限に加えて読む余りのバイト数。上限をまたぐ文字を、
+/// 保存の経路と同じ位置で切るために要る（UTF-8 の 1 文字は 4 バイトまで）
+const BACKFILL_READ_SLACK: usize = 4;
 /// `insert_many` 1 回の行数（Postgres の束縛値の上限 65535 を越えない）
 const INSERT_CHUNK: usize = 500;
 /// backfill が 1 回に取る候補の数
@@ -123,6 +130,12 @@ pub fn split_sections(text: &str) -> Vec<Section> {
                     title.push_str(&t);
                 }
             }
+            // 複数行の Setext 見出しの改行は、語がつながらないよう空白にする
+            Event::SoftBreak | Event::HardBreak => {
+                if let Some((_, _, title)) = current.as_mut() {
+                    title.push(' ');
+                }
+            }
             _ => {}
         }
     }
@@ -174,7 +187,21 @@ fn find_chars(haystack: &[char], needle: &[char]) -> Option<usize> {
 /// どの語も見つからなければ先頭を返す。切った側に `…` を付ける。
 /// 素の文字列で返す（HTML にしない）。
 pub fn excerpt(body: &str, terms: &[String]) -> String {
-    let chars: Vec<char> = body.chars().collect();
+    excerpt_in_window(body, 0, body.chars().count(), terms)
+}
+
+/// 節の本文の一部（`window`）から抜粋を作る。
+///
+/// `window` は本文の `window_start` 文字目（0 始まり）から切り出した文字列、`body_chars` は
+/// 本文全体の文字数。検索は当たった語のまわりだけを DB から受け取り、節の本文の全体を
+/// メモリに載せない。`…` は、抜粋の端が本文の端でないときに付ける。
+fn excerpt_in_window(
+    window: &str,
+    window_start: usize,
+    body_chars: usize,
+    terms: &[String],
+) -> String {
+    let chars: Vec<char> = window.chars().collect();
     let found = terms.iter().find_map(|term| {
         let needle: Vec<char> = term.chars().collect();
         find_chars(&chars, &needle).map(|at| (at, at + needle.len()))
@@ -187,11 +214,11 @@ pub fn excerpt(body: &str, terms: &[String]) -> String {
         None => (0, EXCERPT_FALLBACK_CHARS.min(chars.len())),
     };
     let mut out = String::new();
-    if start > 0 {
+    if window_start + start > 0 {
         out.push('…');
     }
     out.extend(&chars[start..end]);
-    if end < chars.len() {
+    if window_start + end < body_chars {
         out.push('…');
     }
     out
@@ -275,7 +302,16 @@ pub async fn backfill_missing(
                 Ok(true) => report.indexed += 1,
                 Ok(false) => report.skipped += 1,
                 Err(e) => {
-                    warn!(file_id = %candidate.id, error = %e, "drive section index backfill failed for a file");
+                    // 実体の無いファイルは直す手段が無く、起動のたびに候補に入る。
+                    // 1 件ずつ警告せず、件数（`failed`）だけを呼び出し側が出す
+                    if matches!(
+                        e.downcast_ref::<StorageError>(),
+                        Some(StorageError::NotFound)
+                    ) {
+                        debug!(file_id = %candidate.id, "drive section index backfill found no stored object");
+                    } else {
+                        warn!(file_id = %candidate.id, error = %e, "drive section index backfill failed for a file");
+                    }
                     report.failed += 1;
                 }
             }
@@ -295,10 +331,15 @@ async fn backfill_one(
 ) -> Result<bool, anyhow::Error> {
     let mut stream = storage.get_stream(&candidate.storage_key).await?;
     let mut bytes = Vec::new();
+    // NUL を除いた後の長さで数える。保存の経路は NUL を除いてから上限で切るので、
+    // 生の長さで打ち切ると、NUL の多い本文で保存の経路より短い索引になる
+    let mut indexable_len = 0usize;
     while let Some(chunk) = stream.next().await {
-        bytes.extend_from_slice(&chunk?);
+        let chunk = chunk?;
+        indexable_len += chunk.iter().filter(|byte| **byte != 0).count();
+        bytes.extend_from_slice(&chunk);
         // 索引するのは先頭だけ。上限を越えたら残りは読まない
-        if bytes.len() > MAX_INDEXED_BYTES {
+        if indexable_len >= MAX_INDEXED_BYTES + BACKFILL_READ_SLACK {
             break;
         }
     }
@@ -337,8 +378,13 @@ struct SearchRow {
     folder_id: Option<Uuid>,
     heading_path: Vec<String>,
     position: i32,
-    body: String,
     updated_at: DateTimeWithTimeZone,
+    /// 条件に当たった節の総数（`limit` / `offset` を掛ける前）
+    total: i64,
+    /// `excerpt_window` が本文の何文字目から始まるか（0 始まり）
+    window_start: i32,
+    excerpt_window: String,
+    body_chars: i32,
 }
 
 /// プロジェクトのファイルの節を、全部の語を含むもの（ILIKE の部分一致の AND）で引く。
@@ -360,36 +406,69 @@ pub async fn search<C: ConnectionTrait>(
     }
     let from = "FROM drive_file_sections s JOIN drive_files f ON f.id = s.drive_file_id";
 
-    let total: i64 = db
-        .query_one_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            format!("SELECT COUNT(*)::bigint {from} WHERE {conditions}"),
-            values.clone(),
-        ))
-        .await?
-        .ok_or_else(|| {
-            AppError::Internal(anyhow::anyhow!("document search count returned no row"))
-        })?
-        .try_get_by_index(0)?;
+    let count_values = values.clone();
 
     values.push((limit as i64).into());
     let limit_at = values.len();
     values.push((offset.min(i64::MAX as u64) as i64).into());
     let offset_at = values.len();
-    // 並びを一意にする。一意でないと offset のページの境で行が重複・欠落する
+    // 抜粋の窓の起点。語を順に探し、最初に見つかった語の EXCERPT_CONTEXT_CHARS 文字前から
+    // 切り出す。どの語も見つからなければ（lower と ILIKE の食い違い）先頭から切り出す
+    let mut hit_at = String::new();
+    for term in terms {
+        values.push(term.clone().into());
+        hit_at.push_str(&format!(
+            "NULLIF(strpos(lower(s.body), lower(${})), 0), ",
+            values.len()
+        ));
+    }
+    // 件数は同じ走査で数える（COUNT(*) OVER()）。3 文字未満の語では trigram の索引が使えず
+    // 節の本文を全部読むので、件数のためにもう一度読まない。
+    // ページを先に決めてから窓を切るので、lower と strpos はページの行にだけ掛かる。
+    // 並びは一意にする。一意でないと offset のページの境で行が重複・欠落する。
+    // 節の本文の全体は受け取らない。節は最大 MAX_INDEXED_BYTES あり、ページは 100 行まである
     let rows = SearchRow::find_by_statement(Statement::from_sql_and_values(
         DatabaseBackend::Postgres,
         format!(
-            "SELECT f.id AS file_id, f.name AS file_name, f.folder_id, s.heading_path, \
-                    s.position, s.body, f.updated_at \
-             {from} WHERE {conditions} \
-             ORDER BY f.name ASC, f.id ASC, s.position ASC \
-             LIMIT ${limit_at} OFFSET ${offset_at}"
+            "WITH page AS MATERIALIZED ( \
+                 SELECT s.id AS section_id, f.id AS file_id, f.name AS file_name, f.folder_id, \
+                        f.updated_at, s.heading_path, s.position, COUNT(*) OVER() AS total \
+                 {from} WHERE {conditions} \
+                 ORDER BY f.name ASC, f.id ASC, s.position ASC \
+                 LIMIT ${limit_at} OFFSET ${offset_at} \
+             ) \
+             SELECT page.file_id, page.file_name, page.folder_id, page.updated_at, \
+                    page.heading_path, page.position, page.total, w.window_start, \
+                    substr(s.body, w.window_start + 1, {EXCERPT_WINDOW_CHARS}) AS excerpt_window, \
+                    char_length(s.body) AS body_chars \
+             FROM page \
+             JOIN drive_file_sections s ON s.id = page.section_id \
+             CROSS JOIN LATERAL ( \
+                 SELECT GREATEST(COALESCE({hit_at}0) - 1 - {EXCERPT_CONTEXT_CHARS}, 0) AS window_start \
+             ) w \
+             ORDER BY page.file_name ASC, page.file_id ASC, page.position ASC"
         ),
         values,
     ))
     .all(db)
     .await?;
+
+    let total = match rows.first() {
+        Some(row) => row.total,
+        // 先頭のページが空なら 0 件。offset が末尾を越えたときだけ、件数を別に数える
+        None if offset == 0 => 0,
+        None => db
+            .query_one_raw(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                format!("SELECT COUNT(*)::bigint {from} WHERE {conditions}"),
+                count_values,
+            ))
+            .await?
+            .ok_or_else(|| {
+                AppError::Internal(anyhow::anyhow!("document search count returned no row"))
+            })?
+            .try_get_by_index(0)?,
+    };
 
     Ok(DocumentSearchResponse {
         hits: rows
@@ -400,7 +479,12 @@ pub async fn search<C: ConnectionTrait>(
                 folder_id: row.folder_id,
                 heading_path: row.heading_path,
                 position: row.position,
-                excerpt: excerpt(&row.body, terms),
+                excerpt: excerpt_in_window(
+                    &row.excerpt_window,
+                    row.window_start.max(0) as usize,
+                    row.body_chars.max(0) as usize,
+                    terms,
+                ),
                 updated_at: row.updated_at.into(),
             })
             .collect(),
@@ -515,6 +599,38 @@ mod tests {
     fn inline_markup_in_heading_is_flattened() {
         let sections = split_sections("# A `c` *b*\n");
         assert_eq!(paths(&sections), vec![vec!["A c b"]]);
+    }
+
+    #[test]
+    fn multiline_and_empty_headings() {
+        // 複数行の Setext 見出しの改行は空白になる（語がつながらない）
+        let sections = split_sections("Foo\nBar\n===\nbody\n");
+        assert_eq!(paths(&sections), vec![vec!["Foo Bar"]]);
+        // 題の無い見出しも節の境界になり、経路には空の題が入る（階層の位置を保つ）
+        let sections = split_sections("# A\n\n##\n\nbody\n\n### C\n");
+        assert_eq!(
+            paths(&sections),
+            vec![vec!["A"], vec!["A", ""], vec!["A", "", "C"]]
+        );
+    }
+
+    #[test]
+    fn excerpt_in_window_marks_cuts_against_the_whole_body() {
+        let words = terms(&["needle"]);
+        // 窓が本文の途中から始まり、語の前が 100 文字に満たなくても、本文の先頭でなければ … が付く
+        let window = format!("{}needle{}", "a".repeat(10), "b".repeat(10));
+        assert_eq!(
+            excerpt_in_window(&window, 5, 5 + 26 + 1, &words),
+            format!("…{window}…")
+        );
+        // 窓が本文の全体なら付かない
+        assert_eq!(excerpt_in_window(&window, 0, 26, &words), window);
+        // 窓の中で見つからなければ窓の先頭を返す
+        let head = "x".repeat(300);
+        assert_eq!(
+            excerpt_in_window(&head, 0, 1000, &words),
+            format!("{}…", "x".repeat(200))
+        );
     }
 
     #[test]

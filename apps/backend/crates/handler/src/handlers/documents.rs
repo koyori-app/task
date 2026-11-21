@@ -11,9 +11,8 @@ use crate::openapi::CrudErrors;
 use entity::scopes::Scope;
 use payload::documents::{DocumentSearchResponse, SearchDocumentsQuery};
 use service::drive::can_access_project;
+use service::drive_sections::MAX_QUERY_CHARS;
 
-/// 検索語の全体の文字数の上限（タスクの類似検索の題と同じ）
-const MAX_QUERY_CHARS: usize = 255;
 /// 検索語の語数の上限。語ごとに ILIKE を 1 つ足すので抑える
 const MAX_QUERY_TERMS: usize = 10;
 const MAX_SEARCH_LIMIT: u64 = 100;
@@ -51,7 +50,8 @@ pub async fn search_documents(
     }
 
     let query = q.q.trim();
-    if query.is_empty() || query.chars().count() > MAX_QUERY_CHARS {
+    // NUL は Postgres の text に束縛できず、DB のエラー（500）になる。索引の本文にも残らない
+    if query.is_empty() || query.chars().count() > MAX_QUERY_CHARS || query.contains('\0') {
         return Err(AppError::BadRequest);
     }
     let terms: Vec<String> = query.split_whitespace().map(str::to_owned).collect();
