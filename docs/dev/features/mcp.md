@@ -2,7 +2,7 @@
 title: MCP サーバー
 description: MCP クライアントが PAT か OAuth でタスクを読み書きできるエンドポイント
 status: partial
-updated: 2026-11-19
+updated: 2026-11-21
 sidebar:
   order: 7
 ---
@@ -178,9 +178,9 @@ Claude Code のクラウド環境では、環境の設定で環境変数 `TASK_T
 
 失敗は `isError: true` の結果として返す。
 文面は API の状態コードと `message` を並べたもので、例は `403 forbidden`、`404 not-found`、`409 github-integration-missing` である。
-引数の誤りは API を呼ぶ前に `label_ids must be a UUID` のような文面で返す。
+引数の誤りは API を呼ぶ前に `parent_task_id must be a UUID` のような文面で返す。
 
-任意の引数のうち `tenant`、`project`、`status`、`priority`、`q`、`sort`、ID、日付は、空文字を省略として読む。
+任意の引数のうち `tenant`、`project`、`status`、`priority`、`q`、`sort`、`task_type`、`milestone`、`sprint`、ID、日付は、空文字を省略として読む。
 `title`、`description`、`body` は空文字のまま API へ渡す。
 
 ### テナントの決め方
@@ -210,8 +210,13 @@ UUID のときは `project` が必須で、無ければ `project is required whe
 見つからないときは、そのプロジェクトの状態の名前を並べたエラーを返す。
 `create_task` で `status` を省くと、プロジェクトの既定の状態を使う。
 
-ラベル、担当者、種別、マイルストーン、スプリントは ID で渡す。
-ID は `list_project_options` で引く。
+ラベル、担当者、種別、マイルストーン、スプリントは名前か UUID で指す。
+担当者はユーザー名で指す。
+名前の照合は `status` と同じで、完全一致を優先し、無ければ大文字と小文字を区別せずに探す。
+見つからないときは、そのプロジェクトの候補の名前を並べたエラーを返す。
+複数に当たるときは、候補の名前と ID を並べて UUID での指定を求める。
+UUID は確かめずに API へ渡す。
+担当者の候補の一覧は `write:task` が無いと読めないので、そのときは候補なしと返す。
 
 ## データ
 
@@ -301,12 +306,14 @@ ID は `list_project_options` で引く。
 | `list_tasks` | `project`、`q`、`is_archived`、`sort`、`limit`、`offset` | `GET …/projects/{project}/tasks` |
 | `search_tasks` | `project`、`q`、`limit`、`offset` | `GET …/tasks/search` |
 | `get_task` | `task`、`project` | `GET …/tasks/{task}` |
-| `create_task` | `project`、`title`、`description`、`status`、`priority`、`parent_task_id`、`label_ids`、`assignee_ids`、`task_type_id`、`milestone_id`、`sprint_id`、`soft_deadline`、`hard_deadline`、`planned_start_on`、`estimated_minutes` | `POST …/projects/{project}/tasks` |
-| `update_task` | `task`、`project`、`title`、`description`、`clear_description`、`status`、`priority`、`progress_pct`、`add_label_ids`、`remove_label_ids`、`is_archived` | `PUT …/tasks/{task}` |
+| `create_task` | `project`、`title`、`description`、`status`、`priority`、`parent_task_id`、`labels`、`assignees`、`task_type`、`milestone`、`sprint`、`soft_deadline`、`hard_deadline`、`planned_start_on`、`estimated_minutes` | `POST …/projects/{project}/tasks` |
+| `update_task` | `task`、`project`、`title`、`description`、`clear_description`、`status`、`priority`、`progress_pct`、`add_labels`、`remove_labels`、`is_archived` | `PUT …/tasks/{task}` |
 | `list_task_comments` | `task`、`project` | `GET …/tasks/{task}/comments` |
 | `add_task_comment` | `task`、`project`、`body`、`parent_comment_id` | `POST …/tasks/{task}/comments` |
 | `list_task_pull_requests` | `task`、`project` | `GET …/tasks/{task}/forge` |
 | `link_pull_request` | `task`、`project`、`number`、`closes` | `POST …/tasks/{task}/forge/pull-requests` |
+
+`create_task` と `update_task` は、`_id` の付いた旧名（`label_ids`、`assignee_ids`、`task_type_id`、`milestone_id`、`sprint_id`、`add_label_ids`、`remove_label_ids`）も同じ引数として受ける。
 
 `list_project_options` の `kind` は `statuses`、`labels`、`task_types`、`milestones`、`sprints`、`assignable_users` のいずれかである。
 
@@ -342,6 +349,11 @@ OAuth で接続したとき、`whoami` は許可の ID と、クライアント�
 | `project` がキー、または `task` が `KEY-N` | `read:project` |
 | `tenant` が名前 | `read:tenant` |
 | `status` が名前、または `create_task` で `status` を省く | `read:task` |
+| ラベルか種別が名前 | `read:task` |
+| マイルストーンが名前 | `read:milestone` |
+| スプリントが名前 | `read:sprint` |
+
+担当者をユーザー名で渡すときは、追加の scope は要らない。
 
 ID を引く呼び出しが 403 のときは、考えられる原因を文面に添える。
 403 は scope が足りないときのほか、束縛していないテナントやプロジェクトを指したときにも返るので、原因は断定しない。
@@ -403,7 +415,6 @@ OAuth で渡せる scope は、ツールが使う `read:tenant`、`read:project`
 
 - レビュー指摘のツールは未実装である（TASK-560）
 - タスクの一括作成と削除、PR のリンクの解除、自分のタスク、スプリント、通知、テナントの一覧のツールは未実装である（TASK-561）
-- ラベル、担当者、種別、マイルストーン、スプリントを名前で渡すことはできない（TASK-562）
 - このリポジトリに `.mcp.json` は置いていない（TASK-564）
 - `update_task` で変えられるのは、表に挙げた項目だけである。期限、親タスク、担当者などの変更は REST API か CLI を使う
 - Claude Code のクラウド環境の network secrets で PAT を渡せるかは確かめていない
@@ -446,3 +457,5 @@ OAuth で渡せる scope は、ツールが使う `read:tenant`、`read:project`
 | 2026-11-19 | リフレッシュトークンの再利用は、猶予なく許可を取り消す | 公開クライアントのリフレッシュトークンは回転で守る。猶予を置くと、その間は盗まれたトークンも通る |
 | 2026-11-19 | 寿命はアクセストークン 1 時間、リフレッシュトークン 90 日で、使うたびに延ばす | アクセストークンは短くする。90 日は Device Token と PAT の既定に合わせた。使い続ける限り接続し直しを求めない |
 | 2026-11-19 | 連携中のアプリを、アカウント設定の新しいページ `/settings/apps` に置く | PAT は利用者が発行するもので、許可はクライアントが求めて利用者が与えるものである。一覧を分けると、解除する対象を探しやすい |
+| 2026-11-21 | ラベル、担当者、種別、マイルストーン、スプリントの名前の解決を MCP の層で行い、選び方と文面を CLI から写す | `handler` から `cli` は参照できない。`tenant`、`project`、`status` の解決もすでに写しており、名前の選別だけを共有すると写しと共有が混ざる。文面のずれは CLI と同じ表のテストで止める |
+| 2026-11-21 | 名前を受ける引数から `_id` を外し、旧名を別名として受け続ける | 名前を受ける既存の引数（`tenant`、`project`、`status`）には `_id` が付かない。CLI のフラグも `--label` などである。引数の構造体は知らない引数を捨てるので、旧名を受けないと、旧名で呼んだときにラベルの無いタスクが黙ってできる |
