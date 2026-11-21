@@ -25,7 +25,6 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use common::cache::redis::RedisConnection;
-use reqwest::redirect::Policy;
 use url::Url;
 use uuid::Uuid;
 
@@ -274,7 +273,7 @@ where
 
 /// 一度だけ名前解決し、公開アドレスだけなら接続先を返す。https 以外・443 以外のポート・
 /// private 宛ては None（名前解決の前に判定する）。
-async fn resolve_public(url: &Url) -> Option<Vec<SocketAddr>> {
+pub(crate) async fn resolve_public(url: &Url) -> Option<Vec<SocketAddr>> {
     if url.scheme() != "https" {
         return None;
     }
@@ -318,14 +317,10 @@ pub(crate) async fn fetch_icon_at(url: &Url, addrs: &[SocketAddr]) -> Hop {
     let Some(host) = url.host_str() else {
         return Hop::Miss;
     };
-    let client = match reqwest::Client::builder()
+    let client = match crate::http::pinned_client_builder(host, addrs)
         .user_agent("task-favicon-proxy")
-        .no_proxy()
-        .resolve_to_addrs(host, addrs)
-        .redirect(Policy::none())
         .connect_timeout(FETCH_TIMEOUT)
         .timeout(FETCH_TIMEOUT)
-        .pool_max_idle_per_host(0)
         .build()
     {
         Ok(client) => client,

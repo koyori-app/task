@@ -4,6 +4,7 @@ import {
   PhDevices,
   PhFlask,
   PhKey,
+  PhPlugs,
   PhShieldCheck,
   PhSlidersHorizontal,
   PhSunHorizon,
@@ -27,6 +28,7 @@ const items: NavItem[] = [
   { title: '通知', icon: PhBell },
   { title: 'セキュリティ', icon: PhShieldCheck, href: '/settings/security' },
   { title: 'アクセストークン', icon: PhKey, href: '/settings/tokens' },
+  { title: '連携中のアプリ', icon: PhPlugs, href: '/settings/apps' },
   { title: 'セッション', icon: PhDevices },
 ];
 

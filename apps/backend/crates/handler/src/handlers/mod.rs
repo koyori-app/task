@@ -21,6 +21,7 @@ pub mod labels;
 pub mod milestones;
 pub mod my_tasks;
 pub mod oauth;
+pub mod oauth_grants;
 pub mod passkeys;
 pub mod password_reset;
 pub mod personal_tokens;

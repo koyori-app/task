@@ -66,6 +66,21 @@ export const ThemeSelected: Story = {
   },
 };
 
+export const AppsSelected: Story = {
+  name: '連携中のアプリを選択',
+  args: { currentPath: '/settings/apps' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const link = canvas.getByRole('link', { name: '連携中のアプリ' });
+    await expect(link).toHaveAttribute('href', '/settings/apps');
+    await expect(link).toHaveAttribute('aria-current', 'page');
+    // 並びは「アクセストークン」の次
+    const links = canvas.getAllByRole('link');
+    const index = links.findIndex((a) => a.textContent?.trim() === 'アクセストークン');
+    await expect(links[index + 1]).toBe(link);
+  },
+};
+
 export const ThemeSelectedLight: Story = {
   ...ThemeSelected,
   name: 'テーマを選択（ライト）',

@@ -19,6 +19,7 @@ pub mod milestones;
 pub mod notification_settings;
 pub mod notifications;
 pub mod oauth_connections;
+pub mod oauth_tokens;
 pub mod passkeys;
 pub mod personal_token_tenants;
 pub mod personal_tokens;

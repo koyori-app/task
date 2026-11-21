@@ -56,6 +56,7 @@ export function breadcrumbRoute(pathname: string, params: Record<string, string 
     ['/settings/profile', { kind: 'static', name: 'プロフィール' }],
     ['/settings/security', { kind: 'static', name: 'セキュリティ' }],
     ['/settings/tokens', { kind: 'static', name: 'API トークン' }],
+    ['/settings/apps', { kind: 'static', name: '連携中のアプリ' }],
     ['/admin/users', { kind: 'static', name: '管理: ユーザー' }],
     ['/admin/settings', { kind: 'static', name: '管理: システム設定' }],
     ...(user

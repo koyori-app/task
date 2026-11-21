@@ -169,6 +169,15 @@ export default defineConfig(({ command }) => ({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
+      // MCP の OAuth のメタデータ。backend の同じパスへそのまま運ぶ
+      '/.well-known/oauth-protected-resource': {
+        target: buildEnv.API_BASE ?? 'http://localhost:3400',
+        changeOrigin: true,
+      },
+      '/.well-known/oauth-authorization-server': {
+        target: buildEnv.API_BASE ?? 'http://localhost:3400',
+        changeOrigin: true,
+      },
     },
     warmup: {
       clientFiles: [

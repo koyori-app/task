@@ -119,12 +119,79 @@ pub struct Settings {
     /// 再認証の有効期間（秒）。パスキーの追加と削除は、直近のこの秒数の内に本人確認をしていることを求める。
     #[serde(default = "default_reauth_window_secs")]
     pub reauth_window_secs: u64,
+    /// MCP の OAuth で受けるクライアントの `client_id`（URL）の許可リスト。環境変数
+    /// `OAUTH_ALLOWED_CLIENT_IDS` の生の値（カンマ区切り）。読み方は
+    /// [`Settings::oauth_allowed_clients`] の 1 箇所に置く。
+    #[serde(default)]
+    pub oauth_allowed_client_ids: String,
     /// GitHub App 連携。`GITHUB_APP_ID` 未設定時は `None`（他機能は起動可能）。
     #[serde(default, skip_deserializing)]
     pub github_app: Option<GithubAppSettings>,
 }
 
+/// `OAUTH_ALLOWED_CLIENT_IDS` が未設定・空のときに受ける `client_id`。
+/// claude.ai のコネクタ、Claude Code、ChatGPT、Codex CLI の順。
+pub const DEFAULT_OAUTH_ALLOWED_CLIENT_IDS: [&str; 4] = [
+    "https://claude.ai/oauth/mcp-oauth-client-metadata",
+    "https://claude.ai/oauth/claude-code-client-metadata",
+    "https://chatgpt.com/oauth/client.json",
+    "https://chatgpt.com/oauth/codex/client.json",
+];
+
+/// MCP の OAuth で受けるクライアント。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AllowedClients {
+    /// 任意の `client_id`（`*`）。
+    Any,
+    /// 完全一致で受ける `client_id`。空なら全部拒否する。
+    List(Vec<String>),
+}
+
+impl AllowedClients {
+    /// 完全一致の文字列比較。前方一致や正規化はしない。
+    pub fn allows(&self, client_id: &str) -> bool {
+        match self {
+            AllowedClients::Any => true,
+            AllowedClients::List(list) => list.iter().any(|allowed| allowed == client_id),
+        }
+    }
+}
+
 impl Settings {
+    /// `oauth_allowed_client_ids` の読み方。
+    ///
+    /// - 未設定・空文字・空白だけ: 既定の 4 つ。本番の compose は未設定の変数を空文字で渡すので、
+    ///   空を「全部拒否」とは読まない
+    /// - `*` 1 つだけ: 任意の `client_id`
+    /// - `none` 1 つだけ: 全部拒否
+    /// - それ以外: カンマで割り、前後の空白と空の要素を落とした一覧。`*` や `none` がほかの値と
+    ///   混ざっていたら、ただの文字列として扱う（どの URL とも一致しない）
+    pub fn oauth_allowed_clients(&self) -> AllowedClients {
+        let items: Vec<&str> = self
+            .oauth_allowed_client_ids
+            .split(',')
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .collect();
+        match items.as_slice() {
+            [] => AllowedClients::List(
+                DEFAULT_OAUTH_ALLOWED_CLIENT_IDS
+                    .iter()
+                    .map(|id| (*id).to_string())
+                    .collect(),
+            ),
+            ["*"] => AllowedClients::Any,
+            ["none"] => AllowedClients::List(Vec::new()),
+            items => AllowedClients::List(items.iter().map(|id| (*id).to_string()).collect()),
+        }
+    }
+
+    /// 公開の origin（`allow_origin` から末尾の `/` を落としたもの）。MCP の OAuth の issuer と
+    /// 各エンドポイントの URL を作るのに使う。
+    pub fn public_origin(&self) -> String {
+        self.allow_origin.trim_end_matches('/').to_string()
+    }
+
     pub fn traces_sample_rate(&self) -> f32 {
         self.sentry_traces_sample_rate.unwrap_or(0.0)
     }
@@ -326,8 +393,72 @@ mod tests {
             bootstrap_admin_email: None,
             webauthn_rp_id: None,
             reauth_window_secs: 300,
+            oauth_allowed_client_ids: String::new(),
             github_app: Some(test_github_app_settings()),
         }
+    }
+
+    fn allowed(raw: &str) -> AllowedClients {
+        let mut settings = base_settings("http://localhost:3000");
+        settings.oauth_allowed_client_ids = raw.to_string();
+        settings.oauth_allowed_clients()
+    }
+
+    fn list(items: &[&str]) -> AllowedClients {
+        AllowedClients::List(items.iter().map(|item| (*item).to_string()).collect())
+    }
+
+    #[test]
+    fn oauth_allowed_clients_defaults_to_the_four_known_clients() {
+        let defaults = list(&[
+            "https://claude.ai/oauth/mcp-oauth-client-metadata",
+            "https://claude.ai/oauth/claude-code-client-metadata",
+            "https://chatgpt.com/oauth/client.json",
+            "https://chatgpt.com/oauth/codex/client.json",
+        ]);
+        for raw in ["", " ", "  \t ", ",", " , ,"] {
+            assert_eq!(allowed(raw), defaults, "{raw:?}");
+        }
+        for id in DEFAULT_OAUTH_ALLOWED_CLIENT_IDS {
+            assert!(defaults.allows(id), "{id}");
+        }
+        // 完全一致だけ。callback ID 付きの URL と末尾の `/` は通さない
+        assert!(!defaults.allows("https://chatgpt.com/oauth/abc123/client.json"));
+        assert!(!defaults.allows("https://chatgpt.com/oauth/client.json/"));
+        assert!(!defaults.allows("https://claude.ai/oauth/"));
+    }
+
+    #[test]
+    fn oauth_allowed_clients_reads_an_explicit_list() {
+        // 1 件だけ書けばその 1 件。既定の 4 つは入らない
+        let one = allowed("https://x.example/c.json");
+        assert_eq!(one, list(&["https://x.example/c.json"]));
+        assert!(!one.allows(DEFAULT_OAUTH_ALLOWED_CLIENT_IDS[0]));
+        assert_eq!(allowed("a, ,b,"), list(&["a", "b"]));
+        assert_eq!(allowed(" a ,b "), list(&["a", "b"]));
+    }
+
+    #[test]
+    fn oauth_allowed_clients_reads_the_wildcard_and_none() {
+        assert_eq!(allowed("*"), AllowedClients::Any);
+        assert_eq!(allowed(" * "), AllowedClients::Any);
+        assert!(allowed("*").allows("https://anything.example/c.json"));
+        assert_eq!(allowed("none"), list(&[]));
+        assert!(!allowed("none").allows(DEFAULT_OAUTH_ALLOWED_CLIENT_IDS[0]));
+        // ほかの値と混ざった `*` と `none` は、ただの文字列
+        let mixed = allowed("*,https://x.example/c.json");
+        assert_eq!(mixed, list(&["*", "https://x.example/c.json"]));
+        assert!(!mixed.allows("https://y.example/c.json"));
+        assert_eq!(allowed("none,a"), list(&["none", "a"]));
+    }
+
+    #[test]
+    fn public_origin_drops_the_trailing_slash() {
+        let mut settings = base_settings("http://localhost:3000");
+        settings.allow_origin = "https://app.example.com/".into();
+        assert_eq!(settings.public_origin(), "https://app.example.com");
+        settings.allow_origin = "https://app.example.com".into();
+        assert_eq!(settings.public_origin(), "https://app.example.com");
     }
 
     fn test_github_app_settings() -> GithubAppSettings {

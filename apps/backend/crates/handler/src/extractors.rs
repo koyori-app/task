@@ -25,8 +25,16 @@ use service::auth::{
     personal_token_tenant_ids,
 };
 use service::login_session::user_satisfies_2fa;
+use service::oauth_server::ACCESS_TOKEN_PREFIX;
+use service::oauth_server::grant::authenticate_access_token;
 
 type Session = axum_session::Session<SessionRedisPool>;
+
+/// MCP の入口宛ての要求に付ける目印。`/mcp` の入口と、ツールの内向きの呼び出しだけが
+/// 要求の extension に載せる。extension は外から偽装できないので、OAuth のアクセストークン
+/// （MCP の入口宛てに発行したもの）を REST API へ直接は使えない。
+#[derive(Clone, Copy)]
+pub(crate) struct McpAudience;
 
 async fn session_from_parts(parts: &mut Parts, state: &AppState) -> Result<Session, AuthError> {
     Session::from_request_parts(parts, state)
@@ -300,7 +308,7 @@ async fn verify_project_in_tenant(
 ///
 /// 所属があっても、テナントが 2FA を強制していて利用者が 2FA を満たさなければ 403
 /// （`2fa-setup-required`）。強制前に得たセッション・PAT・Device Token もここで止める。
-async fn has_tenant_access(
+pub(crate) async fn has_tenant_access(
     state: &AppState,
     user_id: Uuid,
     tenant_id: Uuid,
@@ -442,46 +450,21 @@ async fn authenticate(parts: &mut Parts, state: &AppState) -> Result<AuthUser, A
         && token.starts_with(DEVICE_TOKEN_PREFIX)
     {
         device_token_user(state, &token).await
+    } else if let Some(token) = bearer_token_from_parts(parts)
+        && token.starts_with(ACCESS_TOKEN_PREFIX)
+    {
+        // OAuth のアクセストークンは MCP の入口宛てに発行する。目印の無い要求
+        // （外から来た `/v1/*`）では通さない
+        if parts.extensions.get::<McpAudience>().is_none() {
+            return Err(AuthError::Unauthorized);
+        }
+        let record = authenticate_access_token(&state.db, &state.settings, &token).await?;
+        personal_token_user(state, record).await
     } else if let Some(token) = bearer_token_from_parts(parts) {
         let record =
             authenticate_personal_token(&state.db, &state.settings.personal_token_secret, &token)
                 .await?;
-        // テナントの削除や一括失効で束縛が尽きたトークンは、行が残っていても使えない
-        let tenant_ids = personal_token_tenant_ids(&state.db, record.id).await?;
-        if tenant_ids.is_empty() {
-            return Err(AuthError::Unauthorized);
-        }
-        let user = users::Entity::find_by_id(record.user_id)
-            .one(&state.db)
-            .await?
-            .ok_or(AuthError::Unauthorized)?;
-        if user.is_suspended {
-            return Err(AuthError::Suspended);
-        }
-        // BOT のトークンは、BOT の所属テナント 1 件だけに結び付く
-        if user.is_bot() && user.bot_tenant_id.map(|id| vec![id]).as_ref() != Some(&tenant_ids) {
-            return Err(AuthError::Forbidden);
-        }
-        let allowed_project_ids = match record.allowed_project_ids.as_ref() {
-            None => None,
-            Some(v) => entity::personal_tokens::parse_allowed_project_ids(v).map_err(|e| {
-                AuthError::Internal(anyhow::anyhow!("allowed_project_ids parse error: {e}"))
-            })?,
-        };
-        // すべての拒否を通った認証成功だけを使用として記録する（認可の 403 は使用に含む）
-        service::auth::record_personal_token_use(&state.db, &record).await?;
-        Ok(AuthUser {
-            user_id: record.user_id,
-            username: user.username,
-            method: AuthMethod::PersonalToken {
-                token_id: record.id,
-                token_name: record.name,
-                tenant_ids,
-                allowed_project_ids,
-                scopes: record.scopes,
-                expires_at: record.expires_at,
-            },
-        })
+        personal_token_user(state, record).await
     } else {
         let session = session_from_parts(parts, state).await?;
         if session_is_half_authed(&session) {
@@ -497,6 +480,50 @@ async fn authenticate(parts: &mut Parts, state: &AppState) -> Result<AuthUser, A
             method: AuthMethod::Session,
         })
     }
+}
+
+/// PAT の行か OAuth の許可の行（どちらも `personal_tokens`）から、認証済みの利用者を組み立てる。
+/// 束縛・停止・BOT の検査と使用の記録は、両方で同じである。
+async fn personal_token_user(
+    state: &AppState,
+    record: service::auth::PersonalTokenRecord,
+) -> Result<AuthUser, AuthError> {
+    // テナントの削除や一括失効で束縛が尽きたトークンは、行が残っていても使えない
+    let tenant_ids = personal_token_tenant_ids(&state.db, record.id).await?;
+    if tenant_ids.is_empty() {
+        return Err(AuthError::Unauthorized);
+    }
+    let user = users::Entity::find_by_id(record.user_id)
+        .one(&state.db)
+        .await?
+        .ok_or(AuthError::Unauthorized)?;
+    if user.is_suspended {
+        return Err(AuthError::Suspended);
+    }
+    // BOT のトークンは、BOT の所属テナント 1 件だけに結び付く
+    if user.is_bot() && user.bot_tenant_id.map(|id| vec![id]).as_ref() != Some(&tenant_ids) {
+        return Err(AuthError::Forbidden);
+    }
+    let allowed_project_ids = match record.allowed_project_ids.as_ref() {
+        None => None,
+        Some(v) => entity::personal_tokens::parse_allowed_project_ids(v).map_err(|e| {
+            AuthError::Internal(anyhow::anyhow!("allowed_project_ids parse error: {e}"))
+        })?,
+    };
+    // すべての拒否を通った認証成功だけを使用として記録する（認可の 403 は使用に含む）
+    service::auth::record_personal_token_use(&state.db, &record).await?;
+    Ok(AuthUser {
+        user_id: record.user_id,
+        username: user.username,
+        method: AuthMethod::PersonalToken {
+            token_id: record.id,
+            token_name: record.name,
+            tenant_ids,
+            allowed_project_ids,
+            scopes: record.scopes,
+            expires_at: record.expires_at,
+        },
+    })
 }
 
 async fn device_token_user(state: &AppState, token: &str) -> Result<AuthUser, AuthError> {
