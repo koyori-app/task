@@ -37,11 +37,13 @@ describe('優先度のアイコンの色', () => {
     }
   });
 
-  it.each(PRIORITIES)('明るい配色で %s は白地と bg-muted の上で 3:1 以上', (priority) => {
+  it.each(PRIORITIES)('明るい配色で %s は白地・bg-muted・bg-accent の上で 3:1 以上', (priority) => {
     const color = token('light', VARIABLES[priority]);
     expect(ratio(color, token('light', 'background'))).toBeGreaterThanOrEqual(3);
     // 行の hover・選択の地
     expect(ratio(color, token('light', 'muted'))).toBeGreaterThanOrEqual(3);
+    // 優先度のメニューの項目の hover の地。「些細」の余裕が小さいので、配色の値が動いたら落とす
+    expect(ratio(color, token('light', 'accent'))).toBeGreaterThanOrEqual(3);
   });
 
   it('暗い配色の色は変えない', () => {
