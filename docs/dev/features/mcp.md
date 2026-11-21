@@ -205,11 +205,12 @@ PAT は `~/.claude.json` に平文で保存され、シェルの履歴にも残�
 引数の誤りは API を呼ぶ前に `parent_task_id must be a UUID` や `findings[1].line: range min: 1` のような文面で返す。
 
 `get_document` だけは JSON ではなく、ファイルの Markdown の本文をそのまま返す。
-Markdown でないファイルは `The content type text/plain is not supported` のような文面で断る。
+Markdown でないファイルは `The file is not a Markdown document` で断る。ファイルの種類はアップロードした利用者の申告なので、文面には入れない。
 4 MiB を超える本文は返さず、`200 The response is larger than 4194304 bytes` を返す。
+本文を最後まで読めなかったときは `200 The response body could not be read` を返す。
 UTF-8 として読めない本文は `200 The response is not valid UTF-8` を返す。
 
-`search_documents` の抜粋と `get_document` の本文は、利用者が書いた文である。
+`search_documents` のファイル名、見出しの経路、抜粋と、`get_document` の本文は、利用者が書いた文である。
 文書に紛れた指示にクライアントが従わないよう、2 つのツールの説明とサーバーの説明に、信頼しないデータとして扱うことを書いている。
 
 任意の引数のうち `tenant`、`project`、`status`、`priority`、`q`、`sort`、`task_type`、`milestone`、`sprint`、`file`、`repo`、`from_repo`、ID、日付は、空文字を省略として読む。
@@ -483,7 +484,8 @@ OAuth で渡せる scope は、ツールが使う `read:tenant`、`read:project`
 - `private_key_jwt` でのクライアントの認証は受けない
 - scope を後から足す手順（403 `insufficient_scope`）は無い。ツールの scope の不足は、従来どおり `isError` の結果で返る
 - `read:drive` を渡せるようにする前に同意した許可は `read:drive` を持たない。`search_documents` と `get_document` は `403 forbidden` になる。使うには、「連携中のアプリ」で接続を解除し、クライアントから接続し直す
-- `get_document` は節だけを返せない。4 MiB を超える本文と、Markdown でないファイルは返さない
+- `get_document` は節だけを返せず、範囲を指定して分けて取ることもできない。4 MiB を超える本文と、Markdown でないファイルは返さない
+- MCP クライアントは、ツールの結果の大きさに 4 MiB より小さい上限を持つことがある。その上限を超える本文は、クライアントの側で切られるか捨てられ、読めない
 - 検索の索引は本文の先頭 1 MiB までなので、それより後ろの文は `search_documents` に当たらない
 - 同意画面では、プロジェクト単位の束縛を選べない
 - ブラウザーから直接トークンを取る MCP クライアント向けの CORS は無い

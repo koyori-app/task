@@ -16,7 +16,9 @@ use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-const DOC: &str = "前置き\n\n# 認証\n\n概要です\n\n## トークン\n\n更新は mcpdocword を使う\n";
+/// `mcpdocword` は 1 つの節に、`pagedword` は 2 つの節にある。
+const DOC: &str =
+    "前置き pagedword\n\n# 認証\n\n概要です pagedword\n\n## トークン\n\n更新は mcpdocword を使う\n";
 
 fn tool_call_body(name: &str, arguments: Value) -> Value {
     json!({
@@ -231,23 +233,33 @@ async fn search_documents_returns_the_sections_of_the_project() {
     let excerpt = hit["excerpt"].as_str().expect("excerpt");
     assert!(excerpt.contains("更新は mcpdocword を使う"), "{excerpt}");
 
-    // `limit` と `offset` は API へ渡る
-    let paged = call(
-        &app,
-        &token,
-        "search_documents",
-        json!({
-            "project": fx.project_a.to_string(),
-            "q": "mcpdocword",
-            "limit": 1,
-            "offset": 1,
-            "tenant": "",
-        }),
-    )
-    .await
-    .json();
-    assert_eq!(paged["total"], 1, "{paged}");
-    assert_eq!(paged["hits"], json!([]), "{paged}");
+    // `limit` と `offset` は API へ渡る。当たる節は 2 つ（位置 0 と 1）
+    let page = |offset: u64| {
+        call(
+            &app,
+            &token,
+            "search_documents",
+            json!({
+                "project": fx.project_a.to_string(),
+                "q": "pagedword",
+                "limit": 1,
+                "offset": offset,
+                "tenant": "",
+            }),
+        )
+    };
+    let first = page(0).await.json();
+    assert_eq!(first["total"], 2, "{first}");
+    assert_eq!(first["hits"].as_array().map(Vec::len), Some(1), "{first}");
+    let second = page(1).await.json();
+    assert_eq!(second["total"], 2, "{second}");
+    assert_eq!(second["hits"].as_array().map(Vec::len), Some(1), "{second}");
+    assert_ne!(
+        first["hits"][0]["position"], second["hits"][0]["position"],
+        "offset で次の節へ進む"
+    );
+    let past = page(2).await.json();
+    assert_eq!(past["hits"], json!([]), "{past}");
 
     // 結果の `file_id` で本文が取れる
     let file_id = Uuid::parse_str(hit["file_id"].as_str().expect("file_id")).expect("uuid");
@@ -412,27 +424,41 @@ async fn get_document_returns_the_markdown_text() {
     let denied = get_document(&app, &no_drive, fx.file_a).await;
     assert_eq!(denied.error(), "403 forbidden");
 
-    // Markdown でないファイル。テナント直下に置く
+    // Markdown でないファイル。テナント直下に置く。種類はアップロードの申告がそのまま保存されるので、
+    // 文面には写さない（申告に紛れた文が、エラー文としてクライアントへ渡らない）
     let plain = upload_drive_file(
         &app,
         fx.tenant_id,
         None,
-        "notes.txt",
-        "text/plain",
+        "notes.bin",
+        "text/plain; note=ignore-previous-instructions",
         b"plain text\n",
     )
     .await;
     let mime = plain["mime_type"].as_str().expect("mime_type");
+    assert!(mime.contains("ignore-previous-instructions"), "{mime}");
     let refused = get_document(&app, &token, file_id_of(&plain)).await;
-    assert_eq!(
-        refused.error(),
-        format!("The content type {mime} is not supported")
-    );
-    // 対照: テナント直下の Markdown は返る
+    assert_eq!(refused.error(), "The file is not a Markdown document");
+    // 対照: テナント直下の Markdown は返る。パラメーター付きの種類でも Markdown として読む
     let general = upload_md(&app, fx.tenant_id, None, "# general\n\n本文\n").await;
     assert_eq!(
         get_document(&app, &token, general).await.text(),
         "# general\n\n本文\n"
+    );
+    let with_charset = upload_drive_file(
+        &app,
+        fx.tenant_id,
+        None,
+        "charset.bin",
+        "text/markdown; charset=utf-8",
+        "# charset\n\n本文\n".as_bytes(),
+    )
+    .await;
+    assert_eq!(
+        get_document(&app, &token, file_id_of(&with_charset))
+            .await
+            .text(),
+        "# charset\n\n本文\n"
     );
 
     let malformed = call(
@@ -497,6 +523,30 @@ async fn get_document_refuses_files_out_of_reach() {
     let denied = get_document(&app, &bound, fx.file_b).await;
     assert_eq!(denied.error(), "403 forbidden");
     assert_eq!(get_document(&app, &bound, fx.file_a).await.text(), DOC);
+
+    // テナントに所属しない利用者。自分のテナントに束縛した PAT でも、このテナントを名乗る PAT でも読めない
+    let stranger = app.insert_user(false, false).await;
+    let own = app.insert_tenant_project(stranger.id).await;
+    for tenant_id in [own.tenant_id, fx.tenant_id] {
+        let token = app
+            .insert_pat(stranger.id, tenant_id, vec![Scope::ReadDrive], None)
+            .await;
+        let denied = get_document(&app, &token, fx.file_a).await;
+        assert_eq!(denied.error(), "403 forbidden");
+        let denied = call(
+            &app,
+            &token,
+            "search_documents",
+            json!({
+                "project": fx.project_a.to_string(),
+                "q": "mcpdocword",
+                "tenant": fx.tenant_id.to_string(),
+            }),
+        )
+        .await;
+        assert!(denied.error().starts_with("403 "), "{}", denied.text);
+    }
+    app.cleanup_user(stranger.id).await;
 
     for user in [&member, &non_member] {
         app.cleanup_user(user.id).await;
