@@ -173,7 +173,9 @@ function stubScroller(wrapper: VueWrapper, { max, left }: { max: number; left: n
   Object.defineProperty(el, 'scrollLeft', {
     configurable: true,
     get: () => scrollLeft,
-    set: (v: number) => (scrollLeft = v),
+    set: (v: number) => {
+      scrollLeft = v;
+    },
   });
   return el;
 }
