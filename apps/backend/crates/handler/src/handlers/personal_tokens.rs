@@ -11,7 +11,6 @@ use sea_orm::{
 };
 
 use crate::AppState;
-use crate::auth_helpers::require_tenant_admin;
 use crate::auth_helpers::require_tenant_owner;
 use crate::error::AppError;
 use crate::extractors::{AuthMethod, AuthUser};
@@ -313,13 +312,11 @@ pub async fn create_personal_token(
         .filter(|id| seen.insert(*id))
         .collect();
     for &tenant_id in &tenant_ids {
-        // tenant_members と同じく、PAT を結び付けるテナントの所属と 2FA の強制を先に確かめる。
-        // 強制の前に取った本認証のセッションでも、2FA を満たさなければ発行できない
+        // 発行は、選んだ各テナントに所属していること（オーナー・Admin・Member・Viewer）と、
+        // テナントの 2FA の強制だけを条件にする。ロールで scope は絞らない。届く範囲は、
+        // 要求のたびに scope・束縛・本人の今のロールで決まる
+        // （docs/dev/design/personal-access-tokens-authz.md の発行の認可）
         auth.ensure_tenant_access(&state, tenant_id, None).await?;
-        // 発行はオーナーとテナント Admin に許す。PAT は発行者本人として動き
-        // （user_id は発行者に固定）、得られる力は発行者の持つ力を超えぬため、
-        // 主に閉じても守れる物が増えない（docs/personal-access-tokens-authz.md）。
-        require_tenant_admin(&state.db, tenant_id, auth.user_id).await?;
     }
 
     if let Some(ref project_ids) = payload.project_ids {

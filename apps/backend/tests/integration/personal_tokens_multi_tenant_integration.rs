@@ -1,6 +1,6 @@
 //! PAT を複数のテナントに結び付ける（TASK-491）。
 //!
-//! 束縛は `personal_token_tenants` が正で、作成時に選んだ全テナントで所属・2FA・Admin を確かめる。
+//! 束縛は `personal_token_tenants` が正で、作成時に選んだ全テナントで所属と 2FA を確かめる。
 //! 認可は「要求のテナントが束縛に含まれるか」に従来の所属判定を足したもの。
 use crate::common::{TestApp, TestUser, insert_extra_project, insert_tenant, json_body};
 use axum::http::StatusCode;
@@ -119,36 +119,32 @@ async fn token_bound_to_two_tenants_works_in_both_and_not_in_a_third() {
 }
 
 #[tokio::test]
-async fn creation_is_rejected_when_any_selected_tenant_fails_the_admin_check() {
+async fn creation_is_rejected_when_the_user_is_not_a_member_of_any_selected_tenant() {
     let mut app = TestApp::new().await;
     let user = app.insert_user_default().await;
     let other = app.insert_user_default().await;
     let a = insert_tenant(&app.state.db, user.id).await;
     let b = insert_tenant(&app.state.db, other.id).await;
-    add_member(&app, b, user.id, TenantRole::Member).await;
     login(&mut app, &user).await;
 
     let res = create_token(&app, json!([a, b]), None).await;
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    assert_eq!(json_body(res).await["message"], "tenant-membership-missing");
     assert_eq!(
         token_count(&app, user.id).await,
         0,
         "一部のテナントだけ束縛したトークンを作らない"
     );
 
-    // 対照: B で Admin なら 201
-    let member = entity::tenant_members::Entity::find()
-        .filter(entity::tenant_members::Column::TenantId.eq(b))
-        .filter(entity::tenant_members::Column::UserId.eq(user.id))
-        .one(&app.state.db)
-        .await
-        .expect("find member")
-        .expect("member");
-    let mut active: entity::tenant_members::ActiveModel = member.into();
-    active.role = Set(TenantRole::Admin);
-    active.update(&app.state.db).await.expect("promote");
+    // 対照: B に Member として入れば 201（Admin は要らない）
+    add_member(&app, b, user.id, TenantRole::Member).await;
     let res = create_token(&app, json!([a, b]), None).await;
     assert_eq!(res.status(), StatusCode::CREATED);
+    assert_eq!(
+        json_body(res).await["tenant_ids"],
+        json!(sorted(&[a, b])),
+        "2 つのテナントに束縛される"
+    );
     assert_eq!(token_count(&app, user.id).await, 1);
 
     app.cleanup_user(user.id).await;

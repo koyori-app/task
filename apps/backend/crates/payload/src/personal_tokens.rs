@@ -14,7 +14,7 @@ pub const MAX_TOKEN_TENANTS: usize = 20;
 pub struct CreatePersonalTokenRequest {
     #[validate(length(min = 1, max = 100))]
     pub name: String,
-    /// トークンを使えるテナント。選んだすべてで、所属・2FA・Admin を確かめる
+    /// トークンを使えるテナント。選んだすべてで、所属と 2FA を確かめる
     #[validate(length(min = 1, max = 20))]
     #[schema(value_type = Vec<String>, format = "uuid", min_items = 1, max_items = 20)]
     pub tenant_ids: Vec<Uuid>,
