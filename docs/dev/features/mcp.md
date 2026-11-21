@@ -148,7 +148,7 @@ codex mcp login task
 
 ### Claude Code での設定
 
-このリポジトリは、直下の `.mcp.json` に本番の入口を置いている。
+このリポジトリは、直下の `.mcp.json` に本番のエンドポイントを置いている。
 
 ```json
 {
@@ -163,9 +163,9 @@ codex mcp login task
 
 `headers` が無いので、Claude Code は OAuth で接続する。
 初めてリポジトリを開くと、このサーバーを使うかを聞かれる。承認したあと `/mcp` で `task` を選ぶと、ブラウザーで同意画面が開く。
-`claude -p` とクラウド環境は同意画面を出せないので、ログイン済みでなければ接続できない。
+`claude -p` は同意画面を出せないので、先に対話のセッションの `/mcp` か `claude mcp login task` でログインしておく。
 
-PAT で接続するときは、`headers` に PAT を書く。
+PAT で接続するときは、`headers` に PAT を書く。次の例は、`headers` を書いた `.mcp.json` を置くリポジトリ向けである。このリポジトリの `.mcp.json` は `headers` を持たないので、`TASK_TOKEN` を読まない。
 
 ```json
 {
@@ -185,12 +185,14 @@ PAT で接続するときは、`headers` に PAT を書く。
 Claude Code のクラウド環境では、環境の設定で環境変数 `TASK_TOKEN` を足し、task のホストを Allowed domains に足す。
 環境変数はその環境を使う全員が読めるので、PAT は scope とプロジェクトを絞って発行する。
 
-`TASK_TOKEN` が未設定だと、Claude Code は設定の警告を出し、接続は失敗する。OAuth には切り替わらない。
-このリポジトリで PAT を使うときは、同じ名前の定義を local スコープに足す。local スコープの定義は `.mcp.json` の定義より優先される。コマンドは次のとおり。
+`headers` に `${TASK_TOKEN}` を書いた定義では、`TASK_TOKEN` が未設定だと、Claude Code は設定の警告を出し、接続は失敗する。OAuth には切り替わらない。
+このリポジトリで PAT を使うときは、同じ名前の定義を local スコープに足す。local スコープの定義は `.mcp.json` の定義より優先される。コマンドは次のとおりである。
 
 ```bash
 claude mcp add --transport http --scope local task https://task.koyori.app/api/mcp --header "Authorization: Bearer <PAT>"
 ```
+
+PAT は `~/.claude.json` に平文で保存され、シェルの履歴にも残る。scope とプロジェクトを絞った PAT を使う。
 
 ### ツールの実行
 
@@ -439,6 +441,8 @@ OAuth で渡せる scope は、ツールが使う `read:tenant`、`read:project`
 - リフレッシュトークンの再利用は猶予なく許可を取り消すので、応答が届かなかった再送や、同時の更新でも、接続し直しになる
 - Codex の IDE 拡張とクラウドの Codex が、どの `client_id` で接続するかは確かめていない。既定の 4 つと違えば、`OAUTH_ALLOWED_CLIENT_IDS` に足す
 - claude.ai、ChatGPT、Codex からの実際の接続は確かめていない
+- Claude Code から PAT で接続すること（`.mcp.json` の `headers` と、local スコープの上書きの両方）は確かめていない
+- このリポジトリの `.mcp.json` で、Claude Code のクラウド環境から接続できるかは確かめていない
 
 ## 決定の記録
 
@@ -467,4 +471,4 @@ OAuth で渡せる scope は、ツールが使う `read:tenant`、`read:project`
 | 2026-11-19 | リフレッシュトークンの再利用は、猶予なく許可を取り消す | 公開クライアントのリフレッシュトークンは回転で守る。猶予を置くと、その間は盗まれたトークンも通る |
 | 2026-11-19 | 寿命はアクセストークン 1 時間、リフレッシュトークン 90 日で、使うたびに延ばす | アクセストークンは短くする。90 日は Device Token と PAT の既定に合わせた。使い続ける限り接続し直しを求めない |
 | 2026-11-19 | 連携中のアプリを、アカウント設定の新しいページ `/settings/apps` に置く | PAT は利用者が発行するもので、許可はクライアントが求めて利用者が与えるものである。一覧を分けると、解除する対象を探しやすい |
-| 2026-11-21 | `.mcp.json` をリポジトリ直下に置き、`headers` を書かず OAuth で接続する。2026-11-18 の「置かず、設定例を書く」を改める | 本番の入口が `https://task.koyori.app/api/mcp` に決まった。`headers` に `${TASK_TOKEN}` を書くと、未設定の人に設定の警告が出て接続が失敗し、OAuth に切り替わらない。同じ名前の user スコープの定義にも勝つので、OAuth で接続済みの人の接続も失敗に変わる |
+| 2026-11-21 | `.mcp.json` をリポジトリ直下に置き、`headers` を書かず OAuth で接続する。2026-11-18 の「置かず、設定例を書く」を改める | 本番のエンドポイントが `https://task.koyori.app/api/mcp` に決まった。`headers` に `${TASK_TOKEN}` を書くと、未設定の人に設定の警告が出て接続が失敗し、OAuth に切り替わらない。同じ名前の user スコープの定義にも勝つので、OAuth で接続済みの人の接続も失敗に変わる |
