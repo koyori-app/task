@@ -186,7 +186,7 @@ Claude Code のクラウド環境では、環境の設定で環境変数 `TASK_T
 環境変数はその環境を使う全員が読めるので、PAT は scope とプロジェクトを絞って発行する。
 
 `headers` に `${TASK_TOKEN}` を書いた定義では、`TASK_TOKEN` が未設定だと、Claude Code は設定の警告を出し、接続は失敗する。OAuth には切り替わらない。
-このリポジトリで PAT を使うときは、同じ名前の定義を local スコープに足す。local スコープの定義は `.mcp.json` の定義より優先される。コマンドは次のとおりである。
+このリポジトリで PAT を使うときは、同じ名前の定義を local スコープに足す。`.mcp.json` の定義は user スコープの同じ名前の定義より優先され、local スコープの定義は `.mcp.json` の定義より優先される。user スコープに PAT で `task` を登録していても、このリポジトリでは `.mcp.json` の定義が使われる。コマンドは次のとおりである。
 
 ```bash
 claude mcp add --transport http --scope local task https://task.koyori.app/api/mcp --header "Authorization: Bearer <PAT>"
