@@ -13,6 +13,7 @@ pub mod auth;
 pub mod desktop;
 pub mod drive;
 pub mod github;
+pub mod oauth_grants;
 pub mod personal_tokens;
 pub mod reviews;
 pub mod tenants;
@@ -30,6 +31,7 @@ pub fn create_routes() -> OpenApiRouter<AppState> {
                 .nest("/auth", crate::routes::auth::routes())
                 .nest("/desktop", crate::routes::desktop::routes())
                 .nest("/personal_tokens", crate::routes::personal_tokens::routes())
+                .nest("/oauth_grants", crate::routes::oauth_grants::routes())
                 .nest("/users", crate::routes::users::routes())
                 .nest("/tenants", crate::routes::tenants::routes())
                 .nest("/invitations", crate::routes::tenants::invitation_routes())

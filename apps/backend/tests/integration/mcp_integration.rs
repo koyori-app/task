@@ -1,6 +1,6 @@
 //! MCP の入口（`POST /mcp`）。規則は docs/dev/features/mcp.md。
 //!
-//! - 入口と認証: PAT の Bearer だけを通す。資格なし・でたらめな Bearer・Cookie だけは 401、
+//! - 入口と認証: PAT か OAuth のアクセストークンの Bearer だけを通す（OAuth は mcp_oauth_integration.rs）。資格なし・でたらめな Bearer・Cookie だけは 401、
 //!   Device Token は 403、許可していない `Origin` は 403
 //! - ツール: REST API を内向きに呼び直すので、scope・テナント束縛・プロジェクト束縛の拒否が
 //!   そのまま `isError: true` の結果になる。拒否と対照の成功を組で確かめる
@@ -222,11 +222,18 @@ async fn request_without_credentials_is_401_with_www_authenticate() {
     let res = app.mcp(None, initialize_body()).await;
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    // 資格情報なし: 認可サーバーの見つけ方と、要る scope を返す。`error` は付けない
+    let origin = app.state.settings.public_origin();
     assert_eq!(
         res.headers()
             .get(header::WWW_AUTHENTICATE)
             .and_then(|value| value.to_str().ok()),
-        Some("Bearer")
+        Some(
+            format!(
+                "Bearer resource_metadata=\"{origin}/.well-known/oauth-protected-resource/api/mcp\", scope=\"read:tenant read:project read:task write:task read:milestone read:sprint\""
+            )
+            .as_str()
+        )
     );
     let body: Value = res.json().await.expect("json");
     assert_eq!(body, json!({ "message": "unauthorized" }));
@@ -239,11 +246,18 @@ async fn unknown_bearer_is_401() {
     let res = app.mcp(Some("not-a-real-token"), initialize_body()).await;
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    // 無効な Bearer: `error="invalid_token"` を足す
+    let origin = app.state.settings.public_origin();
     assert_eq!(
         res.headers()
             .get(header::WWW_AUTHENTICATE)
             .and_then(|value| value.to_str().ok()),
-        Some("Bearer")
+        Some(
+            format!(
+                "Bearer error=\"invalid_token\", resource_metadata=\"{origin}/.well-known/oauth-protected-resource/api/mcp\", scope=\"read:tenant read:project read:task write:task read:milestone read:sprint\""
+            )
+            .as_str()
+        )
     );
     let body: Value = res.json().await.expect("json");
     assert_eq!(body, json!({ "message": "unauthorized" }));

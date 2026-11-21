@@ -1,4 +1,5 @@
 import { apiProxyPlugin } from '#/middlewares/api-proxy';
+import { frameGuard } from '#/middlewares/frame-guard';
 import { pwaManifestPlugin } from '#/pwa';
 import { prehydrationQueryGuard } from '#/middlewares/prehydration-query-guard';
 import { renderDescriptionPlugin } from '#/middlewares/render-description';
@@ -29,7 +30,7 @@ function scoreToStrength(score: number): PasswordStrength {
 export function getApp() {
   const app = new Elysia();
 
-  vike(app, [prehydrationQueryGuard, settingInjector]);
+  vike(app, [prehydrationQueryGuard, frameGuard, settingInjector]);
 
   app.use(staticPlugin({ assets: 'server/public', prefix: '/static-assets' }));
 

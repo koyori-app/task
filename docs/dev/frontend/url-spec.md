@@ -1,7 +1,7 @@
 ---
 title: URL
 description: フロントエンドの URL と識別子、それを定義する Vike のページファイルの対応
-updated: 2026-11-12
+updated: 2026-11-19
 sidebar:
   order: 1
 ---
@@ -37,6 +37,7 @@ sidebar:
 | `/auth/reset-password` | パスワードリセット。`?token=` が無ければ申請フォーム、あれば再設定フォームを出す（[パスワードリセットと変更](/dev/features/auth/password-reset)）。メール内リンクもこの URL を指す |
 | `/verify-email` | メールアドレスの確認。`?token=` はメール内リンクが付ける |
 | `/desktop/authorize` | Koyori Desktop の承認（[アカウント設定](/dev/features/account-settings)）。`?port=&code_challenge=&state=&name=` を受ける。未ログインならサインイン後に戻る |
+| `/oauth/authorize` | MCP の OAuth の同意画面（[MCP サーバー](/dev/features/mcp#画面)）。MCP クライアントが認可の要求を query に付けて開く。未ログインならサインイン後に戻る |
 | `/invitations/accept?token=` | テナント招待の承諾（[テナントとプロジェクトの認可](/dev/design/tenant-project-authz)）。未ログインならサインイン後に戻る |
 
 ### アカウント設定（テナント外）
@@ -48,6 +49,7 @@ sidebar:
 | `/settings/profile` | プロフィール編集（[アカウント設定](/dev/features/account-settings)） |
 | `/settings/security` | 認証方法、2 段階認証、Koyori Desktop の端末（[アカウント設定](/dev/features/account-settings)） |
 | `/settings/tokens` | パーソナルアクセストークンの発行と取り消し（[アカウント設定](/dev/features/account-settings)） |
+| `/settings/apps` | 連携中のアプリ（MCP の OAuth で許可した接続）の一覧と解除（[アカウント設定](/dev/features/account-settings#連携中のアプリ)） |
 | `/settings/preferences` | 環境設定 |
 | `/settings/theme` | テーマ（配色の切り替え） |
 | `/settings/experiments` | 実験的機能の設定 |
@@ -107,10 +109,12 @@ sidebar:
 | `/verify-email` | `verify-email/+Page.vue` |
 | `/auth/reset-password` | `auth/reset-password/+Page.vue` |
 | `/desktop/authorize` | `desktop/authorize/+Page.vue` |
+| `/oauth/authorize` | `oauth/authorize/+Page.vue` |
 | `/invitations/accept` | `invitations/accept/+Page.vue` |
 | `/settings/profile` | `settings/profile/+Page.vue` |
 | `/settings/security` | `settings/security/+Page.vue` |
 | `/settings/tokens` | `settings/tokens/+Page.vue` |
+| `/settings/apps` | `settings/apps/+Page.vue` |
 | `/settings/preferences` | `settings/preferences/+Page.vue` |
 | `/settings/theme` | `settings/theme/+Page.vue` |
 | `/settings/experiments` | `settings/experiments/+Page.vue` |

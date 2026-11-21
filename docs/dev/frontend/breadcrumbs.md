@@ -1,7 +1,7 @@
 ---
 title: パンくず
 description: 共通レイアウトのパンくずの段の組み立て、取得中と失敗時の表示、BreadcrumbList への変換
-updated: 2026-11-04
+updated: 2026-11-19
 slug: dev/frontend/breadcrumbs
 sidebar:
   order: 2
@@ -15,7 +15,7 @@ sidebar:
 
 | 種類 | 対象ページ | 段 |
 |---|---|---|
-| `static` | `/`、`/settings/profile`、`/settings/security`、`/settings/tokens` | 画面名だけの一段 |
+| `static` | `/`、`/settings/profile`、`/settings/security`、`/settings/tokens`、`/settings/apps` | 画面名だけの一段 |
 | `home` | `/{tenant}`、`my-tasks`、`calendar`、`users/{user_id}` | ホーム > 画面名（`/{tenant}` はホームのみ） |
 | `tenant` | `settings`、`settings/members`、`projects/new` | ホーム > 画面名 |
 | `project` | プロジェクトの `tasks`、`settings`、`reviews`、`labels`、`docs` | ホーム > プロジェクト名 > 画面名（`tasks` は画面名なし） |

@@ -24,6 +24,7 @@ pub mod mentions;
 pub mod notification_email;
 pub mod notifications;
 pub mod oauth;
+pub mod oauth_server;
 pub mod passkey_challenges;
 pub mod passkeys;
 pub mod password_reset;

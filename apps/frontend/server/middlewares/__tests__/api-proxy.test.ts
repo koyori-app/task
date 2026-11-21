@@ -208,6 +208,17 @@ describe('MCP endpoint (real fetch)', () => {
           ),
           body: Buffer.concat(chunks).toString('utf8'),
         });
+        // MCP の OAuth のパス（メタデータは GET、token と revoke は資格なしの POST）
+        if (req.method === 'GET' && req.url?.startsWith('/.well-known/')) {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end('{"issuer":"https://task.example.com"}');
+          return;
+        }
+        if (req.method === 'POST' && req.url?.startsWith('/oauth/')) {
+          res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+          res.end('{"access_token":"mcpat_x"}');
+          return;
+        }
         if (req.method !== 'POST') {
           res.writeHead(405, { allow: 'POST' });
           res.end();
@@ -302,20 +313,97 @@ describe('MCP endpoint (real fetch)', () => {
     expect(seen).toMatchObject([{ method, url: '/mcp' }]);
   });
 
-  // 足したのは /api/mcp の 1 パスだけ。backend のほかのパスは公開しない
-  it.each(['/api/mcp/extra', '/api/mcpx', '/api/scalar', '/api/jobs', '/api'])(
-    'does not forward %s',
-    async (pathname) => {
-      const proxyApp = await mcpApp();
+  // 足したのは /api/mcp と MCP の OAuth の 4 パスだけ。backend のほかのパスは公開しない
+  it.each([
+    '/api/mcp/extra',
+    '/api/mcpx',
+    '/api/scalar',
+    '/api/jobs',
+    '/api',
+    '/api/oauth',
+    '/api/oauth/authorize',
+    '/api/oauth/token/x',
+    '/api/oauth/revoke/x',
+    '/.well-known/oauth-protected-resource',
+    '/.well-known/oauth-protected-resource/api/mcp/x',
+    '/.well-known/openid-configuration',
+    '/.well-known/oauth-authorization-server/x',
+  ])('does not forward %s', async (pathname) => {
+    const proxyApp = await mcpApp();
 
+    for (const method of ['POST', 'GET']) {
       const response = await proxyApp.handle(
-        new Request(`http://localhost${pathname}`, { method: 'POST', body: '{}' }),
+        new Request(`http://localhost${pathname}`, {
+          method,
+          body: method === 'POST' ? '{}' : undefined,
+        }),
       );
 
       expect(response.status).toBe(404);
-      expect(seen).toHaveLength(0);
-    },
-  );
+    }
+    expect(seen).toHaveLength(0);
+  });
+
+  // メタデータは先頭が /api でないので、そのままのパスで backend に届く
+  it.each([
+    '/.well-known/oauth-protected-resource/api/mcp',
+    '/.well-known/oauth-authorization-server',
+  ])('forwards GET %s to the same backend path', async (pathname) => {
+    const proxyApp = await mcpApp();
+
+    const response = await proxyApp.handle(new Request(`http://localhost${pathname}`));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ issuer: 'https://task.example.com' });
+    expect(seen).toMatchObject([{ method: 'GET', url: pathname }]);
+  });
+
+  it.each([
+    ['/api/oauth/token', '/oauth/token'],
+    ['/api/oauth/revoke', '/oauth/revoke'],
+  ])('forwards POST %s to the backend %s with the form body intact', async (pathname, target) => {
+    const proxyApp = await mcpApp();
+    const body =
+      'grant_type=authorization_code&code=abc&code_verifier=xyz&client_id=https%3A%2F%2Fclaude.ai%2Foauth%2Fmcp-oauth-client-metadata';
+
+    const response = await proxyApp.handle(
+      new Request(`http://localhost${pathname}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(await response.json()).toEqual({ access_token: 'mcpat_x' });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ method: 'POST', url: target, body });
+    expect(seen[0]!.headers).toMatchObject({
+      'content-type': 'application/x-www-form-urlencoded',
+    });
+  });
+
+  // メタデータは GET だけ、token と revoke は POST だけを運ぶ
+  it.each([
+    ['POST', '/.well-known/oauth-authorization-server'],
+    ['POST', '/.well-known/oauth-protected-resource/api/mcp'],
+    ['GET', '/api/oauth/token'],
+    ['GET', '/api/oauth/revoke'],
+    ['DELETE', '/api/oauth/token'],
+  ])('does not forward %s %s', async (method, pathname) => {
+    const proxyApp = await mcpApp();
+
+    const response = await proxyApp.handle(
+      new Request(`http://localhost${pathname}`, {
+        method,
+        body: method === 'POST' ? '{}' : undefined,
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    expect(seen).toHaveLength(0);
+  });
 });
 
 describe('.env loading', () => {

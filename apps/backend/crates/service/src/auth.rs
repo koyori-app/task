@@ -414,7 +414,10 @@ type HmacSha256 = Hmac<Sha256>;
 pub const DEVICE_TOKEN_PREFIX: &str = "kdt_";
 
 /// `<prefix><base64url>` 形式のトークンと、DBに保存するHMACハッシュを返す。
-fn generate_prefixed_token(prefix: &str, secret: &str) -> Result<(String, String), AuthError> {
+pub(crate) fn generate_prefixed_token(
+    prefix: &str,
+    secret: &str,
+) -> Result<(String, String), AuthError> {
     let mut buf = [0u8; 32];
     crate::random::fill(&mut buf);
     let token = format!("{prefix}{}", URL_SAFE_NO_PAD.encode(buf));
@@ -459,7 +462,9 @@ pub async fn authenticate_personal_token(
         .await?
         .ok_or(AuthError::Unauthorized)?;
 
-    if token.revoked {
+    // OAuth の許可の行は PAT として通さない。平文は誰も持たないが、コードでも固定する
+    // （許可は `oauth_server::grant::authenticate_access_token` が `/mcp` でだけ通す）
+    if token.revoked || token.oauth_client_id.is_some() {
         return Err(AuthError::Unauthorized);
     }
 

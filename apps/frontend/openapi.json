@@ -5685,6 +5685,480 @@
         }
       }
     },
+    "/v1/oauth_grants": {
+      "get": {
+        "tags": ["OAuth Grants"],
+        "summary": "連携中のアプリ（自分の OAuth の許可）の一覧",
+        "description": "セッション専用。取り消し済み・期限切れ・テナントの束縛が尽きたもの・サーバーの許可リストに無いクライアントのものは出ない。",
+        "operationId": "list_oauth_grants",
+        "responses": {
+          "200": {
+            "description": "使える許可の一覧",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OAuthGrantResponse"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/oauth_grants/authorize": {
+      "post": {
+        "tags": ["OAuth Grants"],
+        "summary": "認可の要求を承認し、認可コード付きの遷移先を返す",
+        "description": "セッション専用。選んだすべてのテナントで、所属と 2FA を確かめる（PAT の発行と同じ規則）。1 つでも通らなければ全体を拒否し、コードは発行しない。",
+        "operationId": "approve_authorization",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveAuthorizationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "クライアントのコールバック（`code`・`state`・`iss` 付き）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizationRedirectResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "認可の要求を受けられません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/oauth_grants/deny": {
+      "post": {
+        "tags": ["OAuth Grants"],
+        "summary": "認可の要求を拒否し、エラー付きの遷移先を返す",
+        "description": "セッション専用。検査を通った要求にだけ遷移先を返す（確かめていない `redirect_uri` へ画面を飛ばさない）。",
+        "operationId": "deny_authorization",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthorizationParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "クライアントのコールバック（`error=access_denied`・`state`・`iss` 付き）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizationRedirectResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "認可の要求を受けられません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/oauth_grants/preview": {
+      "post": {
+        "tags": ["OAuth Grants"],
+        "summary": "認可の要求を確かめ、同意画面に出す中身を返す",
+        "description": "セッション専用。要求が受けられないときは 400 で、`message` に理由（`oauth-client-not-allowed`・`oauth-invalid-client`・`oauth-client-metadata-unavailable`・`oauth-invalid-redirect-uri`・`oauth-unsupported-response-type`・`oauth-invalid-code-challenge`・`oauth-invalid-target`・`oauth-invalid-scope`）を返す。",
+        "operationId": "preview_authorization",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthorizationParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "同意画面に出す中身",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizationPreviewResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "認可の要求を受けられません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/oauth_grants/{id}": {
+      "delete": {
+        "tags": ["OAuth Grants"],
+        "summary": "連携中のアプリの接続を解除",
+        "description": "セッション専用。許可を取り消し、そのアクセストークンとリフレッシュトークンを使えなくする。取り消し済みでも 204。",
+        "operationId": "revoke_oauth_grant",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "許可の識別子",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "解除しました"
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/personal_tokens": {
       "get": {
         "tags": ["Personal Tokens"],
@@ -27867,6 +28341,38 @@
           }
         }
       },
+      "ApproveAuthorizationRequest": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/AuthorizationParams"
+          },
+          {
+            "type": "object",
+            "required": ["tenant_ids", "scopes"],
+            "properties": {
+              "scopes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Scope"
+                },
+                "description": "許可する scope。要求された scope の部分集合",
+                "minItems": 1
+              },
+              "tenant_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "description": "接続を使えるテナント。選んだすべてで、所属と 2FA を確かめる",
+                "maxItems": 20,
+                "minItems": 1
+              }
+            }
+          }
+        ],
+        "description": "同意の承認。要求の中身に、利用者が選んだテナントと scope を足す。"
+      },
       "AssignTasksRequest": {
         "type": "object",
         "required": ["task_ids"],
@@ -27984,6 +28490,98 @@
           },
           "user_agent": {
             "type": ["string", "null"]
+          }
+        }
+      },
+      "AuthorizationParams": {
+        "type": "object",
+        "description": "クライアントが認可エンドポイントへ付けてきた要求（query の中身）。\n\n`response_type`・`code_challenge`・`code_challenge_method` は、欠けていても受け取り、\n同意の API が項目ごとのエラーで断る。",
+        "required": ["client_id", "redirect_uri"],
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "description": "クライアントの識別子（Client ID Metadata Document の URL）",
+            "maxLength": 2048
+          },
+          "code_challenge": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "code_challenge_method": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "redirect_uri": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "resource": {
+            "type": ["string", "null"],
+            "description": "トークンの宛先（MCP の入口の URL）",
+            "maxLength": 2048
+          },
+          "response_type": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "scope": {
+            "type": ["string", "null"],
+            "description": "空白区切りの scope。省略すると、渡せる scope の全部を求めたものとして読む",
+            "maxLength": 1024
+          },
+          "state": {
+            "type": ["string", "null"],
+            "maxLength": 2048
+          }
+        }
+      },
+      "AuthorizationPreviewResponse": {
+        "type": "object",
+        "description": "同意画面に出す中身。",
+        "required": [
+          "client_id",
+          "client_name",
+          "client_host",
+          "redirect_host",
+          "redirect_is_loopback",
+          "scopes"
+        ],
+        "properties": {
+          "client_host": {
+            "type": "string",
+            "description": "`client_id` の URL の host"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "client_name": {
+            "type": "string",
+            "description": "クライアントが名乗る名前。自己申告なので、画面は `client_host` を主に出す"
+          },
+          "redirect_host": {
+            "type": "string",
+            "description": "承認のあとで戻る先の host。ポートが明示されていれば `host:port`"
+          },
+          "redirect_is_loopback": {
+            "type": "boolean",
+            "description": "戻る先が利用者の端末（loopback の http）か"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "description": "要求された scope のうち、渡せるもの"
+          }
+        }
+      },
+      "AuthorizationRedirectResponse": {
+        "type": "object",
+        "description": "画面が遷移する先（クライアントのコールバック）。",
+        "required": ["redirect_to"],
+        "properties": {
+          "redirect_to": {
+            "type": "string"
           }
         }
       },
@@ -30381,6 +30979,51 @@
             "items": {
               "$ref": "#/components/schemas/OAuthConnectionItem"
             }
+          }
+        }
+      },
+      "OAuthGrantResponse": {
+        "type": "object",
+        "description": "連携中のアプリ（OAuth の許可）。",
+        "required": [
+          "id",
+          "client_id",
+          "client_name",
+          "tenant_ids",
+          "scopes",
+          "expires_at",
+          "last_used_at"
+        ],
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "client_name": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "この時刻まで使わなければ切れる。使うたびに延びる"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "last_used_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "scopes": {
+            "$ref": "#/components/schemas/ScopeList"
+          },
+          "tenant_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "接続を使えるテナント（昇順）"
           }
         }
       },
@@ -33945,6 +34588,10 @@
     {
       "name": "Personal Tokens",
       "description": "パーソナルアクセストークン（PAT）管理"
+    },
+    {
+      "name": "OAuth Grants",
+      "description": "MCP の OAuth の同意と、連携中のアプリの管理"
     },
     {
       "name": "Drive Files",
