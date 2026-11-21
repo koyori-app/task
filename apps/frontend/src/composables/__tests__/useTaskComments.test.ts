@@ -26,6 +26,8 @@ const { control, requestLog, fetchMock } = vi.hoisted(() => {
     rejectPost?: { status: number; message: string };
     rejectPut?: { status: number; message: string };
     rejectDelete?: { status: number; message: string };
+    /** 在る間は一覧の GET の応答をこれの解決まで待たせる */
+    listGate?: Promise<void>;
   } = { listMode: 'success', threads: [] };
 
   const requestLog: { method: string; url: string; body?: unknown }[] = [];
@@ -41,6 +43,7 @@ const { control, requestLog, fetchMock } = vi.hoisted(() => {
       return jsonResponse({ activities: [] });
     }
     if (method === 'GET' && url.endsWith(`/tasks/${TASK_SEQ_KEY}/comments`)) {
+      if (control.listGate) await control.listGate;
       if (control.listMode === 'error') return jsonResponse({ message: 'boom' }, 500);
       return jsonResponse({ comments: control.threads });
     }
@@ -169,6 +172,7 @@ describe('useTaskComments', () => {
     control.rejectPost = undefined;
     control.rejectPut = undefined;
     control.rejectDelete = undefined;
+    control.listGate = undefined;
     requestLog.length = 0;
   });
 
@@ -205,6 +209,29 @@ describe('useTaskComments', () => {
     expect(post?.body).toEqual({ body: '新しいコメント', parent_comment_id: null });
     // invalidate による取り直しで新しい一覧が threads へ反映される
     expect(comments.threads.value.map((t) => t.id)).toEqual(['c-new']);
+  });
+
+  it('投稿の submitPending は一覧の取り直しが終わるまで true のまま（失敗でも戻る）', async () => {
+    mountHost();
+    await flushPromises();
+
+    // 一覧の取り直しを止めておき、POST が通った後の窓を見る
+    let release!: () => void;
+    control.listGate = new Promise<void>((resolve) => (release = resolve));
+    const posting = comments.submitComment('新しいコメント');
+    expect(comments.submitPending.value).toBe(true);
+    await flushPromises();
+    expect(requestLog.some((r) => r.method === 'POST')).toBe(true);
+    // POST は通ったが下書きはまだ消えていない。この間に送り直させない
+    expect(comments.submitPending.value).toBe(true);
+
+    release();
+    await expect(posting).resolves.toBe(true);
+    expect(comments.submitPending.value).toBe(false);
+
+    control.rejectPost = { status: 500, message: 'boom' };
+    await expect(comments.submitComment('失敗する')).resolves.toBe(false);
+    expect(comments.submitPending.value).toBe(false);
   });
 
   it('返信は parent_comment_id を付けて POST する', async () => {

@@ -71,6 +71,12 @@ export function useTaskComments(params: UseTaskCommentsParams) {
   const deleteError = ref<string | null>(null);
   /** 更新・削除の対象コメント ID（進行中のみ非 null）。ボタンの disabled に使う */
   const updatingCommentId = ref<string | null>(null);
+  /**
+   * 投稿の進行中か。POST の後の一覧の取り直しまで含める（mutation の isPending は POST の応答で戻る）。
+   * 取り直しを待つ間も入力欄には送った下書きが残るので、その間に打った字が下書きに混ざったり、
+   * 同じ本文を送り直したりしないよう、取り直しが終わるまで送信中として扱う
+   */
+  const submitting = ref(false);
   const deletingCommentId = ref<string | null>(null);
   /** 更新・削除に失敗したコメントの ID。エラーを当該コメントの中に出すために持つ */
   const updateErrorCommentId = ref<string | null>(null);
@@ -154,6 +160,7 @@ export function useTaskComments(params: UseTaskCommentsParams) {
     // ペイン切替などで unmount しても完走した結果を対象タスクのキャッシュへ書けるよう、
     // query key は開始時点で固定する（useTaskDetail.mutateTask と同じ理由）
     const queryKey = commentsQueryKey.value;
+    submitting.value = true;
     try {
       await createCommentMutation.mutateAsync({
         params: { path: taskPathParams() },
@@ -173,6 +180,8 @@ export function useTaskComments(params: UseTaskCommentsParams) {
         submitError.value = apiErrorMessage(error, 'コメントを投稿できませんでした');
       }
       return false;
+    } finally {
+      submitting.value = false;
     }
   }
 
@@ -249,7 +258,7 @@ export function useTaskComments(params: UseTaskCommentsParams) {
     refetchComments: () => {
       void commentsQuery.refetch();
     },
-    submitPending: computed(() => createCommentMutation.isPending.value),
+    submitPending: computed(() => submitting.value),
     submitError,
     replyError,
     replyErrorThreadId,

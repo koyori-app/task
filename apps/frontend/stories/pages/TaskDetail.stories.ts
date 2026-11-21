@@ -2137,7 +2137,7 @@ export const CommentPostWithCtrlEnter: Story = {
     await expect(
       within(commentList).findByText('キーで投稿するコメント'),
     ).resolves.toBeInTheDocument();
-    // 送信中に落ちたフォーカスは入力欄へ戻り、続けて打てる
+    // 送信中もフォーカスは入力欄に残り、続けて打てる
     await waitFor(() =>
       expect(textarea.closest('.cm-editor')!.contains(document.activeElement)).toBe(true),
     );
