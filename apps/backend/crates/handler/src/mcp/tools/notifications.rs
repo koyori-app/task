@@ -150,7 +150,11 @@ impl TaskMcp {
             async {
                 let id = parse_uuid("notification_id", &args.notification_id)?.to_string();
                 self.inner(&parts)?
-                    .patch(&["v1", "users", "me", "notifications", &id, "read"])
+                    // 既読の API は本文を読まない
+                    .patch(
+                        &["v1", "users", "me", "notifications", &id, "read"],
+                        &Value::Null,
+                    )
                     .await
             }
             .await,
@@ -167,7 +171,10 @@ impl TaskMcp {
         finish(
             async {
                 self.inner(&parts)?
-                    .patch(&["v1", "users", "me", "notifications", "read-all"])
+                    .patch(
+                        &["v1", "users", "me", "notifications", "read-all"],
+                        &Value::Null,
+                    )
                     .await
             }
             .await,

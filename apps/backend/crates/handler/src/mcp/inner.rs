@@ -111,9 +111,12 @@ impl InnerApi {
         self.send(Method::DELETE, segments, &[], None).await
     }
 
-    /// 本文の無い `PATCH`（通知の既読など）
-    pub(super) async fn patch(&self, segments: &[&str]) -> Result<Value, ToolFailure> {
-        self.send(Method::PATCH, segments, &[], None).await
+    pub(super) async fn patch(
+        &self,
+        segments: &[&str],
+        body: &Value,
+    ) -> Result<Value, ToolFailure> {
+        self.send(Method::PATCH, segments, &[], Some(body)).await
     }
 
     /// 渡すヘッダーは `Authorization`・`Accept`・（本文があれば）`Content-Type` だけ。
@@ -268,16 +271,21 @@ mod tests {
             serde_json::json!(["accept", "authorization", "content-type"])
         );
 
-        for seen in [
-            api.delete(&["v1", "tenants"]).await.unwrap(),
-            api.patch(&["v1", "tenants"]).await.unwrap(),
-        ] {
-            assert_eq!(
-                seen["headers"],
-                serde_json::json!(["accept", "authorization"])
-            );
-            assert_eq!(seen["authorization"], "Bearer pat-1");
-        }
+        let seen = api
+            .patch(&["v1", "tenants"], &serde_json::json!({}))
+            .await
+            .unwrap();
+        assert_eq!(
+            seen["headers"],
+            serde_json::json!(["accept", "authorization", "content-type"])
+        );
+
+        let seen = api.delete(&["v1", "tenants"]).await.unwrap();
+        assert_eq!(
+            seen["headers"],
+            serde_json::json!(["accept", "authorization"])
+        );
+        assert_eq!(seen["authorization"], "Bearer pat-1");
     }
 
     #[test]

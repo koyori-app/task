@@ -13,7 +13,7 @@ backend は MCP（Model Context Protocol）のサーバーを `POST /mcp` で公
 Claude Code などの MCP クライアントは、URL と PAT を設定するか、OAuth で接続を許可すると、タスクを読み書きできる。
 CLI を入れにくい環境で、CLI の代わりに使うためのものである。
 OAuth の認可サーバーも backend が兼ね、claude.ai、Claude Code、ChatGPT、Codex からコネクタとして接続できる。
-ツールは 25 個で、タスクを実装する流れで使うものに加えて、タスクの一括作成と削除、自分のタスク、スプリント、通知、テナントの一覧を含み、レビュー指摘の操作は範囲外である。
+ツールは 31 個で、タスクを実装する流れで使うもの、レビュー指摘を扱うもの、タスクの一括作成と削除、自分のタスク、スプリント、通知、テナントの一覧がある。
 
 ## 用語
 
@@ -60,7 +60,7 @@ SDK の rmcp 3.11 が対応するバージョンの要求を受ける。
 
 | 要求 | `WWW-Authenticate` |
 |---|---|
-| `Authorization` が無い | `Bearer resource_metadata="<公開の origin>/.well-known/oauth-protected-resource/api/mcp", scope="read:tenant read:project read:task write:task read:milestone read:sprint"` |
+| `Authorization` が無い | `Bearer resource_metadata="<公開の origin>/.well-known/oauth-protected-resource/api/mcp", scope="read:tenant read:project read:task write:task read:milestone read:sprint read:review write:review"` |
 | Bearer はあるが無効 | 上の値の `Bearer` の直後に `error="invalid_token", ` を足したもの |
 
 ### OAuth での接続
@@ -203,10 +203,10 @@ PAT は `~/.claude.json` に平文で保存され、シェルの履歴にも残�
 
 失敗は `isError: true` の結果として返す。
 文面は API の状態コードと `message` を並べたもので、例は `403 forbidden`、`404 not-found`、`409 github-integration-missing` である。
-引数の誤りは API を呼ぶ前に `parent_task_id must be a UUID` のような文面で返す。
+引数の誤りは API を呼ぶ前に `parent_task_id must be a UUID` や `findings[1].line: range min: 1` のような文面で返す。
 
-任意の引数のうち `tenant`、`project`、`status`、`priority`、`q`、`sort`、`filter`、`cursor`、`task_type`、`milestone`、`sprint`、ID、日付は、空文字を省略として読む。
-`title`、`description`、`body` は空文字のまま API へ渡す。
+任意の引数のうち `tenant`、`project`、`status`、`priority`、`q`、`sort`、`filter`、`cursor`、`task_type`、`milestone`、`sprint`、`file`、`repo`、`from_repo`、ID、日付は、空文字を省略として読む。
+`title`、`description`、`body`、`summary`、`note` は空文字のまま API へ渡す。
 
 ### テナントの決め方
 
@@ -342,6 +342,12 @@ UUID は確かめずに API へ渡す。
 | `add_task_comment` | `task`、`project`、`body`、`parent_comment_id` | `POST …/tasks/{task}/comments` |
 | `list_task_pull_requests` | `task`、`project` | `GET …/tasks/{task}/forge` |
 | `link_pull_request` | `task`、`project`、`number`、`closes` | `POST …/tasks/{task}/forge/pull-requests` |
+| `list_review_findings` | `project`、`pr`、`repo`、`state`、`severity` | `GET …/projects/{project}/review-findings` |
+| `list_review_rounds` | `project`、`pr`、`repo` | `GET …/projects/{project}/reviews` |
+| `get_review_summary` | `project`、`pr`、`repo` | `GET …/reviews/summary` |
+| `submit_review` | `project`、`pr`、`head_sha`、`summary`、`findings` | `POST …/projects/{project}/reviews` |
+| `update_review_finding` | `project`、`finding_id`、`state`、`note` | `PATCH …/review-findings/{finding_id}` |
+| `carry_over_review` | `project`、`from_pr`、`to_pr`、`from_repo` | `POST …/reviews/carry-over` |
 | `list_tenants` | なし | `GET /v1/tenants` |
 | `bulk_create_tasks` | `project`、`tasks`（`create_task` と同じ項目の配列）、`status` | `POST …/projects/{project}/tasks/bulk-create` |
 | `delete_task` | `task`、`project` | `DELETE …/tasks/{task}` |
@@ -366,6 +372,13 @@ UUID は確かめずに API へ渡す。
 `update_task` は渡した項目だけを変える。
 `soft_deadline` と `hard_deadline` は RFC 3339 か `YYYY-MM-DD` で渡し、`YYYY-MM-DD` はその日の始まりの UTC として読む。
 `priority` の値は API が検証する。
+
+レビューのツールは PR を番号の `pr` で指す。規則は[レビュー指摘](/dev/features/review-findings)にある。
+`list_review_findings` の `state` と `severity` は配列で渡す。
+`submit_review` の `findings` の各要素は `severity`、`title`、`body`、`file`、`line` を持つ。
+`submit_review` は API を呼ぶ前に、`head_sha` が 40 桁の小文字 16 進であること、`title` と `body` が空白だけでないこと、起票の上限と範囲を確かめる。`head_sha` の前後の空白は落として読む。
+`update_review_finding` は API を呼ぶ前に、`note` の上限を確かめる。
+`get_review_summary` は API の集計をそのまま返す。PR の HEAD との照合は、呼び出し側が `latest_head_sha` で行う。
 
 `bulk_create_tasks` は 1 回に 100 件までを、全件作るか 1 件も作らないかで作る。
 要素は `create_task` から `project` と `tenant` を除いた項目を持ち、名前の引き方も同じである。
@@ -401,6 +414,8 @@ OAuth で接続したとき、`whoami` は許可の ID と、クライアント�
 | `list_project_options` の `milestones` | PAT か許可の持ち主 | `read:milestone` |
 | `list_project_options` の `sprints` | PAT か許可の持ち主 | `read:sprint` |
 | `list_project_options` の `assignable_users` | PAT か許可の持ち主 | `write:task` |
+| `list_review_findings`、`list_review_rounds`、`get_review_summary` | PAT か許可の持ち主 | `read:review` |
+| `submit_review`、`update_review_finding`、`carry_over_review` | PAT か許可の持ち主 | `write:review` |
 | `list_tenants` | PAT か許可の持ち主 | `read:tenant` |
 | `list_my_tasks`、`get_notification_settings` | PAT か許可の持ち主 | `read:task` |
 | `list_notifications` | PAT か許可の持ち主 | `read:task` か `read:review` |
@@ -413,7 +428,6 @@ OAuth で接続したとき、`whoami` は許可の ID と、クライアント�
 
 `write:task` は `read:task` を含むので、`unlink_pull_request` と `update_notification_settings` が先に読む一覧も `write:task` で読める。
 PAT と許可での通知の一覧と既読は、持つ scope に応じた種別に限る。`read:task` か `write:task` でタスクの通知を、`read:review` か `write:review` でレビューの通知を扱う。
-OAuth ではレビューの scope を渡せないので、許可で扱えるのはタスクの通知だけである。
 
 引数を名前で渡すと、ID を引くための scope が追加で要る。
 
@@ -444,7 +458,7 @@ OAuth の同意と許可の管理は次のとおりである。
 テナントが 2FA を必須にしていれば、2FA を設定した利用者だけが同意できる。
 選んだテナントのうち 1 つでも条件を満たさなければ、全体を断る。
 
-OAuth で渡せる scope は `read:tenant`、`read:project`、`read:task`、`write:task`、`read:milestone`、`read:sprint` の 6 つに限る。
+OAuth で渡せる scope は `read:tenant`、`read:project`、`read:task`、`write:task`、`read:milestone`、`read:sprint`、`read:review`、`write:review` の 8 つに限る。
 `write:sprint` は渡せないので、`start_sprint` と `complete_sprint` は PAT でだけ使える。
 利用者は同意画面で、クライアントが求めた scope の一部だけを許可できる。
 
@@ -477,7 +491,7 @@ OAuth で渡せる scope は `read:tenant`、`read:project`、`read:task`、`wri
 - 「この端末で動くアプリが接続を求めています。自分で Claude Code や Codex から接続を始めた直後でなければ、拒否してください。」を出す
 - 戻り先をポートまで出す
 - テナントは、候補が 1 件でも選んでいない状態で始める
-- `write:task` はチェックを外した状態で始める
+- `write:task` と `write:review` はチェックを外した状態で始める
 
 テナントを 1 つ以上選ぶまで「許可する」は押せない。候補のテナントが無ければ「許可する」を出さない。
 認可の要求が受けられないときは、理由を出して止まり、クライアントへは戻らない。
@@ -487,7 +501,9 @@ OAuth で渡せる scope は `read:tenant`、`read:project`、`read:task`、`wri
 
 ## 未実装と既知の制限
 
-- レビュー指摘のツールは未実装である（TASK-560）
+- レビューのツールを足す前に与えた許可は `read:review` と `write:review` を持たない。レビューのツールを使うには接続し直す
+- `get_review_summary` は HEAD との照合をしない。CLI の `review summary` と違い、呼び出し側が `latest_head_sha` を比べる
+- 連携を張る前に記録したラウンドは、レビューのツールでは読めず、引き継ぎ元にもできない。CLI の `--repo ""` と `--from-repo ""` を使う
 - OAuth の接続では、`start_sprint` と `complete_sprint` が 403 `forbidden` になる
 - CLI の `sprints list`、`sprints burndown`、`my complete` に当たる専用のツールは無い。`list_project_options` の `sprints`、`get_sprint`、`update_task` を使う
 - `list_my_tasks` の `today` と `week` は UTC で決まる
@@ -534,6 +550,11 @@ OAuth で渡せる scope は `read:tenant`、`read:project`、`read:task`、`wri
 | 2026-11-19 | リフレッシュトークンの再利用は、猶予なく許可を取り消す | 公開クライアントのリフレッシュトークンは回転で守る。猶予を置くと、その間は盗まれたトークンも通る |
 | 2026-11-19 | 寿命はアクセストークン 1 時間、リフレッシュトークン 90 日で、使うたびに延ばす | アクセストークンは短くする。90 日は Device Token と PAT の既定に合わせた。使い続ける限り接続し直しを求めない |
 | 2026-11-19 | 連携中のアプリを、アカウント設定の新しいページ `/settings/apps` に置く | PAT は利用者が発行するもので、許可はクライアントが求めて利用者が与えるものである。一覧を分けると、解除する対象を探しやすい |
+| 2026-11-21 | レビュー指摘のツールを 6 個足す | CLI の `review` の起票、一覧、ラウンド、状態遷移、集計、引き継ぎを、CLI を入れにくい環境でも行える。形はほかのツールと同じで、REST API を呼び直す |
+| 2026-11-21 | OAuth で渡せる scope に `read:review` と `write:review` を足し、loopback の同意画面では `write:review` もチェックを外して始める | 渡せる scope はツールが使うものと定めている。足さなければ、一覧に並ぶのに OAuth では 1 つも通らないツールが 6 個できる。`write:review` は繰り延べで通常タスクを作れる。起票と状態遷移のあとには、マージ可になった PR への Approve と、未解決の High / Medium がある PR への変更要求が、レビュワー本人の名義で GitHub に出る。そのため `write:task` と同じ扱いにする |
+| 2026-11-21 | `submit_review` は API を呼ぶ前に、CLI と同じ 3 つを確かめ、同じ文面で返す | API のエラーは入力の全体を含み、先頭 2000 字で切れると上限の値が残らない。短縮 SHA のエラーは 40 桁が要ることを示さない。空白だけの `title` は API が通す。上限と範囲は DTO の規則を走らせるだけで、写しは持たない |
+| 2026-11-21 | `get_review_summary` は API の集計をそのまま返し、HEAD との照合を足さない | ほかのツールは API の応答を削らず足さずに返す。応答に `gate`、`mergeable`、`latest_head_sha` があり、判断の材料は揃う。サーバーには作業ツリーも終了コードも無い |
+| 2026-11-21 | レビューのツールの `repo` と `from_repo` は、空文字を省略として読む | 使わない引数に空文字を入れるクライアントがある。空文字を連携前のラウンドの指定として読むと、未解決の指摘があっても一覧が空になり、エラーにならないので誤りに気づけない |
 | 2026-11-21 | ラベル、担当者、種別、マイルストーン、スプリントの名前の解決を MCP の層で行い、選び方と文面を CLI から写す | `handler` から `cli` は参照できない。`tenant`、`project`、`status` の解決もすでに写しており、名前の選別だけを共有すると写しと共有が混ざる。文面のずれは CLI と同じ表のテストで止める |
 | 2026-11-21 | 名前を受ける引数から `_id` を外し、旧名を別名として受け続ける | 名前を受ける既存の引数（`tenant`、`project`、`status`）には `_id` が付かない。CLI のフラグも `--label` などである。引数の構造体は知らない引数を捨てるので、旧名を受けないと、旧名で呼んだときにラベルの無いタスクが黙ってできる |
 | 2026-11-21 | CLI の残りの操作を 13 個のツールで足し、既存のツールで足りる操作には専用のツールを作らない | 同じ応答を返すツールが 2 つあると、クライアントに渡るツールの一覧が長くなるだけである。最初の 12 個もタスクの完了を `update_task` に任せている |

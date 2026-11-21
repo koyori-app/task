@@ -30,6 +30,7 @@ const INSTRUCTIONS: &str = "Tools for the task tracker. Refer to a task as KEY-N
 The notification list and read tools and `list_tenants` take no `tenant`. \
 Labels, assignees, task types, milestones and sprints are passed by name or UUID; a name that is not found or is ambiguous returns the candidates. Looking up a milestone or sprint by name needs the read:milestone or read:sprint scope. \
 Referring to a project by key or to a task as KEY-N needs the `read:project` scope; without it, pass UUIDs. \
+Review tools take the pull request number as `pr`; `repo` is only needed to read rounds recorded for another repository. \
 A failed call returns the HTTP status and message of the API, e.g. `403 forbidden` or `404 not-found`.";
 
 /// 担当者の役割。CLI（`crates/cli/src/commands/tasks.rs` の `ASSIGNEE_ROLE`）と同じ値
@@ -45,10 +46,11 @@ impl TaskMcp {
         Self { api }
     }
 
-    /// 全ツール。子モジュールごとのルーターを足し合わせる。和を `#[tool_handler]` の
+    /// ツールはモジュールごとのルーターに分け、ここで足し合わせる。和を `#[tool_handler]` の
     /// 属性に直接書くと、マクロが `式.call(..)` と展開して最後の項にだけ掛かる
     fn all_tools() -> ToolRouter<Self> {
         Self::tool_router()
+            + Self::review_router()
             + Self::task_ops_router()
             + Self::sprints_router()
             + Self::notifications_router()
@@ -66,14 +68,14 @@ impl ServerHandler for TaskMcp {
 
 /// 失敗も `isError: true` の結果として返す。プロトコルのエラー（`Err`）にすると、
 /// クライアントが文面を利用者に見せない
-fn finish(result: Result<Value, ToolFailure>) -> Result<CallToolResult, ErrorData> {
+pub(super) fn finish(result: Result<Value, ToolFailure>) -> Result<CallToolResult, ErrorData> {
     Ok(match result {
         Ok(value) => ok(value),
         Err(failure) => failure.into(),
     })
 }
 
-fn parse_uuid(field: &str, value: &str) -> Result<Uuid, ToolFailure> {
+pub(super) fn parse_uuid(field: &str, value: &str) -> Result<Uuid, ToolFailure> {
     Uuid::parse_str(value).map_err(|_| ToolFailure::new(format!("{field} must be a UUID")))
 }
 
@@ -96,7 +98,7 @@ fn parse_date(field: &str, value: &str) -> Result<NaiveDate, ToolFailure> {
         .map_err(|_| ToolFailure::new(format!("{field} must be YYYY-MM-DD")))
 }
 
-fn to_body<T: serde::Serialize>(request: &T) -> Result<Value, ToolFailure> {
+pub(super) fn to_body<T: serde::Serialize>(request: &T) -> Result<Value, ToolFailure> {
     serde_json::to_value(request)
         .map_err(|error| ToolFailure::new(format!("Could not build the request body: {error}")))
 }
@@ -113,7 +115,7 @@ fn set_priority(body: &mut Value, priority: Option<String>) {
 /// 使わない引数に `""` を入れてくるクライアントがある。名前として解決すると、
 /// 束縛が 1 件の PAT でも `tenant: ""` が「テナントが見つからない」になる。
 /// 本文（`title`・`description`・`body`）には付けない
-fn blank_as_none<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+pub(super) fn blank_as_none<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -215,7 +217,7 @@ struct TaskArgs {
 struct CreateTaskArgs {
     /// Project key or UUID
     project: String,
-    /// 項目は一括作成の要素と共有する。flatten なので入力スキーマは平らなまま
+    // 項目は一括作成の要素と共有する。flatten なので入力スキーマは平らなまま
     #[serde(flatten)]
     task: NewTaskArgs,
     /// Tenant name or UUID. Only needed when the token is bound to more than one tenant
@@ -223,7 +225,7 @@ struct CreateTaskArgs {
     tenant: Option<String>,
 }
 
-/// 作るタスク 1 件の項目（`create_task` と `bulk_create_tasks` の要素）。
+// 作るタスク 1 件の項目（`create_task` と `bulk_create_tasks` の要素）。
 #[derive(Deserialize, JsonSchema)]
 struct NewTaskArgs {
     /// Task title
@@ -528,7 +530,7 @@ async fn resolve_status(
 }
 
 impl TaskMcp {
-    fn inner(&self, parts: &Parts) -> Result<InnerApi, ToolFailure> {
+    pub(super) fn inner(&self, parts: &Parts) -> Result<InnerApi, ToolFailure> {
         InnerApi::from_parts(&self.api, parts)
     }
 

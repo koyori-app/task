@@ -38,13 +38,15 @@ use uuid::Uuid;
 const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
 const REDIRECT_URI: &str = "https://client.test/callback";
 const STATE: &str = "state-xyz";
-const ALL_SCOPES: [&str; 6] = [
+const ALL_SCOPES: [&str; 8] = [
     "read:tenant",
     "read:project",
     "read:task",
     "write:task",
     "read:milestone",
     "read:sprint",
+    "read:review",
+    "write:review",
 ];
 
 // ---- 道具 ----
@@ -541,7 +543,7 @@ async fn authorization_server_metadata_advertises_cimd_and_public_clients_only()
     assert_eq!(body["authorization_response_iss_parameter_supported"], true);
     let scopes = body["scopes_supported"].as_array().expect("scopes");
     assert!(scopes.contains(&json!("offline_access")), "{scopes:?}");
-    assert_eq!(scopes.len(), 7);
+    assert_eq!(scopes.len(), ALL_SCOPES.len() + 1);
     // クライアントの登録は CIMD だけ
     assert!(body.get("registration_endpoint").is_none());
 }
@@ -684,6 +686,40 @@ async fn consent_narrows_the_scope() {
         .await
         .json();
     assert_eq!(listed["total"], 0, "{listed}");
+}
+
+#[tokio::test]
+async fn oauth_grant_with_read_review_can_list_findings() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let project = fx.tp.project_id.to_string();
+    let list = json!({ "project": project, "pr": 5 });
+    let submit = json!({
+        "project": project,
+        "pr": 5,
+        "head_sha": "60cdd77a1b2c3d4e5f60718293a4b5c6d7e8f901",
+    });
+
+    let reader = connect(&app, &[fx.tp.tenant_id], &["read:project", "read:review"]).await;
+    assert_eq!(reader.scope, "read:project read:review");
+    let listed = call(&app, &reader.access, "list_review_findings", list.clone())
+        .await
+        .json();
+    assert_eq!(listed, json!([]));
+    let denied = call(&app, &reader.access, "submit_review", submit.clone()).await;
+    assert_eq!(denied.error(), "403 forbidden");
+
+    // レビューの scope を持たない許可では読めない
+    let tasks_only = connect(&app, &[fx.tp.tenant_id], &["read:task"]).await;
+    let denied = call(&app, &tasks_only.access, "list_review_findings", list).await;
+    assert_eq!(denied.error(), "403 forbidden");
+
+    // 対照: `write:review` の許可は起票できる
+    let writer = connect(&app, &[fx.tp.tenant_id], &["write:review"]).await;
+    let created = call(&app, &writer.access, "submit_review", submit)
+        .await
+        .json();
+    assert_eq!(created["round"], 1, "{created}");
 }
 
 #[tokio::test]

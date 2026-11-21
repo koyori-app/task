@@ -23,13 +23,15 @@ pub const REFRESH_TOKEN_TTL_DAYS: i64 = 90;
 pub const CODE_TTL_SECS: u64 = 300;
 
 /// OAuth で渡せる scope。MCP のツールが要る scope の全部で、これ以外は渡さない。
-pub const GRANTABLE_SCOPES: [Scope; 6] = [
+pub const GRANTABLE_SCOPES: [Scope; 8] = [
     Scope::ReadTenant,
     Scope::ReadProject,
     Scope::ReadTask,
     Scope::WriteTask,
     Scope::ReadMilestone,
     Scope::ReadSprint,
+    Scope::ReadReview,
+    Scope::WriteReview,
 ];
 
 /// リフレッシュトークンを求める scope。受けて捨てる（発行はクライアントの宣言で決める）。
@@ -178,10 +180,10 @@ mod tests {
     }
 
     #[test]
-    fn grantable_scopes_are_the_six_the_tools_need() {
+    fn grantable_scopes_are_the_ones_the_tools_need() {
         assert_eq!(
             scope_string(&GRANTABLE_SCOPES),
-            "read:tenant read:project read:task write:task read:milestone read:sprint"
+            "read:tenant read:project read:task write:task read:milestone read:sprint read:review write:review"
         );
     }
 

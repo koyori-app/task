@@ -48,7 +48,7 @@ const tenantIds = computed(
 const scopes = computed(
   () =>
     chosenScopes.value ??
-    props.preview.scopes.filter((scope) => !(isLoopback.value && scope === 'write:task')),
+    props.preview.scopes.filter((scope) => !(isLoopback.value && scope.startsWith('write:'))),
 );
 
 function toggleScope(scope: TokenScope, checked: boolean) {
