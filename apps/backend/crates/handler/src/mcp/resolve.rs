@@ -491,7 +491,7 @@ impl<'a> ProjectNames<'a> {
             &[("username", value.to_string())],
             || {
                 format!(
-                    "could not look up the assignee \"{value}\": the token may lack the read:task scope, or it is not allowed in this project; if the scope is missing, pass the user UUID instead"
+                    "could not look up the assignee \"{value}\": the token may lack the read:task or write:task scope, or it is not allowed in this project; if the scope is missing, pass the user UUID instead"
                 )
             },
         )
@@ -731,6 +731,32 @@ mod tests {
         // UUID は一覧を引かずにそのまま返す
         let id = Uuid::from_u128(7);
         assert_eq!(names.user(&id.to_string()).await.unwrap(), id);
+    }
+
+    /// `?username=` は read:task と write:task のどちらでも通るので、403 の補足は両方を挙げる
+    #[tokio::test]
+    async fn forbidden_assignee_lookup_names_both_scopes() {
+        let (parts, ()) = axum::http::Request::builder()
+            .uri("/mcp")
+            .header(axum::http::header::AUTHORIZATION, "Bearer pat-1")
+            .body(())
+            .unwrap()
+            .into_parts();
+        let forbidden = axum::Router::new().fallback(|| async {
+            (
+                axum::http::StatusCode::FORBIDDEN,
+                axum::Json(json!({ "message": "forbidden" })),
+            )
+        });
+        let api = InnerApi::from_parts(&forbidden, &parts).unwrap();
+        let failure = ProjectNames::new(&api, "t", "p")
+            .user("alice")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            failure.text(),
+            "403 forbidden (could not look up the assignee \"alice\": the token may lack the read:task or write:task scope, or it is not allowed in this project; if the scope is missing, pass the user UUID instead)"
+        );
     }
 
     #[test]

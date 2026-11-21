@@ -5,7 +5,9 @@
 //! - ツール: REST API を内向きに呼び直すので、scope・テナント束縛・プロジェクト束縛の拒否が
 //!   そのまま `isError: true` の結果になる。拒否と対照の成功を組で確かめる
 
-use crate::common::{TestApp, TestTenantProject, TestUser, create_status, insert_tenant};
+use crate::common::{
+    TestApp, TestTenantProject, TestUser, create_status, insert_extra_project, insert_tenant,
+};
 use axum::http::StatusCode;
 use backend::utils::desktop_auth::s256_challenge;
 use entity::scopes::Scope;
@@ -1536,7 +1538,74 @@ async fn unknown_assignee_lists_candidates_only_with_write_scope() {
         outcome.error(),
         format!("Assignable user not found: nobody (this project has {me})")
     );
+
+    // 読むだけの PAT でも名前の解決は POST の前に走る。`?username=` は read:task で通り、
+    // 候補の全件は write:task が要るので候補なしになる
+    let reader = app
+        .insert_pat(
+            fx.user.id,
+            fx.tp.tenant_id,
+            vec![Scope::ReadProject, Scope::ReadTask],
+            None,
+        )
+        .await;
+    let outcome = call(
+        &app,
+        &reader,
+        "create_task",
+        json!({ "project": fx.project_key, "title": "作られない", "assignees": ["nobody"] }),
+    )
+    .await;
+    assert_eq!(
+        outcome.error(),
+        "Assignable user not found: nobody (this project has none)"
+    );
     assert_eq!(task_count(&app, &fx).await, 0);
+}
+
+/// 名前は指したプロジェクトの一覧からだけ引く。同じテナントの別のプロジェクトの同名は拾わない
+#[tokio::test]
+async fn names_are_looked_up_only_in_the_given_project() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+    let other = insert_extra_project(&app, fx.tp.tenant_id).await;
+    let response = app
+        .post_json_with_session(
+            &format!("/v1/tenants/{}/projects/{other}/labels", fx.tp.tenant_id),
+            json!({ "name": "bug", "color": "#336699" }),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let outcome = call(
+        &app,
+        &token,
+        "create_task",
+        json!({ "project": fx.project_key, "title": "作られない", "labels": ["bug"] }),
+    )
+    .await;
+    assert_eq!(
+        outcome.error(),
+        "Label not found: bug (this project has none)"
+    );
+    assert_eq!(task_count(&app, &fx).await, 0);
+
+    // 対照: 指したプロジェクトに同名を作れば引ける
+    let bug = create_label(&app, &fx, "bug").await;
+    let created = call(
+        &app,
+        &token,
+        "create_task",
+        json!({ "project": fx.project_key, "title": "引ける", "labels": ["bug"] }),
+    )
+    .await
+    .json();
+    let fetched = get_task_json(&app, &token, &created, &fx).await;
+    assert_eq!(
+        ids_of(&fetched["labels"], |label| &label["id"]),
+        sorted(&[bug])
+    );
 }
 
 #[tokio::test]
