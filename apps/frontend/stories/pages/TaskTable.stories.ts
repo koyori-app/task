@@ -1039,6 +1039,71 @@ export const ListView: Story = {
   },
 };
 
+/** 点の位置にある要素（elementFromPoint）。要素の中心を指す */
+function hitAtCenter(el: Element): Element | null {
+  const rect = el.getBoundingClientRect();
+  return document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+}
+
+/**
+ * スマホの幅の List 表示の当たり判定（TASK-524）。タイトルと 2 段目の全体で詳細を開き、
+ * ID の中心はコピーのボタンに当たる。列の切り替えは一覧の幅の container query なので、
+ * test-runner の画面幅によらず幅 390px の枠で狭い表示にする。
+ */
+export const ListViewNarrowHitArea: Story = {
+  name: 'List 表示の狭い幅の当たり判定',
+  decorators: [
+    storyDecorator(listContext),
+    () => ({ template: '<div style="width: 390px"><story /></div>' }),
+  ],
+  beforeEach: mockFetch,
+  play: async ({ canvasElement }) => {
+    const summary = await waitFor(() => {
+      const el = canvasElement.querySelector<HTMLElement>('[data-row-summary]');
+      if (!el || el.getBoundingClientRect().width === 0) throw new Error('2 段目がまだ出ていない');
+      return el;
+    });
+    const row = summary.closest<HTMLElement>('[data-dnd-task]')!;
+    const title = row.querySelector('[data-task-title-open]')!;
+    // 2 段目の期限・優先度の文字は、タイトルのボタン（after の的）に当たる
+    for (const text of summary.querySelectorAll(':scope > span')) {
+      await expect(hitAtCenter(text)?.closest('[data-task-title-open]')).toBe(title);
+    }
+    // ID の中心はコピーのボタン
+    const copy = summary.querySelector('[data-task-id-copy]')!;
+    await expect(hitAtCenter(copy)?.closest('[data-task-id-copy]')).toBe(copy);
+    // 未選択でもサブタスクの矢印が見えて押せる
+    const toggle = row.querySelector('button[aria-label="サブタスクを展開"]')!;
+    await expect(hitAtCenter(toggle)?.closest('button')).toBe(toggle);
+  },
+};
+
+/**
+ * スマホの幅の Table 表示の当たり判定（TASK-524）。タイトルのセルの余白は詳細を開くリンクに、
+ * ID の中心はコピーのボタンに当たる。狭い表示は画面幅の media query で決まる。
+ */
+export const TableNarrowHitArea: Story = {
+  name: 'Table 表示の狭い幅の当たり判定',
+  parameters: { viewport: { defaultViewport: 'mobile1' } },
+  globals: { viewport: { value: 'mobile1', isRotated: false } },
+  beforeEach: mockFetch,
+  play: async ({ canvasElement }) => {
+    await expect(window.matchMedia('(max-width: 768px)').matches).toBe(true);
+    const copy = await waitFor(() => {
+      const el = canvasElement.querySelector<HTMLElement>('td [data-task-id-copy]');
+      if (!el) throw new Error('ID のボタンがまだ出ていない');
+      return el;
+    });
+    await expect(hitAtCenter(copy)?.closest('[data-task-id-copy]')).toBe(copy);
+    const cell = copy.closest('td')!;
+    const link = cell.querySelector('a[data-task-seq-key]')!;
+    // ID の右の余白（セルの中、ID の行の右端の手前）はリンクに当たる
+    const rect = copy.parentElement!.getBoundingClientRect();
+    const blank = document.elementFromPoint(rect.right - 4, rect.top + rect.height / 2);
+    await expect(blank?.closest('a[data-task-seq-key]')).toBe(link);
+  },
+};
+
 // 共有の sampleTasks は書き換えない（既存の List 表示のストーリーの見た目が変わるため）
 export const ListViewChecklistProgress: Story = {
   name: 'List 表示のチェックリスト達成率',
@@ -1483,7 +1548,8 @@ export const ListViewSubtasks: Story = {
     const user = userEvent.setup();
     const row = await canvas.findByLabelText('タスク「OAuth 対応を実装する」を選択');
     const toggle = within(row).getByRole('button', { name: 'サブタスクを展開' });
-    await expect(toggle).toHaveClass('opacity-0');
+    // 広い幅では、選択するまで矢印を隠す（狭い幅は常に出す）
+    await expect(getComputedStyle(toggle).opacity).toBe('0');
 
     await user.click(row);
     await expect(toggle).toHaveClass('opacity-100');

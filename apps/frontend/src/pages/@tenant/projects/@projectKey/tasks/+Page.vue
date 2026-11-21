@@ -52,6 +52,7 @@ import {
 import TaskDetailPane, { type TaskRefLink } from '@/components/tasks/TaskDetailPane.vue';
 import CreateTaskDialog from '@/components/tasks/CreateTaskDialog.vue';
 import TaskListSortMenu from '@/components/tasks/TaskListSortMenu.vue';
+import TaskIdCopyButton from '@/components/tasks/TaskIdCopyButton.vue';
 import TaskTitleLink from '@/components/tasks/TaskTitleLink.vue';
 import { usePreference } from '@/composables/useLocalSettings';
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
@@ -675,6 +676,8 @@ const columns: ColumnDef<TaskTableFeatures, TaskRow>[] = [
         title: task.title,
         segments: matches.value[task.id]?.title ?? undefined,
         lines: isNarrow.value ? 2 : 1,
+        // 狭い幅はセルの余白も開く的にする。包含ブロックは下の relative な div（TASK-524）
+        stretch: isNarrow.value,
         onSelect: onSelectRow,
       });
       const icon = h(pc.icon, { class: 'size-4 shrink-0', style: { color: pc.color } });
@@ -683,12 +686,16 @@ const columns: ColumnDef<TaskTableFeatures, TaskRow>[] = [
           h('div', { class: 'flex items-center gap-2 min-w-0' }, [icon, link]),
           h(TaskMatchSnippets, { snippets: matches.value[task.id]?.snippets ?? [] }),
         ]);
-      // 狭い幅は ID の列を畳み、タイトルの下へ移す
-      return h('div', { class: 'min-w-0 py-1' }, [
+      // 狭い幅は ID の列を畳み、タイトルの下へ移す。ID はコピーのボタンにして的の上に置く
+      return h('div', { class: 'relative min-w-0 py-1' }, [
         link,
         h(TaskMatchSnippets, { snippets: matches.value[task.id]?.snippets ?? [] }),
         h('div', { class: 'mt-0.5 flex items-center gap-1.5' }, [
-          h('span', { class: 'font-mono text-xs text-muted-foreground' }, taskKey(task)),
+          h(TaskIdCopyButton, {
+            class: 'relative z-10',
+            projectKey: projectKey.value,
+            seqId: task.seq_id,
+          }),
           icon,
         ]),
       ]);

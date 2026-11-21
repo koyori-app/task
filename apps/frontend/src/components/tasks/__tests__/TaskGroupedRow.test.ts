@@ -51,17 +51,27 @@ function mountRow(selected = false) {
 }
 
 describe('TaskGroupedRow のサブタスク導線', () => {
-  it('空白部分を選択した後だけ展開矢印を見せる', async () => {
+  it('広い幅では、空白部分を選択した後だけ展開矢印を見せる', async () => {
     const wrapper = mountRow();
     const row = wrapper.get('[aria-label="タスク「親タスク」を選択"]');
     const toggle = wrapper.get('button[aria-label="サブタスクを展開"]');
-    expect(toggle.classes()).toContain('opacity-0');
+    expect(toggle.classes()).toContain('@3xl:opacity-0');
+    expect(toggle.classes()).toContain('@3xl:pointer-events-none');
 
     await row.trigger('click');
     expect(wrapper.emitted('select')).toHaveLength(1);
 
     await wrapper.setProps({ selected: true });
     expect(toggle.classes()).toContain('opacity-100');
+  });
+
+  // TASK-524: 狭い幅は 2 段目まで詳細を開く的になり、空白で選択して矢印を出す手順が使いにくい
+  it('狭い幅では、選択していなくても展開矢印を見せて押せる', () => {
+    const toggle = mountRow().get('button[aria-label="サブタスクを展開"]');
+
+    expect(toggle.classes()).not.toContain('@max-3xl:hidden');
+    expect(toggle.classes()).not.toContain('opacity-0');
+    expect(toggle.classes()).not.toContain('pointer-events-none');
   });
 
   it('既存コントロールとタイトルのクリックは行選択にしない', async () => {
@@ -196,7 +206,8 @@ describe('TaskGroupedRow のタイトルと補足', () => {
     expect(mountWith({ labels: [] }).get('[data-row-summary]').text()).not.toContain('·');
   });
 
-  it('狭い幅の 2 段目で押せるのは ID のコピーだけで、スマホの幅では隠す', () => {
+  // TASK-524: スマホでも ID をコピーでき、詳細を開く的（タイトルの after）より上に置く
+  it('狭い幅の 2 段目で押せるのは ID のコピーだけで、どの幅でも出して的の上に置く', () => {
     const summary = mountWith({ labels, soft_deadline: '2026-06-20T00:00:00Z' }).get(
       '[data-row-summary]',
     );
@@ -204,7 +215,38 @@ describe('TaskGroupedRow のタイトルと補足', () => {
 
     expect(controls).toHaveLength(1);
     expect(controls[0]?.attributes('data-task-id-copy')).toBeDefined();
-    expect(controls[0]?.classes()).toContain('max-[769px]:hidden');
+    expect(controls[0]?.classes()).not.toContain('max-[769px]:hidden');
+    expect(controls[0]?.classes()).toEqual(expect.arrayContaining(['relative', 'z-10']));
+    // 文字だけの ID は残さない（コピーのボタンが ID を出す）
+    expect(summary.find('.min-\\[769px\\]\\:hidden').exists()).toBe(false);
+  });
+
+  // TASK-524: 狭い幅は、タイトルの文字だけでなく文字の列（タイトルと 2 段目）の全体で詳細を開く
+  it('狭い幅ではタイトルのボタンの after が文字の列の全体に広がる', () => {
+    const title = mountWith({}).get('button[data-task-title-open]');
+
+    expect(title.classes()).toEqual(
+      expect.arrayContaining(['@max-3xl:after:absolute', '@max-3xl:after:inset-0']),
+    );
+    expect(title.element.parentElement?.classList.contains('relative')).toBe(true);
+    expect(title.element.parentElement?.querySelector('[data-row-summary]')).not.toBeNull();
+  });
+
+  it('狭い幅の 2 段目の ID を押してもコピーだけで、詳細を開かず行も選択しない', async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const wrapper = mountWith({ seq_id: 9 });
+
+    await wrapper.get('[data-row-summary] [data-task-id-copy]').trigger('click');
+
+    expect(writeText).toHaveBeenCalledWith('TEST-9');
+    expect(wrapper.emitted('open')).toBeUndefined();
+    expect(wrapper.emitted('select')).toBeUndefined();
+
+    // 対照: タイトルを押すと開く
+    await wrapper.get('button[data-task-title-open]').trigger('click');
+    expect(wrapper.emitted('open')).toEqual([['task-1']]);
+    delete (navigator as { clipboard?: unknown }).clipboard;
   });
 
   it('狭い幅の開閉の矢印は丸の下に積み、選択しても丸とタイトルを動かさない', () => {

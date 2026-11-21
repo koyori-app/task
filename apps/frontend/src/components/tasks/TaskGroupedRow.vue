@@ -17,7 +17,6 @@ import {
   isoToLocalDateInput,
   localDateInputToIso,
   PRIORITY_CONFIG,
-  taskSeqKey,
 } from '@/lib/task-display';
 import type { components } from '@/generated/api';
 import type { TaskRowField } from '@/composables/useTaskRowMutations';
@@ -92,7 +91,6 @@ const deadline = computed(() =>
   }),
 );
 const assignees = computed(() => props.task.assignees.map((entry) => entry.user));
-const seqKey = computed(() => taskSeqKey(props.projectKey, props.task.seq_id));
 const checklist = computed(() => countChecklist(props.task.description));
 // 狭い幅の 2 段目はラベルを先頭の 1 つと「+N」に畳む。全件は詳細で見る
 const firstLabel = computed(() => props.task.labels[0] ?? null);
@@ -233,7 +231,9 @@ function selectFromKeyboard(event: KeyboardEvent) {
       >
         <!--
           広い幅は矢印を丸の左に置く。狭い幅は丸の下へ積み、タイトルの幅を削らない。
-          選択で矢印が出ても、丸とタイトルの位置は動かない
+          選択で矢印が出ても、丸とタイトルの位置は動かない。
+          狭い幅は選択していなくても出す。2 段目まで詳細を開く的なので、空白で選択して
+          矢印を出す手順が使いにくい（TASK-524）
         -->
         <div
           class="flex shrink-0 flex-col-reverse items-center @3xl:flex-row @3xl:items-start @3xl:gap-2"
@@ -245,7 +245,7 @@ function selectFromKeyboard(event: KeyboardEvent) {
             :class="
               selected || expanded
                 ? 'bg-muted text-foreground opacity-100 hover:bg-muted-foreground/15'
-                : 'pointer-events-none opacity-0 @max-3xl:hidden'
+                : 'text-muted-foreground @3xl:pointer-events-none @3xl:opacity-0'
             "
             :aria-label="expanded ? 'サブタスクを折りたたむ' : 'サブタスクを展開'"
             :aria-expanded="expanded"
@@ -288,12 +288,15 @@ function selectFromKeyboard(event: KeyboardEvent) {
 
         <!--
           タイトルは省略せず折り返す。同じ段にラベルを並べると、縮めないラベルに押されて
-          タイトルの幅が 0 になり、読めず押せもしなくなる（TASK-484）
+          タイトルの幅が 0 になり、読めず押せもしなくなる（TASK-484）。
+          狭い幅はタイトルの after をこの列（relative）いっぱいに広げ、タイトルと 2 段目の全体で
+          詳細を開く（TASK-524）。包含ブロックは div なので、表の要素に頼らない。広い幅は 2 段目に
+          コピーとラベルの操作があるので広げない
         -->
-        <div class="min-w-0 flex-1 py-2">
+        <div class="relative min-w-0 flex-1 py-2">
           <button
             type="button"
-            class="block max-w-full text-left text-sm font-medium break-words hover:underline"
+            class="block max-w-full text-left text-sm font-medium break-words hover:underline @max-3xl:after:absolute @max-3xl:after:inset-0 @max-3xl:after:content-['']"
             data-task-title-open
             @click="emit('open', task.id)"
           >
@@ -353,10 +356,12 @@ function selectFromKeyboard(event: KeyboardEvent) {
             data-row-summary
           >
             <div class="flex min-w-0 flex-1 items-center gap-1.5">
-              <!-- 画面が広くサイドバーで一覧だけ狭いときは、ここでもコピーできる。スマホは文字だけ -->
-              <span class="shrink-0 font-mono min-[769px]:hidden">{{ seqKey }}</span>
+              <!--
+                ID はどの幅でもコピーのボタン。詳細を開く的（タイトルの after）より上に置き、
+                押してもコピーだけにする（TASK-524）
+              -->
               <TaskIdCopyButton
-                class="max-[769px]:hidden"
+                class="relative z-10"
                 :project-key="projectKey"
                 :seq-id="task.seq_id"
               />
