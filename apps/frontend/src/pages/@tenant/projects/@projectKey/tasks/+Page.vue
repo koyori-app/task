@@ -52,8 +52,7 @@ import {
 import TaskDetailPane, { type TaskRefLink } from '@/components/tasks/TaskDetailPane.vue';
 import CreateTaskDialog from '@/components/tasks/CreateTaskDialog.vue';
 import TaskListSortMenu from '@/components/tasks/TaskListSortMenu.vue';
-import TaskIdCopyButton from '@/components/tasks/TaskIdCopyButton.vue';
-import TaskTitleLink from '@/components/tasks/TaskTitleLink.vue';
+import TaskTableTitleCell from '@/components/tasks/TaskTableTitleCell.vue';
 import { usePreference } from '@/composables/useLocalSettings';
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
@@ -79,7 +78,6 @@ import { type TaskListSortingState } from '@/components/tasks/task-list-sort';
 
 import TaskQueryField from '@/components/tasks/query/TaskQueryField.vue';
 import TaskFilterBar from '@/components/tasks/query/TaskFilterBar.vue';
-import TaskMatchSnippets from '@/components/tasks/query/TaskMatchSnippets.vue';
 import { sortOf, setSort, hasFilter } from '@/lib/task-query/edit';
 import type { SuggestData } from '@/lib/task-query/suggest';
 import { taskQueryErrorsOf, describeTaskQueryError } from '@/lib/task-query/errors';
@@ -668,38 +666,18 @@ const columns: ColumnDef<TaskTableFeatures, TaskRow>[] = [
     header: 'タイトル',
     cell: ({ row }) => {
       const task = row.original;
-      const pc = PRIORITY_CONFIG[task.priority];
-      const link = h(TaskTitleLink, {
+      // 幅の判定（isNarrow）はセルの描画の中で読み、形は部品に任せる
+      return h(TaskTableTitleCell, {
         tenantDisplayId: tenantDisplayId.value,
         projectKey: projectKey.value,
         seqId: task.seq_id,
         title: task.title,
+        priority: task.priority,
+        narrow: isNarrow.value,
         segments: matches.value[task.id]?.title ?? undefined,
-        lines: isNarrow.value ? 2 : 1,
-        // 狭い幅はセルの余白も開く的にする。包含ブロックは下の relative な div（TASK-524）
-        stretch: isNarrow.value,
+        snippets: matches.value[task.id]?.snippets ?? [],
         onSelect: onSelectRow,
       });
-      const icon = h(pc.icon, { class: 'size-4 shrink-0', style: { color: pc.color } });
-      if (!isNarrow.value)
-        return h('div', { class: 'min-w-0' }, [
-          h('div', { class: 'flex items-center gap-2 min-w-0' }, [icon, link]),
-          h(TaskMatchSnippets, { snippets: matches.value[task.id]?.snippets ?? [] }),
-        ]);
-      // 狭い幅は ID の列を畳み、タイトルの下へ移す。ID はコピーのボタンにして的の上に置く
-      return h('div', { class: 'relative min-w-0 py-1' }, [
-        link,
-        h(TaskMatchSnippets, { snippets: matches.value[task.id]?.snippets ?? [] }),
-        h('div', { class: 'mt-0.5 flex items-center gap-1.5' }, [
-          h(TaskIdCopyButton, {
-            class: 'relative z-10',
-            compact: true,
-            projectKey: projectKey.value,
-            seqId: task.seq_id,
-          }),
-          icon,
-        ]),
-      ]);
     },
   },
   {

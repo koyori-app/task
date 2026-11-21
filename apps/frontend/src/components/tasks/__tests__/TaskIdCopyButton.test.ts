@@ -80,25 +80,56 @@ describe('TaskIdCopyButton', () => {
     expect(icon.classes()).toContain('group-focus-within:opacity-100');
   });
 
-  // TASK-524: スマホの狭い 2 段目で、番号の桁とアイコンの幅を取って期限の上へはみ出さない
-  it('compact は幅を先に取らず、親より広がらずに省略する', async () => {
-    const writeText = vi.fn(async () => {});
-    stubClipboard(writeText);
+  // TASK-524: 狭い 2 段目では番号を欠かさず、入らないときはキーの側だけを省略する
+  it('compact はキーと番号を分け、番号は縮めず、根は縮まずに親より広がらない', () => {
     const wrapper = mount(TaskIdCopyButton, {
-      props: { projectKey: 'ABCDEFGH', seqId: 1, compact: true },
+      props: { projectKey: 'ABCDEFGHIJ', seqId: 12345, compact: true },
     });
 
-    expect(wrapper.classes()).toEqual(expect.arrayContaining(['min-w-0', 'max-w-full']));
-    expect(wrapper.classes()).not.toContain('shrink-0');
-    const text = wrapper.get('span');
-    expect(text.attributes('style')).toBeUndefined();
-    expect(text.classes()).toContain('truncate');
+    expect(wrapper.classes()).toEqual(expect.arrayContaining(['shrink-0', 'max-w-full']));
+    expect(wrapper.classes()).not.toContain('min-w-0');
+    // 親の overflow-hidden に切られないよう、左へはみ出さない
+    expect(wrapper.classes()).not.toContain('-ml-1.5');
+    const key = wrapper.get('[data-task-id-key]');
+    const number = wrapper.get('[data-task-id-number]');
+    expect(key.text()).toBe('ABCDEFGHIJ');
+    expect(key.classes()).toEqual(expect.arrayContaining(['min-w-0', 'truncate']));
+    expect(number.text()).toBe('-12345');
+    expect(number.classes()).toContain('shrink-0');
+    // 表示が省略されても、名前と title は ID の全体
+    expect(wrapper.attributes('aria-label')).toBe('タスクID ABCDEFGHIJ-12345 をコピー');
+    expect(wrapper.attributes('title')).toBe('ABCDEFGHIJ-12345');
     expect(wrapper.find('svg').exists()).toBe(false);
+  });
 
-    // 押した結果は出す
-    await wrapper.trigger('click');
-    await flushPromises();
-    expect(writeText).toHaveBeenCalledWith('ABCDEFGH-1');
+  it.each([
+    ['成功', async () => {}, 'タスクIDをコピーしました'],
+    ['失敗', async () => Promise.reject(new Error('denied')), 'タスクIDをコピーできませんでした'],
+  ])(
+    'compact はコピーの%sでもアイコンを足さず、色と読み上げの名前で伝える',
+    async (_, write, name) => {
+      const writeText = vi.fn(write);
+      stubClipboard(writeText);
+      const wrapper = mount(TaskIdCopyButton, {
+        props: { projectKey: 'TASK', seqId: 123, compact: true },
+      });
+
+      await wrapper.trigger('click');
+      await flushPromises();
+
+      expect(writeText).toHaveBeenCalledWith('TASK-123');
+      expect(wrapper.attributes('aria-label')).toBe(name);
+      expect(wrapper.find('svg').exists()).toBe(false);
+      expect(wrapper.text()).toBe('TASK-123');
+    },
+  );
+
+  it('対照: compact でなければ幅を先に取り、アイコンの場所を持つ', () => {
+    const wrapper = mountButton();
+
+    expect(wrapper.classes()).toEqual(expect.arrayContaining(['shrink-0', '-ml-1.5']));
+    expect(wrapper.get('span').attributes('style')).toContain('width');
     expect(wrapper.find('svg').exists()).toBe(true);
+    expect(wrapper.attributes('title')).toBeUndefined();
   });
 });

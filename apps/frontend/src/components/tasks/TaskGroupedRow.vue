@@ -304,9 +304,11 @@ function selectFromKeyboard(event: KeyboardEvent) {
           タイトルは省略せず折り返す。同じ段にラベルを並べると、縮めないラベルに押されて
           タイトルの幅が 0 になり、読めず押せもしなくなる（TASK-484）。
           狭い幅はタイトルの after をこの列（relative）いっぱいに広げ、タイトルと 2 段目の全体で
-          詳細を開く（TASK-524）。after は z-[1] で、位置指定を持つ子（BOT のアバターなど）より上に置く。
-          包含ブロックは div なので、表の要素に頼らない。広い幅は 2 段目に
-          コピーとラベルの操作があるので広げない
+          詳細を開く（TASK-524）。包含ブロックは div なので、表の要素に頼らない。広い幅は 2 段目に
+          コピーとラベルの操作があるので広げない。
+          重なりの順は 2 段だけ: 的（after）は z-[1] で、位置指定を持つ子（BOT のアバターなど）より
+          上に置く。的の上に出す操作は 2 段目の ID のボタンだけで、relative z-10。
+          丸（ステータス）と矢印の列はこの列の外なので的に覆われない
         -->
         <div class="relative min-w-0 flex-1 py-2">
           <button
@@ -370,11 +372,20 @@ function selectFromKeyboard(event: KeyboardEvent) {
             class="mt-1 flex items-center gap-2 text-xs text-muted-foreground @3xl:hidden"
             data-row-summary
           >
-            <div class="flex min-w-0 flex-1 items-center gap-1.5">
+            <!--
+              左の群は 1 行（ID のボタンと同じ 24px）だけを見せる入れ物。1 行目に入らない要素は
+              折り返して 2 行目へ回り、overflow-hidden で見えなくなる。要素は丸ごと出るか出ないかの
+              どちらかで、はみ出しも当たり判定も入れ物が切るので、右の固定幅の列には届かない。
+              重ならないことは入れ物が守り、中の要素の縮み方では守らない。先に置いたものが残る
+              （ID → 達成率 → ラベル）
+            -->
+            <div
+              class="flex h-6 min-w-0 flex-1 flex-wrap content-start items-center gap-x-1.5 overflow-hidden"
+              data-row-summary-left
+            >
               <!--
-                ID はどの幅でもコピーのボタン。詳細を開く的（タイトルの after）より上に置き、
-                押してもコピーだけにする（TASK-524）。compact で、この列より広がって
-                期限などの上に的がはみ出さないようにする
+                ID はどの幅でもコピーのボタン（TASK-524）。compact は番号を縮めず、入らないときは
+                キーの側だけを省略する
               -->
               <TaskIdCopyButton
                 class="relative z-10"
@@ -388,7 +399,12 @@ function selectFromKeyboard(event: KeyboardEvent) {
                 :done="checklist.done"
                 :total="checklist.total"
               />
-              <template v-if="firstLabel">
+              <!-- ラベルは 1 つの塊。64px 以上残れば 1 行目に入って残りの幅まで伸び、名前を省略する -->
+              <span
+                v-if="firstLabel"
+                class="flex min-w-0 flex-[1_1_4rem] items-center gap-1.5"
+                data-row-label
+              >
                 <span aria-hidden="true">·</span>
                 <span
                   class="size-2 shrink-0 rounded-full"
@@ -397,7 +413,7 @@ function selectFromKeyboard(event: KeyboardEvent) {
                 />
                 <span class="min-w-0 truncate">{{ firstLabel.name }}</span>
                 <span v-if="hiddenLabelCount" class="shrink-0">+{{ hiddenLabelCount }}</span>
-              </template>
+              </span>
             </div>
             <span
               class="w-16 shrink-0 truncate text-right"

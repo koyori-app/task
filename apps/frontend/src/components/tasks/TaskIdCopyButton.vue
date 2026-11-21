@@ -9,8 +9,9 @@ const props = defineProps<{
   projectKey: string;
   seqId: number;
   /**
-   * 狭い場所向け。番号の桁とアイコンの幅を先に取らず、親より広がらない（あふれる分は省略する）。
-   * 隠れたコピーのアイコンは出さず、押した結果（チェック・×）だけを出す
+   * 狭い場所向け（狭い幅の一覧の 2 段目）。番号は縮めず、入らないときはキーの側だけを省略する。
+   * アイコンは出さず、押した結果は文字の色と読み上げの名前で伝える。押しても幅が変わらないので、
+   * 隣の要素が押し出されない。親より広がらない
    */
   compact?: boolean;
 }>();
@@ -28,9 +29,10 @@ const textWidth = computed(() => `${props.projectKey.length + 6}ch`);
 <template>
   <button
     type="button"
-    class="-ml-1.5 inline-flex h-6 items-center gap-1 rounded-md pr-1 pl-1.5 font-mono text-xs transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+    class="inline-flex h-6 shrink-0 items-center rounded-md pr-1 font-mono text-xs transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
     :class="[
-      compact ? 'max-w-full min-w-0' : 'shrink-0',
+      // compact は親の overflow-hidden に切られないよう、左へはみ出さず輪も内側に描く
+      compact ? 'max-w-full focus-visible:ring-inset' : '-ml-1.5 gap-1 pl-1.5',
       copyState === 'copied'
         ? 'text-(--koyori-color-success)'
         : copyState === 'error'
@@ -38,19 +40,25 @@ const textWidth = computed(() => `${props.projectKey.length + 6}ch`);
           : 'text-muted-foreground hover:text-foreground',
     ]"
     :aria-label="copyTaskIdLabel(copyState, seqKey)"
+    :title="compact ? seqKey : undefined"
     data-task-id-copy
     @mousedown.prevent
     @click="copyTaskId(seqKey)"
   >
-    <!-- アイコンの場所は先に確保して、出たときに文字を動かさない（compact は確保しない） -->
-    <span v-if="compact" class="min-w-0 truncate text-left">{{ seqKey }}</span>
-    <span v-else class="text-left" :style="{ width: textWidth }">{{ seqKey }}</span>
-    <Check v-if="copyState === 'copied'" class="size-3.5 shrink-0" aria-hidden="true" />
-    <X v-else-if="copyState === 'error'" class="size-3.5 shrink-0" aria-hidden="true" />
-    <Copy
-      v-else-if="!compact"
-      class="size-3.5 shrink-0 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
-      aria-hidden="true"
-    />
+    <template v-if="compact">
+      <span class="min-w-0 truncate" data-task-id-key>{{ projectKey }}</span>
+      <span class="shrink-0" data-task-id-number>-{{ seqId }}</span>
+    </template>
+    <template v-else>
+      <!-- アイコンの場所は先に確保して、出たときに文字を動かさない -->
+      <span class="text-left" :style="{ width: textWidth }">{{ seqKey }}</span>
+      <Check v-if="copyState === 'copied'" class="size-3.5 shrink-0" aria-hidden="true" />
+      <X v-else-if="copyState === 'error'" class="size-3.5 shrink-0" aria-hidden="true" />
+      <Copy
+        v-else
+        class="size-3.5 shrink-0 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
+        aria-hidden="true"
+      />
+    </template>
   </button>
 </template>

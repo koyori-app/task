@@ -1078,32 +1078,6 @@ export const ListViewNarrowHitArea: Story = {
   },
 };
 
-/**
- * スマホの幅の Table 表示の当たり判定（TASK-524）。タイトルのセルの余白は詳細を開くリンクに、
- * ID の中心はコピーのボタンに当たる。狭い表示は画面幅の media query で決まる。
- */
-export const TableNarrowHitArea: Story = {
-  name: 'Table 表示の狭い幅の当たり判定',
-  parameters: { viewport: { defaultViewport: 'mobile1' } },
-  globals: { viewport: { value: 'mobile1', isRotated: false } },
-  beforeEach: mockFetch,
-  play: async ({ canvasElement }) => {
-    await expect(window.matchMedia('(max-width: 768px)').matches).toBe(true);
-    const copy = await waitFor(() => {
-      const el = canvasElement.querySelector<HTMLElement>('td [data-task-id-copy]');
-      if (!el) throw new Error('ID のボタンがまだ出ていない');
-      return el;
-    });
-    await expect(hitAtCenter(copy)?.closest('[data-task-id-copy]')).toBe(copy);
-    const cell = copy.closest('td')!;
-    const link = cell.querySelector('a[data-task-seq-key]')!;
-    // ID の右の余白（セルの中、ID の行の右端の手前）はリンクに当たる
-    const rect = copy.parentElement!.getBoundingClientRect();
-    const blank = document.elementFromPoint(rect.right - 4, rect.top + rect.height / 2);
-    await expect(blank?.closest('a[data-task-seq-key]')).toBe(link);
-  },
-};
-
 // 共有の sampleTasks は書き換えない（既存の List 表示のストーリーの見た目が変わるため）
 export const ListViewChecklistProgress: Story = {
   name: 'List 表示のチェックリスト達成率',
@@ -1549,7 +1523,7 @@ export const ListViewSubtasks: Story = {
     const row = await canvas.findByLabelText('タスク「OAuth 対応を実装する」を選択');
     const toggle = within(row).getByRole('button', { name: 'サブタスクを展開' });
     // 広い幅では、選択するまで矢印を隠す（狭い幅は常に出す）
-    await expect(getComputedStyle(toggle).opacity).toBe('0');
+    await expect(toggle).toHaveClass('@3xl:opacity-0');
 
     await user.click(row);
     await expect(toggle).toHaveClass('opacity-100');

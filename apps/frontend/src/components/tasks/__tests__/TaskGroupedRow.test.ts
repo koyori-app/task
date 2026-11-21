@@ -218,10 +218,31 @@ describe('TaskGroupedRow のタイトルと補足', () => {
     expect(controls[0]?.attributes('data-task-id-copy')).toBeDefined();
     expect(controls[0]?.classes()).not.toContain('max-[769px]:hidden');
     expect(controls[0]?.classes()).toEqual(expect.arrayContaining(['relative', 'z-10']));
-    // 列より広がって期限の上へ的がはみ出さない（compact）
-    expect(controls[0]?.classes()).toContain('min-w-0');
+    // 番号を欠かさない compact の形（キーと番号が別の span）
+    expect(controls[0]?.find('[data-task-id-number]').text()).toBe('-1');
     // 文字だけの ID は残さない（コピーのボタンが ID を出す）
     expect(summary.find('.min-\\[769px\\]\\:hidden').exists()).toBe(false);
+  });
+
+  // TASK-524: 重ならないことは左の群（入れ物）が守る。1 行だけ見せ、入らない要素は 2 行目へ回して隠す
+  it('狭い幅の 2 段目の左の群は 1 行だけ見せる入れ物で、ラベルは 1 つの塊にまとめる', () => {
+    const summary = mountWith({ labels, description: '- [x] 設計\n- [ ] 実装' }).get(
+      '[data-row-summary]',
+    );
+    const left = summary.get('[data-row-summary-left]');
+
+    expect(left.classes()).toEqual(
+      expect.arrayContaining(['h-6', 'flex-wrap', 'overflow-hidden', 'min-w-0', 'flex-1']),
+    );
+    // ID → 達成率 → ラベルの順で、ラベルの「·」・点・名前・+N は 1 つの塊
+    const parts = left.element.children;
+    expect(parts).toHaveLength(3);
+    expect(parts[0]?.hasAttribute('data-task-id-copy')).toBe(true);
+    expect(parts[1]?.hasAttribute('data-checklist-progress')).toBe(true);
+    expect(parts[2]?.hasAttribute('data-row-label')).toBe(true);
+    expect(left.findAll('[data-row-label]')).toHaveLength(1);
+    expect(left.get('[data-row-label]').text()).toContain('UX改善');
+    expect(left.get('[data-row-label]').text()).toContain('+2');
   });
 
   // TASK-524: 狭い幅は、タイトルの文字だけでなく文字の列（タイトルと 2 段目）の全体で詳細を開く
