@@ -2,7 +2,7 @@
 import LoadErrorState from '@/components/LoadErrorState.vue';
 import { ChevronDown, ChevronLeft, ChevronRight, Loader2 } from '@lucide/vue';
 import { computed, onErrorCaptured, ref, shallowRef, useTemplateRef, watch } from 'vue';
-import { useQuery } from '@tanstack/vue-query';
+import { keepPreviousData, useQuery } from '@tanstack/vue-query';
 import { useElementSize, useMediaQuery, useWindowSize } from '@vueuse/core';
 import { navigate } from 'vike/client/router';
 import { usePageContext } from 'vike-vue/usePageContext';
@@ -21,6 +21,7 @@ import {
   Switch,
   type DropdownItem,
 } from '@koyori-app/ui-vue';
+import { useGanttPan } from '@/composables/useGanttPan';
 import { usePreference } from '@/composables/useLocalSettings';
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
@@ -40,7 +41,7 @@ import {
 } from '@/lib/calendar/schedule';
 import { dependencyEdges } from '@/lib/gantt/dependencies';
 import { scrollParentOf } from '@/lib/gantt/scroll-parent';
-import { dateInZone } from '@/lib/calendar/timeline';
+import { addDays, dateInZone } from '@/lib/calendar/timeline';
 import {
   layoutGantt,
   monthDay,
@@ -151,24 +152,46 @@ function setDependencies(on: boolean) {
   preferences.set('ganttDependencies', on);
 }
 
-watch([from, memberIds, scale, groupBy, urlProgressLine, urlDependencies, selectedTaskId], () => {
-  if (typeof window === 'undefined') return;
-  const url = applyGanttUrlState(
-    new URL(window.location.href),
-    {
-      from: from.value,
-      memberIds: memberIds.value,
-      scale: scale.value,
-      groupBy: groupBy.value,
-      progressLine: urlProgressLine.value,
-      dependencies: urlDependencies.value,
-      selected: selectedTaskId.value,
-    },
-    today,
-  );
-  // history を汚さない（カレンダーと同じ）
-  window.history.replaceState(window.history.state, '', url);
+// 横の wheel とスワイプで範囲を 1 日ずつ送る。1 日の幅は図の箱の幅で決まる（下の `dayWidth`）
+const pan = useGanttPan({
+  dayWidth: () => dayWidth.value,
+  pageWidth: () => chartBoxWidth.value,
+  shift: (days) => (from.value = addDays(viewFrom.value, days)),
 });
+// 取得する範囲。送っている間は前の範囲のまま据え、操作が止まってから 1 回だけ取り直す
+const fetchRange = shallowRef({ from: viewFrom.value, to: to.value });
+watch(
+  [viewFrom, to, pan.panning],
+  () => {
+    if (pan.panning.value) return;
+    fetchRange.value = { from: viewFrom.value, to: to.value };
+  },
+  { flush: 'sync' },
+);
+
+watch(
+  [from, memberIds, scale, groupBy, urlProgressLine, urlDependencies, selectedTaskId, pan.panning],
+  () => {
+    if (typeof window === 'undefined') return;
+    // 送っている間は書かず、止まった時に 1 回書く（WebKit は replaceState の回数に上限がある）
+    if (pan.panning.value) return;
+    const url = applyGanttUrlState(
+      new URL(window.location.href),
+      {
+        from: from.value,
+        memberIds: memberIds.value,
+        scale: scale.value,
+        groupBy: groupBy.value,
+        progressLine: urlProgressLine.value,
+        dependencies: urlDependencies.value,
+        selected: selectedTaskId.value,
+      },
+      today,
+    );
+    // history を汚さない（カレンダーと同じ）
+    window.history.replaceState(window.history.state, '', url);
+  },
+);
 
 const scheduleQuery = useQuery({
   queryKey: computed(
@@ -180,8 +203,8 @@ const scheduleQuery = useQuery({
           params: {
             path: { tenant_id: tenantId.value! },
             query: {
-              from: viewFrom.value,
-              to: to.value,
+              from: fetchRange.value.from,
+              to: fetchRange.value.to,
               timezone: timeZone,
               limit: SCHEDULE_PAGE_LIMIT,
               include_overdue: false,
@@ -193,7 +216,21 @@ const scheduleQuery = useQuery({
   ),
   queryFn: ({ queryKey, signal }) => fetchAllSchedule(queryKey[2].params, signal),
   enabled: computed(() => !!tenantId.value && (!scoped.value || !!projectId.value)),
+  // 範囲を変えても前の結果を描いたまま取り直す（読み込み中の表示で図を外さない）
+  placeholderData: (previousData, previousQuery) =>
+    sameScope(previousQuery?.queryKey[2]?.params) ? keepPreviousData(previousData) : undefined,
 });
+
+/** 前の取得が同じテナント・同じプロジェクトの絞りか。違えば前の結果を残さない */
+function sameScope(
+  prev: { path: { tenant_id: string }; query: { project_id?: string[] } } | undefined,
+): boolean {
+  return (
+    !!prev &&
+    prev.path.tenant_id === tenantId.value &&
+    JSON.stringify(prev.query.project_id) === JSON.stringify(projectFilter.value.project_id)
+  );
+}
 
 // 期間の無い課題は予定の API に出ないので、別の口で引いて数える
 const unscheduledQuery = useQuery({
@@ -225,8 +262,8 @@ const relationsQuery = useQuery({
           params: {
             path: { tenant_id: tenantId.value! },
             query: {
-              from: viewFrom.value,
-              to: to.value,
+              from: fetchRange.value.from,
+              to: fetchRange.value.to,
               timezone: timeZone,
               limit: SCHEDULE_PAGE_LIMIT,
               include_overdue: false,
@@ -241,6 +278,8 @@ const relationsQuery = useQuery({
   enabled: computed(
     () => dependenciesOn.value && !!tenantId.value && (!scoped.value || !!projectId.value),
   ),
+  placeholderData: (previousData, previousQuery) =>
+    sameScope(previousQuery?.queryKey[2]?.params) ? keepPreviousData(previousData) : undefined,
 });
 
 const scheduleTasks = computed(() => scheduleQuery.data.value?.tasks ?? []);
@@ -639,167 +678,185 @@ const LEGEND_BAR = `linear-gradient(to right, ${GANTT_PALETTE.TierLow} 40%, ${GA
       />
     </div>
 
+    <!-- 横の wheel とスワイプを受ける。空の表示・失敗の表示の上でも範囲を送れるよう、図の外側で受ける -->
     <div
-      v-if="isTenantResolving || isProjectResolving || scheduleQuery.isLoading.value"
-      class="flex justify-center py-8"
+      class="min-w-0 touch-pan-y touch-pinch-zoom"
+      data-testid="gantt-pan"
+      @wheel="pan.onWheel"
+      @pointerdown="pan.onPointerDown"
+      @pointermove="pan.onPointerMove"
+      @pointerup="pan.onPointerEnd"
+      @pointercancel="pan.onPointerEnd"
+      @click.capture="pan.onClickCapture"
     >
-      <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" aria-label="読み込み中" />
-    </div>
-
-    <LoadErrorState
-      v-else-if="isTenantResolveError || isProjectResolveError || scheduleQuery.isError.value"
-      message="予定の読み込みに失敗しました"
-      @retry="retryFailed"
-    />
-
-    <p v-else-if="isTenantNotFound" class="py-8 text-center text-sm text-muted-foreground">
-      テナントが見つかりません
-    </p>
-
-    <p v-else-if="isProjectNotFound" class="py-8 text-center text-sm text-muted-foreground">
-      プロジェクトが見つかりません
-    </p>
-
-    <p
-      v-else-if="!layout.groups.length"
-      class="py-8 text-center text-sm text-muted-foreground"
-      data-testid="gantt-empty"
-    >
-      この期間に予定のあるタスクはありません
-    </p>
-
-    <p
-      v-else-if="chartError"
-      class="py-8 text-center text-sm text-destructive"
-      role="alert"
-      data-testid="gantt-chart-error"
-    >
-      ガントを描けませんでした。ページを読み込み直してください
-    </p>
-
-    <div
-      v-else
-      class="flex min-w-0 overflow-hidden rounded-md border border-border"
-      data-testid="gantt-body"
-    >
-      <!-- 広い画面: 左の一覧（キー・題・担当・厳守の期限）。行の高さは図と同じ -->
-      <div v-if="!compact" class="w-80 shrink-0 border-r border-border" data-testid="gantt-list">
-        <div
-          class="flex items-end gap-1.5 px-2 pb-1 text-xs text-muted-foreground"
-          :style="{ height: `${HEADER_H}px` }"
-        >
-          <span class="flex-1">タスク</span>
-          <span class="w-7 text-center">担当</span>
-          <span class="w-9 text-right">厳守</span>
-        </div>
-        <template v-for="group in layout.groups" :key="group.key">
-          <button
-            type="button"
-            class="flex w-full items-center gap-1 px-2 text-left text-sm font-semibold"
-            :style="{ height: `${GROUP_H}px`, background: GANTT_PALETTE.GroupRow }"
-            :aria-expanded="!group.collapsed"
-            :data-testid="`gantt-group-${group.key}`"
-            @click="toggleGroup(group.key)"
-          >
-            <ChevronDown
-              class="size-4 shrink-0 transition-transform"
-              :class="{ '-rotate-90': group.collapsed }"
-              aria-hidden="true"
-            />
-            <span class="min-w-0 flex-1 truncate">{{ group.label }}</span>
-            <span class="text-xs font-normal text-muted-foreground">{{ group.count }} 件</span>
-          </button>
-          <template v-if="!group.collapsed">
-            <button
-              v-for="item in group.items"
-              :key="item.rowId"
-              type="button"
-              class="flex w-full items-center gap-1.5 border-t border-border/60 px-2 text-left hover:bg-muted/40"
-              :style="{ height: `${rowH}px` }"
-              :title="item.task.title"
-              @click="openTask(byId.get(item.task.id)!)"
-            >
-              <span class="min-w-0 flex-1">
-                <span class="block font-mono text-[11px] leading-tight text-muted-foreground">
-                  {{ item.task.seq_key }}
-                </span>
-                <span class="block truncate text-sm leading-tight">{{ item.task.title }}</span>
-              </span>
-              <span class="flex w-7 justify-center" :title="assigneeNames(item.task).join('、')">
-                <Avatar
-                  v-if="item.task.assignees.length"
-                  :name="assigneeNames(item.task)[0]!"
-                  :size="20"
-                />
-              </span>
-              <span class="w-9 text-right text-xs text-destructive">
-                {{ item.dates.hard ? monthDay(item.dates.hard) : '' }}
-              </span>
-            </button>
-          </template>
-        </template>
+      <div
+        v-if="isTenantResolving || isProjectResolving || scheduleQuery.isLoading.value"
+        class="flex justify-center py-8"
+      >
+        <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" aria-label="読み込み中" />
       </div>
 
-      <div ref="chartBox" class="relative min-w-0 flex-1 overflow-x-auto">
-        <GanttChart v-bind="chart" @task-click="onTaskClick" />
-        <!-- 狭い画面: 題と群れの見出しを図の行の上に重ねる -->
-        <template v-if="compact">
-          <template
-            v-for="row in overlayRows"
-            :key="row.kind === 'group' ? `g:${row.key}` : row.item.rowId"
+      <LoadErrorState
+        v-else-if="isTenantResolveError || isProjectResolveError || scheduleQuery.isError.value"
+        message="予定の読み込みに失敗しました"
+        @retry="retryFailed"
+      />
+
+      <p v-else-if="isTenantNotFound" class="py-8 text-center text-sm text-muted-foreground">
+        テナントが見つかりません
+      </p>
+
+      <p v-else-if="isProjectNotFound" class="py-8 text-center text-sm text-muted-foreground">
+        プロジェクトが見つかりません
+      </p>
+
+      <p
+        v-else-if="!layout.groups.length"
+        class="py-8 text-center text-sm text-muted-foreground"
+        data-testid="gantt-empty"
+      >
+        この期間に予定のあるタスクはありません
+      </p>
+
+      <p
+        v-else-if="chartError"
+        class="py-8 text-center text-sm text-destructive"
+        role="alert"
+        data-testid="gantt-chart-error"
+      >
+        ガントを描けませんでした。ページを読み込み直してください
+      </p>
+
+      <div
+        v-else
+        class="flex min-w-0 touch-pan-y touch-pinch-zoom overflow-hidden rounded-md border border-border"
+        data-testid="gantt-body"
+      >
+        <!-- 広い画面: 左の一覧（キー・題・担当・厳守の期限）。行の高さは図と同じ -->
+        <div v-if="!compact" class="w-80 shrink-0 border-r border-border" data-testid="gantt-list">
+          <div
+            class="flex items-end gap-1.5 px-2 pb-1 text-xs text-muted-foreground"
+            :style="{ height: `${HEADER_H}px` }"
           >
+            <span class="flex-1">タスク</span>
+            <span class="w-7 text-center">担当</span>
+            <span class="w-9 text-right">厳守</span>
+          </div>
+          <template v-for="group in layout.groups" :key="group.key">
             <button
-              v-if="row.kind === 'group'"
               type="button"
-              class="absolute inset-x-0 flex items-center gap-1 px-2 text-left text-sm font-semibold"
-              :style="{ top: `${row.y}px`, height: `${GROUP_H}px` }"
-              :aria-expanded="!row.collapsed"
-              @click="toggleGroup(row.key)"
+              class="flex w-full items-center gap-1 px-2 text-left text-sm font-semibold"
+              :style="{ height: `${GROUP_H}px`, background: GANTT_PALETTE.GroupRow }"
+              :aria-expanded="!group.collapsed"
+              :data-testid="`gantt-group-${group.key}`"
+              @click="toggleGroup(group.key)"
             >
               <ChevronDown
                 class="size-4 shrink-0 transition-transform"
-                :class="{ '-rotate-90': row.collapsed }"
+                :class="{ '-rotate-90': group.collapsed }"
                 aria-hidden="true"
               />
-              <span class="min-w-0 flex-1 truncate">{{ row.label }}</span>
-              <span class="text-xs font-normal text-muted-foreground">{{ row.count }} 件</span>
+              <span class="min-w-0 flex-1 truncate">{{ group.label }}</span>
+              <span class="text-xs font-normal text-muted-foreground">{{ group.count }} 件</span>
             </button>
-            <button
-              v-else
-              type="button"
-              class="absolute inset-x-0 flex items-start gap-2 px-2 pt-1.5 text-left"
-              :style="{ top: `${row.y}px`, height: `${rowH - 30}px` }"
-              @click="openTask(byId.get(row.item.task.id)!)"
-            >
-              <Avatar
-                v-if="row.item.task.assignees.length"
-                :name="assigneeNames(row.item.task)[0]!"
-                :size="20"
-              />
-              <span class="min-w-0 flex-1">
-                <span class="block truncate text-sm leading-tight">{{ row.item.task.title }}</span>
-                <span class="block truncate text-[11px] leading-tight text-muted-foreground">
-                  {{ compactMeta(row.item) }}
-                  <template v-if="dependenciesOn">
-                    <span
-                      v-if="dependencies.marks.get(row.item.task.id)?.waitingFor.length"
-                      class="text-destructive"
-                      data-testid="gantt-dependency-waiting"
-                    >
-                      ・{{ dependencies.marks.get(row.item.task.id)!.waitingFor.join('・') }} 待ち
-                    </span>
-                    <span
-                      v-else-if="dependencies.marks.get(row.item.task.id)?.count"
-                      data-testid="gantt-dependency-count"
-                    >
-                      ・依存 {{ dependencies.marks.get(row.item.task.id)!.count }}
-                    </span>
-                  </template>
+            <template v-if="!group.collapsed">
+              <button
+                v-for="item in group.items"
+                :key="item.rowId"
+                type="button"
+                class="flex w-full items-center gap-1.5 border-t border-border/60 px-2 text-left hover:bg-muted/40"
+                :style="{ height: `${rowH}px` }"
+                :title="item.task.title"
+                @click="openTask(byId.get(item.task.id)!)"
+              >
+                <span class="min-w-0 flex-1">
+                  <span class="block font-mono text-[11px] leading-tight text-muted-foreground">
+                    {{ item.task.seq_key }}
+                  </span>
+                  <span class="block truncate text-sm leading-tight">{{ item.task.title }}</span>
                 </span>
-              </span>
-            </button>
+                <span class="flex w-7 justify-center" :title="assigneeNames(item.task).join('、')">
+                  <Avatar
+                    v-if="item.task.assignees.length"
+                    :name="assigneeNames(item.task)[0]!"
+                    :size="20"
+                  />
+                </span>
+                <span class="w-9 text-right text-xs text-destructive">
+                  {{ item.dates.hard ? monthDay(item.dates.hard) : '' }}
+                </span>
+              </button>
+            </template>
           </template>
-        </template>
+        </div>
+
+        <!-- touch-action は巻ける域で戻るので、箱と arc の内側の域にも直に当てる -->
+        <div
+          ref="chartBox"
+          class="relative min-w-0 flex-1 touch-pan-y touch-pinch-zoom overflow-x-auto overscroll-x-contain [&_.koyori-gantt-scroll]:touch-pan-y [&_.koyori-gantt-scroll]:touch-pinch-zoom"
+        >
+          <GanttChart v-bind="chart" @task-click="onTaskClick" />
+          <!-- 狭い画面: 題と群れの見出しを図の行の上に重ねる -->
+          <template v-if="compact">
+            <template
+              v-for="row in overlayRows"
+              :key="row.kind === 'group' ? `g:${row.key}` : row.item.rowId"
+            >
+              <button
+                v-if="row.kind === 'group'"
+                type="button"
+                class="absolute inset-x-0 flex items-center gap-1 px-2 text-left text-sm font-semibold"
+                :style="{ top: `${row.y}px`, height: `${GROUP_H}px` }"
+                :aria-expanded="!row.collapsed"
+                @click="toggleGroup(row.key)"
+              >
+                <ChevronDown
+                  class="size-4 shrink-0 transition-transform"
+                  :class="{ '-rotate-90': row.collapsed }"
+                  aria-hidden="true"
+                />
+                <span class="min-w-0 flex-1 truncate">{{ row.label }}</span>
+                <span class="text-xs font-normal text-muted-foreground">{{ row.count }} 件</span>
+              </button>
+              <button
+                v-else
+                type="button"
+                class="absolute inset-x-0 flex items-start gap-2 px-2 pt-1.5 text-left"
+                :style="{ top: `${row.y}px`, height: `${rowH - 30}px` }"
+                @click="openTask(byId.get(row.item.task.id)!)"
+              >
+                <Avatar
+                  v-if="row.item.task.assignees.length"
+                  :name="assigneeNames(row.item.task)[0]!"
+                  :size="20"
+                />
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-sm leading-tight">{{
+                    row.item.task.title
+                  }}</span>
+                  <span class="block truncate text-[11px] leading-tight text-muted-foreground">
+                    {{ compactMeta(row.item) }}
+                    <template v-if="dependenciesOn">
+                      <span
+                        v-if="dependencies.marks.get(row.item.task.id)?.waitingFor.length"
+                        class="text-destructive"
+                        data-testid="gantt-dependency-waiting"
+                      >
+                        ・{{ dependencies.marks.get(row.item.task.id)!.waitingFor.join('・') }} 待ち
+                      </span>
+                      <span
+                        v-else-if="dependencies.marks.get(row.item.task.id)?.count"
+                        data-testid="gantt-dependency-count"
+                      >
+                        ・依存 {{ dependencies.marks.get(row.item.task.id)!.count }}
+                      </span>
+                    </template>
+                  </span>
+                </span>
+              </button>
+            </template>
+          </template>
+        </div>
       </div>
     </div>
 

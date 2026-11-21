@@ -12,7 +12,7 @@ import { GANTT_SCALES, type GanttGroupBy, type GanttScale } from '@/lib/gantt/vi
  */
 export type GanttUrlState = Pick<CalendarUrlState, 'memberIds' | 'selected'> & {
   /**
-   * 範囲の頭（月曜）。選んでおらねば `null` で、今日に従う（目盛りと画面の幅で決まる
+   * 範囲の頭。選んでおらねば `null` で、今日に従う（目盛りと画面の幅で決まる
    * `defaultFrom`）。今日に従う範囲は URL に書かぬので、日が替われば今日の範囲になる。
    */
   from: string | null;
@@ -40,7 +40,7 @@ export function parseGanttUrlState(
 ): GanttUrlState {
   const { memberIds, selected } = parseCalendarUrlState(searchAll, today);
   const rawFrom = searchAll?.from?.at(-1) ?? '';
-  const from = isDateString(rawFrom) ? mondayOf(rawFrom) : null;
+  const from = isDateString(rawFrom) ? rawFrom : null;
   const rawScale = searchAll?.scale?.at(-1);
   const rawGroup = searchAll?.group?.at(-1);
   const rawLine = searchAll?.line?.at(-1);
