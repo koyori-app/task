@@ -481,6 +481,94 @@ async fn list_my_tasks_returns_the_assigned_tasks() {
     assert_eq!(outcome.error(), "403 forbidden");
 }
 
+/// 個人プロジェクトのタスクは `KEY-N` で指せないので、`list_my_tasks` の `id` と
+/// `project.id` を `update_task` に渡して完了にする（`my complete` の代わり）
+#[tokio::test]
+async fn personal_task_is_completed_with_the_ids_from_list_my_tasks() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let token = api_pat(&app, &fx).await;
+    let res = app
+        .get_with_session(&format!(
+            "/v1/tenants/{}/users/me/personal-project",
+            fx.tp.tenant_id
+        ))
+        .await;
+    assert_eq!(res.status(), axum::http::StatusCode::OK);
+    let personal: Value = res.json().await.expect("personal project json");
+    assert_eq!(personal["is_personal"], true);
+    let personal_id = Uuid::parse_str(personal["id"].as_str().expect("id")).expect("uuid");
+    let personal_tp = crate::common::TestTenantProject {
+        tenant_id: fx.tp.tenant_id,
+        project_id: personal_id,
+    };
+    let statuses = call(
+        &app,
+        &token,
+        "list_project_options",
+        json!({ "project": personal_id.to_string(), "kind": "statuses" }),
+    )
+    .await
+    .json();
+    let done = match statuses
+        .as_array()
+        .expect("statuses")
+        .iter()
+        .find(|status| status["is_done_state"] == true)
+    {
+        Some(status) => Uuid::parse_str(status["id"].as_str().expect("id")).expect("uuid"),
+        None => {
+            crate::common::create_status(&app, &personal_tp, "Todo", false).await;
+            crate::common::create_status(&app, &personal_tp, "Done", true).await
+        }
+    };
+    let me = username(&app, fx.user.id).await;
+    call(
+        &app,
+        &token,
+        "create_task",
+        json!({ "project": personal_id.to_string(), "title": "自分用", "assignees": [me] }),
+    )
+    .await
+    .json();
+
+    let mine = call(&app, &token, "list_my_tasks", json!({ "done": false }))
+        .await
+        .json();
+    let item = mine["tasks"]
+        .as_array()
+        .expect("tasks")
+        .iter()
+        .find(|task| task["title"] == "自分用")
+        .unwrap_or_else(|| panic!("個人プロジェクトのタスクが一覧に出る: {mine}"));
+    assert_eq!(item["project"]["is_personal"], true);
+
+    let updated = call(
+        &app,
+        &token,
+        "update_task",
+        json!({
+            "task": item["id"],
+            "project": item["project"]["id"],
+            "status": done.to_string(),
+        }),
+    )
+    .await
+    .json();
+    assert_eq!(updated["status_id"], done.to_string());
+    let mine = call(&app, &token, "list_my_tasks", json!({ "done": false }))
+        .await
+        .json();
+    assert!(
+        mine["tasks"]
+            .as_array()
+            .expect("tasks")
+            .iter()
+            .all(|task| task["title"] != "自分用"),
+        "{mine}"
+    );
+}
+
 #[tokio::test]
 async fn list_my_tasks_outside_the_token_binding_is_403() {
     let mut app = TestApp::new().await;
