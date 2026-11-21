@@ -4,7 +4,7 @@ import AdminUserList from '@/components/admin/AdminUserList.vue';
 </script>
 
 <template>
-  <AdminShell title="管理" description="ユーザーの作成・停止と、認証事故の復旧を行います。">
+  <AdminShell title="管理">
     <AdminUserList />
   </AdminShell>
 </template>

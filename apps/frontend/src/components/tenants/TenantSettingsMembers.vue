@@ -429,11 +429,7 @@ async function confirmRemove() {
   <div class="min-h-0 flex-1 overflow-auto">
     <div class="mx-auto max-w-[760px] px-6 pb-14 pt-8">
       <div class="mb-6">
-        <h1 class="m-0 mb-1 text-2xl font-bold tracking-tight">メンバー</h1>
-        <p class="m-0 text-sm text-muted-foreground">
-          <strong class="font-medium text-foreground">{{ tenant.name }}</strong>
-          に入れる人を管理します。メンバーはこのテナントのすべてのプロジェクトを見られます。
-        </p>
+        <h1 class="m-0 text-2xl font-bold tracking-tight">メンバー</h1>
       </div>
 
       <!-- 招待 -->

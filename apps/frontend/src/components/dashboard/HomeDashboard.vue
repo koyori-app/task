@@ -266,9 +266,6 @@ async function complete(item: DashboardTask) {
             >{{ me.data.value?.username ?? 'ユーザー' }}さん</span
           >
         </h1>
-        <p class="mt-2 text-xs text-muted-foreground sm:text-sm">
-          今日のタスクと、チームの動きをまとめて。
-        </p>
       </div>
       <Button
         class="shrink-0"
