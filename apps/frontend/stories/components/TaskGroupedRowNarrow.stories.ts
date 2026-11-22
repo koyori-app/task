@@ -36,6 +36,8 @@ type RowCase = {
   labels?: ReturnType<typeof label>[];
   assignees?: unknown[];
   depth?: 0 | 1;
+  /** 本物のサブタスクの行（TaskSubtaskBranch）は矢印を出さない */
+  showSubtaskToggle?: boolean;
   noDeadline?: boolean;
 };
 
@@ -85,12 +87,53 @@ const ROWS: RowCase[] = [
     labels: [label('l1', 'UX改善', '#10b981')],
     assignees: [person('u1', 'yupix')],
     depth: 1,
+    showSubtaskToggle: false,
   },
   { name: 'h 期限なし', projectKey: 'TASK', seqId: 123, noDeadline: true },
 ];
 
 /** 一覧の幅。320 / 390 / 480 / 768px の画面から左右 16px の余白を除いた幅 */
 const WIDTHS = [288, 358, 448, 736];
+
+/**
+ * 枠と行（頭文字）ごとに、1 行目に見えるはずの達成率とラベル（入る幅があるときだけ丸ごと出す）。
+ * 288px は ID だけ。358px は短い ID の後ろに達成率かラベルのどちらか。448px は長い ID だとラベルの
+ * 64px が残らない。736px は全部出る。a・f・h は達成率もラベルも持たない
+ */
+const EXPECTED_SHOWN: Record<string, string> = {
+  '288 a': '',
+  '288 b': '',
+  '288 c': '',
+  '288 d': '',
+  '288 e': '',
+  '288 f': '',
+  '288 g': '',
+  '288 h': '',
+  '358 a': '',
+  '358 b': 'progress',
+  '358 c': 'label',
+  '358 d': 'progress',
+  '358 e': '',
+  '358 f': '',
+  '358 g': '',
+  '358 h': '',
+  '448 a': '',
+  '448 b': 'progress+label',
+  '448 c': 'label',
+  '448 d': 'progress',
+  '448 e': 'progress',
+  '448 f': '',
+  '448 g': 'progress+label',
+  '448 h': '',
+  '736 a': '',
+  '736 b': 'progress+label',
+  '736 c': 'label',
+  '736 d': 'progress',
+  '736 e': 'progress+label',
+  '736 f': '',
+  '736 g': 'progress+label',
+  '736 h': '',
+};
 
 function taskOf(row: RowCase): TaskResponse {
   return {
@@ -146,6 +189,7 @@ function renderRows(widths: number[], rows: RowCase[]) {
             :project-labels="[]"
             :members="[]"
             :depth="row.depth ?? 0"
+            :show-subtask-toggle="row.showSubtaskToggle ?? true"
             :on-comment="async () => true"
             @open="onOpen"
             @select="onSelect"
@@ -194,6 +238,24 @@ export const NarrowLayout: Story = {
   render: renderRows(WIDTHS, ROWS),
   play: async ({ canvasElement }) => {
     const all = await summaries(canvasElement, WIDTHS.length * ROWS.length);
+    // 枠と行ごとに、1 行目に見えている達成率（progress）とラベル（label）。出るはずのものが出ていることも見る
+    const shown: Record<string, string> = {};
+    for (const summary of all) {
+      const row = summary.closest<HTMLElement>('[data-case]')!;
+      const left = summary.querySelector<HTMLElement>('[data-row-summary-left]')!;
+      const leftBox = left.getBoundingClientRect();
+      const parts = [
+        ['progress', left.querySelector('[data-checklist-progress]')],
+        ['label', left.querySelector('[data-row-label]')],
+      ] as const;
+      const key = `${row.closest('[data-frame]')!.getAttribute('data-frame')} ${row.dataset.case!.slice(0, 1)}`;
+      shown[key] = parts
+        .filter(([, el]) => el && within(el.getBoundingClientRect(), leftBox))
+        .map(([name]) => name)
+        .join('+');
+    }
+    await expect(shown).toEqual(EXPECTED_SHOWN);
+
     for (const summary of all) {
       const row = summary.closest<HTMLElement>('[data-case]')!;
       const where = `${row.closest('[data-frame]')!.getAttribute('data-frame')}px ${row.dataset.case}`;
@@ -203,6 +265,9 @@ export const NarrowLayout: Story = {
       const copyBox = copy.getBoundingClientRect();
       const number = copy.querySelector<HTMLElement>('[data-task-id-number]')!;
 
+      // 左の群はスクロールできない（検索などで隠した 2 行目へ送られて ID の行が消えない）
+      left.scrollTop = 24;
+      await expect(left.scrollTop, `${where}: 左の群がスクロールする`).toBe(0);
       // C1: コピーの的は左の群の中
       await expect(within(copyBox, leftBox), `${where}: ID が群を越える`).toBe(true);
       // C2: 番号は全部見える
@@ -222,8 +287,12 @@ export const NarrowLayout: Story = {
         ).toBe(true);
       }
 
-      // C5: 期限・優先度・担当と BOT の札は詳細を開く
+      // C5: 期限・優先度・担当と BOT の札は詳細を開く。BOT の札が出ていることも先に見る
       const title = row.querySelector('[data-task-title-open]')!;
+      await expect(
+        summary.querySelectorAll('[aria-label="BOT アカウント"]').length,
+        `${where}: BOT の札`,
+      ).toBe(row.dataset.case!.startsWith('e') ? 1 : 0);
       for (const target of [
         ...summary.querySelectorAll(':scope > span'),
         ...summary.querySelectorAll('[aria-label="BOT アカウント"]'),
@@ -235,8 +304,13 @@ export const NarrowLayout: Story = {
       }
       // C6・C7: ID・矢印・丸はそれぞれの操作
       await expect(hitAtCenter(copy)?.closest('[data-task-id-copy]'), where).toBe(copy);
-      const toggle = row.querySelector('button[aria-label="サブタスクを展開"]')!;
-      await expect(hitAtCenter(toggle)?.closest('button'), where).toBe(toggle);
+      const toggle = row.querySelector('button[aria-label="サブタスクを展開"]');
+      if (row.dataset.case!.startsWith('g')) {
+        // 本物のサブタスクの行と同じく矢印を出さない
+        await expect(toggle, where).toBeNull();
+      } else {
+        await expect(hitAtCenter(toggle!)?.closest('button'), where).toBe(toggle);
+      }
       const statusButton = row.querySelector('button[aria-label^="ステータス"]')!;
       await expect(hitAtCenter(statusButton)?.closest('button'), where).toBe(statusButton);
     }

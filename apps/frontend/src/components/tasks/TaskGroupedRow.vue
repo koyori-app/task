@@ -389,13 +389,14 @@ function selectFromKeyboard(event: KeyboardEvent) {
           >
             <!--
               左の群は 1 行（ID のボタンと同じ 24px）だけを見せる入れ物。1 行目に入らない要素は
-              折り返して 2 行目へ回り、overflow-hidden で見えなくなる。要素は丸ごと出るか出ないかの
+              折り返して 2 行目へ回り、overflow-clip で見えなくなる。要素は丸ごと出るか出ないかの
               どちらかで、はみ出しも当たり判定も入れ物が切るので、右の固定幅の列には届かない。
               重ならないことは入れ物が守り、中の要素の縮み方では守らない。先に置いたものが残る
-              （ID → 達成率 → ラベル）
+              （ID → 達成率 → ラベル）。hidden でなく clip にするのは、ページ内検索や scrollIntoView が
+              入れ物をスクロールして、隠した 2 行目を出したまま ID の行を消さないようにするため
             -->
             <div
-              class="flex h-6 min-w-0 flex-1 flex-wrap content-start items-center gap-x-1.5 overflow-hidden"
+              class="flex h-6 min-w-0 flex-1 flex-wrap content-start items-center gap-x-1.5 overflow-clip"
               data-row-summary-left
             >
               <!--

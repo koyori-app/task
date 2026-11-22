@@ -232,7 +232,7 @@ describe('TaskGroupedRow のタイトルと補足', () => {
     const left = summary.get('[data-row-summary-left]');
 
     expect(left.classes()).toEqual(
-      expect.arrayContaining(['h-6', 'flex-wrap', 'overflow-hidden', 'min-w-0', 'flex-1']),
+      expect.arrayContaining(['h-6', 'flex-wrap', 'overflow-clip', 'min-w-0', 'flex-1']),
     );
     // ID → 達成率 → ラベルの順で、ラベルの「·」・点・名前・+N は 1 つの塊
     const parts = left.element.children;

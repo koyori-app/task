@@ -1041,6 +1041,8 @@ export const ListView: Story = {
 
 /** 点の位置にある要素（elementFromPoint）。要素の中心を指す */
 function hitAtCenter(el: Element): Element | null {
+  // 画面の外では elementFromPoint が null を返すので、画面幅に依らないよう先に寄せる
+  el.scrollIntoView({ block: 'center', inline: 'center' });
   const rect = el.getBoundingClientRect();
   return document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
 }

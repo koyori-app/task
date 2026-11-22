@@ -31,7 +31,7 @@ const textWidth = computed(() => `${props.projectKey.length + 6}ch`);
     type="button"
     class="inline-flex h-6 shrink-0 items-center rounded-md pr-1 font-mono text-xs transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
     :class="[
-      // compact は親の overflow-hidden に切られないよう、左へはみ出さず輪も内側に描く
+      // compact は親の overflow-clip に切られないよう、左へはみ出さず輪も内側に描く
       compact ? 'max-w-full focus-visible:ring-inset' : '-ml-1.5 gap-1 pl-1.5',
       copyState === 'copied'
         ? 'text-(--koyori-color-success)'
