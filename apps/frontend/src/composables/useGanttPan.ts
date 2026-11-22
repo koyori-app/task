@@ -50,8 +50,8 @@ export function useGanttPan(options: {
     clearTimeout(settleTimer);
     settleTimer = setTimeout(() => {
       panning.value = false;
-      // 指を置いたまま止まった時は端数を保つ。wheel の端数は次の操作へ持ち越さない
-      if (!drag) restPx = 0;
+      // 端数は止まっても捨てない。1 刻みが 1 日の幅に届かない wheel を間を置いて回しても
+      // 範囲が動くように、次の操作へ持ち越す（捨てるのは wheel の向きが変わった時と指の操作の時）
     }, PAN_SETTLE_MS);
   }
   onScopeDispose(() => {
@@ -81,6 +81,8 @@ export function useGanttPan(options: {
     // 縦のスクロールと拡大縮小は止めない
     if (delta === null) return;
     event.preventDefault();
+    // 向きが変わったら、逆向きに貯めた端数を捨てる（戻した分で先に貯めた分を打ち消さない）
+    if (delta !== 0 && restPx !== 0 && Math.sign(delta) !== Math.sign(restPx)) restPx = 0;
     apply(delta);
   }
 

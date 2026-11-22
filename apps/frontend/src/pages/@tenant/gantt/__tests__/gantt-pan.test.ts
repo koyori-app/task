@@ -372,14 +372,28 @@ describe('ガントの横のスクロールとスワイプ（TASK-567）', () =>
     expect(range(wrapper)).toBe(rangeText(addDays(FROM, 1)));
   });
 
-  it('wheel の 1 日に届かぬ端数は、止まった後の操作へ持ち越さない', async () => {
+  it('1 日に届かぬ wheel を間を置いて回しても、端数を貯めて範囲を送る', async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+
+    // 1 日は 30px。1 刻み 25px の wheel を、確定より長い間を置いて 2 回回す
+    await panArea(wrapper).trigger('wheel', { deltaX: 25 });
+    await settle();
+    expect(range(wrapper)).toBe(rangeText(FROM));
+    await panArea(wrapper).trigger('wheel', { deltaX: 25 });
+
+    expect(range(wrapper)).toBe(rangeText(addDays(FROM, 1)));
+  });
+
+  it('wheel の向きが変わったら、それまでの端数を捨てる', async () => {
     const wrapper = mountPage();
     await flushPromises();
 
     await panArea(wrapper).trigger('wheel', { deltaX: 25 });
-    await settle();
+    await panArea(wrapper).trigger('wheel', { deltaX: -10 });
     await panArea(wrapper).trigger('wheel', { deltaX: 25 });
 
+    // 捨てなければ 25 - 10 + 25 = 40px で 1 日動く
     expect(range(wrapper)).toBe(rangeText(FROM));
   });
 
