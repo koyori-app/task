@@ -392,7 +392,7 @@ async function playUnscheduledDrawerScroll(canvasElement: HTMLElement) {
   const canvas = within(canvasElement);
   await userEvent.click(await canvas.findByTestId('gantt-unscheduled'));
   const list = await canvas.findByTestId('gantt-unscheduled-list');
-  await waitFor(() => list.scrollHeight > list.clientHeight);
+  await waitFor(() => expect(list.scrollHeight).toBeGreaterThan(list.clientHeight));
 
   const heading = canvas.getByRole('heading', { name: /期間の無いタスク/ });
   const headingTopBefore = heading.getBoundingClientRect().top;
@@ -402,7 +402,10 @@ async function playUnscheduledDrawerScroll(canvasElement: HTMLElement) {
   const maxScroll = list.scrollHeight - list.clientHeight;
 
   list.scrollTop = list.scrollHeight;
-  await waitFor(() => list.scrollTop > 0 && list.scrollTop >= maxScroll - 1);
+  await waitFor(async () => {
+    await expect(list.scrollTop).toBeGreaterThan(0);
+    await expect(list.scrollTop).toBeGreaterThanOrEqual(maxScroll - 1);
+  });
 
   const listRect = list.getBoundingClientRect();
   const btnRect = lastButton.getBoundingClientRect();
@@ -412,9 +415,9 @@ async function playUnscheduledDrawerScroll(canvasElement: HTMLElement) {
   await expect(Math.abs(heading.getBoundingClientRect().top - headingTopBefore)).toBeLessThan(1);
 
   list.scrollTop = 0;
-  await waitFor(() => list.scrollTop === 0);
+  await waitFor(() => expect(list.scrollTop).toBe(0));
   lastButton.focus();
-  await waitFor(() => list.scrollTop > 0);
+  await waitFor(() => expect(list.scrollTop).toBeGreaterThan(0));
 
   await userEvent.click(lastButton);
 }
