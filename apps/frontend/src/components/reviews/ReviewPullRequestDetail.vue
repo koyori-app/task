@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useQueryClient } from '@tanstack/vue-query';
-import { PhCaretLeft, PhFile, PhPlus } from '@phosphor-icons/vue';
+import { PhArrowSquareOut, PhCaretLeft, PhFile, PhPlus } from '@phosphor-icons/vue';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { navigate } from 'vike/client/router';
 import {
@@ -113,9 +113,8 @@ const forgeTarget = computed<ForgeTarget>(() => ({
   repository: pullRequest.value?.repository ?? summary.value?.repository ?? null,
 }));
 const host = computed(() => forgeHost(forgeTarget.value.host));
-const hostHref = computed(() =>
-  host.value ? pullRequestHref(forgeTarget.value, props.prNumber) : null,
-);
+// 知らないホストでも、PR 行に URL があれば開ける（ロゴと名前は出せない）
+const hostHref = computed(() => pullRequestHref(forgeTarget.value, props.prNumber));
 
 const headingMeta = computed(() =>
   [
@@ -139,6 +138,9 @@ const listHref = computed(
 const confirmingLeave = ref(false);
 
 function onBackClick(event: MouseEvent) {
+  // 修飾キーつきのクリックは別のタブで開くだけで、下書きを失わない
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+    return;
   if (!(isComposerOpen.value && composerDirty.value)) return;
   event.preventDefault();
   confirmingLeave.value = true;
@@ -298,8 +300,19 @@ const reviewerItems = computed<DropdownItem[]>(() => [
 const reviewerLabel = computed(() => {
   if (reviewerFilter.value === null) return 'レビュアー: すべて';
   const name = reviewers.value.find((r) => r.id === reviewerFilter.value)?.username;
-  return `レビュアー: ${name ?? '不明'}`;
+  return `レビュアー: ${name ?? (roundsQuery.isPending.value ? '読み込み中' : '不明')}`;
 });
+
+/**
+ * レビュアーの絞り込みは、ラウンドの一覧（どの Round を誰が出したか）が無いと当てられない。
+ * 届く前と取得に失敗したときに、空の対応表で全部の指摘を落として「条件に合う指摘は
+ * ありません」と出さないよう、待ちと失敗を別に扱う。
+ */
+const roundsFailed = computed(() => roundsQuery.isError.value && !roundsQuery.data.value);
+const reviewerWaiting = computed(
+  () => reviewerFilter.value !== null && roundsQuery.isPending.value,
+);
+const reviewerUnavailable = computed(() => reviewerFilter.value !== null && roundsFailed.value);
 
 /** 選んでいる Round のラウンド（「R3 は a1b2c3d を見ています」の行に使う） */
 const selectedRound = computed(
@@ -372,6 +385,9 @@ const selectedFindingFiltered = computed(
     findingsQuery.isSuccess.value &&
     selectedFindingId.value !== null &&
     !selectedFindingMissing.value &&
+    // レビュアーの絞り込みを当てられていない間は、見えない理由が絞り込みとは言えない
+    !reviewerWaiting.value &&
+    !reviewerUnavailable.value &&
     !visibleFindings.value.some((finding) => finding.id === selectedFindingId.value),
 );
 
@@ -510,7 +526,15 @@ async function invalidateAll() {
   ]);
 }
 
+/**
+ * 遷移を送ってから取り直しが済むまで。PATCH が返った時点で操作を戻すと、取り直す前の
+ * `available_actions` のボタンがもう一度押せてしまう。
+ */
+const transitioning = ref(false);
+
 async function transition(finding: ReviewFinding, to: FindingState, note: string | null) {
+  if (transitioning.value) return;
+  transitioning.value = true;
   transitionError.value = null;
   try {
     await updateState.mutateAsync({
@@ -527,7 +551,11 @@ async function transition(finding: ReviewFinding, to: FindingState, note: string
     };
   }
   // 失敗した操作の結果が画面に残らないよう、失敗しても正しい状態を取り直す
-  await invalidateAll();
+  try {
+    await invalidateAll();
+  } finally {
+    transitioning.value = false;
+  }
 }
 
 function openComposer() {
@@ -566,15 +594,17 @@ async function onRoundCreated() {
       </div>
       <div class="flex shrink-0 flex-wrap gap-2">
         <Button
-          v-if="host && hostHref"
+          v-if="hostHref"
           variant="secondary"
-          :label="`${host.label} で開く`"
+          :label="host ? `${host.label} で開く` : 'ホストで開く'"
           :href="hostHref"
           target="_blank"
           rel="noopener noreferrer"
           data-testid="open-on-host"
         >
-          <template #icon><component :is="host.icon" class="size-4" /></template>
+          <template #icon>
+            <component :is="host?.icon ?? PhArrowSquareOut" class="size-4" />
+          </template>
         </Button>
         <Button
           v-if="!isComposerOpen"
@@ -661,7 +691,11 @@ async function onRoundCreated() {
         :items="reviewerItems"
         :on-select="setReviewer"
       />
-      <p class="text-muted-foreground ml-auto text-xs" data-testid="finding-count">
+      <p
+        v-if="!reviewerWaiting && !reviewerUnavailable"
+        class="text-muted-foreground ml-auto text-xs"
+        data-testid="finding-count"
+      >
         {{ visibleFindings.length }} 件 · ↑ ↓ で移る
       </p>
     </div>
@@ -687,6 +721,14 @@ async function onRoundCreated() {
         }}</time></template
       >
     </p>
+
+    <Alert
+      v-if="roundsFailed"
+      message="ラウンドを読み込めませんでした"
+      retry-label="再試行"
+      :on-retry="() => void roundsQuery.refetch()"
+      data-testid="rounds-error"
+    />
 
     <p
       v-if="roundMissing"
@@ -715,7 +757,7 @@ async function onRoundCreated() {
 
     <!-- 指摘 -->
     <div
-      v-if="findingsQuery.isPending.value"
+      v-if="findingsQuery.isPending.value || reviewerWaiting"
       class="flex flex-col gap-2"
       data-testid="findings-loading"
     >
@@ -736,6 +778,14 @@ async function onRoundCreated() {
         <template #icon><PhPlus class="size-4" /></template>
       </Button>
     </div>
+    <p
+      v-else-if="reviewerUnavailable"
+      role="status"
+      class="text-muted-foreground text-sm"
+      data-testid="reviewer-unavailable"
+    >
+      ラウンドを読み込めていないため、レビュアーで絞り込めません。
+    </p>
     <div
       v-else-if="visibleFindings.length === 0"
       class="bg-muted flex flex-col items-center gap-3 rounded-lg px-4 py-8 text-center"
@@ -798,7 +848,7 @@ async function onRoundCreated() {
               :tenant-slug="tenantSlug"
               :project-id="projectId"
               :project-key="projectKey"
-              :pending="updateState.isPending.value"
+              :pending="transitioning"
               :error="transitionError?.id === finding.id ? transitionError.message : null"
               @toggle="toggleFinding(finding.id)"
               @transition="(to, note) => transition(finding, to, note)"

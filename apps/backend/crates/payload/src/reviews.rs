@@ -368,7 +368,7 @@ pub struct ReviewedPullRequest {
     /// マージを塞いでいる件数（High / Medium かつ open / fixing / fixed）
     ///
     /// **可否の断定はここからは出せない。** 可否には鮮度と連携の有無も要り
-    /// （`ReviewSummary` + `mergeVerdict` の片道降格）、この一覧はその材料を
+    /// （`ReviewSummary` + `mergeGateView` の片道降格）、この一覧はその材料を
     /// 持たない。一覧に `mergeable` を置いていた頃、詳細パネルが「リポジトリ
     /// 未確定」と言う横で一覧だけ「マージ可」と出る矛盾が実際に起きた
     pub blocking: u64,

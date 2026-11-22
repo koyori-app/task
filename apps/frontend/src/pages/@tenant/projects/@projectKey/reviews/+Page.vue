@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Loader2 } from '@lucide/vue';
-import { computed, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { navigate } from 'vike/client/router';
 import { usePageContext } from 'vike-vue/usePageContext';
 
@@ -39,12 +39,26 @@ const legacyWarnings = computed(() => {
     : [];
 });
 
+// 親が描き直すたびに新しい配列を渡すと、一覧の watch が古い URL の状態へ戻す
+const urlWarnings = computed(() => [...legacyWarnings.value, ...initialUrl.value.warnings]);
+
+/** 転送に失敗した先。読み込み中のまま止めず、手で開けるリンクを出す */
+const redirectFailedHref = ref<string | null>(null);
+async function redirectLegacy(href: string) {
+  redirectFailedHref.value = null;
+  try {
+    await navigate(href, { overwriteLastHistoryEntry: true });
+  } catch {
+    redirectFailedHref.value = href;
+  }
+}
+
 // 同じ +Page.vue の中の遷移（一覧を開いたまま旧 URL へ移る）でも転送する
 const hydrated = useHydrated();
 watch(
   [hydrated, legacyHref],
   ([ready, href]) => {
-    if (ready && href) void navigate(href, { overwriteLastHistoryEntry: true });
+    if (ready && href) void redirectLegacy(href);
   },
   { immediate: true },
 );
@@ -73,7 +87,16 @@ const isNotFound = computed(() => isTenantNotFound.value || isProjectNotFound.va
 
 <template>
   <div class="flex flex-col gap-6 px-4 pt-2 pb-10">
-    <div v-if="isLoading" class="flex justify-center py-16">
+    <div
+      v-if="legacyHref !== null && redirectFailedHref === legacyHref"
+      class="text-muted-foreground flex flex-col items-center gap-2 py-16 text-center text-sm"
+      data-testid="legacy-redirect-failed"
+    >
+      <p>PR の詳細へ移れませんでした</p>
+      <a class="text-link underline underline-offset-2" :href="legacyHref">PR の詳細を開く</a>
+    </div>
+
+    <div v-else-if="isLoading" class="flex justify-center py-16">
       <Loader2 class="text-muted-foreground h-8 w-8 animate-spin" />
     </div>
 
@@ -101,7 +124,7 @@ const isNotFound = computed(() => isTenantNotFound.value || isProjectNotFound.va
       :project-id="projectId"
       :project-key="projectKey"
       :initial-url-state="initialUrl.state"
-      :initial-url-warnings="[...legacyWarnings, ...initialUrl.warnings]"
+      :initial-url-warnings="urlWarnings"
     />
   </div>
 </template>

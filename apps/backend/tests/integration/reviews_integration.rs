@@ -2822,6 +2822,41 @@ async fn pull_request_rows_carry_fixed_counts_and_host_fields() {
         "webhook を受けていない PR 行の URL は null: {row}"
     );
 
+    // webhook が届いて PR 行に URL が入ったあとは、その URL をそのまま返す
+    {
+        use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
+        let updated = fx
+            .app
+            .state
+            .db
+            .execute_raw(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                "UPDATE forge_pull_requests SET html_url = $1 WHERE project_id = $2 AND number = $3",
+                [
+                    "https://ghe.example.com/acme/app/pull/618".into(),
+                    fx.project_id.into(),
+                    618.into(),
+                ],
+            ))
+            .await
+            .expect("update html_url");
+        assert_eq!(
+            updated.rows_affected(),
+            1,
+            "起票で用意した PR 行が 1 つある"
+        );
+    }
+    let listed = json(
+        fx.app
+            .get_with_session(&format!("{}/pull-requests", fx.reviews_path()))
+            .await,
+    )
+    .await;
+    assert_eq!(
+        listed.as_array().expect("PR list")[0]["html_url"],
+        "https://ghe.example.com/acme/app/pull/618"
+    );
+
     fx.app.cleanup_user(fx.reviewer.id).await;
     fx.app.cleanup_user(fx.developer.id).await;
 }

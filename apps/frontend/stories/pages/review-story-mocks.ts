@@ -1,6 +1,7 @@
 import { provide } from 'vue';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
 
+import { transitionedFinding } from '@/components/reviews/__tests__/transition-mock';
 import type { components } from '@/generated/api';
 
 type Finding = components['schemas']['FindingResponse'];
@@ -363,26 +364,7 @@ export function mockReviewFetch(options: ReviewMockOptions = {}) {
         };
         const id = pathname.split('/').pop();
         findings = findings.map((f) =>
-          f.id === id
-            ? {
-                ...f,
-                state: body.state,
-                fixed_by: body.state === 'fixed' ? VIEWER_ID : f.fixed_by,
-                // 自分の修正は自分で確認できない（backend が verified を返さない）
-                available_actions: ['open'],
-                transitions: [
-                  ...f.transitions,
-                  {
-                    id: `t-${f.id}-${f.transitions.length}`,
-                    actor: viewer,
-                    from_state: f.state,
-                    to_state: body.state,
-                    note: body.note,
-                    created_at: at(0),
-                  },
-                ],
-              }
-            : f,
+          f.id === id ? transitionedFinding(f, body.state, viewer, body.note, at(0)) : f,
         );
         return jsonResponse(findings.find((f) => f.id === id));
       }

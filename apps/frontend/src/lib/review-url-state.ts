@@ -177,6 +177,8 @@ export function parseReviewListUrlState(search: SearchSource): {
 export function applyReviewListUrlState(url: URL, state: ReviewListUrlState): URL {
   const next = new URL(url.href);
   for (const key of LIST_KEYS) next.searchParams.delete(key);
+  // 旧 URL の `pr`。読めた値は詳細へ転送されるので、一覧に残るのは不正な値だけ
+  next.searchParams.delete('pr');
   // 読む側と同じ上限で切る（書いた URL を開き直しても同じ検索語になるように）
   if (state.q !== '') next.searchParams.set('q', state.q.slice(0, PR_QUERY_MAX_LENGTH));
   // 選んだ状態は `open` でも書く。Open が 1 件も無い一覧の既定は「すべて」なので、

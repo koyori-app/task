@@ -104,7 +104,8 @@ export const AfterFixed: Story = {
 
     await waitFor(() => expect(row.getByRole('button', { name: '確認した' })).toBeDisabled());
     await expect(row.getByText('修正した人は確認できません')).toBeInTheDocument();
-    await expect(row.getByRole('button', { name: 'レビューに戻す' })).toBeEnabled();
+    // 取り直しが済むまでは、操作は無効のまま
+    await waitFor(() => expect(row.getByRole('button', { name: 'レビューに戻す' })).toBeEnabled());
     await expect(row.getByTestId('finding-last-transition')).toHaveTextContent(
       'yupix が Open → Fixed にしました',
     );

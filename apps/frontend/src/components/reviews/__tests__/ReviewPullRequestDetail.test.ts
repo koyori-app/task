@@ -480,6 +480,102 @@ describe('ReviewPullRequestDetail', () => {
     expect(wrapper.find('[data-testid="finding-form-reject"]').exists()).toBe(false);
   });
 
+  it('「修正した」のあと、本人には無効の「確認した」と理由を出す', async () => {
+    stubFetch({ findings: sampleFindings() });
+    const wrapper = mountDetail({ finding: 'a1' });
+    await flushPromises();
+
+    bodyButton('修正した')!.click();
+    await flushPromises();
+
+    const row = wrapper.get('#finding-a1');
+    expect(row.text()).toContain('Fixed');
+    expect(bodyButton('確認した')?.disabled).toBe(true);
+    expect(row.text()).toContain('修正した人は確認できません');
+    expect(bodyButton('レビューに戻す')?.disabled).toBe(false);
+    expect(bodyButton('修正に着手する')).toBeUndefined();
+    expect(row.get('[data-testid="finding-last-transition"]').text()).toContain(
+      'yupix が Open → Fixed にしました',
+    );
+  });
+
+  it('遷移を送ってから取り直しが済むまで、操作を無効にして二度押しを送らない', async () => {
+    const state: MockState = { findings: sampleFindings() };
+    const { patched } = stubFetch(state);
+    const wrapper = mountDetail({ finding: 'a1' });
+    await flushPromises();
+
+    // 取り直しを止めておく（PATCH は返るが、指摘の一覧は届かない）
+    state.hangFindings = true;
+    bodyButton('修正した')!.click();
+    await flushPromises();
+    expect(patched).toHaveLength(1);
+    const buttons = wrapper.get('[data-testid="finding-actions"]').findAll('button');
+    expect(buttons.every((b) => b.attributes('disabled') !== undefined)).toBe(true);
+
+    bodyButton('修正した')!.click();
+    await flushPromises();
+    expect(patched).toHaveLength(1);
+  });
+
+  it('知らないホストの PR 行でも、URL があれば名前なしの「開く」を出す', async () => {
+    stubFetch({
+      pullRequests: [
+        pullRequest({ host: 'forgejo', html_url: 'https://git.example.com/acme/app/pulls/618' }),
+      ],
+    });
+    const wrapper = mountDetail();
+    await flushPromises();
+    const open = wrapper.get('[data-testid="open-on-host"]');
+    expect(open.text()).toBe('ホストで開く');
+    expect(open.attributes('href')).toBe('https://git.example.com/acme/app/pulls/618');
+  });
+
+  describe('レビュアーの絞り込みとラウンドの取得', () => {
+    it('ラウンドが届くまでは、条件に合う指摘が無いとは言わずに待つ', async () => {
+      stubFetch({ findings: sampleFindings(), hangRounds: true });
+      const wrapper = mountDetail({ reviewer: OTHER_ID });
+      await flushPromises();
+
+      expect(wrapper.find('[data-testid="findings-loading"]').exists()).toBe(true);
+      expect(wrapper.find('[data-testid="no-finding-match"]').exists()).toBe(false);
+      expect(bodyButton('レビュアー: 読み込み中')).toBeDefined();
+    });
+
+    it('ラウンドの取得に失敗したら理由と再試行を出し、再試行で絞り込みを当てる', async () => {
+      const state: MockState = { findings: sampleFindings(), roundsStatus: 500 };
+      stubFetch(state);
+      const wrapper = mountDetail({ reviewer: OTHER_ID, finding: 'a1' });
+      await flushPromises();
+
+      expect(wrapper.find('[data-testid="no-finding-match"]').exists()).toBe(false);
+      expect(wrapper.find('[data-testid="filtered-finding"]').exists()).toBe(false);
+      expect(wrapper.get('[data-testid="rounds-error"]').text()).toContain(
+        'ラウンドを読み込めませんでした',
+      );
+      expect(wrapper.get('[data-testid="reviewer-unavailable"]').text()).toContain(
+        'レビュアーで絞り込めません',
+      );
+
+      state.roundsStatus = undefined;
+      await wrapper.get('[data-testid="rounds-error"] button').trigger('click');
+      await flushPromises();
+
+      expect(wrapper.find('[data-testid="rounds-error"]').exists()).toBe(false);
+      expect(wrapper.findAll('[data-testid="finding-row"]')).toHaveLength(4);
+      expect(bodyButton('レビュアー: reviewer')).toBeDefined();
+    });
+
+    it('レビュアーで絞っていなければ、ラウンドの失敗でも指摘は出す', async () => {
+      stubFetch({ findings: sampleFindings(), roundsStatus: 500 });
+      const wrapper = mountDetail();
+      await flushPromises();
+
+      expect(wrapper.find('[data-testid="rounds-error"]').exists()).toBe(true);
+      expect(wrapper.findAll('[data-testid="finding-row"]')).toHaveLength(5);
+    });
+  });
+
   it('遷移に失敗したら、理由をその行の中に出して取り直す', async () => {
     const { calls } = stubFetch({
       findings: sampleFindings(),
@@ -707,6 +803,17 @@ describe('ReviewPullRequestDetail', () => {
       expect(unload()).toBe(false);
       await wrapper.find('#draft-title').setValue('書きかけ');
       expect(unload()).toBe(true);
+    });
+
+    it('下書きがあっても、修飾キーつきのクリック（別のタブで開く）は確認しない', async () => {
+      const { wrapper } = await openComposer();
+      await wrapper.find('#draft-title').setValue('書きかけ');
+      const click = new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true });
+      wrapper.get('[data-testid="back-to-list"]').element.dispatchEvent(click);
+      await flushPromises();
+      // 確認を挟むときは、リンクの既定の動作を止めている
+      expect(click.defaultPrevented).toBe(false);
+      expect(navigate).not.toHaveBeenCalled();
     });
 
     it('下書きが無ければ、「PR の一覧」は確認なしのリンクのまま', async () => {

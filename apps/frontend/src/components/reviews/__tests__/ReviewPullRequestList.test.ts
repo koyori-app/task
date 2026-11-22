@@ -457,6 +457,24 @@ describe('ReviewPullRequestList', () => {
     await flushPromises();
     expect(rowNumbers(wrapper)).toEqual(['7']);
     expect(bodyButton('状態: Merged')).toBeDefined();
+    // 詳細の「PR の一覧」が古い条件へ戻らないよう、遷移先の条件を控え直す
+    expect(window.sessionStorage.getItem(`reviews:list:${PROJECT_ID}`)).toBe(
+      '?pr_state=merged&sort=number',
+    );
+  });
+
+  it('検索を控えたあとクエリなしの一覧へ遷移すると、控えも空に戻す', async () => {
+    stubFetch({ pullRequests: manyPullRequests(3) });
+    const wrapper = mountList();
+    await flushPromises();
+    await wrapper.get('input[type="search"]').setValue('fix');
+    expect(window.sessionStorage.getItem(`reviews:list:${PROJECT_ID}`)).toBe('?q=fix');
+
+    // サイドバーの「レビュー」（クエリなし）。同じページが使い回され、props だけが変わる
+    await wrapper.setProps({ initialUrlState: { ...DEFAULT_REVIEW_LIST_URL_STATE } });
+    await flushPromises();
+    expect(wrapper.findAll('[data-testid="pr-row"]')).toHaveLength(3);
+    expect(window.sessionStorage.getItem(`reviews:list:${PROJECT_ID}`)).toBe('');
   });
 
   it('読み込み中は骨組みを出す', async () => {

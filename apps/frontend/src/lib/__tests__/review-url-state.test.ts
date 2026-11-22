@@ -58,6 +58,14 @@ describe('PR の一覧の URL の状態', () => {
     expect(url.searchParams.get('q')).toBe('new');
   });
 
+  it('転送できずに残った旧 URL の pr は、書き直すときに消す', () => {
+    const url = applyReviewListUrlState(new URL(`${LIST_URL}?pr=abc&q=old`), {
+      ...DEFAULT_REVIEW_LIST_URL_STATE,
+      q: 'new',
+    });
+    expect(url.search).toBe('?q=new');
+  });
+
   it('選んだ PR の状態は既定と同じ open でも載せ、1 ページ目は載せない', () => {
     const url = applyReviewListUrlState(new URL(LIST_URL), {
       ...DEFAULT_REVIEW_LIST_URL_STATE,

@@ -2,6 +2,8 @@ import { vi } from 'vitest';
 
 import type { components } from '@/generated/api';
 
+import { transitionedFinding } from './transition-mock';
+
 type Finding = components['schemas']['FindingResponse'];
 type PullRequest = components['schemas']['ReviewedPullRequest'];
 type Round = components['schemas']['ReviewResponse'];
@@ -98,7 +100,13 @@ export type MockState = {
   summary?: Partial<Summary>;
   prsStatus?: number;
   findingsStatus?: number;
+  /** 指摘の一覧の応答を返さない（取り直しを止めておく） */
+  hangFindings?: boolean;
   summaryStatus?: number;
+  /** ラウンドの一覧の応答を失敗させる */
+  roundsStatus?: number;
+  /** ラウンドの一覧の応答を返さない */
+  hangRounds?: boolean;
   patchStatus?: number;
   patchMessage?: string;
   /** 閲覧者の連携 GitHub のユーザー名。null・未指定で未連携 */
@@ -167,6 +175,8 @@ export function stubFetch(state: MockState) {
       );
     }
     if (req.method === 'GET' && pathname.endsWith('/reviews')) {
+      if (state.hangRounds) return new Promise<Response>(() => {});
+      if (state.roundsStatus) return jsonResponse({ message: 'error' }, state.roundsStatus);
       return jsonResponse(state.rounds ?? [round()]);
     }
     if (req.method === 'POST' && pathname.endsWith('/reviews')) {
@@ -175,16 +185,30 @@ export function stubFetch(state: MockState) {
       return jsonResponse({ id: 'r-new', round: 2 }, 201);
     }
     if (req.method === 'GET' && pathname.endsWith('/review-findings')) {
+      if (state.hangFindings) return new Promise<Response>(() => {});
       if (state.findingsStatus) return jsonResponse({ message: 'error' }, state.findingsStatus);
       return jsonResponse(findings);
     }
     if (req.method === 'PATCH' && pathname.includes('/review-findings/')) {
-      const body = (await req.clone().json()) as { state: Finding['state'] };
+      const body = (await req.clone().json()) as {
+        state: Finding['state'];
+        note: string | null;
+      };
       patched.push({ path: pathname, body });
       if (state.patchStatus)
         return jsonResponse({ message: state.patchMessage ?? 'error' }, state.patchStatus);
       const id = pathname.split('/').pop();
-      state.findings = findings.map((f) => (f.id === id ? { ...f, state: body.state } : f));
+      state.findings = findings.map((f) =>
+        f.id === id
+          ? transitionedFinding(
+              f,
+              body.state,
+              { id: VIEWER_ID, username: 'yupix', avatar_url: null },
+              body.note,
+              '2026-08-27T00:00:00Z',
+            )
+          : f,
+      );
       return jsonResponse(state.findings.find((f) => f.id === id));
     }
     if (req.method === 'GET' && pathname.includes('/tasks/')) {

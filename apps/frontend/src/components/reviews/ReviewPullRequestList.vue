@@ -287,6 +287,8 @@ watch(
     urlWarnings.value = [...nextWarnings];
     urlCheckPending = true;
     checkUrlState();
+    // 補正が無いと writeUrl を通らないので、ここでも控える（空のクエリも控えて、前の条件を消す）
+    rememberSearch();
   },
 );
 
