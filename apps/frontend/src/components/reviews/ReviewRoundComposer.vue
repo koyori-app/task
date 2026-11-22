@@ -159,6 +159,8 @@ async function commit() {
         label="レビュー対象の head SHA"
         description="40 桁の commit SHA（git rev-parse HEAD）"
         required
+        required-mark="asterisk"
+        description-position="bottom"
         :error="headShaError ?? ''"
       >
         <Input
@@ -228,7 +230,7 @@ async function commit() {
           </Field>
         </div>
         <div class="min-w-[200px] flex-1">
-          <Field id="draft-title" label="タイトル" required>
+          <Field id="draft-title" label="タイトル" required required-mark="asterisk">
             <Input
               placeholder="1 行の要約"
               :value="draft.title"

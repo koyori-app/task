@@ -54,6 +54,19 @@ afterEach(() => {
 });
 
 describe('ReviewRoundComposer', () => {
+  it('head SHA の説明文は入力欄の下に出し、必須の印は `*` にする', () => {
+    stubFetch();
+    const wrapper = mountComposer();
+    const input = wrapper.get('#composer-head').element;
+    const description = wrapper.get('#composer-head-description').element;
+    expect(description.textContent).toContain('40 桁の commit SHA');
+    expect(
+      input.compareDocumentPosition(description) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(wrapper.get('label[for="composer-head"]').find('[aria-hidden="true"]').text()).toBe('*');
+    expect(wrapper.get('label[for="draft-title"]').find('[aria-hidden="true"]').text()).toBe('*');
+  });
+
   it('head SHA が未入力なら確定できない', async () => {
     stubFetch();
     mountComposer();

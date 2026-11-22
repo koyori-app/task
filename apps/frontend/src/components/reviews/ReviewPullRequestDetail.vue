@@ -411,7 +411,15 @@ function findingHref(id: string): string {
  */
 const scrolledFindingId = ref<string | null>(null);
 watch(
-  () => [selectedFindingId.value, findingsQuery.data.value] as const,
+  // レビュアーで絞っている間は、ラウンドが届くまで一覧を描かない。指摘が先に届いても
+  // 行の要素が無いので、一覧が描けるようになったことも依存に入れる
+  () =>
+    [
+      selectedFindingId.value,
+      findingsQuery.data.value,
+      reviewerWaiting.value,
+      reviewerUnavailable.value,
+    ] as const,
   async ([id]) => {
     if (!id) {
       scrolledFindingId.value = null;
@@ -551,8 +559,15 @@ async function transition(finding: ReviewFinding, to: FindingState, note: string
     };
   }
   // 失敗した操作の結果が画面に残らないよう、失敗しても正しい状態を取り直す
+  // 操作を戻すのに要るのは指摘の取り直し（新しい `available_actions`）だけ。PR の一覧は
+  // 全 PR を集計して返すので遅く、それを待つと 1 件片付けるたびに全部の行が押せなくなる
+  void Promise.all([
+    queryClient.invalidateQueries({ queryKey: ['get', REVIEWED_PRS_PATH] }),
+    queryClient.invalidateQueries({ queryKey: ['get', REVIEWS_PATH] }),
+    queryClient.invalidateQueries({ queryKey: ['get', REVIEW_SUMMARY_PATH] }),
+  ]);
   try {
-    await invalidateAll();
+    await queryClient.invalidateQueries({ queryKey: ['get', REVIEW_FINDINGS_PATH] });
   } finally {
     transitioning.value = false;
   }

@@ -518,6 +518,22 @@ describe('ReviewPullRequestDetail', () => {
     expect(patched).toHaveLength(1);
   });
 
+  it('指摘の取り直しが済めば、PR の一覧の取り直しを待たずに操作を戻す', async () => {
+    const state: MockState = { findings: sampleFindings() };
+    stubFetch(state);
+    const wrapper = mountDetail({ finding: 'a1' });
+    await flushPromises();
+
+    // PR の一覧の取り直しだけが返らない
+    state.hangPullRequests = true;
+    bodyButton('修正に着手する')!.click();
+    await flushPromises();
+
+    expect(wrapper.get('#finding-a1').text()).toContain('Fixing');
+    expect(bodyButton('修正した')?.disabled).toBe(false);
+    expect(bodyButton('着手を取り消す')?.disabled).toBe(false);
+  });
+
   it('知らないホストの PR 行でも、URL があれば名前なしの「開く」を出す', async () => {
     stubFetch({
       pullRequests: [
@@ -540,6 +556,24 @@ describe('ReviewPullRequestDetail', () => {
       expect(wrapper.find('[data-testid="findings-loading"]').exists()).toBe(true);
       expect(wrapper.find('[data-testid="no-finding-match"]').exists()).toBe(false);
       expect(bodyButton('レビュアー: 読み込み中')).toBeDefined();
+    });
+
+    it('指摘が先に届いても、一覧が描けるようになってから URL の指摘へスクロールする', async () => {
+      const scrolled: string[] = [];
+      vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(function (this: Element) {
+        scrolled.push(this.id);
+      });
+      const state: MockState = { findings: sampleFindings(), roundsStatus: 500 };
+      stubFetch(state);
+      const wrapper = mountDetail({ reviewer: OTHER_ID, finding: 'a1' });
+      await flushPromises();
+      // 指摘は届いているが、ラウンドが無いので行はまだ無い
+      expect(scrolled).toEqual([]);
+
+      state.roundsStatus = undefined;
+      await wrapper.get('[data-testid="rounds-error"] button').trigger('click');
+      await flushPromises();
+      expect(scrolled).toEqual(['finding-a1']);
     });
 
     it('ラウンドの取得に失敗したら理由と再試行を出し、再試行で絞り込みを当てる', async () => {

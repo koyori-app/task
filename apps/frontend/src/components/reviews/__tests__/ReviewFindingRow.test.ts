@@ -185,6 +185,8 @@ describe('ReviewFindingRow', () => {
 
     const form = wrapper.get('[data-testid="finding-form-reject"]');
     expect(form.text()).toContain('この指摘を取り下げる');
+    // 必須の印は `*`（読み上げには混ぜない）
+    expect(form.get('label').find('[aria-hidden="true"]').text()).toBe('*');
     const confirm = wrapper.get('[data-testid="finding-form-confirm"]');
     expect(confirm.attributes('data-variant')).toBe('danger');
     expect(confirm.attributes('disabled')).toBeDefined();

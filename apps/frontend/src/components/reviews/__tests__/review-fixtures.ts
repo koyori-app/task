@@ -99,6 +99,8 @@ export type MockState = {
   /** 集計の上書き。gate の既定は、塞ぐ指摘があれば blocked、無ければ ready */
   summary?: Partial<Summary>;
   prsStatus?: number;
+  /** PR の一覧の応答を返さない（全 PR の集計で遅い取り直し） */
+  hangPullRequests?: boolean;
   findingsStatus?: number;
   /** 指摘の一覧の応答を返さない（取り直しを止めておく） */
   hangFindings?: boolean;
@@ -141,6 +143,7 @@ export function stubFetch(state: MockState) {
     const findings = state.findings ?? [];
 
     if (req.method === 'GET' && pathname.endsWith('/reviews/pull-requests')) {
+      if (state.hangPullRequests) return new Promise<Response>(() => {});
       if (state.prsStatus) return jsonResponse({ message: 'error' }, state.prsStatus);
       return jsonResponse(state.pullRequests ?? [pullRequest()]);
     }

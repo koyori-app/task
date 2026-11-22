@@ -555,6 +555,7 @@ function detailHref(pr: ReviewedPullRequest): string {
         <DataList
           id="review-pr-list"
           label="レビューのある PR"
+          hide-heading
           class="[--koyori-data-list-min-width:56rem]"
           :heading-level="2"
           :columns="columns"

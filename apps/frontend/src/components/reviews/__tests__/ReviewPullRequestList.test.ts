@@ -146,6 +146,11 @@ describe('ReviewPullRequestList', () => {
 
     expect(wrapper.findAll('[data-testid="pr-row"]')).toHaveLength(10);
     expect(wrapper.text()).toContain('1–10 / 11 件');
+    // 表の上の見出しは見た目だけ隠し、表の名前（aria-labelledby の参照先）としては残す
+    const heading = wrapper.get('#review-pr-list-heading');
+    expect(heading.text()).toContain('レビューのある PR');
+    expect(heading.classes().some((name) => /sr-?only/i.test(name))).toBe(true);
+    expect(wrapper.get('section').attributes('aria-labelledby')).toBe('review-pr-list-heading');
 
     const nav = wrapper.get('nav[aria-label="PR のページ"]');
     nav

@@ -247,7 +247,12 @@ function transitionText(history: ReviewFinding['transitions'][number]): string {
           <h3 class="text-sm font-semibold">{{ form.title }}</h3>
           <p class="text-muted-foreground text-xs">{{ form.description }}</p>
         </div>
-        <Field :id="`finding-note-${finding.id}`" label="理由" :required="form.required">
+        <Field
+          :id="`finding-note-${finding.id}`"
+          label="理由"
+          :required="form.required"
+          required-mark="asterisk"
+        >
           <Textarea
             :rows="3"
             :max-length="NOTE_MAX_LENGTH"
