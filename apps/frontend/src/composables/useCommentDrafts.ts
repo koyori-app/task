@@ -59,7 +59,7 @@ export function setCommentDraft(
   }
 }
 
-export function clearCommentDraft(
+function clearCommentDraft(
   userId: string | null,
   taskId: string | undefined,
   threadId: string | null,
