@@ -392,7 +392,7 @@ async function playUnscheduledDrawerScroll(canvasElement: HTMLElement) {
   const canvas = within(canvasElement);
   await userEvent.click(await canvas.findByTestId('gantt-unscheduled'));
   const list = await canvas.findByTestId('gantt-unscheduled-list');
-  await waitFor(() => expect(list.scrollHeight).toBeGreaterThan(list.clientHeight));
+  await waitFor(() => list.scrollHeight > list.clientHeight);
 
   const heading = canvas.getByRole('heading', { name: /期間の無いタスク/ });
   const headingTopBefore = heading.getBoundingClientRect().top;
@@ -402,22 +402,19 @@ async function playUnscheduledDrawerScroll(canvasElement: HTMLElement) {
   const maxScroll = list.scrollHeight - list.clientHeight;
 
   list.scrollTop = list.scrollHeight;
-  await waitFor(() => {
-    expect(list.scrollTop).toBeGreaterThan(0);
-    expect(list.scrollTop).toBeGreaterThanOrEqual(maxScroll - 1);
-  });
+  await waitFor(() => list.scrollTop > 0 && list.scrollTop >= maxScroll - 1);
 
   const listRect = list.getBoundingClientRect();
   const btnRect = lastButton.getBoundingClientRect();
-  expect(btnRect.top).toBeGreaterThanOrEqual(listRect.top - 1);
-  expect(btnRect.bottom).toBeLessThanOrEqual(listRect.bottom + 1);
+  await expect(btnRect.top).toBeGreaterThanOrEqual(listRect.top - 1);
+  await expect(btnRect.bottom).toBeLessThanOrEqual(listRect.bottom + 1);
 
-  expect(Math.abs(heading.getBoundingClientRect().top - headingTopBefore)).toBeLessThan(1);
+  await expect(Math.abs(heading.getBoundingClientRect().top - headingTopBefore)).toBeLessThan(1);
 
   list.scrollTop = 0;
-  await waitFor(() => expect(list.scrollTop).toBe(0));
+  await waitFor(() => list.scrollTop === 0);
   lastButton.focus();
-  await waitFor(() => expect(list.scrollTop).toBeGreaterThan(0));
+  await waitFor(() => list.scrollTop > 0);
 
   await userEvent.click(lastButton);
 }
@@ -438,6 +435,19 @@ export const UnscheduledDrawerScrollNarrow: Story = {
   parameters: { viewport: { defaultViewport: 'mobile2' } },
   beforeEach: UnscheduledDrawerScroll.beforeEach,
   play: async ({ canvasElement }) => playUnscheduledDrawerScroll(canvasElement),
+};
+
+/** 像撮影用。play を付けない（最後の click で詳細が開くのを避ける）。 */
+export const UnscheduledDrawerScrollCapture: Story = {
+  ...UnscheduledDrawerScroll,
+  name: '期間なし drawer（像撮影）',
+  play: undefined,
+};
+
+export const UnscheduledDrawerScrollCaptureNarrow: Story = {
+  ...UnscheduledDrawerScrollNarrow,
+  name: '期間なし drawer（像撮影・幅 375）',
+  play: undefined,
 };
 
 // 頁の縦のスクロールは layout の main（overflow-y: auto）が持つ。低性能の端末（deviceMemory の無い
