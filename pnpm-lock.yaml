@@ -10,8 +10,8 @@ catalogs:
       specifier: 0.1.0-alpha.8
       version: 0.1.0-alpha.8
     '@koyori-app/arc-vue':
-      specifier: 0.1.0-alpha.8
-      version: 0.1.0-alpha.8
+      specifier: 0.1.0-alpha.9
+      version: 0.1.0-alpha.9
     '@koyori-app/ui-vue':
       specifier: 0.11.0
       version: 0.11.0
@@ -70,7 +70,7 @@ importers:
         version: 0.1.0-alpha.8
       '@koyori-app/arc-vue':
         specifier: 'catalog:'
-        version: 0.1.0-alpha.8(@koyori-app/arc@0.1.0-alpha.8)(vue@3.5.45(typescript@6.0.3))
+        version: 0.1.0-alpha.9(@koyori-app/arc@0.1.0-alpha.8)(vue@3.5.45(typescript@6.0.3))
       '@koyori-app/openapi-vue-query':
         specifier: 0.1.4
         version: 0.1.4(@tanstack/vue-query@5.104.0(vue@3.5.45(typescript@6.0.3)))(openapi-fetch@0.17.0)(openapi-typescript-helpers@0.1.0)(vue@3.5.45(typescript@6.0.3))
@@ -1392,8 +1392,8 @@ packages:
     peerDependencies:
       solid-js: ^1.8.8
 
-  '@koyori-app/arc-vue@0.1.0-alpha.8':
-    resolution: {integrity: sha512-4zuEjQSWJkMMiIggTgP4JgecrDoTyw623C29jYUuiN8aRfy1xom7jPsvnV3Ue4z8BuRbdNVVEfMMlQsvh27ktA==}
+  '@koyori-app/arc-vue@0.1.0-alpha.9':
+    resolution: {integrity: sha512-0QfdweU0KsuDkxYbakII+IXKoE/gznVwGO/GqLHrN3Kh01rtyxXo70ijr5WpNQGuI9fqvsSkzfz+Zc/1iPlZOA==}
     peerDependencies:
       '@koyori-app/arc': ^0.1.0-alpha.1
       vue: ^3.5.0
@@ -8057,10 +8057,12 @@ packages:
   yuku-core@0.19.0:
     resolution: {integrity: sha512-kYK9e1XdfirNhkipzW0wmMcSWcVF/CWnuugodfVYRCUwvoBefweL9HzB96OiKEhsx78V5WbUxbJqlizMX869Qg==}
     engines: {node: '>=14.18.0'}
+    deprecated: 'Yuku is now one package with one core. Use "yuku" instead: https://yuku.fyi/javascript/. Existing installs keep working but get no more fixes.'
 
   yuku-parser@0.19.0:
     resolution: {integrity: sha512-XrBh9ZiQK5mJVRxZBAvD6LwRyAYrK3MFtH3+onyuxFL5hFD44EC3QOmIC1FjTj6H2MMwq46/NAI+NZxLZPZgxg==}
     engines: {node: '>=14.18.0'}
+    deprecated: 'Yuku is now one package with one core. Use "yuku" instead: https://yuku.fyi/javascript/. Existing installs keep working but get no more fixes.'
 
   zigpty@0.2.1:
     resolution: {integrity: sha512-MR9JqJx2wf5f4wz8zpx050AlqrmWeIW+1h0SO5iEyhG3HFRjY5luC3szS2ux2EGuPjE5OU9ZAuiCBeMWBTrqZw==}
@@ -9257,7 +9259,7 @@ snapshots:
       '@solid-primitives/utils': 6.4.1(solid-js@1.9.15)
       solid-js: 1.9.15
 
-  '@koyori-app/arc-vue@0.1.0-alpha.8(@koyori-app/arc@0.1.0-alpha.8)(vue@3.5.45(typescript@6.0.3))':
+  '@koyori-app/arc-vue@0.1.0-alpha.9(@koyori-app/arc@0.1.0-alpha.8)(vue@3.5.45(typescript@6.0.3))':
     dependencies:
       '@koyori-app/arc': 0.1.0-alpha.8
       vue: 3.5.45(typescript@6.0.3)
