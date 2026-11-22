@@ -11,7 +11,7 @@ FROM ubuntu:24.04
 ARG RUST_VERSION=1.95.0
 # .node-version と同じ版にする。Renovate が .node-version と同じ PR で上げる
 # （.github/renovate.json5 の node-runtime の群れ）
-ARG NODE_VERSION=24.22.0
+ARG NODE_VERSION=26.13.1
 
 # mold は apps/backend/.cargo/config.toml が要求する。iproute2 / procps は scripts/restart_*_dev.sh、
 # docker は統合テストのハーネス（testcontainers）と docker compose が使う
