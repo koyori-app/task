@@ -284,6 +284,29 @@ describe('ReviewFindingsView', () => {
     expect(list.text()).toContain('High');
   });
 
+  it('内容を直した指摘にだけ「編集済み」の印を出し、直した時刻を title に出す', async () => {
+    stubFetch({
+      findings: [
+        finding({ id: 'f-edited', title: '直した指摘', edited_at: '2026-11-22T03:04:05Z' }),
+        finding({ id: 'f-plain', title: '直していない指摘', severity: 'low' }),
+      ],
+    });
+    const wrapper = mountView();
+    await flushPromises();
+
+    const marks = wrapper.findAll('[data-testid="finding-edited"]');
+    expect(marks).toHaveLength(1);
+    expect(marks[0]!.text()).toBe('編集済み');
+    expect(marks[0]!.attributes('title')).toBe(
+      `${new Date('2026-11-22T03:04:05Z').toLocaleString('ja-JP')} に編集`,
+    );
+    const items = wrapper.get('[data-testid="finding-list"]').findAll('li');
+    const edited = items.find((item) => item.text().includes('直した指摘'))!;
+    expect(edited.find('[data-testid="finding-edited"]').exists()).toBe(true);
+    // 画面から直す操作は持たない（直すのは CLI と API）
+    expect(wrapper.text()).not.toContain('編集する');
+  });
+
   it('未解決が無ければマージ可を出す', async () => {
     stubFetch({ findings: [finding({ state: 'verified' })] });
     const wrapper = mountView();

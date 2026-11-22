@@ -30,6 +30,7 @@ import {
   STATES,
   STATE_LABELS,
   findingActions,
+  editedTitle,
   findingLocation,
   mergeVerdict,
   sortFindings,
@@ -1049,6 +1050,14 @@ async function onRoundCreated() {
                     {{ STATE_LABELS[finding.state] }}
                   </span>
                   <span class="text-muted-foreground text-xs">R{{ finding.round }}</span>
+                  <span
+                    v-if="editedTitle(finding)"
+                    class="text-muted-foreground text-xs"
+                    :title="editedTitle(finding) ?? undefined"
+                    data-testid="finding-edited"
+                  >
+                    編集済み
+                  </span>
                   <a
                     class="hover:text-link min-w-0 flex-1 truncate font-medium underline-offset-4 hover:underline"
                     :href="findingHref(finding.id)"

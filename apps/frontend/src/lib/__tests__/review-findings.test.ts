@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 import {
   STATES,
   countsAsUnresolved,
+  editedTitle,
   findingActions,
   findingLocation,
   sortFindings,
@@ -175,6 +176,13 @@ describe('summaryRows', () => {
 });
 
 describe('表示ヘルパー', () => {
+  it('直した指摘だけに、直した時刻の title を返す', () => {
+    expect(editedTitle(finding())).toBeNull();
+    expect(editedTitle(finding({ edited_at: null }))).toBeNull();
+    const title = editedTitle(finding({ edited_at: '2026-11-22T03:04:05Z' }));
+    expect(title).toBe(`${new Date('2026-11-22T03:04:05Z').toLocaleString('ja-JP')} に編集`);
+  });
+
   it('位置は file:line、行が無ければ file だけ、file が無ければ null', () => {
     expect(findingLocation(finding({ file: 'src/App.vue', line: 42 }))).toBe('src/App.vue:42');
     expect(findingLocation(finding({ file: 'src/App.vue' }))).toBe('src/App.vue');
