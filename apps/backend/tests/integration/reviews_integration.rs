@@ -2775,3 +2775,82 @@ async fn round_numbering_does_not_block_project_foreign_keys() {
     fx.app.cleanup_user(fx.reviewer.id).await;
     fx.app.cleanup_user(fx.developer.id).await;
 }
+
+/// PR 一覧の行が、全重大度の承認待ち（fixed）の数と、リポジトリ・ホスト・PR の URL を返す。
+#[tokio::test]
+async fn pull_request_rows_carry_fixed_counts_and_host_fields() {
+    let mut fx = setup().await;
+    link_repo(&fx, "acme", "app").await;
+    fx.login(&fx.reviewer.clone()).await;
+    let (_, ids) = submit_round_with(
+        &fx,
+        618,
+        OLD_HEAD,
+        &[
+            ("high", "high fixed"),
+            ("low", "low fixed"),
+            ("low", "low open"),
+        ],
+    )
+    .await;
+
+    fx.login(&fx.developer.clone()).await;
+    for id in &ids[..2] {
+        assert_eq!(
+            transition(&fx, id, "fixed").await.status(),
+            StatusCode::OK,
+            "修正者は fixed にできる"
+        );
+    }
+
+    let listed = json(
+        fx.app
+            .get_with_session(&format!("{}/pull-requests", fx.reviews_path()))
+            .await,
+    )
+    .await;
+    let row = &listed.as_array().expect("PR list")[0];
+    assert_eq!(row["pr_number"], 618);
+    assert_eq!(row["unresolved"], 3);
+    assert_eq!(row["blocking"], 1);
+    assert_eq!(row["blocking_fixed"], 1);
+    assert_eq!(row["unresolved_fixed"], 2, "fixed は重大度を問わず数える");
+    assert_eq!(row["repository"], "acme/app");
+    assert_eq!(row["host"], "github");
+    assert!(
+        row.as_object().expect("row").contains_key("html_url") && row["html_url"].is_null(),
+        "webhook を受けていない PR 行の URL は null: {row}"
+    );
+
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+/// 連携の無いプロジェクトの行は、リポジトリもホストも持たない。
+#[tokio::test]
+async fn pull_request_rows_of_unlinked_projects_have_no_repository() {
+    let mut fx = setup().await;
+    fx.login(&fx.reviewer.clone()).await;
+    submit_round(&fx, 618, "low", "unlinked").await;
+
+    let listed = json(
+        fx.app
+            .get_with_session(&format!("{}/pull-requests", fx.reviews_path()))
+            .await,
+    )
+    .await;
+    let row = listed.as_array().expect("PR list")[0]
+        .as_object()
+        .expect("row")
+        .clone();
+    assert_eq!(row["unresolved_fixed"], 0);
+    for key in ["repository", "host", "html_url"] {
+        assert!(
+            row.contains_key(key) && row[key].is_null(),
+            "{key} は null: {row:?}"
+        );
+    }
+
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}

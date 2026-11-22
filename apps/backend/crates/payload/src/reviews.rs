@@ -375,6 +375,17 @@ pub struct ReviewedPullRequest {
     /// `blocking` のうち fixed の件数（`blocking` の内数）。修正済みでレビュー側の
     /// 確認（verified）を待っている分で、`blocking - blocking_fixed` が open / fixing の残り
     pub blocking_fixed: u64,
+    /// 未解決のうち fixed の件数（`unresolved` の内数。重大度は問わない）
+    pub unresolved_fixed: u64,
+    /// 集計対象のリポジトリ（`owner/name`）。GitHub 連携が無ければ `null`
+    #[schema(nullable)]
+    pub repository: Option<String>,
+    /// PR 行のホスト（`github` など）。PR 行が無ければ `null`
+    #[schema(nullable)]
+    pub host: Option<String>,
+    /// ホスト上の PR の URL。PR 行が無い、または webhook をまだ受けていなければ `null`
+    #[schema(nullable)]
+    pub html_url: Option<String>,
     /// 最新のレビューの作成時刻。写しだけの PR は null
     #[schema(value_type = Option<String>, format = "date-time")]
     pub last_reviewed_at: Option<DateTime<Utc>>,
