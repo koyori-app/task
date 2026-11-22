@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import TaskMatchText from './query/TaskMatchText.vue';
 import TaskMatchSnippets from './query/TaskMatchSnippets.vue';
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import {
   PhCalendarBlank,
   PhCalendarPlus,
@@ -127,6 +127,21 @@ const deadlineOrderInvalid = computed(() => {
   if (!raw || raw === isoToLocalDateInput(props.task.soft_deadline)) return false;
   return softNotBeforeHard(localDateInputToIso(raw), props.task.hard_deadline);
 });
+
+/**
+ * 編集中に保存済みの期限か最終期限が変わったら（詳細のペインで直したなど）、入力欄にフォーカスが
+ * 無ければ送らずに編集を閉じる。一覧が狭い間は入力欄と警告が隠れるだけで下書きは残るので、
+ * 閉じないと、送っていない値が保存済みのように見える入力欄が警告なしで戻ってくる
+ */
+watch(
+  () => [props.task.soft_deadline, props.task.hard_deadline],
+  () => {
+    if (!editingDeadline.value) return;
+    const el = deadlineInputRef.value?.$el as HTMLElement | undefined;
+    if (el?.contains(document.activeElement)) return;
+    editingDeadline.value = false;
+  },
+);
 
 function commitDeadline() {
   if (!editingDeadline.value) return;

@@ -509,4 +509,39 @@ describe('TaskGroupedRow の期限と最終期限', () => {
     expect(wrapper.emitted('update:softDeadline')).toEqual([['2026-08-20T00:00:00.000Z']]);
     expect(wrapper.text()).not.toContain(DEADLINE_ORDER_MESSAGE);
   });
+
+  // 一覧が狭い間（入力欄が隠れている間）に詳細などで期限が変わると、送っていない下書きが
+  // 警告なしで戻ってくる。入力欄にフォーカスが無ければ、下書きを捨てて編集を閉じる
+  it('フォーカスの無い編集中に期限か最終期限が変わったら、送らずに編集を閉じる', async () => {
+    for (const change of [
+      { hard_deadline: '2026-08-25T00:00:00.000Z' },
+      { soft_deadline: '2026-08-10T00:00:00.000Z' },
+    ]) {
+      const wrapper = mountDeadlines({ hard_deadline: '2026-08-20T00:00:00.000Z' });
+      await editDeadline(wrapper, '2026-08-21');
+      (wrapper.get('input[aria-label="期限"]').element as HTMLInputElement).blur();
+
+      await wrapper.setProps({
+        task: { ...task, hard_deadline: '2026-08-20T00:00:00.000Z', ...change },
+      });
+
+      expect(wrapper.find('input[aria-label="期限"]').exists(), JSON.stringify(change)).toBe(false);
+      expect(wrapper.emitted('update:softDeadline')).toBeUndefined();
+      wrapper.unmount();
+    }
+  });
+
+  it('入力欄にフォーカスがあれば、期限が変わっても編集を続ける', async () => {
+    const wrapper = mountDeadlines({ hard_deadline: '2026-08-20T00:00:00.000Z' });
+    await editDeadline(wrapper, '2026-08-21');
+    const input = wrapper.get('input[aria-label="期限"]').element as HTMLInputElement;
+    input.focus();
+
+    await wrapper.setProps({ task: { ...task, hard_deadline: '2026-08-25T00:00:00.000Z' } });
+
+    expect(wrapper.find('input[aria-label="期限"]').exists()).toBe(true);
+    expect((wrapper.get('input[aria-label="期限"]').element as HTMLInputElement).value).toBe(
+      '2026-08-21',
+    );
+  });
 });
