@@ -32,6 +32,7 @@ pub mod project_task_views;
 pub mod projects;
 pub mod reactions;
 pub mod recovery_codes;
+pub mod review_finding_edits;
 pub mod review_finding_transitions;
 pub mod review_findings;
 pub mod reviews;

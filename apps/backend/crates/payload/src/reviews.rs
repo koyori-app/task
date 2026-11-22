@@ -62,6 +62,89 @@ pub struct UpdateFindingStateRequest {
     pub note: Option<String>,
 }
 
+/// 指摘の内容の直し（TASK-577）。省略した欄は変えない。`file` / `line` は `null` で消す。
+///
+/// 直せるのは、その指摘を含むラウンドの作成者だけで、状態が `open` の間だけ（仕様 §3）。
+/// 欄の上限は起票（[`CreateFindingInput`]）と同じ。重大度は直せない（マージ可否を決める
+/// 重さを後から動かせると、出し直しの記録を経ずに基準が変わる）。重さを変えたいときは、
+/// 指摘を取り下げて出し直す。
+#[derive(Validate, Debug, Default, Deserialize, ToSchema, serde::Serialize)]
+#[validate(schema(function = "validate_content_update"))]
+pub struct UpdateFindingContentRequest {
+    /// 送られたら断るためだけに受ける。黙って捨てると、直したつもりで直っていないことに
+    /// 気づけない。仕様には載せない
+    #[serde(
+        default,
+        deserialize_with = "crate::nullable::deserialize_some",
+        skip_serializing
+    )]
+    #[schema(ignore)]
+    pub severity: Option<Option<serde_json::Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[validate(length(min = 1, max = 200))]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[validate(length(min = 1, max = 20000))]
+    pub body: Option<String>,
+    /// 位置のファイル。`null` で消す
+    #[serde(
+        default,
+        deserialize_with = "crate::nullable::deserialize_some",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schema(value_type = Option<String>, nullable)]
+    pub file: Option<Option<String>>,
+    /// 位置の行（1 以上）。`null` で消す
+    #[serde(
+        default,
+        deserialize_with = "crate::nullable::deserialize_some",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schema(value_type = Option<i32>, nullable)]
+    pub line: Option<Option<i32>>,
+}
+
+impl UpdateFindingContentRequest {
+    /// 直す欄が一つも無いか。
+    pub fn is_empty(&self) -> bool {
+        self.title.is_none() && self.body.is_none() && self.file.is_none() && self.line.is_none()
+    }
+}
+
+/// `file` / `line` は `Option<Option<_>>` なので、欄の属性ではなくここで上限を見る。
+fn validate_content_update(
+    request: &UpdateFindingContentRequest,
+) -> Result<(), validator::ValidationError> {
+    if request.severity.is_some() {
+        return Err(
+            validator::ValidationError::new("severity_not_editable").with_message(
+                "severity は直せません（重さを変えたいときは、指摘を取り下げて出し直してください）"
+                    .into(),
+            ),
+        );
+    }
+    if request.is_empty() {
+        return Err(
+            validator::ValidationError::new("nothing_to_edit").with_message(
+                "直す欄がありません（title / body / file / line のどれかを渡してください）".into(),
+            ),
+        );
+    }
+    if let Some(Some(file)) = &request.file
+        && file.chars().count() > 1000
+    {
+        return Err(validator::ValidationError::new("file_too_long")
+            .with_message("file は 1000 文字までです".into()));
+    }
+    if let Some(Some(line)) = request.line
+        && line < 1
+    {
+        return Err(validator::ValidationError::new("line_out_of_range")
+            .with_message("line は 1 以上の整数です".into()));
+    }
+    Ok(())
+}
+
 /// 別の PR の未解決の指摘を、この PR の新しいラウンドへ引き継ぐ（TASK-495）。
 ///
 /// 元 PR の記録は変えない。引き継ぎ先は現在の連携先に限る。
@@ -216,6 +299,10 @@ pub struct FindingResponse {
     pub created_at: DateTime<Utc>,
     #[schema(value_type = String, format = "date-time")]
     pub updated_at: DateTime<Utc>,
+    /// 内容（題・本文・位置）を最後に直した時刻。直していなければ `null`
+    #[serde(default)]
+    #[schema(value_type = Option<String>, format = "date-time", nullable)]
+    pub edited_at: Option<DateTime<Utc>>,
     pub transitions: Vec<FindingTransitionResponse>,
     /// 要求者がいま遷移できる先の状態（`PATCH … {state}` にそのまま渡せる値）。
     /// `write:review` が無い場合は空。
@@ -250,6 +337,7 @@ impl FindingResponse {
             carried_from_finding_id: model.carried_from_finding_id,
             created_at: model.created_at.with_timezone(&Utc),
             updated_at: model.updated_at.with_timezone(&Utc),
+            edited_at: model.edited_at.map(|at| at.with_timezone(&Utc)),
             transitions,
             available_actions: available_actions.into_iter().map(Into::into).collect(),
         }
@@ -425,4 +513,70 @@ fn gate_schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
     crate::or_unknown::described_schema::<ReviewGate>(
         "表示用の判定（上から順に最初に当たったもの）。クライアントは再計算しない\n\n権威のゲートは引き続き CLI の `--head` 照合と branch protection。",
     )
+}
+
+#[cfg(test)]
+mod content_update_tests {
+    use super::*;
+
+    fn parse(json: &str) -> UpdateFindingContentRequest {
+        serde_json::from_str(json).expect("parse")
+    }
+
+    /// 省略は変えない、`null` は消す（`file` / `line`）。
+    #[test]
+    fn omitted_fields_stay_and_null_clears_the_location() {
+        let request = parse(r#"{"title":"t"}"#);
+        assert_eq!(request.title.as_deref(), Some("t"));
+        assert_eq!(request.file, None);
+        assert_eq!(request.line, None);
+
+        let request = parse(r#"{"file":null,"line":null}"#);
+        assert_eq!(request.file, Some(None));
+        assert_eq!(request.line, Some(None));
+    }
+
+    /// 起票と同じ上限で見る。欄が一つも無い直しは通さない。
+    #[test]
+    fn edits_follow_the_same_limits_as_submitting() {
+        assert!(parse(r#"{"line":7}"#).validate().is_ok());
+        assert!(parse(r#"{"file":null}"#).validate().is_ok());
+        for json in ["{}", r#"{"line":0}"#, r#"{"title":""}"#, r#"{"body":""}"#] {
+            assert!(parse(json).validate().is_err(), "{json}");
+        }
+        let long_file = format!(r#"{{"file":"{}"}}"#, "a".repeat(1001));
+        assert!(parse(&long_file).validate().is_err());
+        let longest_file = format!(r#"{{"file":"{}"}}"#, "a".repeat(1000));
+        assert!(parse(&longest_file).validate().is_ok());
+    }
+
+    /// 重大度は直せない。送れば値にかかわらず断る（`null` も含む）。
+    #[test]
+    fn the_severity_cannot_be_edited() {
+        for json in [
+            r#"{"severity":"low"}"#,
+            r#"{"severity":null}"#,
+            r#"{"title":"t","severity":"high"}"#,
+        ] {
+            let errors = parse(json).validate().expect_err(json);
+            assert!(
+                errors.to_string().contains("severity は直せません"),
+                "{json}: {errors}"
+            );
+        }
+    }
+
+    /// CLI が送る形。省いた欄は送らず、消す欄は `null` で送る。
+    #[test]
+    fn serializing_skips_omitted_fields_and_sends_null_to_clear() {
+        let request = UpdateFindingContentRequest {
+            title: Some("t".into()),
+            line: Some(None),
+            ..Default::default()
+        };
+        assert_eq!(
+            serde_json::to_value(&request).unwrap(),
+            serde_json::json!({ "title": "t", "line": null })
+        );
+    }
 }

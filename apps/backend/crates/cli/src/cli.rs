@@ -732,6 +732,36 @@ pub enum ReviewCommand {
         #[arg(long, value_name = "text")]
         note: Option<String>,
     },
+    /// Edit the title, body, or location of a finding you submitted, while it is still open.
+    /// The severity cannot be changed; reject the finding and submit it again instead
+    Edit {
+        /// Finding UUID
+        id: String,
+        /// Project key or UUID
+        #[arg(long)]
+        project: String,
+        /// New title
+        #[arg(long)]
+        title: Option<String>,
+        /// New body (markdown)
+        #[arg(long, conflicts_with = "body_file")]
+        body: Option<String>,
+        /// Read the new body from a file (`-` for stdin)
+        #[arg(long, value_name = "path")]
+        body_file: Option<String>,
+        /// New file of the location
+        #[arg(long, conflicts_with = "clear_file")]
+        file: Option<String>,
+        /// Remove the file of the location
+        #[arg(long)]
+        clear_file: bool,
+        /// New line of the location (1 or greater)
+        #[arg(long, conflicts_with = "clear_line")]
+        line: Option<String>,
+        /// Remove the line of the location
+        #[arg(long)]
+        clear_line: bool,
+    },
     /// Show the merge verdict for a PR (exits 1 unless it is reviewed, clean, and up to date)
     Summary {
         /// Project key or UUID

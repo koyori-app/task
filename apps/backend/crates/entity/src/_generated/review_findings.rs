@@ -28,6 +28,8 @@ pub struct Model {
     pub carried_root_finding_id: Option<Uuid>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
+    #[sea_orm(nullable)]
+    pub edited_at: Option<DateTimeWithTimeZone>,
     #[sea_orm(
         belongs_to,
         from = "review_id",

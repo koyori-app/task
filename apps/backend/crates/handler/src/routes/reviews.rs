@@ -24,4 +24,7 @@ pub fn finding_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(
             crate::handlers::reviews::update_review_finding_state
         ))
+        .routes(routes!(
+            crate::handlers::reviews::update_review_finding_content
+        ))
 }

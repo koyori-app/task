@@ -19,13 +19,18 @@
 // - 引き継ぎの再実行: 2 回目は 409。元 PR に指摘が増えれば、その分だけ写る
 // - 引き継ぎの拒否系: 同じ PR 400 / 元ラウンド無し 409 / 引き継ぐ指摘無し 409 / PR 番号 0 と形式違いの `from_repo` 400 / `write:review` の無い PAT 403 / テナント外 403（対照: 201）
 // - 引き継ぎの元リポジトリ: 過去の連携先を `from_repo` で指せる（既定は現在の連携先）
+// - 内容の直し（TASK-577）: その指摘を含むラウンドの作成者は、open の指摘の題・本文・位置を直せる。変わった欄だけが前後の値つきで履歴に残り、応答と一覧に `edited_at` が載る。今と同じ値だけの直しは何も書かない
+// - 直しの主体と状態: 作成者でない利用者は 403、open でない指摘は 409（対照: open に戻せば直せる）。`write:review` の無い PAT は 403
+// - 直しの検め: 欄が無い・line が 0・題が空・file が 1001 文字は 400 で、指摘は変わらない
+// - 重大度は直せない: `severity` を送ると（ほかの欄と一緒でも）400 で、何も変わらない
+// - 直しとマージ可否: 題・本文・位置を直しても、集計の判定（塞いでいる件数・マージ可否）は変わらない
 
 use crate::common::TestApp;
 use axum::http::StatusCode;
 use entity::scopes::Scope;
 use entity::{
-    github_integrations, project_statuses, review_findings, reviews, task_assignees, tasks,
-    tenant_members,
+    github_integrations, project_statuses, review_finding_edits, review_findings, reviews,
+    task_assignees, tasks, tenant_members,
 };
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, prelude::Uuid,
@@ -174,6 +179,50 @@ async fn submit_round(fx: &Fixture, pr: i32, severity: &str, title: &str) -> (St
             .expect("finding id")
             .to_string(),
     )
+}
+
+async fn edit(fx: &Fixture, finding_id: &str, body: serde_json::Value) -> reqwest::Response {
+    fx.app
+        .patch_json_with_session(
+            &format!("{}/{finding_id}/content", fx.findings_path()),
+            body,
+        )
+        .await
+}
+
+/// 指摘の直しの履歴を、欄の名の順に (欄, 前, 後, edit_id, 直した人) で返す。
+async fn edits_of(
+    fx: &Fixture,
+    finding_id: &str,
+) -> Vec<(String, Option<String>, Option<String>, Uuid, Uuid)> {
+    let mut rows = review_finding_edits::Entity::find()
+        .filter(
+            review_finding_edits::Column::FindingId.eq(finding_id.parse::<Uuid>().expect("uuid")),
+        )
+        .all(&fx.app.state.db)
+        .await
+        .expect("edits")
+        .into_iter()
+        .map(|row| {
+            (
+                row.field,
+                row.before_value,
+                row.after_value,
+                row.edit_id,
+                row.actor_id,
+            )
+        })
+        .collect::<Vec<_>>();
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    rows
+}
+
+async fn finding_row(fx: &Fixture, finding_id: &str) -> review_findings::Model {
+    review_findings::Entity::find_by_id(finding_id.parse::<Uuid>().expect("uuid"))
+        .one(&fx.app.state.db)
+        .await
+        .expect("finding")
+        .expect("finding row")
 }
 
 async fn transition(fx: &Fixture, finding_id: &str, state: &str) -> reqwest::Response {
@@ -2772,6 +2821,328 @@ async fn round_numbering_does_not_block_project_foreign_keys() {
     compatible
         .expect("numbering must allow FK key-share locks")
         .unwrap();
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+/// ラウンドの作成者は open の指摘の内容を直せ、変わった欄だけが前後の値つきで残る（TASK-577）。
+#[tokio::test]
+async fn the_round_author_can_edit_an_open_finding_and_the_edit_is_recorded() {
+    let mut fx = setup().await;
+    fx.login(&fx.reviewer.clone()).await;
+    let (_, finding) = submit_round(&fx, 901, "medium", "元の題").await;
+    assert!(
+        finding_row(&fx, &finding).await.edited_at.is_none(),
+        "直す前は edited_at が空"
+    );
+
+    let res = edit(
+        &fx,
+        &finding,
+        serde_json::json!({
+            "title": "直した題",
+            "body": "直した本文",
+            "file": null,
+            "line": 7,
+        }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = json(res).await;
+    assert_eq!(body["severity"], "medium", "重大度は変わらない");
+    assert_eq!(body["title"], "直した題");
+    assert_eq!(body["body"], "直した本文");
+    assert!(
+        body["file"].is_null(),
+        "null で位置のファイルを消す: {body}"
+    );
+    assert_eq!(body["line"], 7);
+    assert!(body["edited_at"].is_string(), "直した時刻を返す: {body}");
+    assert_eq!(body["state"], "open", "直しで状態は変わらない");
+    assert_eq!(
+        body["transitions"].as_array().map(Vec::len),
+        Some(1),
+        "直しは状態の遷移の履歴に混ぜない: {body}"
+    );
+
+    let edits = edits_of(&fx, &finding).await;
+    let edit_id = edits[0].3;
+    assert_eq!(
+        edits,
+        vec![
+            (
+                "body".into(),
+                Some("再現条件と根拠".into()),
+                Some("直した本文".into()),
+                edit_id,
+                fx.reviewer.id
+            ),
+            (
+                "file".into(),
+                Some("apps/frontend/src/App.vue".into()),
+                None,
+                edit_id,
+                fx.reviewer.id
+            ),
+            (
+                "line".into(),
+                Some("42".into()),
+                Some("7".into()),
+                edit_id,
+                fx.reviewer.id
+            ),
+            (
+                "title".into(),
+                Some("元の題".into()),
+                Some("直した題".into()),
+                edit_id,
+                fx.reviewer.id
+            ),
+        ],
+        "変わった欄ごとに 1 行、同じ直しは同じ edit_id で残る"
+    );
+
+    // 一覧にも直した時刻が載る
+    let list = json(
+        fx.app
+            .get_with_session(&format!("{}?pr=901", fx.findings_path()))
+            .await,
+    )
+    .await;
+    assert_eq!(list[0]["edited_at"], body["edited_at"]);
+
+    // 今と同じ値だけを渡した直しは何も書かない（履歴も edited_at も変わらない）
+    let res = edit(&fx, &finding, serde_json::json!({ "title": "直した題" })).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(json(res).await["edited_at"], body["edited_at"]);
+    assert_eq!(edits_of(&fx, &finding).await.len(), 4);
+
+    // 次の直しは別の edit_id で足される
+    let res = edit(&fx, &finding, serde_json::json!({ "line": null })).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let edits = edits_of(&fx, &finding).await;
+    assert_eq!(edits.len(), 5);
+    let line_edits: Vec<_> = edits.iter().filter(|row| row.0 == "line").collect();
+    assert_eq!(line_edits.len(), 2);
+    assert!(
+        line_edits
+            .iter()
+            .any(|row| row.1.as_deref() == Some("7") && row.2.is_none() && row.3 != edit_id)
+    );
+
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+/// 直せるのは、その指摘を含むラウンドの作成者だけ（TASK-577）。
+#[tokio::test]
+async fn only_the_round_author_can_edit_a_finding() {
+    let mut fx = setup().await;
+    fx.login(&fx.reviewer.clone()).await;
+    let (_, finding) = submit_round(&fx, 902, "high", "レビュワーの指摘").await;
+
+    fx.login(&fx.developer.clone()).await;
+    let res = edit(&fx, &finding, serde_json::json!({ "title": "他人が直す" })).await;
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    let row = finding_row(&fx, &finding).await;
+    assert_eq!(row.title, "レビュワーの指摘", "断ったら指摘は変わらない");
+    assert!(row.edited_at.is_none());
+    assert!(edits_of(&fx, &finding).await.is_empty());
+
+    // 対照: 作成者なら直せる
+    fx.login(&fx.reviewer.clone()).await;
+    assert_eq!(
+        edit(
+            &fx,
+            &finding,
+            serde_json::json!({ "title": "作成者が直す" })
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+/// 直せるのは open の間だけ。理由を本文に入れた 409 を返す（TASK-577）。
+#[tokio::test]
+async fn a_finding_that_is_not_open_cannot_be_edited() {
+    let mut fx = setup().await;
+    fx.login(&fx.reviewer.clone()).await;
+    let (_, finding) = submit_round(&fx, 903, "medium", "修正済みにする指摘").await;
+
+    fx.login(&fx.developer.clone()).await;
+    assert_eq!(
+        transition(&fx, &finding, "fixed").await.status(),
+        StatusCode::OK
+    );
+
+    fx.login(&fx.reviewer.clone()).await;
+    let res = edit(&fx, &finding, serde_json::json!({ "title": "後から直す" })).await;
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+    let message = json(res).await["message"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        message.contains("fixed") && message.contains("open の間だけ"),
+        "理由を返す: {message}"
+    );
+    let row = finding_row(&fx, &finding).await;
+    assert_eq!(row.title, "修正済みにする指摘");
+    assert!(edits_of(&fx, &finding).await.is_empty());
+
+    // 対照: 差し戻して open にすれば直せる
+    assert_eq!(
+        transition(&fx, &finding, "open").await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        edit(&fx, &finding, serde_json::json!({ "title": "後から直す" }))
+            .await
+            .status(),
+        StatusCode::OK
+    );
+
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+/// 直しの欄は起票と同じ上限で検め、通らなければ何も変えない（TASK-577）。
+#[tokio::test]
+async fn edits_are_validated_before_anything_changes() {
+    let mut fx = setup().await;
+    fx.login(&fx.reviewer.clone()).await;
+    let (_, finding) = submit_round(&fx, 904, "low", "検めの指摘").await;
+
+    for body in [
+        serde_json::json!({}),
+        serde_json::json!({ "line": 0 }),
+        serde_json::json!({ "title": "" }),
+        serde_json::json!({ "file": "a".repeat(1001) }),
+    ] {
+        let res = edit(&fx, &finding, body.clone()).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST, "{body} は入力の誤り");
+    }
+    let row = finding_row(&fx, &finding).await;
+    assert_eq!(row.title, "検めの指摘");
+    assert_eq!(row.line, Some(42));
+    assert!(row.edited_at.is_none());
+    assert!(edits_of(&fx, &finding).await.is_empty());
+
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+/// 直しは `write:review` の書き込みとして扱う（TASK-577）。
+#[tokio::test]
+async fn editing_a_finding_requires_the_write_review_scope() {
+    let fx = setup().await;
+    let (_, finding) = submit_round(&fx, 905, "low", "鍵の指摘").await;
+    let path = format!("{}/{finding}/content", fx.findings_path());
+    let body = serde_json::json!({ "title": "鍵で直す" });
+
+    let read_only = fx
+        .app
+        .insert_pat(fx.reviewer.id, fx.tenant_id, vec![Scope::ReadReview], None)
+        .await;
+    let res = fx
+        .app
+        .patch_json_with_bearer(&path, body.clone(), &read_only)
+        .await;
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    assert_eq!(finding_row(&fx, &finding).await.title, "鍵の指摘");
+
+    // 対照: write:review を持つ鍵なら直せる
+    let writer = fx
+        .app
+        .insert_pat(
+            fx.reviewer.id,
+            fx.tenant_id,
+            vec![Scope::ReadReview, Scope::WriteReview],
+            None,
+        )
+        .await;
+    let res = fx.app.patch_json_with_bearer(&path, body, &writer).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(finding_row(&fx, &finding).await.title, "鍵で直す");
+
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+async fn summary_of(fx: &Fixture, pr: i32) -> serde_json::Value {
+    json(
+        fx.app
+            .get_with_session(&format!("{}/summary?pr={pr}", fx.reviews_path()))
+            .await,
+    )
+    .await
+}
+
+/// 重大度は直せない。送れば 400 で断り、何も変えない（TASK-577）。
+#[tokio::test]
+async fn the_severity_of_a_finding_cannot_be_edited() {
+    let mut fx = setup().await;
+    fx.login(&fx.reviewer.clone()).await;
+    let (_, finding) = submit_round(&fx, 907, "high", "重さは直せない指摘").await;
+
+    for body in [
+        serde_json::json!({ "severity": "low" }),
+        serde_json::json!({ "severity": null }),
+        serde_json::json!({ "title": "題も一緒に直す", "severity": "nit" }),
+    ] {
+        let res = edit(&fx, &finding, body.clone()).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST, "{body}");
+        let text = res.text().await.unwrap_or_default();
+        assert!(text.contains("severity は直せません"), "理由を返す: {text}");
+    }
+    let row = finding_row(&fx, &finding).await;
+    assert_eq!(row.severity.as_str(), "high");
+    assert_eq!(row.title, "重さは直せない指摘", "一緒に送った欄も変えない");
+    assert!(row.edited_at.is_none());
+    assert!(edits_of(&fx, &finding).await.is_empty());
+
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+/// 内容を直しても、マージ可否の集計の判定は変わらない（TASK-577）。
+#[tokio::test]
+async fn editing_a_finding_does_not_change_the_merge_verdict() {
+    let mut fx = setup().await;
+    fx.login(&fx.reviewer.clone()).await;
+    let (_, finding) = submit_round(&fx, 906, "high", "直しても塞ぐ指摘").await;
+
+    let before = summary_of(&fx, 906).await;
+    assert_eq!(before["blocking"], 1);
+    assert_eq!(before["mergeable"], false, "{before}");
+
+    assert_eq!(
+        edit(
+            &fx,
+            &finding,
+            serde_json::json!({
+                "title": "題を直した",
+                "body": "本文を直した",
+                "file": null,
+                "line": null,
+            }),
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+    let after = summary_of(&fx, 906).await;
+    assert_eq!(after["blocking"], before["blocking"], "{after}");
+    assert_eq!(after["mergeable"], before["mergeable"], "{after}");
+    assert_eq!(
+        after["counts"], before["counts"],
+        "重大度 × 状態の件数も変わらない"
+    );
+
     fx.app.cleanup_user(fx.reviewer.id).await;
     fx.app.cleanup_user(fx.developer.id).await;
 }

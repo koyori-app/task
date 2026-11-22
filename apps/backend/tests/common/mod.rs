@@ -1662,6 +1662,21 @@ impl TestApp {
             .expect("delete request")
     }
 
+    pub async fn patch_json_with_bearer(
+        &self,
+        path: &str,
+        body: serde_json::Value,
+        token: &str,
+    ) -> Response {
+        self.client
+            .patch(format!("{}{path}", self.base_url))
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .json(&body)
+            .send()
+            .await
+            .expect("patch request")
+    }
+
     /// 本文を取らない更新を PAT で叩く（全件既読・1 件既読）。
     pub async fn patch_with_bearer(&self, path: &str, token: &str) -> Response {
         self.client
