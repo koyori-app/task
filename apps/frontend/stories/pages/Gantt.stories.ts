@@ -388,9 +388,40 @@ export const DependencyToggle: Story = {
   },
 };
 
-// 頁の縦のスクロールは layout の main（overflow-y: auto）が持つ。低性能の端末（deviceMemory の無い
-// Firefox・Safari を含む）では、図は外のスクロール域に見える行だけを描くので、main を巻いた先の行も
-// 描かれねばならない（外の域を window に取り違えると、巻いた先が描かれない）
+async function playUnscheduledDrawerScroll(canvasElement: HTMLElement) {
+  const canvas = within(canvasElement);
+  await userEvent.click(await canvas.findByTestId('gantt-unscheduled'));
+  const list = await canvas.findByTestId('gantt-unscheduled-list');
+  await waitFor(() => expect(list.scrollHeight).toBeGreaterThan(list.clientHeight));
+
+  const heading = canvas.getByRole('heading', { name: /期間の無いタスク/ });
+  const headingTopBefore = heading.getBoundingClientRect().top;
+
+  const lastTitle = '期間なし 150';
+  const lastButton = canvas.getByText(lastTitle).closest('button')!;
+  const maxScroll = list.scrollHeight - list.clientHeight;
+
+  list.scrollTop = list.scrollHeight;
+  await waitFor(() => {
+    expect(list.scrollTop).toBeGreaterThan(0);
+    expect(list.scrollTop).toBeGreaterThanOrEqual(maxScroll - 1);
+  });
+
+  const listRect = list.getBoundingClientRect();
+  const btnRect = lastButton.getBoundingClientRect();
+  expect(btnRect.top).toBeGreaterThanOrEqual(listRect.top - 1);
+  expect(btnRect.bottom).toBeLessThanOrEqual(listRect.bottom + 1);
+
+  expect(Math.abs(heading.getBoundingClientRect().top - headingTopBefore)).toBeLessThan(1);
+
+  list.scrollTop = 0;
+  await waitFor(() => expect(list.scrollTop).toBe(0));
+  lastButton.focus();
+  await waitFor(() => expect(list.scrollTop).toBeGreaterThan(0));
+
+  await userEvent.click(lastButton);
+}
+
 export const UnscheduledDrawerScroll: Story = {
   name: '期間なし drawer を巻く',
   decorators: [withContext()],
@@ -398,17 +429,7 @@ export const UnscheduledDrawerScroll: Story = {
     window.scrollTo(0, 0);
     return createMockFetch({ tasks: sampleTasks.slice(0, 2), unscheduled: manyUnscheduledTasks });
   },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    await userEvent.click(await canvas.findByTestId('gantt-unscheduled'));
-    const list = await canvas.findByTestId('gantt-unscheduled-list');
-    await waitFor(() => expect(list.scrollHeight).toBeGreaterThan(list.clientHeight));
-    const lastTitle = '期間なし 150';
-    const lastButton = canvas.getByText(lastTitle).closest('button')!;
-    list.scrollTop = list.scrollHeight;
-    await waitFor(() => expect(lastButton).toBeVisible());
-    await userEvent.click(lastButton);
-  },
+  play: async ({ canvasElement }) => playUnscheduledDrawerScroll(canvasElement),
 };
 
 export const UnscheduledDrawerScrollNarrow: Story = {
@@ -416,9 +437,12 @@ export const UnscheduledDrawerScrollNarrow: Story = {
   decorators: [withContext()],
   parameters: { viewport: { defaultViewport: 'mobile2' } },
   beforeEach: UnscheduledDrawerScroll.beforeEach,
-  play: UnscheduledDrawerScroll.play,
+  play: async ({ canvasElement }) => playUnscheduledDrawerScroll(canvasElement),
 };
 
+// 頁の縦のスクロールは layout の main（overflow-y: auto）が持つ。低性能の端末（deviceMemory の無い
+// Firefox・Safari を含む）では、図は外のスクロール域に見える行だけを描くので、main を巻いた先の行も
+// 描かれねばならない（外の域を window に取り違えると、巻いた先が描かれない）
 export const LowDeviceMainScroll: Story = {
   name: '低性能の端末で頁の main を巻く',
   decorators: [
