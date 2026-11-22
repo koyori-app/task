@@ -2,7 +2,7 @@
 title: レビュー指摘管理
 description: PR レビューの指摘を task で追跡し、GitHub には要約コメント 1 本と、マージ可でのレビュワー本人の Approve、未解決の High / Medium があるときの変更要求だけを置く仕組みと運用ルール
 status: partial
-updated: 2026-11-15
+updated: 2026-11-22
 slug: dev/features/review-findings
 sidebar:
   order: 5
@@ -321,9 +321,10 @@ PR 単位の読み取りの規則は次のとおりである。
 
 `/reviews/pull-requests` の行（`ReviewedPullRequest`）は次のとおりである。可否は返さない。
 
-- `unresolved`（未解決数）は open / fixing / fixed を数える。`blocking`（塞いでいる件数）は同じ状態の High / Medium のみを数える。`blocking_fixed` は `blocking` の内数で確認（verified）待ちの分である
+- `unresolved`（未解決数）は open / fixing / fixed を数える。`blocking`（塞いでいる件数）は同じ状態の High / Medium のみを数える。`blocking_fixed` は `blocking` の内数で確認（verified）待ちの分である。`unresolved_fixed` は `unresolved` の内数で、重大度を問わず fixed を数える
 - ラウンド数とホスト上の PR の状態 `state`（`open` / `closed` / `merged` / `unknown`）を持つ
-- PR 行（`forge_pull_requests`）から `state`・`merged_at`・`merge_effects_processed_at`・`pull_request_id` を返す。PR 行とは自然キー `(project_id, repo_owner, repo_name, pr_number)` で結ぶ。PR 行が無ければ `state = unknown`、他は null である
+- `repository` は集計対象のリポジトリ（`owner/name`）で、GitHub 連携が無ければ null である
+- PR 行（`forge_pull_requests`）から `state`・`merged_at`・`merge_effects_processed_at`・`pull_request_id`・`host`・`html_url` を返す。PR 行とは自然キー `(project_id, repo_owner, repo_name, pr_number)` で結ぶ。PR 行が無ければ `state = unknown`、他は null である。`html_url` は、ラウンドの起票で用意した PR 行が webhook を受けるまでも null である
 
 起票と遷移の規則は次のとおりである。
 
@@ -371,28 +372,35 @@ PR 単位の読み取りの規則は次のとおりである。
 
 ## 画面
 
-| 項目 | 値 |
-|---|---|
-| URL | `/{tenant}/projects/{key}/reviews`。`?pr=618` で PR を指定する。要約コメントのリンク先である |
-| クエリ | 指摘の絞り込みと選択は `?round=` / `?severity=` / `?state=` / `?finding=`。PR 一覧の状態は `?mine=1`（自分が作成した PR だけ）と `?page=N`（ページを操作していなければ載せない。`page` が無いときは表示中の PR が載るページを開くので、明示した 1 ページ目は `page=1` として残す）、`?q=`（検索語。空なら載せない）、`?pr_state=`（選んだ PR の状態。選んでいなければ載せない） |
-| ページファイル | `apps/frontend/src/pages/@tenant/projects/@projectKey/reviews/+Page.vue` |
-| 本体 | `components/reviews/ReviewFindingsView.vue` と `ReviewRoundComposer.vue`、`ReviewFindingBody.vue` |
+PR の一覧と PR の詳細の 2 画面である。
 
-ページは `<ReviewFindingsView :key="projectId">` で作り直す。設定画面と同じ扱いである。
+| 項目 | PR の一覧 | PR の詳細 |
+|---|---|---|
+| URL | `/{tenant}/projects/{key}/reviews` | `/{tenant}/projects/{key}/reviews/{pr}` |
+| クエリ | `?q=`（検索語）、`?pr_state=`（選んだ PR の状態。選んでいなければ載せない）、`?author=`（作成者）、`?unresolved=yes\|no`、`?reviewed=7d\|30d\|90d`、`?mine=1`（自分が作成した PR だけ）、`?sort=unresolved\|number`、`?page=N`（2 ページ目から載せる） | `?q=`（検索語）、`?state=` と `?severity=`（カンマ区切りの集合）、`?round=`、`?reviewer=`（利用者の ID）、`?finding=`（開いている指摘） |
+| ページファイル | `apps/frontend/src/pages/@tenant/projects/@projectKey/reviews/+Page.vue` | `apps/frontend/src/pages/@tenant/projects/@projectKey/reviews/@prNumber/+Page.vue` |
+| 本体 | `components/reviews/ReviewPullRequestList.vue` | `components/reviews/ReviewPullRequestDetail.vue` と `ReviewMergeGate.vue`、`ReviewFindingRow.vue`、`ReviewDeferredTaskLink.vue`、`ReviewRoundComposer.vue`、`ReviewFindingBody.vue` |
+
+- どちらの画面も自分のクエリだけを書き換え、既定値は URL に載せない。URL は replaceState で書く。知らない値は捨てて理由を出す
+- 一覧は `<ReviewPullRequestList :key="projectId">`、詳細は `<ReviewPullRequestDetail :key="projectId:prNumber">` で作り直す。設定画面と同じ扱いである
+- 旧 URL の `/{tenant}/projects/{key}/reviews?pr=618` は詳細へ転送する。`round`・`severity`・`state`・`finding` は引き継ぎ、`mine`・`page`・`q`・`pr_state` は捨てる。要約コメントと通知メールのリンクはこの形で出ているので、転送で詳細へ届く
+- 詳細の「PR の一覧」は、一覧が最後に URL へ書いたクエリを `sessionStorage` から読んで付け、絞り込みを保ったまま戻る
 
 ### ラウンドの起票
 
-人間のレビュワー向けである。対象 PR と head SHA を指定し、指摘（重大度 / title / body / file:line）を下書きに 1 件ずつ追加して、まとめて確定する。確定までサーバーには何も作られない。指摘ゼロでの確定もできる。head SHA は 40 桁の小文字 16 進かを送信前に見る。
+人間のレビュワー向けで、PR の詳細の「指摘を起票」から開く。head SHA を指定し、指摘（重大度 / title / body / file:line）を下書きに 1 件ずつ追加して、まとめて確定する。確定までサーバーには何も作られない。指摘ゼロでの確定もできる。head SHA は 40 桁の小文字 16 進かを送信前に見る。
 
-### PR 一覧
+### PR の一覧
 
 - 番号・タイトルの部分一致で探せる
-- 各行にホスト上の PR の状態（Open / Merged / Closed / 状態不明）をバッジで出し、状態で絞り込める。開いた直後は Open の PR だけを出し、Open の PR が 1 件も無い一覧と、URL の `page` が Open の一覧には無く「すべて」の一覧なら在るときは「すべて」で開く。URL に `pr` が無いときに自動で開く PR は、この絞り込みで先頭に出るものである。選んだ状態は `pr_state` に載せる（既定と同じ `open` でも載せる）。選んでいなければ載せず、既定の決め方で開く
-- 10 件ごとにページを分け、`page` が無ければ表示中の PR が載っているページを開く。範囲外の `page` は最後のページに寄せて理由を出す
-- 絞り込みとページ分割は画面側で行う。API は全件を集計して返す
-- 各行のバッジは件数の事実だけを出す。`blocking` が 0 なら「未解決なし」、open / fixing が残れば赤の「N 件が未解決」（N は `blocking - blocking_fixed`）、すべて fixed なら「N 件が承認待ち」である
+- 状態（Open / Merged / Closed / 状態不明）・作成者・未解決のあり / なし・最終レビューの期間（7 日 / 30 日 / 90 日以内）で絞り込み、最終レビューが新しい順・未解決が多い順・番号が大きい順に並べ替える。未解決が多い順は High・Medium の残り（`blocking - blocking_fixed`）、未解決の数、最終レビューの順で比べる
+- 開いた直後は Open の PR だけを出し、Open の PR が 1 件も無い一覧と、URL の `page` が Open の一覧には無く「すべて」の一覧なら在るときは「すべて」で開く。選んだ状態は `pr_state` に載せる（既定と同じ `open` でも載せる）。選んでいなければ載せず、既定の決め方で開く
+- 10 件ごとにページを分ける。範囲外の `page` は最後のページに寄せて理由を出す
+- 絞り込み・並べ替え・ページ分割は画面側で行う。API は全件を集計して返す
+- 各行は件数の事実だけを 3 列で出し、可否は出さない。High・Medium は `blocking - blocking_fixed`、Low・Nit は `(unresolved - blocking) - (unresolved_fixed - blocking_fixed)`、承認待ちは `unresolved_fixed` で、3 つを足すと `unresolved` になる
+- 行はクリックの操作を持たず、題と行末の矢印が詳細へのリンクである
 
-「自分が作成した PR だけ」のスイッチの動作は次のとおりである。
+「自分の PR」のスイッチの動作は次のとおりである。
 
 - PR の作成者（`pr_author`）は GitHub のユーザー名なので、閲覧者の連携 GitHub アカウントのユーザー名（`GET /v1/auth/oauth/connections` の `provider_login`）と大文字小文字を区別せず照合する
 - 未連携ならスイッチは無効で、URL の `mine=1` は理由を出して無視する
@@ -403,29 +411,35 @@ PR 単位の読み取りの規則は次のとおりである。
 
 ### 指摘の一覧と操作
 
-- PR 単位の指摘一覧は重大度・状態・ラウンドでフィルタする。各指摘は title / file:line / 本文 / 遷移履歴を持つ
+- 指摘はファイルごとにまとめ、左にファイルの木を置く。木の節を選ぶと、絞り込まずに一覧のそのまとまりへ移る
+- ファイルの件数は「解決 / 全体」で、木の節と一覧のファイルの見出しで同じ数を出す。解決に数えるのは verified・deferred・rejected で、fixed は数えない。open・fixing が残れば赤、残りが fixed だけなら橙、全部解決なら緑である。件数は絞り込みに関係なく、そのファイルの全指摘で数える
+- 絞り込みは検索（題・本文・ファイル）、状態と重大度（複数選択）、Round、レビュアーである。Round を選ぶと、そのラウンドが見た head をホストのコミットへのリンクで出す
+- 指摘は 1 行に畳み、選んだ行だけを開いて本文と操作を出す。↑ ↓ で選択を前後に動かし、Esc で外す
 - 状態遷移の操作は fixing / fixed / verified / deferred / rejected と、戻り遷移（fixed → open の差し戻し、fixing → open の着手の取り消し、deferred → open、rejected → open）である
 - 出すボタンは指摘の `available_actions` そのものである。役割制約はすべて backend が判定済みである
-- 自分が fixed を宣言した指摘には、確認が出ない理由の説明だけを添える
-- `deferred` はリンクされた通常タスクへジャンプできる
-- ラウンドの履歴として、同じ PR に何ラウンド（R1, R2, …）レビューが走り、どの head を見たかを出す
+- 自分が fixed を宣言した指摘には、無効の「確認した」と、確認できない理由を添える
+- 繰り延べと取り下げは行の中に理由の入力欄を開き、理由を `note` として送る。繰り延べの理由は任意で、取り下げの理由は画面で必須にする。API は `note` を任意のまま受ける
+- `deferred` の行は、繰り延べ先のタスクの番号をタスク詳細へのリンクで出す
+- 開いた行には最後の遷移を 1 件出し、行のメニューから全部の遷移履歴に切り替えられる
+- 起票の下書きを抱えたまま「PR の一覧」へ戻ろうとすると確認を挟み、タブを閉じる・再読み込みは `beforeunload` で止める。ブラウザの「戻る」は確認しない
+- 「GitHub で開く」は PR 行のホスト（`host`）のロゴと名前で出す。PR 行の `html_url` があればそれを開き、無ければホストとリポジトリから URL を組む
 
-遷移規則は画面に持たない。`lib/review-findings.ts` の `findingActions` は `available_actions` にラベルを付けるだけ、`mergeVerdict` は `gate` に見出しと説明を付けるだけである。
+遷移規則は画面に持たない。`lib/review-findings.ts` の `findingActionButtons` は `available_actions` にラベルと並びを付けるだけ、`mergeGateView` は `gate` に見出しと満たしていない条件の文を付けるだけである。
 
 ### マージ可否の表示
 
-次の 6 つを集計の `gate` で出し分ける。画面は判定を再計算しない。判定は「可」以外へ落とす方向にだけ使い、「可」の保証には使わない。
+次の 6 つを集計の `gate` で出し分ける。画面は判定を再計算しない。判定は「可」以外へ落とす方向にだけ使い、「可」の保証には使わない。出すのは満たしていない条件だけで、満たしている条件と条件の説明文は出さない。
 
-| 表示 | `gate` | 内容 |
-|---|---|---|
-| リポジトリ未確定 | `unlinked` | GitHub 連携が無い。ゲートとして扱ってよい表示ではない |
-| 未レビュー | `unreviewed` | ラウンドが 0 件 |
-| マージ不可（残数つき） | `blocked` | 未解決の High・Medium がある |
-| レビューが古い | `outdated` | キャッシュ済みの現在 head と最新ラウンドの `head_sha` が不一致。可を出さない |
-| 鮮度不明 | `stale_unknown` | キャッシュが無い（ジョブが一度も走っていない・メタ取得に失敗した）。可を出さない |
-| マージ可 | `ready` | GitHub を最後に確認した時刻を必ず併記する |
+| 表示 | `gate` | 満たしていない条件 | 行のボタン |
+|---|---|---|---|
+| リポジトリ未確定 | `unlinked` | GitHub 連携が無く、どの PR を見た集計か決まらない。ゲートとして扱ってよい表示ではない | なし |
+| 未レビュー | `unreviewed` | ラウンドが 0 件 | 指摘を起票 |
+| マージ不可 | `blocked` | 未解決の High・Medium の件数と、そのうちの承認待ち（fixed）の件数 | 未解決を見る |
+| レビューが古い | `outdated` | キャッシュ済みの現在 head と最新ラウンドの `head_sha` が不一致。現在 head をホストのコミットへのリンクで出す | 指摘を起票 |
+| 鮮度不明 | `stale_unknown` | キャッシュが無い（ジョブが一度も走っていない・メタ取得に失敗した） | なし |
+| マージ可 | `ready` | なし。GitHub を最後に確認した時刻を併記する | なし |
 
-判断の材料として、レビューした commit（手元の HEAD と見比べれば、レビュー後に積まれたコミットに気づける）、集計対象のリポジトリ（空を含む）、オーナー代行での棄却件数（あれば）、GitHub の確認時刻を並べる。
+オーナー代行での棄却の件数は、件数があるときだけ、どの表示でも最後に 1 行で出す。代行の条件はオーナー自身が作れるので、マージ可否を読む場所に痕跡を残す。集計対象のリポジトリは詳細の見出しに出す。
 
 ## 未実装と既知の制限
 
@@ -531,3 +545,8 @@ PR 単位の読み取りの規則は次のとおりである。
 | 2026-11-15 | 出し直した PR への指摘の引き継ぎは、未解決の指摘を引き継ぎ先の新しいラウンドへ写し、元の PR の記録は変えない（TASK-495）。写しのラウンドの作成者と head は元のままにし、レビューには数えない。位置はそのまま写す。引き継ぎ元は同じプロジェクトの中に限る。入口は API と CLI だけにして、Web の操作は作らない | ラウンドは「どの head を見た判断か」の記録で、追記・削除しないのがモデルの根幹である。作成者を引き継いだ人にすると、PR の作者が自分で引き継いで High を棄却でき、マージ基準を迂回できる。写しをレビューに数えると、同じ commit で出し直した PR が誰もレビューしていないのに「可」になり、元の作成者の名義で Approve される。別プロジェクトは権限・PAT の束縛・作成者の在籍が別で、許さない。Web の操作は同時に進む画面の変更と衝突するので、API を用意して後から足す |
 | 2026-11-15 | 写しには大元の指摘 ID を外部キーとは別に保持し、引き継ぎ先の元の指摘とも重複を判定する。PR 一覧の最終レビュー時刻は写しを除き、写しだけなら null とする | 参照先の削除で引き継ぎの鎖が切れても、複数経路の引き継ぎで同じ指摘が増えない。写しの作成はレビューの実施時刻を更新しない。元の指摘の共有ロックを先に取り、採番のプロジェクト行を後にロックすることで、状態遷移と引き継ぎのロック順が揃い、循環待ちを防ぐ |
 | 2026-11-17 | PR 一覧の検索語を `q` に、利用者が選んだ「PR の状態」を `pr_state` に載せる（TASK-474）。選んでいなければ載せず、TASK-503 の既定の決め方で開く。TASK-503 の「状態は URL に載せない」を改める | 載せないと、再読み込みで絞り込みが消える。`page` の意味が状態に依るので、状態が無いとページを推測で補うことになる。選んだときだけ載せれば、`pr` だけの共有リンクは今と同じに開く |
+| 2026-11-22 | 画面を PR の一覧（`/reviews`）と PR の詳細（`/reviews/{pr}`）の 2 画面に分け、指摘をファイルごとにまとめる（TASK-585）。旧 URL の `?pr=` は詳細へ転送する | 1 画面に PR の一覧・マージ可否・絞り込み・起票・指摘を並べていて、レビューが溜まると見にくかった。投稿済みの要約コメントと通知メールのリンクは旧 URL のまま残る |
+| 2026-11-22 | 指摘の状態と重大度の絞り込みを集合にし、URL にはカンマ区切りで載せる | 「未解決」は open・fixing・fixed の 3 つを同時に見るので、単一値では表せない。旧 URL の単一値はそのまま読める |
+| 2026-11-22 | マージ可否の表示は、満たしていない条件だけを出す。オーナー代行での棄却の件数は、件数があるときだけ残す | 満たしている条件と説明文が並ぶと、直すものが埋もれる。代行の条件はオーナー自身が作れるので、可否を読む場所に痕跡を残す決まりは変えない |
+| 2026-11-22 | 取り下げの理由は画面で必須にし、繰り延べの理由は任意にする。API の `note` は任意のまま変えない | 取り下げは指摘を対応しないと決める操作で、理由が無いと後から判断を追えない。CLI と MCP は今も理由なしで遷移を送れる |
+| 2026-11-22 | PR 一覧の行に `unresolved_fixed`・`repository`・`host`・`html_url` を足す | 一覧の High・Medium / Low・Nit / 承認待ちの 3 列を同じ数え方にするには、全重大度の fixed の数が要る。ホストのロゴと PR・コミットへのリンクは PR 行のホストから決める |

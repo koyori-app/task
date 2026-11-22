@@ -1,7 +1,7 @@
 ---
 title: URL
 description: フロントエンドの URL と識別子、それを定義する Vike のページファイルの対応
-updated: 2026-11-19
+updated: 2026-11-22
 sidebar:
   order: 1
 ---
@@ -95,7 +95,8 @@ sidebar:
 | `/{tenant}/projects/{key}/docs/{file_id}` | ドキュメント詳細。`{file_id}` は Drive ファイルの UUID。`?edit=1` で編集モード |
 | `/{tenant}/projects/{key}/settings` | プロジェクト設定。メンバー管理もこの画面の節である |
 | `/{tenant}/projects/{key}/gantt` | プロジェクトのガントチャート。テナントのガントと同じ画面を、そのプロジェクトのタスクに絞って出す。サイドバーのプロジェクトの入口は、テナントのガントと同じ実験的機能を有効にしたときだけ出る。クエリはテナントのガントと同じ |
-| `/{tenant}/projects/{key}/reviews` | [レビュー指摘](/dev/features/review-findings)の画面。`?pr=618`、`?round=`、`?severity=`、`?state=`、`?finding=`、`?mine=1`、`?page=`、`?q=`（PR 一覧の検索語）、`?pr_state=`（選んだ PR の状態。選んでいなければ載せない）を持つ |
+| `/{tenant}/projects/{key}/reviews` | [レビュー指摘](/dev/features/review-findings)の PR の一覧。`?q=`（検索語）、`?pr_state=`（選んだ PR の状態。選んでいなければ載せない）、`?author=`、`?unresolved=`、`?reviewed=`、`?mine=1`、`?sort=`、`?page=` を持ち、既定値は URL から省く。旧 URL の `?pr=618` は PR の詳細へ転送する |
+| `/{tenant}/projects/{key}/reviews/{pr}` | レビュー指摘の PR の詳細。`{pr}` は PR 番号。`?q=`（検索語）、`?state=` と `?severity=`（カンマ区切り）、`?round=`、`?reviewer=`、`?finding=`（開いている指摘）を持ち、既定値は URL から省く。URL は replaceState で書く |
 
 ## ページファイル
 
@@ -136,6 +137,7 @@ sidebar:
 | `/{tenant}/projects/{key}/settings` | `@tenant/projects/@projectKey/settings/+Page.vue` |
 | `/{tenant}/projects/{key}/gantt` | `@tenant/projects/@projectKey/gantt/+Page.vue` |
 | `/{tenant}/projects/{key}/reviews` | `@tenant/projects/@projectKey/reviews/+Page.vue` |
+| `/{tenant}/projects/{key}/reviews/{pr}` | `@tenant/projects/@projectKey/reviews/@prNumber/+Page.vue` |
 | （エラー） | `_error/+Page.vue` |
 
 URL を持たないファイルは次のとおりである。

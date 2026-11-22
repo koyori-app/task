@@ -2,7 +2,7 @@
 title: Git ホスティング連携
 description: PR・コミット・ブランチとタスクの自動リンクと、マージ時のタスクの自動完了（GitHub / GitLab / Forgejo）
 status: partial
-updated: 2026-11-04
+updated: 2026-11-22
 slug: dev/features/tasks/github-tasks
 sidebar:
   order: 9
@@ -383,7 +383,7 @@ webhook 経由のリンクはシステムが行うので権限検査を経ない
 - 見出しの「Pull Requests」は、並ぶ PR がすべて `host = gitlab` なら「Merge Requests」になる
 - 「PR をリンク」はダイアログで PR 番号と「マージしたらこのタスクを完了にする」（`closes`）を受け取る。リポジトリはプロジェクトの連携先を表示するだけで選ばせない。連携先は `repository` で読み、`null` ならボタンを無効にして理由を出す
 - PR 行のメニューの「リンクを外す」は確認ダイアログを挟み、タイトル・本文に `KEY-N` が残っていれば次の PR イベントで戻ることを添える
-- PR 行の「N 件が未解決」「未解決なし」は `reviews/summary` と同じ集計で、`unresolved` が `null` なら出さない。クリックでレビュー画面のその PR（`reviews?pr=N`）へ遷移する
+- PR 行の「N 件が未解決」「未解決なし」は `reviews/summary` と同じ集計で、`unresolved` が `null` なら出さない。クリックでレビュー画面のその PR の詳細（`reviews/N`）へ遷移する
 - コミットはタスク詳細のアクティビティにも時系列で並ぶ
 - Branches の各行はブランチ名と `html_url` へのリンクで、リンクを外すボタンを置く
 - `commits_complete = false` の PR の行には「コミット一覧は一部のみ」と添える。ホストの上限に当たった・一覧を読み切れなかった・同期がまだ走っていない状態である。空表示にはしない

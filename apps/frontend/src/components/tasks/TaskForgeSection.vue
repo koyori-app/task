@@ -11,6 +11,7 @@ import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
 import type { components } from '@/generated/api';
 import { apiClient, fetchClient } from '@/lib/api-vue-query';
 import { pullRequestState as prState } from '@/lib/forge-pull-request';
+import { reviewDetailHref } from '@/lib/review-url-state';
 import { httpUrl } from '@/lib/task-activity';
 
 import TaskForgeBranches from './TaskForgeBranches.vue';
@@ -112,7 +113,7 @@ const pullRequestHeading = computed(() =>
 
 // 未解決件数は `read:review` が無い・レビューが無い PR では null（表示しない）
 function reviewHref(pr: PullRequest): string {
-  return `/${props.tenantDisplayId}/projects/${props.projectKey}/reviews?pr=${pr.number}`;
+  return reviewDetailHref(props.tenantDisplayId, props.projectKey, pr.number);
 }
 
 const SOURCE_LABELS: Record<string, string> = {

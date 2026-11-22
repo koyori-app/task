@@ -49,6 +49,7 @@ export function breadcrumbRoute(pathname: string, params: Record<string, string 
   const task = encodeURIComponent(params.taskId ?? '');
   const user = encodeURIComponent(params.userId ?? '');
   const file = encodeURIComponent(params.fileId ?? '');
+  const pr = encodeURIComponent(params.prNumber ?? '');
   const tenantBase = `/${tenant}`;
   const projectBase = `${tenantBase}/projects/${project}`;
   const routes = new Map<string, { kind: RouteKind; name: string }>([
@@ -80,6 +81,10 @@ export function breadcrumbRoute(pathname: string, params: Record<string, string 
           [`${projectBase}/tasks`, { kind: 'project', name: '' }],
           [`${projectBase}/settings`, { kind: 'project', name: 'プロジェクト設定' }],
           [`${projectBase}/reviews`, { kind: 'project', name: 'レビュー' }],
+          // PR の詳細も、一覧と同じ「レビュー」の段で出す
+          ...(pr
+            ? ([[`${projectBase}/reviews/${pr}`, { kind: 'project', name: 'レビュー' }]] as const)
+            : []),
           [`${projectBase}/docs`, { kind: 'project', name: 'ドキュメント' }],
           ...(file
             ? ([[`${projectBase}/docs/${file}`, { kind: 'document', name: '' }]] as const)

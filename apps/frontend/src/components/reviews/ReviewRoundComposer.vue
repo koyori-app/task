@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { PhTrash } from '@phosphor-icons/vue';
+import { PhPlus, PhX } from '@phosphor-icons/vue';
 import { computed, ref, watch } from 'vue';
 import { Button, ConfirmDialog, Field, Input, Picker, Textarea } from '@koyori-app/ui-vue';
 import { useCreateReviewMutation } from '@/lib/api-vue-query';
@@ -25,6 +25,12 @@ type StagedFinding = {
 
 const createReview = useCreateReviewMutation();
 const severityItems = SEVERITIES.map((value) => ({ value, label: SEVERITY_LABELS[value] }));
+const SEVERITY_CLASS: Record<FindingSeverity, string> = {
+  high: 'text-(--koyori-color-danger)',
+  medium: 'text-(--koyori-color-warning)',
+  low: 'text-muted-foreground',
+  nit: 'text-muted-foreground',
+};
 
 const headSha = ref('');
 const summary = ref('');
@@ -141,49 +147,56 @@ async function commit() {
 </script>
 
 <template>
-  <div class="flex flex-col gap-4 rounded-lg border p-4" data-testid="round-composer">
+  <div class="bg-card flex flex-col gap-4 rounded-lg border p-4" data-testid="round-composer">
     <div class="flex flex-col gap-0.5">
       <h2 class="text-base font-semibold">新しいラウンド（R{{ nextRound }}）を起票</h2>
       <p class="text-muted-foreground text-xs">下書き · 確定するまでサーバーには作られません</p>
     </div>
 
-    <Field
-      id="composer-head"
-      label="レビュー対象の head SHA"
-      description="40 桁の commit SHA（git rev-parse HEAD）"
-      :error="headShaError ?? ''"
-    >
-      <Input
-        placeholder="60cdd7795f94fa4e4148ce996c2efb4c363e3f5e"
-        class="[&_input]:font-mono"
-        :value="headSha"
-        :on-value-change="(v: string) => (headSha = v)"
-      />
-    </Field>
+    <div class="grid gap-4 md:grid-cols-2">
+      <Field
+        id="composer-head"
+        label="レビュー対象の head SHA"
+        description="40 桁の commit SHA（git rev-parse HEAD）"
+        required
+        :error="headShaError ?? ''"
+      >
+        <Input
+          placeholder="60cdd7795f94fa4e4148ce996c2efb4c363e3f5e"
+          class="[&_input]:font-mono"
+          :value="headSha"
+          :on-value-change="(v: string) => (headSha = v)"
+        />
+      </Field>
 
-    <Field id="composer-summary" label="総評">
-      <Textarea
-        :rows="2"
-        placeholder="具体的な不具合は見つからなかった"
-        :value="summary"
-        :on-value-change="(v: string) => (summary = v)"
-      />
-    </Field>
+      <Field id="composer-summary" label="総評">
+        <Textarea
+          :rows="2"
+          placeholder="具体的な不具合は見つからなかった"
+          :value="summary"
+          :on-value-change="(v: string) => (summary = v)"
+        />
+      </Field>
+    </div>
 
     <!-- 下書きに積んだ指摘 -->
     <div v-if="staged.length > 0" class="flex flex-col gap-2">
       <p class="text-sm font-medium">下書きの指摘 {{ staged.length }} 件</p>
-      <ul class="divide-y rounded-md border" data-testid="staged-list">
+      <ul class="flex flex-col gap-1" data-testid="staged-list">
         <li
           v-for="(finding, index) in staged"
           :key="`${finding.title}-${index}`"
-          class="flex items-center gap-2 px-3 py-2"
+          class="bg-muted flex items-center gap-2 rounded-md py-1 pr-1 pl-3"
         >
-          <span class="text-muted-foreground rounded-md border px-2 py-0.5 text-xs">
+          <span
+            class="flex shrink-0 items-center gap-1.5 text-xs"
+            :class="SEVERITY_CLASS[finding.severity]"
+          >
+            <span class="size-1.5 rounded-full bg-current" aria-hidden="true" />
             {{ SEVERITY_LABELS[finding.severity] }}
           </span>
           <span class="min-w-0 flex-1 truncate text-sm">{{ finding.title }}</span>
-          <span v-if="finding.file" class="text-muted-foreground font-mono text-xs">
+          <span v-if="finding.file" class="text-muted-foreground truncate font-mono text-xs">
             {{ finding.file }}{{ finding.line ? `:${finding.line}` : '' }}
           </span>
           <Button
@@ -192,14 +205,14 @@ async function commit() {
             :ariaLabel="`下書きから「${finding.title}」を外す`"
             @click="removeStaged(index)"
           >
-            <template #icon><PhTrash class="size-4" /></template>
+            <template #icon><PhX class="size-4" /></template>
           </Button>
         </li>
       </ul>
     </div>
 
     <!-- 指摘の入力 -->
-    <div class="flex flex-col gap-2 rounded-md border p-3">
+    <div class="flex flex-col gap-3 rounded-md bg-(--koyori-color-surface-hover) p-3">
       <div class="flex flex-wrap gap-2">
         <div class="w-[130px]">
           <Field id="draft-severity" label="重大度">
@@ -215,54 +228,51 @@ async function commit() {
           </Field>
         </div>
         <div class="min-w-[200px] flex-1">
-          <label for="draft-title" class="mb-1.5 block text-xs font-medium">タイトル</label>
-          <Input
-            id="draft-title"
-            placeholder="1 行の要約"
-            :value="draft.title"
-            :on-value-change="(v: string) => (draft.title = v)"
-          />
+          <Field id="draft-title" label="タイトル" required>
+            <Input
+              placeholder="1 行の要約"
+              :value="draft.title"
+              :on-value-change="(v: string) => (draft.title = v)"
+            />
+          </Field>
+        </div>
+        <div class="w-full sm:w-[220px]">
+          <Field id="draft-file" label="ファイル">
+            <Input
+              placeholder="src/App.vue"
+              class="[&_input]:font-mono"
+              :value="draft.file"
+              :on-value-change="(v: string) => (draft.file = v)"
+            />
+          </Field>
+        </div>
+        <div class="w-[80px]">
+          <Field id="draft-line" label="行">
+            <Input
+              input-mode="numeric"
+              placeholder="42"
+              :value="draft.line"
+              :on-value-change="(v: string) => (draft.line = v)"
+            />
+          </Field>
         </div>
       </div>
 
-      <div class="flex flex-wrap gap-2">
-        <div class="min-w-[200px] flex-1">
-          <label for="draft-file" class="mb-1.5 block text-xs font-medium">ファイル（任意）</label>
-          <Input
-            id="draft-file"
-            placeholder="src/App.vue"
-            class="[&_input]:font-mono"
-            :value="draft.file"
-            :on-value-change="(v: string) => (draft.file = v)"
-          />
-        </div>
-        <div class="w-[110px]">
-          <label for="draft-line" class="mb-1.5 block text-xs font-medium">行（任意）</label>
-          <Input
-            id="draft-line"
-            input-mode="numeric"
-            placeholder="42"
-            :value="draft.line"
-            :on-value-change="(v: string) => (draft.line = v)"
-          />
-        </div>
-      </div>
-
-      <div>
-        <label for="draft-body" class="mb-1.5 block text-xs font-medium">本文</label>
+      <Field id="draft-body" label="本文">
         <Textarea
-          id="draft-body"
           :rows="3"
           placeholder="再現条件と根拠"
           :value="draft.body"
           :on-value-change="(v: string) => (draft.body = v)"
         />
-      </div>
+      </Field>
 
       <p v-if="draftError" role="alert" class="text-destructive text-sm">{{ draftError }}</p>
 
       <div>
-        <Button type="button" variant="tertiary" label="下書きに追加" @click="addToDraft" />
+        <Button type="button" variant="tertiary" label="下書きに追加" @click="addToDraft">
+          <template #icon><PhPlus class="size-4" /></template>
+        </Button>
       </div>
     </div>
 
@@ -294,7 +304,7 @@ async function commit() {
         :label="createReview.isPending.value ? '確定中…' : `確定（${staged.length} 件）`"
         @click="commit"
       />
-      <Button type="button" variant="tertiary" label="キャンセル" @click="requestCancel" />
+      <Button type="button" variant="ghost" label="キャンセル" @click="requestCancel" />
     </div>
 
     <ConfirmDialog
