@@ -12,6 +12,7 @@ pub mod custom_fields;
 pub mod deadline_filter;
 pub mod desktop_auth;
 pub mod drive;
+pub mod drive_sections;
 pub mod drive_task_links;
 pub mod email;
 pub mod email_verification;

@@ -166,10 +166,7 @@ const ACCESS_FLAGS = [
     <div class="min-h-0 flex-1 overflow-auto">
       <div class="mx-auto max-w-[760px] px-6 pb-14 pt-8">
         <div class="mb-6">
-          <h1 class="m-0 mb-1 text-2xl font-bold tracking-tight">一般</h1>
-          <p class="m-0 text-sm text-muted-foreground">
-            テナント全体の情報と既定値です。すべてのプロジェクトとメンバーに適用されます。
-          </p>
+          <h1 class="m-0 text-2xl font-bold tracking-tight">一般</h1>
         </div>
 
         <!-- Identity -->

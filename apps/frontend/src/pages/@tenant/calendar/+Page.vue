@@ -222,7 +222,6 @@ function retryFailed() {
   <div class="flex w-full min-w-0 flex-col gap-4">
     <div>
       <h1 class="text-2xl font-semibold tracking-tight">カレンダー</h1>
-      <p class="text-sm text-muted-foreground">メンバーごとのタスクの予定（2 週間）</p>
     </div>
 
     <div class="flex flex-wrap items-center gap-2">

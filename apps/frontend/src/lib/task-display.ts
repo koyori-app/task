@@ -8,12 +8,12 @@ export const PRIORITY_CONFIG: Record<
   ApiPriority,
   { label: string; color: string; icon: LucideIcon }
 > = {
-  CriticalFire: { label: '緊急', color: '#dc2626', icon: Signal },
-  Critical: { label: '重大', color: '#ef4444', icon: Signal },
-  High: { label: '高', color: '#f97316', icon: SignalHigh },
-  Medium: { label: '中', color: '#eab308', icon: SignalMedium },
-  Low: { label: '低', color: '#6b7280', icon: SignalLow },
-  Trivial: { label: '些細', color: '#9ca3af', icon: SignalLow },
+  CriticalFire: { label: '緊急', color: 'var(--priority-critical-fire)', icon: Signal },
+  Critical: { label: '重大', color: 'var(--priority-critical)', icon: Signal },
+  High: { label: '高', color: 'var(--priority-high)', icon: SignalHigh },
+  Medium: { label: '中', color: 'var(--priority-medium)', icon: SignalMedium },
+  Low: { label: '低', color: 'var(--priority-low)', icon: SignalLow },
+  Trivial: { label: '些細', color: 'var(--priority-trivial)', icon: SignalLow },
 };
 
 export function taskSeqKey(projectKey: string, seqId: number): string {

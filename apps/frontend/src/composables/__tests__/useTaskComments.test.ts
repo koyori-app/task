@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { defineComponent } from 'vue';
 import { mount, flushPromises } from '@vue/test-utils';
-import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
+import { VueQueryPlugin, QueryClient, onlineManager } from '@tanstack/vue-query';
 import type { paths } from '@/generated/api';
 import { useTaskComments } from '../useTaskComments';
 import { useTaskActivities } from '../useTaskActivities';
@@ -26,6 +26,12 @@ const { control, requestLog, fetchMock } = vi.hoisted(() => {
     rejectPost?: { status: number; message: string };
     rejectPut?: { status: number; message: string };
     rejectDelete?: { status: number; message: string };
+    /** 在る間は一覧の GET の応答をこれの解決まで待たせる */
+    listGate?: Promise<void>;
+    /** true の間はどの要求も通信エラー（オフライン）で落とす */
+    networkDown?: boolean;
+    /** POST の応答を返す直前に呼ぶ */
+    onPost?: () => void;
   } = { listMode: 'success', threads: [] };
 
   const requestLog: { method: string; url: string; body?: unknown }[] = [];
@@ -33,6 +39,7 @@ const { control, requestLog, fetchMock } = vi.hoisted(() => {
   const fetchMock = async (input: Request) => {
     const url = input.url;
     const method = input.method.toUpperCase();
+    if (control.networkDown) throw new TypeError('Failed to fetch');
     const entry: { method: string; url: string; body?: unknown } = { method, url };
     if (method === 'POST' || method === 'PUT') entry.body = await input.clone().json();
     requestLog.push(entry);
@@ -41,6 +48,7 @@ const { control, requestLog, fetchMock } = vi.hoisted(() => {
       return jsonResponse({ activities: [] });
     }
     if (method === 'GET' && url.endsWith(`/tasks/${TASK_SEQ_KEY}/comments`)) {
+      if (control.listGate) await control.listGate;
       if (control.listMode === 'error') return jsonResponse({ message: 'boom' }, 500);
       return jsonResponse({ comments: control.threads });
     }
@@ -48,6 +56,7 @@ const { control, requestLog, fetchMock } = vi.hoisted(() => {
       if (control.rejectPost) {
         return jsonResponse({ message: control.rejectPost.message }, control.rejectPost.status);
       }
+      control.onPost?.();
       return jsonResponse(
         {
           id: 'c-new',
@@ -169,7 +178,14 @@ describe('useTaskComments', () => {
     control.rejectPost = undefined;
     control.rejectPut = undefined;
     control.rejectDelete = undefined;
+    control.listGate = undefined;
+    control.networkDown = undefined;
+    control.onPost = undefined;
     requestLog.length = 0;
+  });
+
+  afterEach(() => {
+    onlineManager.setOnline(true);
   });
 
   it('一覧を取得して threads として公開する', async () => {
@@ -205,6 +221,110 @@ describe('useTaskComments', () => {
     expect(post?.body).toEqual({ body: '新しいコメント', parent_comment_id: null });
     // invalidate による取り直しで新しい一覧が threads へ反映される
     expect(comments.threads.value.map((t) => t.id)).toEqual(['c-new']);
+  });
+
+  /** 結果が出たかを、待たずに見られるようにする（出ないまま止まる経路を await で固めない） */
+  function track<T>(promise: Promise<T>) {
+    const state: { settled: boolean; value?: T } = { settled: false };
+    void promise.then((value) => {
+      state.settled = true;
+      state.value = value;
+    });
+    return state;
+  }
+
+  it('投稿は POST の応答で true を返し、一覧の取り直しを待たない', async () => {
+    mountHost();
+    await flushPromises();
+
+    // 一覧の取り直しを止めたままにする
+    let release!: () => void;
+    control.listGate = new Promise<void>((resolve) => (release = resolve));
+    control.threads = [sampleThread('c-new', '新しいコメント')];
+    const posting = track(comments.submitComment('新しいコメント'));
+    expect(comments.submitPending.value).toBe(true);
+    await flushPromises();
+
+    expect(posting).toEqual({ settled: true, value: true });
+    expect(comments.submitPending.value).toBe(false);
+
+    // 取り直しが進めば一覧に出る
+    release();
+    await flushPromises();
+    expect(comments.threads.value.map((t) => t.id)).toEqual(['c-new']);
+  });
+
+  it('投稿の後の一覧の取り直しが失敗しても、投稿は成功として返す', async () => {
+    mountHost();
+    await flushPromises();
+
+    control.listMode = 'error';
+    await expect(comments.submitComment('新しいコメント')).resolves.toBe(true);
+    await flushPromises();
+    expect(comments.submitError.value).toBe(null);
+    expect(comments.submitPending.value).toBe(false);
+  });
+
+  it('投稿の応答の時点でオフラインなら、取り直しは止まったまま投稿は返り、復帰で一覧に出る', async () => {
+    mountHost();
+    await flushPromises();
+
+    control.threads = [sampleThread('c-new', '新しいコメント')];
+    control.onPost = () => onlineManager.setOnline(false);
+    const posting = track(comments.submitComment('新しいコメント'));
+    await flushPromises();
+
+    expect(posting).toEqual({ settled: true, value: true });
+    expect(comments.submitPending.value).toBe(false);
+    expect(comments.threads.value).toEqual([]);
+
+    onlineManager.setOnline(true);
+    await vi.waitFor(() => expect(comments.threads.value.map((t) => t.id)).toEqual(['c-new']));
+  });
+
+  describe('オフラインで送る（復帰を待たずに失敗にする）', () => {
+    beforeEach(() => {
+      onlineManager.setOnline(false);
+      control.networkDown = true;
+    });
+
+    it('投稿は false を返し、submitError を出す', async () => {
+      mountHost();
+      await flushPromises();
+
+      const posting = track(comments.submitComment('オフラインの投稿'));
+      await flushPromises();
+
+      expect(posting).toEqual({ settled: true, value: false });
+      expect(comments.submitError.value).toContain('コメントを投稿できませんでした');
+      expect(comments.submitPending.value).toBe(false);
+    });
+
+    it('編集は false を返し、updateError を出す', async () => {
+      control.threads = [sampleThread('c-1', '元の本文')];
+      mountHost();
+      await flushPromises();
+
+      const saving = track(comments.updateComment('c-1', '直した本文'));
+      await flushPromises();
+
+      expect(saving).toEqual({ settled: true, value: false });
+      expect(comments.updateError.value).toContain('コメントを更新できませんでした');
+      expect(comments.updatingCommentId.value).toBe(null);
+    });
+
+    it('削除は false を返し、deleteError を出す', async () => {
+      control.threads = [sampleThread('c-1', '消すコメント')];
+      mountHost();
+      await flushPromises();
+
+      const deleting = track(comments.deleteComment('c-1'));
+      await flushPromises();
+
+      expect(deleting).toEqual({ settled: true, value: false });
+      expect(comments.deleteError.value).toContain('コメントを削除できませんでした');
+      expect(comments.deletingCommentId.value).toBe(null);
+    });
   });
 
   it('返信は parent_comment_id を付けて POST する', async () => {

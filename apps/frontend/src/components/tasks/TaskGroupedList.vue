@@ -37,6 +37,15 @@ type LabelResponse = components['schemas']['LabelResponse'];
 type StatusResponse = components['schemas']['ProjectStatusResponse'];
 type ProjectMember = { id: string; username: string; avatar_url?: string | null };
 
+/**
+ * 見出しに並べる列。行（TaskGroupedRow）の列と数を揃える。
+ * ステータスはグループの見出しが表し、ID は名前の列の 2 段目にあって列を持たない。
+ * どちらの並べ替えもツールバーのメニューから選べる。
+ */
+const TASK_HEADER_COLUMNS = TASK_LIST_SORT_COLUMNS.filter(
+  (c) => c.id !== 'status' && c.id !== 'key',
+);
+
 const props = defineProps<{
   groups: TaskGroup[];
   /** タスク ID（`KEY-N`）を組み立てるプロジェクトキー */
@@ -499,7 +508,7 @@ async function commitAdding(statusId: string) {
           <div :inert="collapsed[group.status.id] || undefined">
             <div :class="[TASK_HEADER_GRID, 'border-b text-xs text-muted-foreground']">
               <TaskListSortHeader
-                v-for="column in TASK_LIST_SORT_COLUMNS.filter((c) => c.id !== 'status')"
+                v-for="column in TASK_HEADER_COLUMNS"
                 :key="column.id"
                 :column="column"
                 :sorting="sorting"

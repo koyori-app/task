@@ -29,7 +29,7 @@ export default defineComponent({
     uploadFile: { type: Function, default: undefined },
     uploadScope: { type: String, default: undefined },
   },
-  emits: ['update:modelValue', 'update:uploading'],
+  emits: ['update:modelValue', 'update:uploading', 'submit'],
   setup(props, { emit, expose }) {
     expose({
       focus: () => {},

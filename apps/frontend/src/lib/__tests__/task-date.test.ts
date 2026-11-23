@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { formatShortDate, toIsoDate } from '../task-date';
+import { formatShortDate, softNotBeforeHard, toIsoDate } from '../task-date';
 
 const originalTimezone = process.env.TZ;
 
@@ -45,6 +45,39 @@ describe('formatShortDate', () => {
     } finally {
       if (original === undefined) delete process.env.TZ;
       else process.env.TZ = original;
+    }
+  });
+});
+
+describe('softNotBeforeHard', () => {
+  const hard = '2026-07-15T00:00:00.000Z';
+
+  it('期限が最終期限より 1 ミリ秒でも前なら矛盾しない', () => {
+    expect(softNotBeforeHard('2026-07-14T23:59:59.999Z', hard)).toBe(false);
+  });
+
+  it('同じ時刻はサーバーが弾くので矛盾とみなす', () => {
+    expect(softNotBeforeHard(hard, hard)).toBe(true);
+  });
+
+  it('期限が最終期限より後なら矛盾', () => {
+    expect(softNotBeforeHard('2026-07-16T00:00:00.000Z', hard)).toBe(true);
+  });
+
+  it('同じ日でも期限が 0 時・最終期限が 12 時なら矛盾しない', () => {
+    expect(softNotBeforeHard('2026-07-15T00:00:00.000Z', '2026-07-15T12:00:00Z')).toBe(false);
+  });
+
+  it('どちらかが無ければ矛盾しない', () => {
+    for (const [soft, other] of [
+      [null, hard],
+      [hard, null],
+      [undefined, hard],
+      [hard, undefined],
+      ['', hard],
+      [hard, ''],
+    ] as const) {
+      expect(softNotBeforeHard(soft, other)).toBe(false);
     }
   });
 });

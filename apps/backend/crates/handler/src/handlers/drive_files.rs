@@ -617,9 +617,12 @@ pub async fn upload_file(
             content_hash: Set(Some(content_hash)),
         };
         let saved = model.insert(&txn).await?;
+        let text = String::from_utf8_lossy(&body);
+        // 本文の索引は Drive の中の書き込みなので、write:task に依らず作る
+        service::drive_sections::reindex(&txn, &saved, &text).await?;
         // 結び付けは task_attachments への書き込み。手動添付と同じく write:task が無ければ触れない
         if auth.require_scope(Scope::WriteTask).is_ok() {
-            sync_body_links(&txn, &saved, auth.user_id, &String::from_utf8_lossy(&body)).await?;
+            sync_body_links(&txn, &saved, auth.user_id, &text).await?;
         }
         txn.commit().await?;
         Ok(saved)
@@ -957,9 +960,12 @@ pub async fn update_file_content(
         active.content_hash = Set(Some(content_hash));
         active.updated_at = Set(Utc::now().into());
         let saved = active.update(&txn).await?;
+        let text = String::from_utf8_lossy(&body);
+        // 本文の索引は write:task に依らず作り直す
+        service::drive_sections::reindex(&txn, &saved, &text).await?;
         // アップロードと同じく write:task が無ければ既存の行にも触れない
         if auth.require_scope(Scope::WriteTask).is_ok() {
-            sync_body_links(&txn, &saved, auth.user_id, &String::from_utf8_lossy(&body)).await?;
+            sync_body_links(&txn, &saved, auth.user_id, &text).await?;
         }
         txn.commit().await?;
         Ok((saved, old_storage_key))
