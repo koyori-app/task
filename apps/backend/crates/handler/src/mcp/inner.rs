@@ -113,6 +113,10 @@ impl InnerApi {
         self.send(Method::PUT, segments, &[], Some(body)).await
     }
 
+    pub(super) async fn delete(&self, segments: &[&str]) -> Result<Value, ToolFailure> {
+        self.send(Method::DELETE, segments, &[], None).await
+    }
+
     pub(super) async fn patch(
         &self,
         segments: &[&str],
@@ -357,6 +361,13 @@ mod tests {
             seen["headers"],
             serde_json::json!(["accept", "authorization"])
         );
+
+        let seen = api.delete(&["v1", "tenants"]).await.unwrap();
+        assert_eq!(
+            seen["headers"],
+            serde_json::json!(["accept", "authorization"])
+        );
+        assert_eq!(seen["authorization"], "Bearer pat-1");
     }
 
     /// 決まった状態・`Content-Type`・本文を返すルーターを呼ぶ `InnerApi`。

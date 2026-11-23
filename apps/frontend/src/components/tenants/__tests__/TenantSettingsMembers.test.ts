@@ -64,13 +64,14 @@ function member(
   username: string,
   role: 'Admin' | 'Member',
   accountKind = 'human',
+  avatarUrl: string | null = null,
 ): TenantMemberResponse {
   return {
     id: `row-${userId}`,
     tenant_id: TENANT_ID,
     user_id: userId,
     role,
-    user: { id: userId, username, account_kind: accountKind, avatar_url: null },
+    user: { id: userId, username, account_kind: accountKind, avatar_url: avatarUrl },
     department: null,
     position: null,
     team: null,
@@ -145,6 +146,22 @@ describe('TenantSettingsMembers', () => {
     expect(roleNames('release-botのロール').some((name) => name.startsWith('Admin'))).toBe(false);
     expect(roleNames('release-botのロール').some((name) => name.startsWith('Member'))).toBe(true);
     expect(roleNames('memberのロール').some((name) => name.startsWith('Admin'))).toBe(true);
+  });
+
+  it('アバターの画像があるメンバーは画像を、無いメンバーは頭文字を出す', () => {
+    const wrapper = mountMembers(ADMIN_ID, [
+      member(OWNER_ID, 'owner', 'Admin', 'human', 'https://example.test/owner.png'),
+      member(MEMBER_ID, 'member', 'Member'),
+    ]);
+    const rowOf = (username: string) => {
+      const row = wrapper.findAll('li').find((li) => li.find(`a`).text() === username);
+      if (!row) throw new Error(`row "${username}" not found`);
+      return row;
+    };
+
+    expect(rowOf('owner').get('img').attributes('src')).toBe('https://example.test/owner.png');
+    expect(rowOf('member').find('img').exists()).toBe(false);
+    expect(rowOf('member').get('[role=img]').text()).toBe('m');
   });
 
   it('Admin 本人の除名は塞ぐが、他のメンバーは外せる', async () => {

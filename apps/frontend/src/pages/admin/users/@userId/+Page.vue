@@ -7,7 +7,7 @@ const pageContext = usePageContext();
 </script>
 
 <template>
-  <AdminShell title="ユーザー詳細" description="権限・停止・認証方法を確認し、復旧操作を行います。">
+  <AdminShell title="ユーザー詳細">
     <AdminUserDetail
       :key="String(pageContext.routeParams.userId)"
       :user-id="String(pageContext.routeParams.userId)"

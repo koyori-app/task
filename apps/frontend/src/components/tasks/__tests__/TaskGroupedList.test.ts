@@ -140,6 +140,22 @@ async function openAddRow(wrapper: ReturnType<typeof mountList>['wrapper'], stat
   await nextTick();
 }
 
+describe('TaskGroupedList の列の見出し', () => {
+  it('見出しは行の 5 列と同じ数で並び、列を持たない ID は出さない', () => {
+    const { wrapper } = mountList();
+    const header = sectionOf(wrapper, 'Todo').get('[class*="@3xl:grid-cols-"].border-b');
+    const cells = header.element.children;
+
+    expect(cells).toHaveLength(5);
+    // 見出しの名前はメニューのトリガーにある。メニューの項目の文字は混ぜない
+    const labels = Array.from(
+      cells,
+      (cell) => cell.querySelector('span.font-medium')?.textContent?.trim() ?? '',
+    );
+    expect(labels).toEqual(['タスク', '担当', '期限', '優先度', '']);
+  });
+});
+
 describe('TaskGroupedList のタスク追加', () => {
   it('タイトルだけでも作れる（未指定の項目は送らない）', async () => {
     const { wrapper, onCreate } = mountList();

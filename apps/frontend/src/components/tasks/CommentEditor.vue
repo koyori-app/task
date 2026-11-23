@@ -13,6 +13,7 @@ import {
   setMentionNames,
 } from '@/lib/comment-mention-extensions';
 import type { UploadedFile } from '@/lib/drive-upload';
+import { ignoreRepeatedModEnter } from '@/lib/mod-enter-repeat';
 import { pasteUploadExtensions, resetPasteUploads } from '@/lib/paste-upload-extension';
 
 /**
@@ -28,6 +29,8 @@ import { pasteUploadExtensions, resetPasteUploads } from '@/lib/paste-upload-ext
  * 手で打った `@name`（候補から選ばなかった物）は素の文字のままで、メンションにはならない。
  *
  * IME の変換中は候補を確定しない（Enter は変換の確定に使われるため、変換中は補完へ渡さない）。
+ *
+ * Mod-Enter（Mac は Ctrl-Enter も）で `submit` を emit する（変換中と disabled の間は送らない）。
  *
  * SSR しない: CodeMirror は DOM を要求するため、マウント後にクライアントで組み立てる
  * （MarkdownEditor と同じ。器の div は常に出るのでレイアウトは前後で変わらない）。
@@ -76,6 +79,8 @@ const emit = defineEmits<{
   'update:modelValue': [value: string];
   /** 貼り付けたファイルを上げている最中か。呼び出し側は true の間、送信・保存を止める */
   'update:uploading': [value: boolean];
+  /** Mod-Enter。呼び出し側は送信・保存する */
+  submit: [];
 }>();
 
 const host = useTemplateRef<HTMLDivElement>('host');
@@ -85,6 +90,13 @@ let mentionTooltipParent: HTMLElement | null = null;
 
 /** 印の id を札の字へ引く表。候補（選んだばかりの者）を先に、API の表で上書きする。 */
 const nameTable = computed<MentionTable>(() => nameTableOf(props.candidates, props.mentions));
+
+/** Mod-Enter（Mac は Ctrl-Enter も）。変換中と disabled の間は送らず、空行も入れない */
+function submitFromKey(target: EditorView): boolean {
+  if (target.composing || props.disabled) return true;
+  emit('submit');
+  return true;
+}
 
 function extensions(): Extension[] {
   if (!mentionTooltipParent) {
@@ -108,11 +120,19 @@ function extensions(): Extension[] {
       names: nameTable.value,
       disabled: () => props.disabled,
     }),
-    keymap.of([...defaultKeymap, ...historyKeymap]),
+    ignoreRepeatedModEnter,
+    // 既定の Mod-Enter（空行の挿入）より先に置く（先に登録した束が優先される）
+    keymap.of([
+      { key: 'Mod-Enter', run: submitFromKey },
+      { mac: 'Ctrl-Enter', run: submitFromKey },
+      ...defaultKeymap,
+      ...historyKeymap,
+    ]),
     EditorView.lineWrapping,
     theme,
+    // disabled の間も editable は保ち、readOnly だけで編集を止める。contenteditable を外すと
+    // フォーカスが body へ落ち、キーで送った直後の打鍵が一覧の単打ショートカット（T など）に届く
     EditorState.readOnly.of(props.disabled),
-    EditorView.editable.of(!props.disabled),
     ...(props.placeholder ? [placeholderExt(props.placeholder)] : []),
     EditorView.contentAttributes.of({
       ...(props.ariaLabel ? { 'aria-label': props.ariaLabel } : {}),
@@ -189,9 +209,13 @@ watch(nameTable, (table) => {
 // disabled / placeholder の変更は state ごと作り直す（MarkdownEditor と同じ理由）。
 // uploadFile の有無も同じ（テナントとプロジェクトが mount の後で分かる所で、拡張を足し直す）。
 // 関数が入れ替わっただけ（上げる先のプロジェクトが替わった）では作り直さないよう、有無だけを見る
+// caret の位置は引き継ぐ。送信・保存が失敗して下書きが残った時に、続きが先頭に入らないようにする
+// （本文が外から差し替わっていたら位置が合わないので、同じ本文の時だけ）
 watch([() => props.disabled, () => props.placeholder, () => !!props.uploadFile], () => {
   if (!view) return;
-  view.setState(EditorState.create({ doc: props.modelValue, extensions: extensions() }));
+  const doc = props.modelValue;
+  const selection = doc === view.state.doc.toString() ? view.state.selection : undefined;
+  view.setState(EditorState.create({ doc, selection, extensions: extensions() }));
 });
 
 function focus() {

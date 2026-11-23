@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import TaskMatchText from './query/TaskMatchText.vue';
 import TaskMatchSnippets from './query/TaskMatchSnippets.vue';
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import {
   PhCalendarBlank,
   PhCalendarPlus,
@@ -17,7 +17,6 @@ import {
   isoToLocalDateInput,
   localDateInputToIso,
   PRIORITY_CONFIG,
-  taskSeqKey,
 } from '@/lib/task-display';
 import type { components } from '@/generated/api';
 import type { TaskRowField } from '@/composables/useTaskRowMutations';
@@ -27,6 +26,7 @@ import TaskChecklistProgress from '@/components/tasks/TaskChecklistProgress.vue'
 import TaskIdCopyButton from '@/components/tasks/TaskIdCopyButton.vue';
 import UserAvatar from '@/components/UserAvatar.vue';
 import { countChecklist } from '@/lib/task-checklist';
+import { DEADLINE_ORDER_MESSAGE, softNotBeforeHard } from '@/lib/task-date';
 
 type TaskResponse = components['schemas']['TaskResponse'];
 type LabelResponse = components['schemas']['LabelResponse'];
@@ -92,7 +92,6 @@ const deadline = computed(() =>
   }),
 );
 const assignees = computed(() => props.task.assignees.map((entry) => entry.user));
-const seqKey = computed(() => taskSeqKey(props.projectKey, props.task.seq_id));
 const checklist = computed(() => countChecklist(props.task.description));
 // 狭い幅の 2 段目はラベルを先頭の 1 つと「+N」に畳む。全件は詳細で見る
 const firstLabel = computed(() => props.task.labels[0] ?? null);
@@ -118,11 +117,39 @@ async function startEditingDeadline() {
   (deadlineInputRef.value?.$el as HTMLElement | undefined)?.querySelector('input')?.focus();
 }
 
+/**
+ * 下書きの期限が保存済みの最終期限と同じか後（サーバーが 400 で弾く）。変えていない値では止めない。
+ * 下書きは送る値（localDateInputToIso）にし、最終期限は保存済みの時刻のまま比べる（詳細と同じ規則）
+ */
+const deadlineOrderInvalid = computed(() => {
+  if (!editingDeadline.value) return false;
+  const raw = deadlineDraft.value.trim();
+  if (!raw || raw === isoToLocalDateInput(props.task.soft_deadline)) return false;
+  return softNotBeforeHard(localDateInputToIso(raw), props.task.hard_deadline);
+});
+
+/**
+ * 編集中に保存済みの期限か最終期限が変わったら（詳細のペインで直したなど）、入力欄にフォーカスが
+ * 無ければ送らずに編集を閉じる。一覧が狭い間は入力欄と警告が隠れるだけで下書きは残るので、
+ * 閉じないと、送っていない値が保存済みのように見える入力欄が警告なしで戻ってくる
+ */
+watch(
+  () => [props.task.soft_deadline, props.task.hard_deadline],
+  () => {
+    if (!editingDeadline.value) return;
+    const el = deadlineInputRef.value?.$el as HTMLElement | undefined;
+    if (el?.contains(document.activeElement)) return;
+    editingDeadline.value = false;
+  },
+);
+
 function commitDeadline() {
   if (!editingDeadline.value) return;
-  editingDeadline.value = false;
   const raw = deadlineDraft.value.trim();
   const current = isoToLocalDateInput(props.task.soft_deadline);
+  // 矛盾していれば送らずに編集を開いたまま警告を見せる
+  if (deadlineOrderInvalid.value) return;
+  editingDeadline.value = false;
   if (raw === current) return;
   // 変換は詳細画面と同じヘルパーを使う（画面ごとに時刻の寄せ方が変わらないように）
   emit('update:softDeadline', raw ? localDateInputToIso(raw) : null);
@@ -233,7 +260,9 @@ function selectFromKeyboard(event: KeyboardEvent) {
       >
         <!--
           広い幅は矢印を丸の左に置く。狭い幅は丸の下へ積み、タイトルの幅を削らない。
-          選択で矢印が出ても、丸とタイトルの位置は動かない
+          選択で矢印が出ても、丸とタイトルの位置は動かない。
+          狭い幅は選択していなくても出す。2 段目まで詳細を開く的なので、空白で選択して
+          矢印を出す手順が使いにくい（TASK-524）
         -->
         <div
           class="flex shrink-0 flex-col-reverse items-center @3xl:flex-row @3xl:items-start @3xl:gap-2"
@@ -245,7 +274,7 @@ function selectFromKeyboard(event: KeyboardEvent) {
             :class="
               selected || expanded
                 ? 'bg-muted text-foreground opacity-100 hover:bg-muted-foreground/15'
-                : 'pointer-events-none opacity-0 @max-3xl:hidden'
+                : 'text-muted-foreground @3xl:pointer-events-none @3xl:opacity-0'
             "
             :aria-label="expanded ? 'サブタスクを折りたたむ' : 'サブタスクを展開'"
             :aria-expanded="expanded"
@@ -288,12 +317,18 @@ function selectFromKeyboard(event: KeyboardEvent) {
 
         <!--
           タイトルは省略せず折り返す。同じ段にラベルを並べると、縮めないラベルに押されて
-          タイトルの幅が 0 になり、読めず押せもしなくなる（TASK-484）
+          タイトルの幅が 0 になり、読めず押せもしなくなる（TASK-484）。
+          狭い幅はタイトルの after をこの列（relative）いっぱいに広げ、タイトルと 2 段目の全体で
+          詳細を開く（TASK-524）。包含ブロックは div なので、表の要素に頼らない。広い幅は 2 段目に
+          コピーとラベルの操作があるので広げない。
+          重なりの順は 2 段だけ: 的（after）は z-[1] で、位置指定を持つ子（BOT のアバターなど）より
+          上に置く。的の上に出す操作は 2 段目の ID のボタンだけで、relative z-10。
+          丸（ステータス）と矢印の列はこの列の外なので的に覆われない
         -->
-        <div class="min-w-0 flex-1 py-2">
+        <div class="relative min-w-0 flex-1 py-2">
           <button
             type="button"
-            class="block max-w-full text-left text-sm font-medium break-words hover:underline"
+            class="block max-w-full text-left text-sm font-medium break-words hover:underline @max-3xl:after:absolute @max-3xl:after:inset-0 @max-3xl:after:z-[1] @max-3xl:after:content-['']"
             data-task-title-open
             @click="emit('open', task.id)"
           >
@@ -352,11 +387,25 @@ function selectFromKeyboard(event: KeyboardEvent) {
             class="mt-1 flex items-center gap-2 text-xs text-muted-foreground @3xl:hidden"
             data-row-summary
           >
-            <div class="flex min-w-0 flex-1 items-center gap-1.5">
-              <!-- 画面が広くサイドバーで一覧だけ狭いときは、ここでもコピーできる。スマホは文字だけ -->
-              <span class="shrink-0 font-mono min-[769px]:hidden">{{ seqKey }}</span>
+            <!--
+              左の群は 1 行（ID のボタンと同じ 24px）だけを見せる入れ物。1 行目に入らない要素は
+              折り返して 2 行目へ回り、overflow-clip で見えなくなる。要素は丸ごと出るか出ないかの
+              どちらかで、はみ出しも当たり判定も入れ物が切るので、右の固定幅の列には届かない。
+              重ならないことは入れ物が守り、中の要素の縮み方では守らない。先に置いたものが残る
+              （ID → 達成率 → ラベル）。hidden でなく clip にするのは、ページ内検索や scrollIntoView が
+              入れ物をスクロールして、隠した 2 行目を出したまま ID の行を消さないようにするため
+            -->
+            <div
+              class="flex h-6 min-w-0 flex-1 flex-wrap content-start items-center gap-x-1.5 overflow-clip"
+              data-row-summary-left
+            >
+              <!--
+                ID はどの幅でもコピーのボタン（TASK-524）。compact は番号を縮めず、入らないときは
+                キーの側だけを省略する
+              -->
               <TaskIdCopyButton
-                class="max-[769px]:hidden"
+                class="relative z-10"
+                compact
                 :project-key="projectKey"
                 :seq-id="task.seq_id"
               />
@@ -366,7 +415,12 @@ function selectFromKeyboard(event: KeyboardEvent) {
                 :done="checklist.done"
                 :total="checklist.total"
               />
-              <template v-if="firstLabel">
+              <!-- ラベルは 1 つの塊。64px 以上残れば 1 行目に入って残りの幅まで伸び、名前を省略する -->
+              <span
+                v-if="firstLabel"
+                class="flex min-w-0 flex-[1_1_4rem] items-center gap-1.5"
+                data-row-label
+              >
                 <span aria-hidden="true">·</span>
                 <span
                   class="size-2 shrink-0 rounded-full"
@@ -375,7 +429,7 @@ function selectFromKeyboard(event: KeyboardEvent) {
                 />
                 <span class="min-w-0 truncate">{{ firstLabel.name }}</span>
                 <span v-if="hiddenLabelCount" class="shrink-0">+{{ hiddenLabelCount }}</span>
-              </template>
+              </span>
             </div>
             <span
               class="w-16 shrink-0 truncate text-right"
@@ -522,6 +576,14 @@ function selectFromKeyboard(event: KeyboardEvent) {
       </div>
     </div>
 
+    <!-- 期限の入力欄（広い幅の列）と同じ条件で出す。一覧が狭くなったら入力欄と一緒に隠れる -->
+    <p
+      v-if="deadlineOrderInvalid"
+      role="alert"
+      class="hidden px-3 pb-1.5 text-xs text-destructive @3xl:block"
+    >
+      {{ DEADLINE_ORDER_MESSAGE }}
+    </p>
     <p v-if="error" class="px-3 pb-1.5 text-xs text-destructive">{{ error }}</p>
   </div>
 </template>

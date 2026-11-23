@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, mount } from '@vue/test-utils';
 
 import TaskGroupedRow from '@/components/tasks/TaskGroupedRow.vue';
+import { DEADLINE_ORDER_MESSAGE } from '@/lib/task-date';
 import type { components } from '@/generated/api';
 
 enableAutoUnmount(afterEach);
@@ -51,17 +52,27 @@ function mountRow(selected = false) {
 }
 
 describe('TaskGroupedRow のサブタスク導線', () => {
-  it('空白部分を選択した後だけ展開矢印を見せる', async () => {
+  it('広い幅では、空白部分を選択した後だけ展開矢印を見せる', async () => {
     const wrapper = mountRow();
     const row = wrapper.get('[aria-label="タスク「親タスク」を選択"]');
     const toggle = wrapper.get('button[aria-label="サブタスクを展開"]');
-    expect(toggle.classes()).toContain('opacity-0');
+    expect(toggle.classes()).toContain('@3xl:opacity-0');
+    expect(toggle.classes()).toContain('@3xl:pointer-events-none');
 
     await row.trigger('click');
     expect(wrapper.emitted('select')).toHaveLength(1);
 
     await wrapper.setProps({ selected: true });
     expect(toggle.classes()).toContain('opacity-100');
+  });
+
+  // TASK-524: 狭い幅は 2 段目まで詳細を開く的になり、空白で選択して矢印を出す手順が使いにくい
+  it('狭い幅では、選択していなくても展開矢印を見せて押せる', () => {
+    const toggle = mountRow().get('button[aria-label="サブタスクを展開"]');
+
+    expect(toggle.classes()).not.toContain('@max-3xl:hidden');
+    expect(toggle.classes()).not.toContain('opacity-0');
+    expect(toggle.classes()).not.toContain('pointer-events-none');
   });
 
   it('既存コントロールとタイトルのクリックは行選択にしない', async () => {
@@ -108,7 +119,7 @@ describe('TaskGroupedRow の優先度の表示', () => {
 
     expect(wrapper.html()).not.toContain('--priority-color');
     const flag = wrapper.get('button[aria-label="優先度"] svg');
-    expect(flag.attributes('style')).toContain('color: #eab308');
+    expect(flag.attributes('style')).toContain('color: var(--priority-medium)');
   });
 
   // 文字が先だと「重大」と「中」で旗の位置が動く
@@ -196,7 +207,8 @@ describe('TaskGroupedRow のタイトルと補足', () => {
     expect(mountWith({ labels: [] }).get('[data-row-summary]').text()).not.toContain('·');
   });
 
-  it('狭い幅の 2 段目で押せるのは ID のコピーだけで、スマホの幅では隠す', () => {
+  // TASK-524: スマホでも ID をコピーでき、詳細を開く的（タイトルの after）より上に置く
+  it('狭い幅の 2 段目で押せるのは ID のコピーだけで、どの幅でも出して的の上に置く', () => {
     const summary = mountWith({ labels, soft_deadline: '2026-06-20T00:00:00Z' }).get(
       '[data-row-summary]',
     );
@@ -204,7 +216,66 @@ describe('TaskGroupedRow のタイトルと補足', () => {
 
     expect(controls).toHaveLength(1);
     expect(controls[0]?.attributes('data-task-id-copy')).toBeDefined();
-    expect(controls[0]?.classes()).toContain('max-[769px]:hidden');
+    expect(controls[0]?.classes()).not.toContain('max-[769px]:hidden');
+    expect(controls[0]?.classes()).toEqual(expect.arrayContaining(['relative', 'z-10']));
+    // 番号を欠かさない compact の形（キーと番号が別の span）
+    expect(controls[0]?.find('[data-task-id-number]').text()).toBe('-1');
+    // 文字だけの ID は残さない（コピーのボタンが ID を出す）
+    expect(summary.find('.min-\\[769px\\]\\:hidden').exists()).toBe(false);
+  });
+
+  // TASK-524: 重ならないことは左の群（入れ物）が守る。1 行だけ見せ、入らない要素は 2 行目へ回して隠す
+  it('狭い幅の 2 段目の左の群は 1 行だけ見せる入れ物で、ラベルは 1 つの塊にまとめる', () => {
+    const summary = mountWith({ labels, description: '- [x] 設計\n- [ ] 実装' }).get(
+      '[data-row-summary]',
+    );
+    const left = summary.get('[data-row-summary-left]');
+
+    expect(left.classes()).toEqual(
+      expect.arrayContaining(['h-6', 'flex-wrap', 'overflow-clip', 'min-w-0', 'flex-1']),
+    );
+    // ID → 達成率 → ラベルの順で、ラベルの「·」・点・名前・+N は 1 つの塊
+    const parts = left.element.children;
+    expect(parts).toHaveLength(3);
+    expect(parts[0]?.hasAttribute('data-task-id-copy')).toBe(true);
+    expect(parts[1]?.hasAttribute('data-checklist-progress')).toBe(true);
+    expect(parts[2]?.hasAttribute('data-row-label')).toBe(true);
+    expect(left.findAll('[data-row-label]')).toHaveLength(1);
+    expect(left.get('[data-row-label]').text()).toContain('UX改善');
+    expect(left.get('[data-row-label]').text()).toContain('+2');
+  });
+
+  // TASK-524: 狭い幅は、タイトルの文字だけでなく文字の列（タイトルと 2 段目）の全体で詳細を開く
+  it('狭い幅ではタイトルのボタンの after が文字の列の全体に広がる', () => {
+    const title = mountWith({}).get('button[data-task-title-open]');
+
+    expect(title.classes()).toEqual(
+      expect.arrayContaining([
+        '@max-3xl:after:absolute',
+        '@max-3xl:after:inset-0',
+        // 位置指定を持つ子（BOT のアバター）より上に置く
+        '@max-3xl:after:z-[1]',
+      ]),
+    );
+    expect(title.element.parentElement?.classList.contains('relative')).toBe(true);
+    expect(title.element.parentElement?.querySelector('[data-row-summary]')).not.toBeNull();
+  });
+
+  it('狭い幅の 2 段目の ID を押してもコピーだけで、詳細を開かず行も選択しない', async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const wrapper = mountWith({ seq_id: 9 });
+
+    await wrapper.get('[data-row-summary] [data-task-id-copy]').trigger('click');
+
+    expect(writeText).toHaveBeenCalledWith('TEST-9');
+    expect(wrapper.emitted('open')).toBeUndefined();
+    expect(wrapper.emitted('select')).toBeUndefined();
+
+    // 対照: タイトルを押すと開く
+    await wrapper.get('button[data-task-title-open]').trigger('click');
+    expect(wrapper.emitted('open')).toEqual([['task-1']]);
+    delete (navigator as { clipboard?: unknown }).clipboard;
   });
 
   it('狭い幅の開閉の矢印は丸の下に積み、選択しても丸とタイトルを動かさない', () => {
@@ -370,5 +441,107 @@ describe('TaskGroupedRow のチェックリスト達成率', () => {
     await wrapper.get('[data-row-labels] [data-checklist-progress]').trigger('click');
 
     expect(wrapper.emitted('open')).toBeUndefined();
+  });
+});
+
+// TASK-389: 一覧の期限の列も、詳細と同じ規則で最終期限との矛盾を送る前に止める
+describe('TaskGroupedRow の期限と最終期限', () => {
+  function mountDeadlines(overrides: Partial<TaskResponse>, error?: string) {
+    return mount(TaskGroupedRow, {
+      props: {
+        projectKey: 'TEST',
+        task: { ...task, ...overrides },
+        statuses: [status],
+        projectLabels: [],
+        members: [],
+        error,
+        onComment: vi.fn(async () => true),
+      },
+      attachTo: document.body,
+    });
+  }
+
+  // 一覧が狭くなると期限の入力欄（広い幅の列）は隠れる。警告だけが残らず、行の失敗も隠さない
+  it('矛盾の警告は入力欄と同じ幅の条件で出し、行の失敗の文言と一緒に出せる', async () => {
+    const wrapper = mountDeadlines(
+      { hard_deadline: '2026-08-20T00:00:00.000Z' },
+      '更新に失敗しました',
+    );
+
+    await editDeadline(wrapper, '2026-08-21');
+
+    const alert = wrapper.get('[role="alert"]');
+    expect(alert.text()).toBe(DEADLINE_ORDER_MESSAGE);
+    expect(alert.classes()).toEqual(expect.arrayContaining(['hidden', '@3xl:block']));
+    expect(wrapper.text()).toContain('更新に失敗しました');
+  });
+
+  async function editDeadline(wrapper: ReturnType<typeof mountDeadlines>, value: string) {
+    if (!wrapper.find('input[aria-label="期限"]').exists()) {
+      await wrapper.get('button[aria-label="期限を設定"]').trigger('click');
+    }
+    const input = wrapper.get('input[aria-label="期限"]');
+    await input.setValue(value);
+    await input.trigger('keydown', { key: 'Enter' });
+  }
+
+  it('期限が最終期限と同じ日か後なら送らずに警告し、編集を開いたままにする', async () => {
+    const wrapper = mountDeadlines({ hard_deadline: '2026-08-20T00:00:00.000Z' });
+
+    for (const value of ['2026-08-20', '2026-08-21']) {
+      await editDeadline(wrapper, value);
+      expect(wrapper.emitted('update:softDeadline'), value).toBeUndefined();
+      expect(wrapper.get('[role="alert"]').text()).toBe(DEADLINE_ORDER_MESSAGE);
+      expect(wrapper.find('input[aria-label="期限"]').exists()).toBe(true);
+    }
+
+    // 前の日なら送る
+    await editDeadline(wrapper, '2026-08-19');
+    expect(wrapper.emitted('update:softDeadline')).toEqual([['2026-08-19T00:00:00.000Z']]);
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+  });
+
+  it('保存済みの最終期限が同じ日の 12 時なら、その日の期限は止めずに送る', async () => {
+    const wrapper = mountDeadlines({ hard_deadline: '2026-08-20T12:00:00Z' });
+
+    await editDeadline(wrapper, '2026-08-20');
+
+    expect(wrapper.emitted('update:softDeadline')).toEqual([['2026-08-20T00:00:00.000Z']]);
+    expect(wrapper.text()).not.toContain(DEADLINE_ORDER_MESSAGE);
+  });
+
+  // 一覧が狭い間（入力欄が隠れている間）に詳細などで期限が変わると、送っていない下書きが
+  // 警告なしで戻ってくる。入力欄にフォーカスが無ければ、下書きを捨てて編集を閉じる
+  it('フォーカスの無い編集中に期限か最終期限が変わったら、送らずに編集を閉じる', async () => {
+    for (const change of [
+      { hard_deadline: '2026-08-25T00:00:00.000Z' },
+      { soft_deadline: '2026-08-10T00:00:00.000Z' },
+    ]) {
+      const wrapper = mountDeadlines({ hard_deadline: '2026-08-20T00:00:00.000Z' });
+      await editDeadline(wrapper, '2026-08-21');
+      (wrapper.get('input[aria-label="期限"]').element as HTMLInputElement).blur();
+
+      await wrapper.setProps({
+        task: { ...task, hard_deadline: '2026-08-20T00:00:00.000Z', ...change },
+      });
+
+      expect(wrapper.find('input[aria-label="期限"]').exists(), JSON.stringify(change)).toBe(false);
+      expect(wrapper.emitted('update:softDeadline')).toBeUndefined();
+      wrapper.unmount();
+    }
+  });
+
+  it('入力欄にフォーカスがあれば、期限が変わっても編集を続ける', async () => {
+    const wrapper = mountDeadlines({ hard_deadline: '2026-08-20T00:00:00.000Z' });
+    await editDeadline(wrapper, '2026-08-21');
+    const input = wrapper.get('input[aria-label="期限"]').element as HTMLInputElement;
+    input.focus();
+
+    await wrapper.setProps({ task: { ...task, hard_deadline: '2026-08-25T00:00:00.000Z' } });
+
+    expect(wrapper.find('input[aria-label="期限"]').exists()).toBe(true);
+    expect((wrapper.get('input[aria-label="期限"]').element as HTMLInputElement).value).toBe(
+      '2026-08-21',
+    );
   });
 });

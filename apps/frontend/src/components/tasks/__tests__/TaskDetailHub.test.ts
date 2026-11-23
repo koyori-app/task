@@ -20,6 +20,7 @@ vi.mock('@/components/markdown/MarkdownEditor.vue', async () => ({
 import { ConfirmDialog } from '@koyori-app/ui-vue';
 import TaskDetailHub from '../TaskDetailHub.vue';
 import { PRIORITY_CONFIG } from '@/lib/task-display';
+import { DEADLINE_ORDER_MESSAGE } from '@/lib/task-date';
 import { renderDescription } from '@/lib/markup-renderer';
 
 enableAutoUnmount(afterEach);
@@ -271,7 +272,7 @@ describe('TaskDetailHub', () => {
 
     expect(wrapper.html()).not.toContain('--priority-color');
     const flag = wrapper.get('button[aria-label="優先度"] svg');
-    expect(flag.attributes('style')).toContain('color: #eab308');
+    expect(flag.attributes('style')).toContain('color: var(--priority-medium)');
   });
 
   it('本文のスクロール領域で切れないよう、メニューはどれもトップレイヤーに出す', () => {
@@ -535,6 +536,74 @@ describe('TaskDetailHub', () => {
     await input.setValue('2026-08-20');
     await input.trigger('blur');
     expect(wrapper.emitted('save:planned_start_on')).toEqual([['2026-08-20']]);
+  });
+
+  function mountDeadlines(soft: string | null, hard: string | null) {
+    return mount(TaskDetailHub, {
+      props: {
+        task: { ...task, soft_deadline: soft, hard_deadline: hard },
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+      },
+    });
+  }
+
+  it('期限が最終期限と同じ日か後なら送らずに警告し、編集を開いたままにする', async () => {
+    const wrapper = mountDeadlines(null, '2026-08-20T00:00:00.000Z');
+
+    await wrapper.get('button[aria-label="ソフト期限を編集"]').trigger('click');
+    const input = wrapper.get('input[aria-label="ソフト期限"]');
+    for (const value of ['2026-08-20', '2026-08-21']) {
+      await input.setValue(value);
+      await input.trigger('blur');
+      expect(wrapper.emitted('save:soft_deadline'), value).toBeUndefined();
+      expect(wrapper.get('[role="alert"]').text()).toBe(DEADLINE_ORDER_MESSAGE);
+      expect(wrapper.find('input[aria-label="ソフト期限"]').exists()).toBe(true);
+    }
+
+    // 前の日なら送る
+    await input.setValue('2026-08-19');
+    await input.trigger('blur');
+    expect(wrapper.emitted('save:soft_deadline')).toEqual([['2026-08-19']]);
+  });
+
+  it('最終期限が期限と同じ日か前なら送らずに警告する', async () => {
+    const wrapper = mountDeadlines('2026-08-20T00:00:00.000Z', null);
+
+    await wrapper.get('button[aria-label="ハード期限を編集"]').trigger('click');
+    const input = wrapper.get('input[aria-label="ハード期限"]');
+    for (const value of ['2026-08-20', '2026-08-19']) {
+      await input.setValue(value);
+      await input.trigger('blur');
+      expect(wrapper.emitted('save:hard_deadline'), value).toBeUndefined();
+      expect(wrapper.text()).toContain(DEADLINE_ORDER_MESSAGE);
+    }
+
+    await input.setValue('2026-08-21');
+    await input.trigger('blur');
+    expect(wrapper.emitted('save:hard_deadline')).toEqual([['2026-08-21']]);
+  });
+
+  it('保存済みの最終期限が同じ日の 12 時なら、その日の期限は止めずに送る', async () => {
+    const wrapper = mountDeadlines(null, '2026-08-20T12:00:00Z');
+
+    await wrapper.get('button[aria-label="ソフト期限を編集"]').trigger('click');
+    const input = wrapper.get('input[aria-label="ソフト期限"]');
+    await input.setValue('2026-08-20');
+    await input.trigger('blur');
+
+    expect(wrapper.emitted('save:soft_deadline')).toEqual([['2026-08-20']]);
+    expect(wrapper.text()).not.toContain(DEADLINE_ORDER_MESSAGE);
+  });
+
+  it('時刻付きの期限の組は、編集を開いただけでは警告しない', async () => {
+    // 期限は画面から入れた 0 時、最終期限は CLI で入れた同じ日の 12 時（サーバーが通す組）
+    const wrapper = mountDeadlines('2026-08-20T00:00:00.000Z', '2026-08-20T12:00:00Z');
+
+    await wrapper.get('button[aria-label="ハード期限を編集"]').trigger('click');
+    expect(wrapper.find('input[aria-label="ハード期限"]').exists()).toBe(true);
+    expect(wrapper.text()).not.toContain(DEADLINE_ORDER_MESSAGE);
   });
 
   it('does not save an empty progress value as zero percent', async () => {
@@ -844,39 +913,6 @@ describe('TaskDetailHub の保存に失敗した下書き', () => {
     expect(resumeButton(wrapper)).toBeUndefined();
     await wrapper.get('h1').trigger('click');
     expect((titleInput(wrapper).element as HTMLInputElement).value).toBe(task.title);
-  });
-
-  // 「クリア」は失う入力が無いので再開ボタンを出さない。前に成功した下書きで出してもいけない
-  it('説明の保存に成功したあと「クリア」で失敗しても、前の値で編集を再開させない', async () => {
-    const wrapper = mountHub();
-    await wrapper
-      .findAll('button')
-      .find((button) => button.text() === '説明を追加')!
-      .trigger('click');
-    const textarea = wrapper.get('textarea[aria-label="説明"]');
-    await textarea.setValue('成功した説明');
-    await wrapper
-      .findAll('button')
-      .find((button) => button.text() === '保存')!
-      .trigger('click');
-    await wrapper.setProps({ fieldErrors: {}, task: { ...task, description: '成功した説明' } });
-
-    await wrapper
-      .findAll('button')
-      .find((button) => button.text() === '成功した説明')!
-      .trigger('click');
-    await wrapper
-      .findAll('button')
-      .find((button) => button.text() === 'クリア')!
-      .trigger('click');
-    // クリアは確認を挟む
-    (wrapper.findAllComponents(ConfirmDialog)[1]!.props('onConfirm') as () => void)();
-    await nextTick();
-    expect(wrapper.emitted('save:description')).toEqual([['成功した説明'], [null]]);
-
-    await wrapper.setProps({ fieldErrors: { description: FAILED } });
-    expect(wrapper.text()).toContain(FAILED);
-    expect(resumeButton(wrapper)).toBeUndefined();
   });
 
   // 分割ビューのペインは別のタスクへ移っても同じインスタンスで、失敗表示も残りうる
@@ -1385,14 +1421,17 @@ describe('TaskDetailHub 説明の編集', () => {
     expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(false);
   });
 
-  it('クリアは確認後にだけ空にして保存する', async () => {
+  // 「クリア」を編集の取り消しと取り違えて、保存済みの説明を全部消す事故があった（TASK-580）
+  it('説明の編集中に「クリア」ボタンを出さない', async () => {
     const wrapper = await startEdit();
-    await button(wrapper, 'クリア')!.trigger('click');
-    expect(wrapper.emitted('save:description')).toBeUndefined();
-    const confirm = dialogs(wrapper)[1]!;
-    expect(confirm.props('open')).toBe(true);
-    (confirm.props('onConfirm') as () => void)();
-    await nextTick();
+    expect(button(wrapper, 'クリア')).toBeUndefined();
+    expect(dialogs(wrapper).some((d) => d.props('title') === '説明を消しますか？')).toBe(false);
+  });
+
+  it('本文を空にして保存すると、説明を消して保存する', async () => {
+    const wrapper = await startEdit();
+    await wrapper.get('textarea[aria-label="説明"]').setValue('');
+    await button(wrapper, '保存')!.trigger('click');
     expect(wrapper.emitted('save:description')).toEqual([[null]]);
   });
 });

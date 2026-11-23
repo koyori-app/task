@@ -62,6 +62,7 @@ import {
   pickerTrigger,
 } from '@/components/__tests__/picker';
 import { PRIORITY_CONFIG } from '@/lib/task-display';
+import { DEADLINE_ORDER_MESSAGE } from '@/lib/task-date';
 
 const statuses = [
   {
@@ -265,6 +266,108 @@ describe('CreateTaskDialog double-submit guard', () => {
     await flushPromises();
 
     wrapper.unmount();
+  });
+});
+
+describe('CreateTaskDialog の Ctrl+Enter で作成', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    isHydrated.value = true;
+    isPending.value = false;
+    mutateAsync.mockReset();
+    mutateAsync.mockImplementation(() => {
+      isPending.value = true;
+      return new Promise(() => {});
+    });
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined as never);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  function titleKeydown(init: KeyboardEventInit) {
+    const event = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      bubbles: true,
+      cancelable: true,
+      ...init,
+    });
+    getTitleInput().dispatchEvent(event);
+    return event;
+  }
+
+  it.each([
+    ['Ctrl', { ctrlKey: true }],
+    ['⌘', { metaKey: true }],
+  ])('タイトルで %s+Enter を押すと作成する', async (_, modifier) => {
+    mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('キーで作る');
+
+    const event = titleKeydown(modifier);
+    await flushPromises();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(mutateAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['変換中（isComposing）', { isComposing: true }],
+    ['変換中（keyCode 229）', { keyCode: 229 }],
+    ['押しっぱなし', { repeat: true }],
+    ['Shift を足した', { shiftKey: true }],
+    ['Alt を足した', { altKey: true }],
+  ])('%s の Ctrl+Enter では作成しない', async (_, init) => {
+    mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('キーで作る');
+
+    const event = titleKeydown({ ctrlKey: true, ...init });
+    await flushPromises();
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('修飾キー無しの Enter は止めない（form の暗黙の送信に任せる）', async () => {
+    mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('キーで作る');
+
+    expect(titleKeydown({}).defaultPrevented).toBe(false);
+  });
+
+  it('説明の submit（Ctrl+Enter）で作成する', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('説明から作る');
+
+    wrapper.getComponent({ name: 'MarkdownEditorStub' }).vm.$emit('submit');
+    await flushPromises();
+
+    expect(mutateAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('作成中はタイトルの Ctrl+Enter でも説明の submit でも 2 回目を送らない', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('一度だけ');
+
+    titleKeydown({ ctrlKey: true });
+    await flushPromises();
+    expect(isPending.value).toBe(true);
+
+    titleKeydown({ ctrlKey: true });
+    wrapper.getComponent({ name: 'MarkdownEditorStub' }).vm.$emit('submit');
+    await flushPromises();
+
+    expect(mutateAsync).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -1083,6 +1186,62 @@ describe('CreateTaskDialog dates', () => {
 
     expect(mutateAsync).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('開始予定日は期限以前の日付にしてください');
+    wrapper.unmount();
+  });
+
+  it.each([
+    ['と同じ日', '2026-10-23'],
+    ['より後の日', '2026-10-24'],
+  ])('期限が最終期限%sなら送らずに警告する', async (_, soft) => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('期限の矛盾');
+    await pickDate('softDeadline', soft);
+    await pickDate('hardDeadline', '2026-10-23');
+    expect(datesChip().getAttribute('aria-invalid')).toBe('true');
+    expect(document.body.querySelector(DATE_PANEL)?.textContent).toContain(DEADLINE_ORDER_MESSAGE);
+
+    await submitForm();
+
+    expect(mutateAsync).not.toHaveBeenCalled();
+    const alerts = [...document.body.querySelectorAll('[role="alert"]')].map((a) => a.textContent);
+    expect(alerts.some((text) => text?.includes(DEADLINE_ORDER_MESSAGE))).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('開始予定日と期限の矛盾が重なると、パネルと送信の警告は同じ開始予定日の文言を出す', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('二重の矛盾');
+    await pickDate('plannedStartOn', '2026-10-24');
+    await pickDate('softDeadline', '2026-10-23');
+    await pickDate('hardDeadline', '2026-10-23');
+    const panel = document.body.querySelector(DATE_PANEL)?.textContent ?? '';
+    expect(panel).toContain('開始予定日が期限より後になっています');
+    expect(panel).not.toContain(DEADLINE_ORDER_MESSAGE);
+
+    await submitForm();
+
+    expect(mutateAsync).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('開始予定日は期限以前の日付にしてください');
+    wrapper.unmount();
+  });
+
+  it('期限が最終期限の前日なら送る', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('期限の順');
+    await pickDate('softDeadline', '2026-10-22');
+    await pickDate('hardDeadline', '2026-10-23');
+    expect(datesChip().getAttribute('aria-invalid')).toBeNull();
+
+    await submitForm();
+
+    expect(mutateAsync.mock.calls[0][0].body).toMatchObject({
+      soft_deadline: '2026-10-22T00:00:00.000Z',
+      hard_deadline: '2026-10-23T00:00:00.000Z',
+    });
+    expect(document.body.textContent).not.toContain(DEADLINE_ORDER_MESSAGE);
     wrapper.unmount();
   });
 });

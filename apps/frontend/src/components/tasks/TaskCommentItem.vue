@@ -129,7 +129,8 @@ function closeDeleteConfirm() {
 }
 
 async function commitEditing() {
-  if (editUploading.value) return;
+  // キー（Ctrl+Enter）の経路は「保存」ボタンの disabled を通らないので、ここでも止める
+  if (props.updating || editUploading.value) return;
   const next = editDraft.value.trim();
   if (!next || next === (props.comment.body ?? '')) {
     cancelEditing();
@@ -219,6 +220,7 @@ async function confirmDelete() {
           :upload-file="uploadFile"
           :upload-scope="comment.id"
           @update:uploading="editUploading = $event"
+          @submit="commitEditing"
         />
         <div class="flex justify-end gap-2">
           <Button

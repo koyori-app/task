@@ -601,9 +601,6 @@ async function onRoundCreated() {
   <div class="mx-auto flex w-full max-w-[1080px] flex-col gap-6">
     <div class="flex flex-col gap-1">
       <h1 class="text-2xl font-bold tracking-tight">レビュー指摘</h1>
-      <p class="text-muted-foreground text-sm">
-        指摘の一覧と状態はここが権威です。GitHub の PR には要約コメントが 1 本だけ置かれます。
-      </p>
     </div>
 
     <p v-if="prsQuery.isPending.value" class="text-muted-foreground text-sm">読み込み中…</p>

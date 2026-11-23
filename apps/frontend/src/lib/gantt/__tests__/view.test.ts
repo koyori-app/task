@@ -14,7 +14,7 @@ import {
 } from '../view';
 
 describe('viewDays と shiftView', () => {
-  it('どの目盛りも 7 の倍数で、送っても範囲の頭が月曜のまま', () => {
+  it('どの目盛りも 7 の倍数で、前後の送りで曜日がずれない（月曜から送れば月曜のまま）', () => {
     for (const scale of GANTT_SCALES) {
       for (const compact of [false, true]) {
         expect(viewDays(scale, compact) % 7).toBe(0);

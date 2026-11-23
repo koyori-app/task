@@ -10,7 +10,6 @@ const pageContext = usePageContext();
   <div class="mx-auto flex w-full max-w-4xl flex-col gap-6 py-6">
     <header class="flex flex-col gap-1">
       <h1 class="text-2xl font-bold">アカウント設定</h1>
-      <p class="text-muted-foreground text-sm">個人アカウントの情報を管理します。</p>
     </header>
 
     <div class="flex flex-col gap-8 md:flex-row">

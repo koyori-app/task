@@ -24,16 +24,31 @@ function koyoriBlock(selector: string): string {
   throw new Error(`koyori の ${selector} の配色が見つからぬ`);
 }
 
-const TASK_ROOT = CSS.slice(CSS.indexOf(':root {'), CSS.indexOf('\n}', CSS.indexOf(':root {')));
+/** tailwind.css の `selector {` で始まる規則の中身。無ければ空。 */
+function taskBlock(selector: string): string {
+  const start = CSS.indexOf(`\n${selector} {`);
+  return start < 0 ? '' : CSS.slice(start, CSS.indexOf('\n}', start));
+}
+
+const TASK_ROOT = taskBlock(':root');
+/** task が明るい配色だけで替える値 */
+const TASK_LIGHT = taskBlock("[data-theme='light']");
 const KOYORI: Record<ThemeName, string> = {
   dark: koyoriBlock(':root'),
   light: koyoriBlock('[data-theme=light]'),
 };
 
-/** `--name` の値。task の `:root`、その配色の koyori、暗い配色の順に見て、`var(--…)` は値までたどる。 */
+/**
+ * `--name` の値。明るい配色なら task の `[data-theme='light']` を先に見て、続けて task の `:root`、
+ * その配色の koyori、暗い配色の順に見る。`var(--…)` は値までたどる。
+ */
 function raw(theme: ThemeName, name: string): string {
   const find = (css: string) => new RegExp(`--${name}:\\s*([^;}]+)`).exec(css)?.[1].trim();
-  const value = find(TASK_ROOT) ?? find(KOYORI[theme]) ?? find(KOYORI.dark);
+  const value =
+    (theme === 'light' ? find(TASK_LIGHT) : undefined) ??
+    find(TASK_ROOT) ??
+    find(KOYORI[theme]) ??
+    find(KOYORI.dark);
   if (value === undefined) throw new Error(`${theme} の --${name} が見つからぬ`);
   const ref = /^var\(--([\w-]+)\)$/.exec(value);
   return ref ? raw(theme, ref[1]) : value;

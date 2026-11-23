@@ -13,8 +13,13 @@ const props = withDefaults(
     segments?: import('@/generated/api').components['schemas']['MatchSegment'][];
     /** 何行まで出すか。既定は 1 行で省略する */
     lines?: 1 | 2 | 'all';
+    /**
+     * after を包含ブロックいっぱいに広げ、周りの余白も詳細を開く的にする。
+     * 包含ブロックは呼ぶ側が `relative` な `div` で用意する（下の注釈）
+     */
+    stretch?: boolean;
   }>(),
-  { lines: 1 },
+  { lines: 1, stretch: false },
 );
 
 // inline のままだと truncate が効かず、列の外へはみ出して隣の列に重なる。
@@ -52,7 +57,7 @@ function onPlainClick(event: MouseEvent) {
     :href="taskDetailHref(tenantDisplayId, projectKey, seqId)"
     :data-task-seq-key="taskSeqKey(projectKey, seqId)"
     class="text-sm text-link hover:underline"
-    :class="lineClass"
+    :class="[lineClass, stretch && `after:absolute after:inset-0 after:z-[1] after:content-['']`]"
     @click="onPlainClick"
   >
     <!--
@@ -60,6 +65,8 @@ function onPlainClick(event: MouseEvent) {
       `<tr>` は WebKit で絶対配置の包含ブロックにならないため、判定が行を飛び越えて
       テーブル全体へ広がり、「どこをタップしても一番下の行が開く」状態になっていた。
       一覧の行（DataListRow）はクリック操作を持たないので、開くのはこのリンクだけ。
+      stretch で広げるときの包含ブロックは、呼ぶ側が `relative` な `div` で用意する。
+      `<tr>` / `<td>` に任せない。
     -->
     <TaskMatchText v-if="segments" :segments="segments" /><template v-else>{{ title }}</template>
   </a>

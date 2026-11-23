@@ -3,6 +3,7 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test';
 import { provide } from 'vue';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
 
+import { DEADLINE_ORDER_MESSAGE } from '@/lib/task-date';
 import CreateTaskDialog from '@/components/tasks/CreateTaskDialog.vue';
 
 const statuses = [
@@ -356,9 +357,9 @@ export const PriorityMenuOpen: Story = {
     // 各行に優先度の色の旗が出る（引き金のチップと同じ旗。行の名前には混ざらない）
     const high = await canvas.findByRole('option', { name: '高' });
     // 行の中は「旗 → label → チェック印」の順で、最初の装飾の svg が旗。
-    // 高の色（PRIORITY_CONFIG の #f97316）。style.color は rgb に正規化されて返る
+    // 高の色（PRIORITY_CONFIG の --priority-high）。配色で替わる変数のまま style に載る
     const flag = high.querySelector<SVGElement>('svg[aria-hidden="true"]');
-    await expect(flag?.style.color).toBe('rgb(249, 115, 22)');
+    await expect(flag?.style.color).toBe('var(--priority-high)');
   },
 };
 
@@ -449,6 +450,60 @@ export const Success201: Story = {
   },
 };
 
+/** 作成の POST が 1 回だけ飛んだか */
+function postCount() {
+  return (globalThis.fetch as ReturnType<typeof fn>).mock.calls.filter(
+    ([request]) => (request as Request).method === 'POST',
+  ).length;
+}
+
+export const SubmitWithCtrlEnterInDescription: Story = {
+  beforeEach() {
+    const mock = mockCreate();
+    createdSpy.mockClear();
+    return mock.restore;
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const user = userEvent.setup();
+    await user.type(await canvas.findByLabelText(/タイトル/), 'キーで作るタスク');
+    await user.type(canvas.getByLabelText('説明'), '説明から Ctrl+Enter');
+    // requestSubmit() は無効なボタンを通り越すので、ステータスが読み込まれて作成できる状態を待つ
+    const submit = await canvas.findByRole('button', { name: '作成' });
+    await waitFor(() => expect(submit).toBeEnabled());
+    await user.keyboard('{Control>}{Enter}{/Control}');
+
+    await waitFor(() => expect(createdSpy).toHaveBeenCalled());
+    await expect(postCount()).toBe(1);
+    await expect(postedRequest().clone().json()).resolves.toMatchObject({
+      title: 'キーで作るタスク',
+      description: '説明から Ctrl+Enter',
+    });
+  },
+};
+
+export const SubmitWithCtrlEnterInTitle: Story = {
+  beforeEach() {
+    const mock = mockCreate();
+    createdSpy.mockClear();
+    return mock.restore;
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const user = userEvent.setup();
+    await user.type(await canvas.findByLabelText(/タイトル/), 'タイトルから作る');
+    const submit = await canvas.findByRole('button', { name: '作成' });
+    await waitFor(() => expect(submit).toBeEnabled());
+    await user.keyboard('{Control>}{Enter}{/Control}');
+
+    await waitFor(() => expect(createdSpy).toHaveBeenCalled());
+    await expect(postCount()).toBe(1);
+    await expect(postedRequest().clone().json()).resolves.toMatchObject({
+      title: 'タイトルから作る',
+    });
+  },
+};
+
 export const EscapeCloses: Story = {
   beforeEach() {
     openChangeSpy.mockClear();
@@ -473,6 +528,37 @@ export const ValidationError: Story = {
     await expect(canvas.findByRole('alert')).resolves.toHaveTextContent(
       'タイトルを入力してください',
     );
+  },
+};
+
+/** 期限が最終期限と同じ日。送らずに理由を出し、日付のチップも矛盾として赤くする */
+let deadlineOrderFetch: ReturnType<typeof mockCreate>['fetchSpy'] | undefined;
+export const DeadlineOrderError: Story = {
+  beforeEach() {
+    const mock = mockCreate();
+    deadlineOrderFetch = mock.fetchSpy;
+    return mock.restore;
+  },
+  play: async ({ canvasElement }) => {
+    const doc = canvasElement.ownerDocument;
+    const canvas = within(doc.body);
+    const user = userEvent.setup();
+    await user.type(await canvas.findByLabelText(/タイトル/), '期限の矛盾');
+    await pickDate(user, canvas, 'softDeadline', '2026-07-20');
+    await pickDate(user, canvas, 'hardDeadline', '2026-07-20');
+    await expect(doc.querySelector(DATE_PANEL)).toHaveTextContent(DEADLINE_ORDER_MESSAGE);
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(doc.querySelector(DATE_PANEL)).toBeNull());
+    await expect(canvas.getByRole('button', { name: /^日付/ })).toHaveAttribute(
+      'aria-invalid',
+      'true',
+    );
+
+    await user.click(canvas.getByRole('button', { name: '作成' }));
+    await expect(canvas.findByRole('alert')).resolves.toHaveTextContent(DEADLINE_ORDER_MESSAGE);
+    await expect(
+      deadlineOrderFetch!.mock.calls.filter(([request]) => (request as Request).method === 'POST'),
+    ).toHaveLength(0);
   },
 };
 
