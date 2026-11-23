@@ -1491,14 +1491,14 @@ export const DescriptionEditEscape: Story = {
   },
 };
 
-export const DescriptionClear: Story = {
-  name: '説明クリア',
+export const DescriptionEmptySave: Story = {
+  name: '説明を空にして保存',
   beforeEach: () => {
     const puts: unknown[] = [];
     const restore = createMockFetch({
       onPut: (body) => puts.push(body),
     });
-    (DescriptionClear as { puts?: unknown[] }).puts = puts;
+    (DescriptionEmptySave as { puts?: unknown[] }).puts = puts;
     return restore;
   },
   play: async ({ canvasElement }) => {
@@ -1509,12 +1509,18 @@ export const DescriptionClear: Story = {
     ).resolves.toBeInTheDocument();
 
     await user.click(canvas.getByText('OIDC フローとセッション管理を実装する。'));
-    await user.click(await canvas.findByRole('button', { name: 'クリア' }));
-    // クリアは確認を挟む。確認で「消す」を押して実行する
-    await user.click(await screen.findByRole('button', { name: '消す' }));
+    // 説明を消す専用のボタンは無い。本文を全部消して「保存」すると説明が空になる
+    const editor = await canvas.findByRole('textbox', { name: '説明' });
+    await expect(editor).toHaveAttribute('contenteditable', 'true');
+    await user.click(editor);
+    await user.keyboard('{Control>}a{/Control}');
+    await user.keyboard('{Backspace}');
+    // 空の文書では CodeMirror が本文の中に placeholder を描く（textContent は空にならない）
+    await expect(editor.querySelector('.cm-placeholder')).not.toBeNull();
+    await user.click(canvas.getByRole('button', { name: '保存' }));
 
     await expect(canvas.findByText('説明を追加')).resolves.toBeInTheDocument();
-    const puts = (DescriptionClear as { puts?: unknown[] }).puts ?? [];
+    const puts = (DescriptionEmptySave as { puts?: unknown[] }).puts ?? [];
     await expect(puts).toContainEqual({ clear_description: true });
   },
 };
