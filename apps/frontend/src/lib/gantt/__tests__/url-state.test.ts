@@ -33,7 +33,7 @@ describe('parseGanttUrlState', () => {
         TODAY,
       ),
     ).toEqual(
-      state({ from: '2026-11-16', scale: 'month', groupBy: 'assignee', progressLine: true }),
+      state({ from: '2026-11-18', scale: 'month', groupBy: 'assignee', progressLine: true }),
     );
     expect(parseGanttUrlState({ line: ['off'] }, TODAY).progressLine).toBe(false);
     expect(parseGanttUrlState({ scale: ['year'], group: ['label'], line: ['1'] }, TODAY)).toEqual(
@@ -83,6 +83,13 @@ describe('applyGanttUrlState', () => {
     const searchAll: Record<string, string[]> = {};
     for (const [key, value] of url.searchParams) (searchAll[key] ??= []).push(value);
     expect(parseGanttUrlState(searchAll, TODAY)).toEqual(s);
+  });
+
+  it('月曜でない from も丸めずに書き、そのまま読み戻す（日ずつ送った範囲）', () => {
+    const s = state({ from: '2026-11-19' });
+    const url = urlOf(s);
+    expect(url.searchParams.get('from')).toBe('2026-11-19');
+    expect(parseGanttUrlState({ from: ['2026-11-19'] }, TODAY)).toEqual(s);
   });
 
   it('オーバーレイで開いたタスクを selected に書き、閉じれば消す（TASK-474）', () => {

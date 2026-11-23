@@ -11,7 +11,7 @@ export type GanttGroupBy = 'project' | 'assignee';
 export const SCHEDULE_MAX_DAYS = 93;
 
 /**
- * 一画面に描く日数。どれも 7 の倍数にして、送っても範囲の頭が月曜のままになるようにする。
+ * 一画面に描く日数。どれも 7 の倍数にして、前後の送りで曜日がずれないようにする。
  * 狭い画面（`compact`）は、日の段で一日の幅が読める広さを保つために日数を減らす。
  * 月の段も予定の API の上限に収め、13 週（およそ 3 か月）にする。
  */
@@ -57,7 +57,7 @@ export function fitDayWidth(boxWidth: number, scale: GanttScale, compact: boolea
   return compact ? Math.max(2, fit) : Math.max(pxPerDay(scale), fit);
 }
 
-/** `from`（月曜）から始まる範囲の最後の日（含む） */
+/** `from` から始まる範囲の最後の日（含む） */
 export function viewTo(from: string, scale: GanttScale, compact: boolean): string {
   return addDays(from, viewDays(scale, compact) - 1);
 }
