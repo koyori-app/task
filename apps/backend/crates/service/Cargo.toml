@@ -28,6 +28,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 lettre = { version = "0.11", default-features = false, features = ["builder", "hostname", "smtp-transport", "tokio1", "tokio1-rustls-tls"] }
 mime_guess = "2"
 object_store = { version = "0.14", features = ["aws", "http"] }
+pulldown-cmark = { version = "0.13", default-features = false }
 qrcode = "0.15"
 rand = "0.10"
 redis = { workspace = true }

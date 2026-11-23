@@ -10,6 +10,7 @@ pub mod bots;
 pub mod custom_fields;
 pub mod dashboard;
 pub mod desktop_auth;
+pub mod documents;
 pub mod drive_files;
 pub mod drive_folders;
 pub mod favicons;
