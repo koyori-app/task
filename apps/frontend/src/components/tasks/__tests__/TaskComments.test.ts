@@ -3,7 +3,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils';
-import { nextTick } from 'vue';
+import { nextTick, watch } from 'vue';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import { createPinia, setActivePinia } from 'pinia';
 import TaskComments from '../TaskComments.vue';
@@ -293,6 +293,58 @@ describe('TaskComments', () => {
       expect(onUpdate).toHaveBeenCalledWith('c-1', '直した本文');
     });
 
+    it('入力欄の submit（Ctrl+Enter）で送り、空の間とアップロード中は送らない', async () => {
+      const onSubmit = vi.fn(async () => true);
+      const wrapper = mountComments({ onSubmit });
+      const composer = () => editors(wrapper)[0]!;
+
+      composer().vm.$emit('submit');
+      await flushPromises();
+      expect(onSubmit).not.toHaveBeenCalled();
+
+      await wrapper.get('textarea[aria-label="コメントを入力"]').setValue('キーで送る');
+      composer().vm.$emit('update:uploading', true);
+      await nextTick();
+      composer().vm.$emit('submit');
+      await flushPromises();
+      expect(onSubmit).not.toHaveBeenCalled();
+
+      composer().vm.$emit('update:uploading', false);
+      await nextTick();
+      composer().vm.$emit('submit');
+      await flushPromises();
+      expect(onSubmit).toHaveBeenCalledWith('キーで送る');
+    });
+
+    it('編集の入力欄の submit（Ctrl+Enter）で保存し、アップロード中と保存中は保存しない', async () => {
+      const onUpdate = vi.fn(async () => true);
+      const wrapper = mountComments({
+        threads: [thread('c-1', '元の本文')],
+        currentUserId: user.id,
+        onUpdate,
+      });
+      await menuItems(wrapper, 'コメントを編集')[0]!.trigger('click');
+      await wrapper.get('textarea[aria-label="コメントを編集"]').setValue('直した本文');
+      const editor = () => editors(wrapper).find((e) => e.props('ariaLabel') === 'コメントを編集')!;
+
+      editor().vm.$emit('update:uploading', true);
+      await nextTick();
+      editor().vm.$emit('submit');
+      await flushPromises();
+      expect(onUpdate).not.toHaveBeenCalled();
+      editor().vm.$emit('update:uploading', false);
+
+      await wrapper.setProps({ updatingCommentId: 'c-1' });
+      editor().vm.$emit('submit');
+      await flushPromises();
+      expect(onUpdate).not.toHaveBeenCalled();
+
+      await wrapper.setProps({ updatingCommentId: null });
+      editor().vm.$emit('submit');
+      await flushPromises();
+      expect(onUpdate).toHaveBeenCalledWith('c-1', '直した本文');
+    });
+
     it('テナントとプロジェクトが分かる時だけ、入力欄と編集の入力欄へ uploadFile を渡す', async () => {
       const without = mountComments({ threads: [thread('c-1', '本文')], currentUserId: user.id });
       await menuItems(without, 'コメントを編集')[0]!.trigger('click');
@@ -396,8 +448,85 @@ describe('TaskComments', () => {
     ).toBe('');
   });
 
-  // 同じスレッドへ戻って書き直した下書きも、送信済みの本文ではないので残す
-  it('送信中に離れて同じスレッドへ戻り書き直したら、その下書きは消さない', async () => {
+  describe('送信中の入力欄（POST の結果だけで解く）', () => {
+    const composer = (w: VueWrapper) =>
+      w.get<HTMLTextAreaElement>('textarea[aria-label="コメントを入力"]').element;
+
+    function deferredSubmit() {
+      const pending: ((posted: boolean) => void)[] = [];
+      const onSubmit = vi.fn(() => new Promise<boolean>((resolve) => pending.push(resolve)));
+      return { onSubmit, resolve: (posted: boolean) => pending.shift()!(posted) };
+    }
+
+    it('送信中は入力欄と送信を止め、成功で空になって打てる。下書きを残したまま打てる瞬間を作らない', async () => {
+      const { onSubmit, resolve } = deferredSubmit();
+      const wrapper = mountComments({ taskId: 'a', onSubmit });
+      await wrapper.get('textarea[aria-label="コメントを入力"]').setValue('送る本文');
+      await wrapper.get('form').trigger('submit');
+
+      expect(composer(wrapper).disabled).toBe(true);
+      expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeDefined();
+      // 送信中の再送（Ctrl+Enter）は呼ばない
+      wrapper.findComponent({ name: 'CommentEditorStub' }).vm.$emit('submit');
+      await flushPromises();
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+
+      // 入力欄の状態の移り変わりを同期で記録する
+      const editor = wrapper.findComponent({ name: 'CommentEditorStub' });
+      const seen: [boolean, string][] = [];
+      const stop = watch(
+        () => [editor.props('disabled') as boolean, editor.props('modelValue') as string] as const,
+        ([disabled, value]) => seen.push([disabled, value]),
+        { flush: 'sync' },
+      );
+      resolve(true);
+      await flushPromises();
+      stop();
+
+      expect(composer(wrapper).disabled).toBe(false);
+      expect(composer(wrapper).value).toBe('');
+      expect(seen.some(([disabled, value]) => !disabled && value === '送る本文')).toBe(false);
+    });
+
+    it('失敗したら下書きを残して打てるようにする', async () => {
+      const { onSubmit, resolve } = deferredSubmit();
+      const wrapper = mountComments({ taskId: 'a', onSubmit });
+      await wrapper.get('textarea[aria-label="コメントを入力"]').setValue('失敗する本文');
+      await wrapper.get('form').trigger('submit');
+      expect(composer(wrapper).disabled).toBe(true);
+
+      resolve(false);
+      await flushPromises();
+      expect(composer(wrapper).disabled).toBe(false);
+      expect(composer(wrapper).value).toBe('失敗する本文');
+    });
+
+    it('送信中に作り直した入力欄も送信中で、送り直せない。成功で空になる', async () => {
+      const first = deferredSubmit();
+      const before = mountComments({ taskId: 'a', onSubmit: first.onSubmit });
+      await before.get('textarea[aria-label="コメントを入力"]').setValue('一度だけ送る');
+      await before.get('form').trigger('submit');
+      before.unmount();
+
+      const again = vi.fn(async () => true);
+      const after = mountComments({ taskId: 'a', onSubmit: again });
+      expect(composer(after).value).toBe('一度だけ送る');
+      expect(composer(after).disabled).toBe(true);
+      await after.get('form').trigger('submit');
+      after.findComponent({ name: 'CommentEditorStub' }).vm.$emit('submit');
+      await flushPromises();
+      expect(again).not.toHaveBeenCalled();
+
+      first.resolve(true);
+      await flushPromises();
+      expect(composer(after).disabled).toBe(false);
+      expect(composer(after).value).toBe('');
+    });
+  });
+
+  // 送信中の宛先の入力欄は止まるので、利用者は送信済みの下書きを書き換えられない。
+  // 書き換わっていた場合に消さないことは useCommentDrafts の単体テストが見る
+  it('送信中に離れて同じスレッドへ戻ると、その入力欄も送信中で止まり、成功で空になる', async () => {
     let resolveSubmit: ((posted: boolean) => void) | undefined;
     const onSubmit = vi.fn(
       () =>
@@ -416,18 +545,27 @@ describe('TaskComments', () => {
     await openThread();
     await wrapper.get('textarea[aria-label="返信を入力"]').setValue('返信します');
     await wrapper.get('form').trigger('submit');
+    // 本物の useTaskComments と同じく、POST の間はこのペインの submitPending が true
+    await wrapper.setProps({ submitPending: true });
 
-    // 一覧へ戻り、同じスレッドを開き直して別の下書きを書く
+    // 同じペインでは一覧の入力欄も止まる（1 つの composable で POST を重ねない）。
+    // 同じスレッドを開き直すと、そこも送信中
     await wrapper.get('button[aria-label="コメント一覧へ戻る"]').trigger('click');
+    expect(
+      wrapper.get<HTMLTextAreaElement>('textarea[aria-label="コメントを入力"]').element.disabled,
+    ).toBe(true);
     await openThread();
-    await wrapper.get('textarea[aria-label="返信を入力"]').setValue('書き直した返信');
+    const reply = () =>
+      wrapper.get<HTMLTextAreaElement>('textarea[aria-label="返信を入力"]').element;
+    expect(reply().disabled).toBe(true);
+    expect(reply().value).toBe('返信します');
 
+    await wrapper.setProps({ submitPending: false });
     resolveSubmit!(true);
     await flushPromises();
 
-    expect(
-      wrapper.get<HTMLTextAreaElement>('textarea[aria-label="返信を入力"]').element.value,
-    ).toBe('書き直した返信');
+    expect(reply().disabled).toBe(false);
+    expect(reply().value).toBe('');
   });
 
   it('編集は onUpdate をコメント ID と新本文で呼ぶ', async () => {

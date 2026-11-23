@@ -241,6 +241,8 @@ type MockOptions = {
   rejectCommentsList?: boolean;
   /** コメント投稿 POST を { message } 付きで拒否する */
   rejectCommentPost?: { status: number; message: string };
+  /** コメントを投稿した後の、コメント一覧と履歴の GET に応答しない（取り直しが止まった状態） */
+  stallRefetchAfterCommentPost?: boolean;
   attachments?: {
     id: string;
     drive_file_id: string;
@@ -301,6 +303,8 @@ function applyPutBody(
 
 let mutableTaskDetail = { ...sampleTaskDetail };
 let mutableComments: MockComment[] = [];
+/** 投稿された本文（POST の順）。モックが本文を読むので、Request からは読み直せない */
+let postedCommentBodies: string[] = [];
 
 function createMockFetch(overrides: MockOptions = {}) {
   mutableTaskDetail = { ...(overrides.task ?? sampleTaskDetail) };
@@ -311,6 +315,9 @@ function createMockFetch(overrides: MockOptions = {}) {
     replies: thread.replies.map((reply) => ({ ...reply })),
   }));
   const original = globalThis.fetch;
+  let commentPosted = false;
+  postedCommentBodies = [];
+  const stalled = () => !!overrides.stallRefetchAfterCommentPost && commentPosted;
   globalThis.fetch = fn().mockImplementation(async (req: Request) => {
     const url = typeof req === 'string' ? req : req?.url;
     // KFM の遅延 chunk 読み込みなど、API mock の対象でない呼び出しは元の fetch へ渡す。
@@ -354,6 +361,7 @@ function createMockFetch(overrides: MockOptions = {}) {
       return jsonResponse([mockUsers.alpha, mockUsers.beta]);
     }
     if (url.includes('/activities')) {
+      if (stalled()) return new Promise(() => {});
       const activities = overrides.activities ?? [];
       return jsonResponse({ activities, total: activities.length, next_cursor: null });
     }
@@ -421,6 +429,7 @@ function createMockFetch(overrides: MockOptions = {}) {
         if (overrides.rejectCommentsList) {
           return jsonResponse({ message: 'server error' }, 500);
         }
+        if (stalled()) return new Promise(() => {});
         return jsonResponse({
           comments: mutableComments.map((thread) => ({
             ...thread,
@@ -441,6 +450,8 @@ function createMockFetch(overrides: MockOptions = {}) {
           );
         }
         const body = (await req.json()) as { body: string; parent_comment_id?: string | null };
+        commentPosted = true;
+        postedCommentBodies.push(body.body);
         const posted = {
           id: `comment-new-${mutableComments.length + 1}`,
           body: body.body,
@@ -2100,7 +2111,8 @@ export const CommentPost: Story = {
     await user.type(textarea, '新しく投稿するコメント');
     await user.click(await canvas.findByRole('button', { name: 'コメントする' }));
 
-    // submitComment は POST → invalidate/refetch 完了後に true。submitDraft はその後に下書きを消す。
+    // submitComment は POST の応答で true（取り直しは待たない）。submitDraft はその時に下書きを消し、
+    // 新しいコメントは取り直しが届いた時に一覧へ出る。
     // canvas 全体の findByText だと入力欄の文字に先に当たり、再取得を待たず assert してしまう。
     // storybook/test の expect 自体は再試行しないため、下書きの消去を waitFor で待つ。
     // 入力欄は CodeMirror（contenteditable）なので、value ではなく中の文字で見る
@@ -2114,6 +2126,58 @@ export const CommentPost: Story = {
     await expect(
       within(commentList).findByText('新しく投稿するコメント'),
     ).resolves.toBeInTheDocument();
+  },
+};
+
+export const CommentPostWithCtrlEnter: Story = {
+  name: 'コメント投稿（Ctrl+Enter）',
+  beforeEach: () => createMockFetch({ comments: sampleComments }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    const textarea = await canvas.findByRole('textbox', { name: 'コメントを入力' });
+    await user.type(textarea, 'キーで投稿するコメント');
+    await user.keyboard('{Control>}{Enter}{/Control}');
+
+    // 下書きの消去を待つ（CommentPost と同じ理由で waitFor）
+    await waitFor(() => expect(textarea.textContent).not.toContain('キーで投稿するコメント'));
+    const commentList = await waitFor(() => {
+      const list = canvasElement.querySelector('[data-activity-feed]');
+      if (!list) throw new Error('comment list not ready');
+      return list as HTMLElement;
+    });
+    await expect(
+      within(commentList).findByText('キーで投稿するコメント'),
+    ).resolves.toBeInTheDocument();
+    // 送信中もフォーカスは入力欄に残り、続けて打てる
+    await waitFor(() =>
+      expect(textarea.closest('.cm-editor')!.contains(document.activeElement)).toBe(true),
+    );
+  },
+};
+
+/** POST が通ったら、一覧の取り直しが止まっていても入力欄は空で打てる。次の投稿に前の本文が混ざらない */
+export const CommentPostWhileRefetchStalls: Story = {
+  name: 'コメント投稿（取り直しが止まっている間）',
+  beforeEach: () =>
+    createMockFetch({ comments: sampleComments, stallRefetchAfterCommentPost: true }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    const textarea = await canvas.findByRole('textbox', { name: 'コメントを入力' });
+    await user.type(textarea, 'キーで投稿するコメント');
+    await user.keyboard('{Control>}{Enter}{/Control}');
+
+    // 取り直しを待たずに、下書きが消えて読み取り専用が解ける。フォーカスは入力欄のまま
+    await waitFor(() => expect(textarea.textContent).not.toContain('キーで投稿するコメント'));
+    await waitFor(() => expect(textarea.getAttribute('aria-readonly')).toBeNull());
+    await expect(textarea.closest('.cm-editor')!.contains(document.activeElement)).toBe(true);
+
+    await user.keyboard('次');
+    await waitFor(() => expect(textarea.textContent).toBe('次'));
+    await user.keyboard('{Control>}{Enter}{/Control}');
+
+    await waitFor(() => expect(postedCommentBodies).toEqual(['キーで投稿するコメント', '次']));
   },
 };
 

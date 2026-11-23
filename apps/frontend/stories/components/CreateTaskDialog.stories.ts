@@ -449,6 +449,60 @@ export const Success201: Story = {
   },
 };
 
+/** 作成の POST が 1 回だけ飛んだか */
+function postCount() {
+  return (globalThis.fetch as ReturnType<typeof fn>).mock.calls.filter(
+    ([request]) => (request as Request).method === 'POST',
+  ).length;
+}
+
+export const SubmitWithCtrlEnterInDescription: Story = {
+  beforeEach() {
+    const mock = mockCreate();
+    createdSpy.mockClear();
+    return mock.restore;
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const user = userEvent.setup();
+    await user.type(await canvas.findByLabelText(/タイトル/), 'キーで作るタスク');
+    await user.type(canvas.getByLabelText('説明'), '説明から Ctrl+Enter');
+    // requestSubmit() は無効なボタンを通り越すので、ステータスが読み込まれて作成できる状態を待つ
+    const submit = await canvas.findByRole('button', { name: '作成' });
+    await waitFor(() => expect(submit).toBeEnabled());
+    await user.keyboard('{Control>}{Enter}{/Control}');
+
+    await waitFor(() => expect(createdSpy).toHaveBeenCalled());
+    await expect(postCount()).toBe(1);
+    await expect(postedRequest().clone().json()).resolves.toMatchObject({
+      title: 'キーで作るタスク',
+      description: '説明から Ctrl+Enter',
+    });
+  },
+};
+
+export const SubmitWithCtrlEnterInTitle: Story = {
+  beforeEach() {
+    const mock = mockCreate();
+    createdSpy.mockClear();
+    return mock.restore;
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const user = userEvent.setup();
+    await user.type(await canvas.findByLabelText(/タイトル/), 'タイトルから作る');
+    const submit = await canvas.findByRole('button', { name: '作成' });
+    await waitFor(() => expect(submit).toBeEnabled());
+    await user.keyboard('{Control>}{Enter}{/Control}');
+
+    await waitFor(() => expect(createdSpy).toHaveBeenCalled());
+    await expect(postCount()).toBe(1);
+    await expect(postedRequest().clone().json()).resolves.toMatchObject({
+      title: 'タイトルから作る',
+    });
+  },
+};
+
 export const EscapeCloses: Story = {
   beforeEach() {
     openChangeSpy.mockClear();
