@@ -22,6 +22,7 @@ use crate::openapi::{CrudErrors, SessionAuthErrors};
 use common::validation::PKCE_CHALLENGE_REGEX;
 use entity::scopes::Scope;
 use payload::oauth_grants::*;
+use payload::or_unknown::OrUnknown;
 use service::oauth_server::client::{ClientError, ClientMetadata, resolve_client};
 use service::oauth_server::grant::{self, PendingAuthorization};
 use service::oauth_server::{
@@ -127,7 +128,7 @@ fn preview_of(
         client_host,
         redirect_host: host_with_explicit_port(&redirect),
         redirect_is_loopback: redirect_uri_is_loopback(&params.redirect_uri),
-        scopes,
+        scopes: scopes.into_iter().map(OrUnknown::from).collect(),
     })
 }
 
@@ -263,7 +264,7 @@ pub async fn list_oauth_grants(
                 client_id: grant.oauth_client_id?,
                 client_name: grant.name,
                 tenant_ids,
-                scopes: grant.scopes,
+                scopes: grant.scopes.0.into_iter().map(OrUnknown::from).collect(),
                 expires_at: grant.expires_at?.with_timezone(&Utc),
                 last_used_at: grant.last_used_at.map(|value| value.with_timezone(&Utc)),
             })

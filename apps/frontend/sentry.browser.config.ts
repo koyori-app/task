@@ -4,6 +4,28 @@ import { isAuthPagePath } from '@/lib/auth-pages';
 
 const DEFAULT_TRACES_SAMPLE_RATE = 0.1;
 
+/**
+ * SDK 11 で既定が「多く集める」側に変わった `dataCollection` を、v10 の既定（`sendDefaultPii` 無し）に戻す。
+ * 未設定のままだと利用者の情報・cookie・リクエストの本文を集め、IP も推定させる。
+ * 値は MIGRATION.md（11.16.0）の「If you want to keep the v10 default behavior」と同じ。
+ */
+const SCRUBBED_HEADER_PARTS = ['forwarded', '-ip', 'remote-', 'via', '-user'];
+export const V10_DATA_COLLECTION = {
+  userInfo: false,
+  cookies: false,
+  httpHeaders: {
+    request: { deny: SCRUBBED_HEADER_PARTS },
+    response: { deny: SCRUBBED_HEADER_PARTS },
+  },
+  httpBodies: [],
+  urlQueryParams: { deny: SCRUBBED_HEADER_PARTS },
+  genAI: { inputs: false, outputs: false },
+  databaseQueryData: false,
+  queues: false,
+  graphQL: { document: false, variables: false },
+  frameContextLines: 7,
+} satisfies Sentry.BrowserOptions['dataCollection'];
+
 /** 未設定・空文字（Docker の空 ARG）・0〜1 の範囲外は既定値に倒す。`0` は無効化として通す。 */
 export const parseTracesSampleRate = (raw: string | undefined): number => {
   if (!raw?.trim()) return DEFAULT_TRACES_SAMPLE_RATE;
@@ -132,6 +154,8 @@ export const sentryBrowserConfig = (app: App) => {
       // browserTracingIntegration が無いと fetch / XHR に trace ヘッダが付かない
       integrations: [
         Sentry.browserTracingIntegration(),
+        // SDK 11 の既定（'page'）は遷移で session を作り直さない。v10 と同じく遷移ごとに作る
+        Sentry.browserSessionIntegration({ lifecycle: 'route' }),
         ...(isAuthPagePath(window.location.pathname)
           ? []
           : [
@@ -142,6 +166,12 @@ export const sentryBrowserConfig = (app: App) => {
             ]),
         scrubUrlsIntegration(),
       ],
+      // SDK 11 の既定の span streaming では `beforeSendTransaction` が呼ばれず、トランザクションの
+      // URL を落とせない。v10 と同じトランザクションの送り方に留める
+      traceLifecycle: 'static',
+      dataCollection: V10_DATA_COLLECTION,
+      // SDK 11 の既定（true）は captureMessage にも合成のスタックを付け、issue のまとまり方が変わる
+      attachStacktrace: false,
       beforeSend: (event) => scrubUrls(event),
       beforeSendTransaction: (event) => scrubUrls(event),
       tracesSampleRate: parseTracesSampleRate(

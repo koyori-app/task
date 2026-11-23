@@ -1,7 +1,7 @@
 //! Sentry の初期化と、tracing・HTTP レイヤーへの組み込み。
 
 use std::borrow::Cow;
-use std::sync::{Arc, LazyLock};
+use std::sync::LazyLock;
 
 use axum::{Router, body::Body, http::Request, middleware};
 use common::error::SENTRY_CAPTURED_LOG_TARGET;
@@ -9,10 +9,12 @@ use common::settings::Settings;
 use handler::middlewares::sentry_context::scrub_request;
 use regex::Regex;
 use sentry::integrations::tower::{NewSentryLayer, SentryHttpLayer};
-use sentry::integrations::tracing::{EventFilter, SentryLayer, default_event_filter};
+use sentry::integrations::tracing::{BreadcrumbLayer, ErrorLayer, SpanLayer};
 use sentry::protocol::{Breadcrumb, Context, Event, Value};
 use tower::ServiceBuilder;
-use tracing::{Metadata, Subscriber};
+use tracing::{Level, Metadata, Subscriber};
+use tracing_subscriber::Layer;
+use tracing_subscriber::filter::{LevelFilter, filter_fn};
 use tracing_subscriber::registry::LookupSpan;
 
 /// apalis の `.enable_tracing()` が出すイベントの target の接頭辞
@@ -75,28 +77,30 @@ pub fn client_options(
     else {
         return Ok(None);
     };
-    Ok(Some(sentry::ClientOptions {
-        dsn: Some(dsn.parse()?),
-        release: sentry::release_name!(),
-        environment: settings
-            .rust_env
-            .as_deref()
-            .map(str::trim)
-            .filter(|env| !env.is_empty())
-            .map(|env| Cow::Owned(env.to_owned())),
-        traces_sample_rate: settings.traces_sample_rate(),
+    // `ClientOptions` は non_exhaustive で、構造体の式では作れない。builder で組み、DSN は
+    // 不正なら panic する `dsn()` ではなくフィールドへ入れて、parse の失敗を呼び元へ返す
+    let mut options = sentry::ClientOptions::new()
+        .maybe_release(sentry::release_name!())
+        // 未設定でも 0.0 を明示する（`Disabled` ではなく固定率）。親の標本化の判断は引き継ぐ
+        .traces_sample_rate(settings.traces_sample_rate())
         // 本番既定は false。必要時のみ環境変数で opt-in 推奨
-        send_default_pii: false,
-        before_send: Some(Arc::new(|mut event| {
+        .send_default_pii(false)
+        .before_send(|mut event| {
             scrub_event(&mut event);
             Some(event)
-        })),
-        before_breadcrumb: Some(Arc::new(|mut breadcrumb| {
+        })
+        .before_breadcrumb(|mut breadcrumb| {
             scrub_breadcrumb(&mut breadcrumb);
             Some(breadcrumb)
-        })),
-        ..Default::default()
-    }))
+        });
+    options.dsn = Some(dsn.parse()?);
+    options.environment = settings
+        .rust_env
+        .as_deref()
+        .map(str::trim)
+        .filter(|env| !env.is_empty())
+        .map(|env| Cow::Owned(env.to_owned()));
+    Ok(Some(options))
 }
 
 /// Sentry を初期化済みか。未初期化なら送り先が無いので、レイヤーを積まずコストをなくす。
@@ -104,23 +108,42 @@ fn is_enabled() -> bool {
     sentry::Hub::current().client().is_some()
 }
 
-/// tracing の error をイベントに、warn / info をブレッドクラムにする。
+/// tracing の info 以上の span を transaction・span に、error をイベントに、warn / info を
+/// ブレッドクラムにする。structured log としては送らない（`LogLayer` を積まない）。
 /// Sentry を初期化していなければ `None`（レイヤーを積まない）。
-pub fn tracing_layer<S>() -> Option<SentryLayer<S>>
+///
+/// sentry 0.49 で非推奨になった `SentryLayer`（上と同じ選び方を一つにまとめていた）を、
+/// 個別のレイヤーと level の絞りに分けた形。
+pub fn tracing_layer<S>() -> Option<Vec<Box<dyn Layer<S> + Send + Sync>>>
 where
     S: Subscriber + for<'span> LookupSpan<'span>,
 {
-    is_enabled().then(|| sentry::integrations::tracing::layer().event_filter(event_filter))
+    is_enabled().then(|| {
+        vec![
+            SpanLayer::new().with_filter(LevelFilter::INFO).boxed(),
+            BreadcrumbLayer::new()
+                .with_filter(filter_fn(|metadata| {
+                    metadata.is_event()
+                        && matches!(*metadata.level(), Level::WARN | Level::INFO)
+                        && !is_ignored_target(metadata)
+                }))
+                .boxed(),
+            ErrorLayer::new()
+                .with_filter(filter_fn(|metadata| {
+                    metadata.is_event()
+                        && *metadata.level() == Level::ERROR
+                        && !is_ignored_target(metadata)
+                }))
+                .boxed(),
+        ]
+    })
 }
 
-fn event_filter(metadata: &Metadata<'_>) -> EventFilter {
+/// Sentry へ送らぬ event の target。AppError は capture_anyhow で送信済み。ジョブの失敗は
+/// 試行ごとに出るうえエラー文に宛先が混ざるので送らず、最終的な失敗を job::failure_report が送る
+fn is_ignored_target(metadata: &Metadata<'_>) -> bool {
     let target = metadata.target();
-    // AppError は capture_anyhow で送信済み。ジョブの失敗は試行ごとに出るうえエラー文に
-    // 宛先が混ざるので送らず、最終的な失敗を job::failure_report が送る
-    if target == SENTRY_CAPTURED_LOG_TARGET || target.starts_with(APALIS_TRACE_TARGET_PREFIX) {
-        return EventFilter::Ignore;
-    }
-    default_event_filter(metadata)
+    target == SENTRY_CAPTURED_LOG_TARGET || target.starts_with(APALIS_TRACE_TARGET_PREFIX)
 }
 
 /// リクエストごとの Hub・トランザクションを張る。外側から順に
@@ -226,6 +249,7 @@ mod tests {
     use common::error::AppError;
     use sentry::Envelope;
     use sentry::protocol::{EnvelopeItem, Map};
+    use std::sync::Arc;
     use tower::ServiceExt;
     use tracing_subscriber::layer::SubscriberExt;
 
@@ -277,8 +301,24 @@ mod tests {
         let options = client_options(&settings).unwrap().unwrap();
 
         assert_eq!(options.environment.as_deref(), Some("production"));
-        assert_eq!(options.traces_sample_rate, 0.5);
+        assert!(matches!(
+            options.traces_sampling_strategy,
+            sentry::TracesSamplingStrategy::FixedRate(rate) if rate == 0.5
+        ));
         assert!(!options.send_default_pii);
+    }
+
+    #[test]
+    fn unset_sample_rate_is_an_explicit_zero_rate_not_disabled() {
+        let options = client_options(&settings(Some("https://public@sentry.example.com/1")))
+            .unwrap()
+            .unwrap();
+
+        assert!(matches!(
+            options.traces_sampling_strategy,
+            sentry::TracesSamplingStrategy::FixedRate(rate) if rate == 0.0
+        ));
+        assert_eq!(options.environment, None);
     }
 
     #[test]
@@ -388,6 +428,81 @@ mod tests {
         });
 
         assert!(events.is_empty());
+    }
+
+    /// `tracing_layer` の下で `run` を実行し、Sentry へ送られた封筒を返す（transaction も送る設定）
+    fn layer_envelopes(run: impl FnOnce()) -> Vec<Envelope> {
+        sentry::test::with_captured_envelopes_options(
+            || {
+                let subscriber = tracing_subscriber::registry().with(tracing_layer());
+                tracing::subscriber::with_default(subscriber, run);
+            },
+            sentry::ClientOptions::new().traces_sample_rate(1.0),
+        )
+    }
+
+    #[test]
+    fn only_error_events_and_transactions_leave_the_process() {
+        let envelopes = layer_envelopes(|| {
+            tracing::info!("info crumb");
+            tracing::warn!("warn crumb");
+            tracing::debug!("debug ignored");
+            tracing::info_span!("work").in_scope(|| tracing::info!("crumb in span"));
+            tracing::debug_span!("hidden").in_scope(|| {});
+            tracing::error!("error event");
+        });
+
+        // info・warn のログは breadcrumb にするだけで、structured log や metric としては送らない
+        let items: Vec<_> = envelopes.iter().flat_map(Envelope::items).collect();
+        assert!(
+            items
+                .iter()
+                .all(|item| matches!(item, EnvelopeItem::Event(_) | EnvelopeItem::Transaction(_))),
+            "{items:?}"
+        );
+        let events: Vec<_> = items
+            .iter()
+            .filter_map(|item| match item {
+                EnvelopeItem::Event(event) => Some(event),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].message.as_deref(), Some("error event"));
+        let crumbs: Vec<_> = events[0]
+            .breadcrumbs
+            .iter()
+            .filter_map(|crumb| crumb.message.as_deref())
+            .collect();
+        // span の中の breadcrumb は、その span の scope の中にだけ残り、span の外の error には載らない
+        assert_eq!(crumbs, ["info crumb", "warn crumb"]);
+        // info 以上の span だけが transaction になる
+        let transactions: Vec<_> = items
+            .iter()
+            .filter_map(|item| match item {
+                EnvelopeItem::Transaction(transaction) => transaction.name.as_deref(),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(transactions, ["work"]);
+    }
+
+    #[test]
+    fn ignored_targets_leave_no_breadcrumbs() {
+        let events = captured_events(|| {
+            tracing::info!(target: "apalis::layers::tracing::on_request", "apalis crumb");
+            tracing::warn!(target: SENTRY_CAPTURED_LOG_TARGET, "captured crumb");
+            tracing::info!("kept crumb");
+            tracing::error!("error event");
+        });
+
+        assert_eq!(events.len(), 1);
+        let crumbs: Vec<_> = events[0]
+            .breadcrumbs
+            .iter()
+            .filter_map(|crumb| crumb.message.as_deref())
+            .collect();
+        assert_eq!(crumbs, ["kept crumb"]);
     }
 
     #[test]
@@ -583,10 +698,7 @@ mod tests {
                     .unwrap();
                 assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
             },
-            sentry::ClientOptions {
-                traces_sample_rate: 1.0,
-                ..Default::default()
-            },
+            sentry::ClientOptions::new().traces_sample_rate(1.0),
         )
     }
 

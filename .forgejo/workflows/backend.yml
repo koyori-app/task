@@ -120,6 +120,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             apps/backend/target
+            apps/backend/migration/target
           key: forgejo-cargo-${{ runner.os }}-${{ hashFiles('apps/backend/Cargo.lock') }}
           restore-keys: |
             forgejo-cargo-${{ runner.os }}-
@@ -138,6 +139,13 @@ jobs:
       - name: Run tests
         run: cargo test --workspace -- --test-threads=1
         working-directory: apps/backend
+
+      # migration は workspace の外の crate なので上の --workspace に入らぬ。
+      # GitHub 側は lib・doc・migration を別の job で撃つが、ここは 1 本の job に step で足す
+      # （上の Run tests が workspace の lib と doc を既に撃つ）
+      - name: Run migration tests
+        run: cargo test -- --test-threads=1
+        working-directory: apps/backend/migration
 
       - name: Export OpenAPI from backend
         run: cargo run --bin export_openapi -- /tmp/exported-openapi.json
