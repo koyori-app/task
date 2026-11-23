@@ -79,11 +79,20 @@ describe('ReviewFindingRow', () => {
     const title = wrapper.get('[data-testid="finding-title"]');
     expect(title.attributes('href')).toBe('/acme/projects/APP/reviews/618?finding=f-1');
 
-    await title.trigger('click', { ctrlKey: true });
-    expect(wrapper.emitted('toggle')).toBeUndefined();
+    // vike のリンク横取りは document の click で、defaultPrevented を見ない。届けばリンク先へ遷移する
+    const reachedDocument = vi.fn();
+    document.addEventListener('click', reachedDocument);
+    try {
+      await title.trigger('click', { ctrlKey: true });
+      expect(wrapper.emitted('toggle')).toBeUndefined();
+      expect(reachedDocument).toHaveBeenCalledTimes(1);
 
-    await title.trigger('click');
-    expect(wrapper.emitted('toggle')).toHaveLength(1);
+      await title.trigger('click');
+      expect(wrapper.emitted('toggle')).toHaveLength(1);
+      expect(reachedDocument).toHaveBeenCalledTimes(1);
+    } finally {
+      document.removeEventListener('click', reachedDocument);
+    }
   });
 
   it('重大度のチップは High・Medium が danger、Low・Nit が neutral', () => {

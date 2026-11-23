@@ -810,9 +810,14 @@ describe('ReviewPullRequestDetail', () => {
 
       const back = wrapper.get('[data-testid="back-to-list"]');
       const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+      // vike のリンク横取りは document の click で、defaultPrevented を見ない。届けば確認を待たずに遷移する
+      const reachedDocument = vi.fn();
+      document.addEventListener('click', reachedDocument);
       back.element.dispatchEvent(click);
+      document.removeEventListener('click', reachedDocument);
       await flushPromises();
       expect(click.defaultPrevented).toBe(true);
+      expect(reachedDocument).not.toHaveBeenCalled();
       expect(document.body.textContent).toContain('起票中の下書きは、一覧へ戻ると失われます。');
 
       bodyButton('キャンセル')!.click();
@@ -853,8 +858,12 @@ describe('ReviewPullRequestDetail', () => {
     it('下書きが無ければ、「PR の一覧」は確認なしのリンクのまま', async () => {
       const { wrapper } = await openComposer();
       const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+      const reachedDocument = vi.fn();
+      document.addEventListener('click', reachedDocument);
       wrapper.get('[data-testid="back-to-list"]').element.dispatchEvent(click);
+      document.removeEventListener('click', reachedDocument);
       expect(click.defaultPrevented).toBe(false);
+      expect(reachedDocument).toHaveBeenCalledTimes(1);
     });
   });
 

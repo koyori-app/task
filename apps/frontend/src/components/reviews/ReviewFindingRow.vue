@@ -127,7 +127,9 @@ function onTitleClick(event: MouseEvent) {
   // 修飾キーつきのクリックは、リンクとして別のタブで開かせる
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
     return;
+  // vike は document の click でリンクを横取りし defaultPrevented を見ないので、伝播も止める
   event.preventDefault();
+  event.stopPropagation();
   emit('toggle');
 }
 

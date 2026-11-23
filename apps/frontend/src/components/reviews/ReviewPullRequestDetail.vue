@@ -142,7 +142,9 @@ function onBackClick(event: MouseEvent) {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
     return;
   if (!(isComposerOpen.value && composerDirty.value)) return;
+  // vike は document の click でリンクを横取りし defaultPrevented を見ないので、伝播も止める
   event.preventDefault();
+  event.stopPropagation();
   confirmingLeave.value = true;
 }
 
