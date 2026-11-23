@@ -96,6 +96,28 @@ async fn job_row(db: &DatabaseConnection, queue: &str) -> (String, Option<String
     )
 }
 
+/// ワーカーが掴んでいる行か。掴んだ行は、ハンドラーの実行中に Queued から Running へ書き換わる
+/// （書き換えはハンドラーの開始の後に非同期で行われ、どちらの状態も回収の対象になる）
+fn held_by(row: &(String, Option<String>), worker: &str) -> bool {
+    matches!(row.0.as_str(), "Queued" | "Running") && row.1.as_deref() == Some(worker)
+}
+
+/// キューに 1 件だけ積んだジョブの `last_result`（回収された行は、完了するまでこの印が残る）
+async fn job_last_result(db: &DatabaseConnection, queue: &str) -> String {
+    let row = db
+        .query_one_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "SELECT last_result::text AS last_result FROM apalis.jobs WHERE job_type = $1",
+            [queue.into()],
+        ))
+        .await
+        .expect("select job")
+        .expect("job row");
+    row.try_get::<Option<String>>("", "last_result")
+        .expect("last_result")
+        .unwrap_or_default()
+}
+
 async fn worker_ids(db: &DatabaseConnection, queue: &str) -> Vec<String> {
     db.query_all_raw(Statement::from_sql_and_values(
         DatabaseBackend::Postgres,
@@ -125,6 +147,14 @@ where
 
 /// 死んだ世代が掴んでいたジョブは、別 ID の次世代の heartbeat 側の孤児回収で Pending に戻り、
 /// 次世代が実行し直す。同じ ID で復帰すると `last_seen` が更新され続けて回収されない。
+///
+/// 待ちは、行の状態か、ハンドラーに着いたという知らせだけに置く。次の二つを時間で当てにしない。
+/// - ハンドラーに着いた時点では、掴んだ印（`lock_by`）がまだ書かれていないことがあり、書かれた後も、
+///   状態は Queued から Running へ書き換わる（どちらも非同期）。印が書かれる前に世代 1 を消すと、
+///   行は Pending のまま残る。状態は Queued と決め打たず、掴み手で見る。
+/// - 世代 2 を止める（`pause`）と、取り込み（Fetch）の最中に当たったとき、状態機械が Fetch に固まって
+///   heartbeat が二度と走らず、回収が起きない。本番は `pause` を使わず、この試験だけが踏む
+///   （調査は TASK-575）。止めずに、回収された行を世代 2 がそのまま取り直すのを見る。
 #[tokio::test]
 async fn orphaned_job_of_dead_generation_is_requeued_and_rerun_by_next_generation() {
     let app = TestApp::new().await;
@@ -145,31 +175,30 @@ async fn orphaned_job_of_dead_generation_is_requeued_and_rerun_by_next_generatio
     timeout(DEADLINE, gate.reached.notified())
         .await
         .expect("generation 1 picks up the job");
-    // ジョブを掴んだまま世代 1 のタスクが消える（掴んだ行は、ハンドラーの実行中も Queued のまま）
+    // 掴んだ印が書かれるのを待ってから、ジョブを掴んだまま世代 1 のタスクを消す
+    wait_until("generation 1's lock is persisted", || async {
+        held_by(&job_row(db, &queue).await, &id1)
+    })
+    .await;
     gen1.abort();
     let _ = gen1.await;
-    assert_eq!(
-        job_row(db, &queue).await,
-        ("Queued".to_string(), Some(id1.clone()))
-    );
+    assert!(held_by(&job_row(db, &queue).await, &id1));
 
     let id2 = worker_id(&logical, 2);
     let ctx2 = WorkerContext::new(&id2);
     let gen2 = tokio::spawn(run_generation(
         ctx2.clone(),
-        blocking_generation(&storage, &gate, ctx2.clone()),
+        blocking_generation(&storage, &gate, ctx2),
         rx,
     ));
-    // 登録前に止めると keep_alive が WORKER_DOES_NOT_EXIST で落ちるので、登録を待ってから取り込みを止める
+    // 登録前に旧世代の行を動かしても、回収は走らない（世代 2 の行が無い）ので、登録を待つ
     wait_until("generation 2 registers", || async {
         worker_ids(db, &queue).await.contains(&id2)
     })
     .await;
-    // 登録の直後に止めると heartbeat が回らず、回収が起きない。1 回目の heartbeat を待つ
-    // （止めた worker の heartbeat が止まる理由の調査は TASK-575）
-    tokio::time::sleep(KEEP_ALIVE + Duration::from_millis(500)).await;
-    ctx2.pause().expect("pause generation 2");
-    // 取り込みを止めてから旧世代の行を回収対象にする。回収は heartbeat 側（KEEP_ALIVE ごと）が行う
+    // 旧世代の行を回収対象にする。回収は世代 2 の heartbeat 側（KEEP_ALIVE ごと）が行い、
+    // Pending に戻った行を世代 2 が取り直してハンドラーに着く。旧世代の行が新しいうちは掴まれた
+    // ままなので、世代 2 が着くのは回収の後に限られる
     db.execute_raw(Statement::from_sql_and_values(
         DatabaseBackend::Postgres,
         "UPDATE apalis.workers SET last_seen = now() - interval '2 hours' WHERE id = $1",
@@ -177,15 +206,20 @@ async fn orphaned_job_of_dead_generation_is_requeued_and_rerun_by_next_generatio
     ))
     .await
     .expect("age generation 1 row");
-    wait_until("the orphaned job returns to Pending", || async {
-        job_row(db, &queue).await == ("Pending".to_string(), None)
-    })
-    .await;
-
-    ctx2.resume().expect("resume generation 2");
     timeout(DEADLINE, gate.reached.notified())
         .await
-        .expect("generation 2 re-runs the job");
+        .expect("generation 2 re-runs the orphaned job");
+    // 世代 2 が掴んだ行。掴み手が世代 2 に替わり、回収された印は、完了するまで残る
+    wait_until("generation 2's lock is persisted", || async {
+        held_by(&job_row(db, &queue).await, &id2)
+    })
+    .await;
+    assert!(
+        job_last_result(db, &queue)
+            .await
+            .contains("Re-enqueued due to worker heartbeat timeout"),
+        "the job was not requeued by the heartbeat"
+    );
     gate.release.notify_one();
     wait_until("the job is Done", || async {
         job_row(db, &queue).await.0 == "Done"
