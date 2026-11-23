@@ -15,7 +15,8 @@ export const USER_AVATAR_SIZES = {
 
 /**
  * 頭文字の色。地（bg-muted）に対する text-foreground は、明るい面でも暗い面でも対比が 4.5:1 を
- * 十分に超える。薄い字（text-muted-foreground）は明るい面で 4.47:1 しかなく、12px 以下の字には足りぬ。
+ * 十分に超える。薄い字（text-muted-foreground）も bg-muted の上で 4.5:1 を超えるが余裕は小さく
+ * （muted-text-contrast.test.ts）、頭文字は小さいので濃い text-foreground を使う。
  */
 export const USER_AVATAR_INITIALS_CLASS = 'bg-muted text-foreground';
 

@@ -84,6 +84,23 @@
   --sidebar-accent-foreground: var(--koyori-color-text);
   --background: var(--koyori-color-surface);
   --foreground: var(--koyori-color-text);
+  /* 優先度のアイコンの色（PRIORITY_CONFIG）。ここは暗い配色の値 */
+  --priority-critical-fire: #dc2626;
+  --priority-critical: #ef4444;
+  --priority-high: #f97316;
+  --priority-medium: #eab308;
+  --priority-low: #6b7280;
+  --priority-trivial: #9ca3af;
+}
+
+/*
+ * 明るい配色では、白地で 3:1（WCAG 1.4.11）に届かない優先度の色だけを濃くする。
+ * koyori と同じく [data-theme='light'] に置き、入れ子の明るい面にも当てる。
+ */
+[data-theme='light'] {
+  --priority-high: #ea580c;
+  --priority-medium: #a16207;
+  --priority-trivial: #858b98;
 }
 
 @layer base {

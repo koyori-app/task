@@ -80,8 +80,7 @@ function onCancel() {
 <template>
   <div class="mx-auto w-full max-w-[720px]">
     <div class="mb-6">
-      <h1 class="mb-1 text-3xl font-bold tracking-tight">プロジェクトを作成</h1>
-      <p class="text-sm text-muted-foreground">新しいタスクのためのワークスペースを用意します。</p>
+      <h1 class="text-3xl font-bold tracking-tight">プロジェクトを作成</h1>
     </div>
 
     <form @submit.prevent="form.handleSubmit">

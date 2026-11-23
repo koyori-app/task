@@ -2,7 +2,7 @@
 import { usePageContext } from 'vike-vue/usePageContext';
 import { useMeQuery } from '@/lib/api-vue-query';
 
-defineProps<{ title: string; description?: string }>();
+defineProps<{ title: string }>();
 
 const pageContext = usePageContext();
 const meQuery = useMeQuery();
@@ -22,7 +22,6 @@ const links = [
     <template v-else>
       <header class="flex flex-col gap-1">
         <h1 class="text-2xl font-bold">{{ title }}</h1>
-        <p v-if="description" class="text-muted-foreground text-sm">{{ description }}</p>
       </header>
       <nav class="flex gap-1" aria-label="管理">
         <a

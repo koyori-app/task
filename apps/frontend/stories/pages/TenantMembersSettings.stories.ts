@@ -29,12 +29,23 @@ const sampleTenant = {
   require_2fa: false,
 };
 
-const member = (id: string, username: string, role: string, userId: string) => ({
+/** 画像の読み込みを待たずに済むよう、data URI の SVG を使う（外へは出ない）。 */
+const AVATAR_IMAGE_URL = `data:image/svg+xml;utf8,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8" fill="#2563eb"/><circle cx="4" cy="4" r="2" fill="#fff"/></svg>',
+)}`;
+
+const member = (
+  id: string,
+  username: string,
+  role: string,
+  userId: string,
+  avatarUrl: string | null = null,
+) => ({
   id,
   tenant_id: TENANT_UUID,
   user_id: userId,
   role,
-  user: { id: userId, username, avatar_url: null },
+  user: { id: userId, username, avatar_url: avatarUrl },
 });
 
 const sampleMembers = [
@@ -43,6 +54,7 @@ const sampleMembers = [
     'rei.tanaka',
     'Admin',
     '00000000-0000-0000-0000-000000000003',
+    AVATAR_IMAGE_URL,
   ),
   member(
     'aaaaaaaa-0000-4000-8000-000000000003',

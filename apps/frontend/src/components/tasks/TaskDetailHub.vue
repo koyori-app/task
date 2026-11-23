@@ -65,8 +65,10 @@ import {
   formatProgressPct,
   formatTaskDate,
   isoToLocalDateInput,
+  localDateInputToIso,
   taskSeqKey,
 } from '@/lib/task-display';
+import { DEADLINE_ORDER_MESSAGE, softNotBeforeHard } from '@/lib/task-date';
 // KFM サイドカー CSS の消費契約 (@/lib/markup-renderer/index.ts): v-html する消費側が
 // 明示 import する。GFM は器の kfm-content (KFM_CONTENT_CLASS) が無いと一行も当たらない。
 // content-class.ts は leaf module なので、この import で KFM コアが client へ載ることはない。
@@ -581,12 +583,15 @@ function commitEditing(field: EditableField) {
     case 'soft_deadline': {
       const current = isoToLocalDateInput(props.task.soft_deadline);
       if (draftValue.value === current) break;
+      // 最終期限と同じか後なら送らずに編集を開いたまま警告を見せる（サーバーが 400 で弾く）
+      if (deadlineOrderInvalid.value) return;
       emit('save:soft_deadline', keepDraft('soft_deadline', draftValue.value.trim() || null));
       break;
     }
     case 'hard_deadline': {
       const current = isoToLocalDateInput(props.task.hard_deadline);
       if (draftValue.value === current) break;
+      if (deadlineOrderInvalid.value) return;
       emit('save:hard_deadline', keepDraft('hard_deadline', draftValue.value.trim() || null));
       break;
     }
@@ -689,6 +694,26 @@ const plannedStartAfterSoft = computed(() => {
   if (editingField.value !== 'planned_start_on' || !props.task?.soft_deadline) return false;
   const draft = draftValue.value.trim();
   return !!draft && draft > isoToLocalDateInput(props.task.soft_deadline);
+});
+
+/**
+ * 編集中の期限（soft / hard）が、もう一方の保存済みの期限と矛盾するか。相手の側は保存済みの
+ * ISO をそのまま使い、下書きは送る値（useTaskDetail と同じ localDateInputToIso）にして時刻で比べる。
+ */
+const deadlineOrderInvalid = computed(() => {
+  if (!props.task) return false;
+  const draft = draftValue.value.trim();
+  if (!draft) return false;
+  // 変えていない値では警告しない（保存済みは時刻付きで、下書きは 0 時に寄るため、開いただけで真になりうる）
+  if (editingField.value === 'soft_deadline') {
+    if (draft === isoToLocalDateInput(props.task.soft_deadline)) return false;
+    return softNotBeforeHard(localDateInputToIso(draft), props.task.hard_deadline);
+  }
+  if (editingField.value === 'hard_deadline') {
+    if (draft === isoToLocalDateInput(props.task.hard_deadline)) return false;
+    return softNotBeforeHard(props.task.soft_deadline, localDateInputToIso(draft));
+  }
+  return false;
 });
 
 function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadline') {
@@ -1110,6 +1135,13 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                     role="alert"
                   >
                     開始予定日が期限より後になっています
+                  </p>
+                  <p
+                    v-else-if="deadlineOrderInvalid"
+                    class="mt-1 text-xs text-destructive"
+                    role="alert"
+                  >
+                    {{ DEADLINE_ORDER_MESSAGE }}
                   </p>
                   <p
                     v-else-if="

@@ -39,7 +39,7 @@ import { apiClient, TASK_SEARCH_PATH } from '@/lib/api-vue-query';
 import { PRIORITY_CONFIG, taskDetailHref } from '@/lib/task-display';
 import { chipTrigger } from '@/lib/task-chip';
 import { isImeKeydown } from '@/lib/ime-keydown-guard';
-import { toIsoDate } from '@/lib/task-date';
+import { DEADLINE_ORDER_MESSAGE, softNotBeforeHard, toIsoDate } from '@/lib/task-date';
 import { useAuthStore } from '@/stores/auth';
 
 const CREATE_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
@@ -171,6 +171,10 @@ const validationMessage = ref<string | null>(null);
 // 文字列（YYYY-MM-DD）同士の比較で足りる。サーバーは前後関係を検証しない
 const plannedStartAfterSoft = computed(
   () => !!plannedStartOn.value && !!softDeadline.value && plannedStartOn.value > softDeadline.value,
+);
+// 期限が最終期限と同じか後ならサーバーが 400 で弾く。送る値と同じ変換で比べる
+const softAfterHard = computed(() =>
+  softNotBeforeHard(toIsoDate(softDeadline.value), toIsoDate(hardDeadline.value)),
 );
 const requestError = ref<string | null>(null);
 const successMessage = ref<string | null>(null);
@@ -446,6 +450,10 @@ async function submit(event: SubmitEvent) {
   }
   if (plannedStartAfterSoft.value) {
     validationMessage.value = '開始予定日は期限以前の日付にしてください';
+    return;
+  }
+  if (softAfterHard.value) {
+    validationMessage.value = DEADLINE_ORDER_MESSAGE;
     return;
   }
   const normalizedEstimate = estimate.value.trim();
@@ -831,7 +839,10 @@ async function submit(event: SubmitEvent) {
               v-model:planned-start-on="plannedStartOn"
               v-model:soft-deadline="softDeadline"
               v-model:hard-deadline="hardDeadline"
-              :invalid="plannedStartAfterSoft"
+              :invalid="plannedStartAfterSoft || softAfterHard"
+              :invalid-message="
+                !plannedStartAfterSoft && softAfterHard ? DEADLINE_ORDER_MESSAGE : undefined
+              "
             />
 
             <TaskNumberChip

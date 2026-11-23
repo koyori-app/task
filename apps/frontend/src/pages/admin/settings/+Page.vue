@@ -4,7 +4,7 @@ import AdminRegistrationSettings from '@/components/admin/AdminRegistrationSetti
 </script>
 
 <template>
-  <AdminShell title="システム設定" description="Task 全体の設定です。">
+  <AdminShell title="システム設定">
     <AdminRegistrationSettings />
   </AdminShell>
 </template>

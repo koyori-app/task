@@ -20,6 +20,7 @@ vi.mock('@/components/markdown/MarkdownEditor.vue', async () => ({
 import { ConfirmDialog } from '@koyori-app/ui-vue';
 import TaskDetailHub from '../TaskDetailHub.vue';
 import { PRIORITY_CONFIG } from '@/lib/task-display';
+import { DEADLINE_ORDER_MESSAGE } from '@/lib/task-date';
 import { renderDescription } from '@/lib/markup-renderer';
 
 enableAutoUnmount(afterEach);
@@ -271,7 +272,7 @@ describe('TaskDetailHub', () => {
 
     expect(wrapper.html()).not.toContain('--priority-color');
     const flag = wrapper.get('button[aria-label="優先度"] svg');
-    expect(flag.attributes('style')).toContain('color: #eab308');
+    expect(flag.attributes('style')).toContain('color: var(--priority-medium)');
   });
 
   it('本文のスクロール領域で切れないよう、メニューはどれもトップレイヤーに出す', () => {
@@ -535,6 +536,74 @@ describe('TaskDetailHub', () => {
     await input.setValue('2026-08-20');
     await input.trigger('blur');
     expect(wrapper.emitted('save:planned_start_on')).toEqual([['2026-08-20']]);
+  });
+
+  function mountDeadlines(soft: string | null, hard: string | null) {
+    return mount(TaskDetailHub, {
+      props: {
+        task: { ...task, soft_deadline: soft, hard_deadline: hard },
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+      },
+    });
+  }
+
+  it('期限が最終期限と同じ日か後なら送らずに警告し、編集を開いたままにする', async () => {
+    const wrapper = mountDeadlines(null, '2026-08-20T00:00:00.000Z');
+
+    await wrapper.get('button[aria-label="ソフト期限を編集"]').trigger('click');
+    const input = wrapper.get('input[aria-label="ソフト期限"]');
+    for (const value of ['2026-08-20', '2026-08-21']) {
+      await input.setValue(value);
+      await input.trigger('blur');
+      expect(wrapper.emitted('save:soft_deadline'), value).toBeUndefined();
+      expect(wrapper.get('[role="alert"]').text()).toBe(DEADLINE_ORDER_MESSAGE);
+      expect(wrapper.find('input[aria-label="ソフト期限"]').exists()).toBe(true);
+    }
+
+    // 前の日なら送る
+    await input.setValue('2026-08-19');
+    await input.trigger('blur');
+    expect(wrapper.emitted('save:soft_deadline')).toEqual([['2026-08-19']]);
+  });
+
+  it('最終期限が期限と同じ日か前なら送らずに警告する', async () => {
+    const wrapper = mountDeadlines('2026-08-20T00:00:00.000Z', null);
+
+    await wrapper.get('button[aria-label="ハード期限を編集"]').trigger('click');
+    const input = wrapper.get('input[aria-label="ハード期限"]');
+    for (const value of ['2026-08-20', '2026-08-19']) {
+      await input.setValue(value);
+      await input.trigger('blur');
+      expect(wrapper.emitted('save:hard_deadline'), value).toBeUndefined();
+      expect(wrapper.text()).toContain(DEADLINE_ORDER_MESSAGE);
+    }
+
+    await input.setValue('2026-08-21');
+    await input.trigger('blur');
+    expect(wrapper.emitted('save:hard_deadline')).toEqual([['2026-08-21']]);
+  });
+
+  it('保存済みの最終期限が同じ日の 12 時なら、その日の期限は止めずに送る', async () => {
+    const wrapper = mountDeadlines(null, '2026-08-20T12:00:00Z');
+
+    await wrapper.get('button[aria-label="ソフト期限を編集"]').trigger('click');
+    const input = wrapper.get('input[aria-label="ソフト期限"]');
+    await input.setValue('2026-08-20');
+    await input.trigger('blur');
+
+    expect(wrapper.emitted('save:soft_deadline')).toEqual([['2026-08-20']]);
+    expect(wrapper.text()).not.toContain(DEADLINE_ORDER_MESSAGE);
+  });
+
+  it('時刻付きの期限の組は、編集を開いただけでは警告しない', async () => {
+    // 期限は画面から入れた 0 時、最終期限は CLI で入れた同じ日の 12 時（サーバーが通す組）
+    const wrapper = mountDeadlines('2026-08-20T00:00:00.000Z', '2026-08-20T12:00:00Z');
+
+    await wrapper.get('button[aria-label="ハード期限を編集"]').trigger('click');
+    expect(wrapper.find('input[aria-label="ハード期限"]').exists()).toBe(true);
+    expect(wrapper.text()).not.toContain(DEADLINE_ORDER_MESSAGE);
   });
 
   it('does not save an empty progress value as zero percent', async () => {
