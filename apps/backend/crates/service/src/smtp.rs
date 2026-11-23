@@ -47,7 +47,7 @@ impl SmtpClient {
     ///  # Examples
     ///
     ///  ```no_run
-    /// use backend::utils::smtp::SmtpClient;
+    /// use service::smtp::SmtpClient;
     ///
     /// let smtp_client = SmtpClient::new(
     ///     "smtp.example.com",
@@ -101,7 +101,7 @@ impl SmtpClient {
     /// # Examples
     ///
     /// ```no_run
-    /// use backend::utils::smtp::SmtpClient;
+    /// use service::smtp::SmtpClient;
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
