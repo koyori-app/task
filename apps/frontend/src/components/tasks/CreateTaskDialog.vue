@@ -38,6 +38,7 @@ import type { components } from '@/generated/api';
 import { apiClient, TASK_SEARCH_PATH } from '@/lib/api-vue-query';
 import { PRIORITY_CONFIG, taskDetailHref } from '@/lib/task-display';
 import { chipTrigger } from '@/lib/task-chip';
+import { isImeKeydown } from '@/lib/ime-keydown-guard';
 import { DEADLINE_ORDER_MESSAGE, softNotBeforeHard, toIsoDate } from '@/lib/task-date';
 import { useAuthStore } from '@/stores/auth';
 
@@ -383,6 +384,21 @@ function onKeydown(event: KeyboardEvent) {
   }
 }
 
+/** キーからの作成。submit() は form の SubmitEvent を読むので、form の送信として起こす */
+function requestCreate() {
+  titleInputRef.value?.form?.requestSubmit();
+}
+
+// input の暗黙の送信は Enter だけで、Ctrl / ⌘ 付きでは起きない
+function onTitleKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey)) return;
+  // 説明の欄（CodeMirror の Mod-Enter）と同じく、Shift / Alt を足した組み合わせでは作らない
+  if (event.shiftKey || event.altKey) return;
+  if (isImeKeydown(event) || event.repeat) return;
+  event.preventDefault();
+  requestCreate();
+}
+
 function closeDialog() {
   // 親が open を握っていない場合でも捨てられるよう、ここでも呼ぶ。
   // resetForm は冪等なので watch と二重に走っても問題ない
@@ -565,6 +581,7 @@ async function submit(event: SubmitEvent) {
             autocomplete="off"
             aria-label="タイトル（必須）"
             placeholder="タスクのタイトル"
+            @keydown="onTitleKeydown"
             class="-mx-1 w-[calc(100%+0.5rem)] rounded bg-transparent px-1 py-0.5 text-xl font-semibold tracking-tight outline-none placeholder:text-muted-foreground/60 hover:bg-muted/40 focus-visible:bg-muted/40 md:text-2xl"
           />
           <SimilarTasksList
@@ -586,6 +603,7 @@ async function submit(event: SubmitEvent) {
             :upload-file="uploadFile"
             :upload-scope="projectId"
             @update:uploading="descriptionUploading = $event"
+            @submit="requestCreate"
           />
         </div>
 

@@ -12178,6 +12178,148 @@
         }
       }
     },
+    "/v1/tenants/{tenant_id}/projects/{project_id}/documents/search": {
+      "get": {
+        "tags": ["Drive Files"],
+        "summary": "プロジェクトのドキュメント本文検索",
+        "operationId": "search_documents",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "プロジェクトID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "検索語。空白で語に分け、全部の語を含む節に当たる（大文字小文字を無視した部分一致）",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "検索結果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentSearchResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tenants/{tenant_id}/projects/{project_id}/events": {
       "get": {
         "tags": ["Tasks"],
@@ -28569,7 +28711,12 @@
           "scopes": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Scope"
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Scope"
+                }
+              ],
+              "x-or-unknown": true
             },
             "description": "要求された scope のうち、渡せるもの"
           }
@@ -29776,6 +29923,70 @@
           },
           "token_last_four": {
             "type": "string"
+          }
+        }
+      },
+      "DocumentSearchHit": {
+        "type": "object",
+        "description": "当たった節 1 つ。1 ファイルから複数の節が返る",
+        "required": [
+          "file_id",
+          "file_name",
+          "folder_id",
+          "heading_path",
+          "position",
+          "excerpt",
+          "updated_at"
+        ],
+        "properties": {
+          "excerpt": {
+            "type": "string",
+            "description": "語の前後を切り出した素の文字列（HTML ではない）。切った側に `…` が付く"
+          },
+          "file_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "file_name": {
+            "type": "string"
+          },
+          "folder_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "heading_path": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "祖先から自分までの見出し。最初の見出しより前の節は空"
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32",
+            "description": "ファイルの中の節の順（0 始まり）"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DocumentSearchResponse": {
+        "type": "object",
+        "required": ["hits", "total"],
+        "properties": {
+          "hits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DocumentSearchHit"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "当たった節の数（`limit` / `offset` を掛ける前）",
+            "minimum": 0
           }
         }
       },
@@ -31015,7 +31226,15 @@
             "format": "date-time"
           },
           "scopes": {
-            "$ref": "#/components/schemas/ScopeList"
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Scope"
+                }
+              ],
+              "x-or-unknown": true
+            }
           },
           "tenant_ids": {
             "type": "array",

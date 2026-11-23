@@ -10,6 +10,8 @@ const USER: &str = "11111111-1111-4111-8111-111111111111";
 const TENANT: &str = "22222222-2222-4222-8222-222222222222";
 const LISTED: &str = "33333333-3333-4333-8333-333333333333";
 const OPEN: &str = "44444444-4444-4444-8444-444444444444";
+/// 試す移し。後に移しが足されても位置が崩れぬよう、名で引く
+const TARGET: &str = "m20261111000000_project_member_inheritance";
 
 async fn scalar<C: ConnectionTrait>(db: &C, sql: &str) -> Option<String> {
     db.query_one_raw(Statement::from_string(DbBackend::Postgres, sql.to_owned()))
@@ -36,8 +38,13 @@ async fn existing_projects_inherit_and_listed_roles_remain() {
     let url = format!("{}/{name}", server.rsplit_once('/').unwrap().0);
     let db = Database::connect(&url).await.expect("connect");
 
-    let total = Migrator::migrations().len() as u32;
-    Migrator::up(&db, Some(total - 1))
+    let migrations = Migrator::migrations();
+    let total = migrations.len() as u32;
+    let before = migrations
+        .iter()
+        .position(|migration| migration.name() == TARGET)
+        .expect("継承の移しが Migrator に載っている") as u32;
+    Migrator::up(&db, Some(before))
         .await
         .expect("up to previous");
     db.execute_unprepared(&format!(
@@ -71,7 +78,10 @@ async fn existing_projects_inherit_and_listed_roles_remain() {
     let role_sql = format!("SELECT role FROM project_members WHERE project_id = '{LISTED}'");
     assert_eq!(scalar(&db, &role_sql).await.as_deref(), Some("Admin"));
 
-    Migrator::down(&db, Some(1)).await.expect("down");
+    // 継承の移しと、その後に足された移しをまとめて戻す
+    Migrator::down(&db, Some(total - before))
+        .await
+        .expect("down to previous");
     assert_eq!(
         scalar(
             &db,

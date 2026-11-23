@@ -8,6 +8,7 @@ import {
   scrubUrls,
   sentryBrowserConfig,
   stripUrlQuery,
+  V10_DATA_COLLECTION,
 } from '../../sentry.browser.config';
 
 const sentryHooks = vi.hoisted(() => ({
@@ -20,6 +21,7 @@ vi.mock('@sentry/vue', () => ({
   attachErrorHandler: vi.fn(),
   isInitialized: vi.fn(() => false),
   browserTracingIntegration: vi.fn(() => ({ name: 'BrowserTracing' })),
+  browserSessionIntegration: vi.fn(() => ({ name: 'BrowserSession' })),
   replayIntegration: vi.fn(() => ({ name: 'Replay' })),
   getClient: vi.fn(() => ({
     on: (hook: string, callback: (breadcrumb: Breadcrumb) => void) => {
@@ -196,6 +198,19 @@ describe('sentryBrowserConfig', () => {
       hook({ category: 'navigation', data: { from: '/', to: '/invitations/accept?token=x' } });
     }
     expect(sentryHooks.stopReplay).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the v10 defaults that SDK 11 changed', () => {
+    const options = initOptions();
+
+    expect(options).toMatchObject({
+      traceLifecycle: 'static',
+      attachStacktrace: false,
+      dataCollection: V10_DATA_COLLECTION,
+    });
+    expect(V10_DATA_COLLECTION).toMatchObject({ userInfo: false, cookies: false, httpBodies: [] });
+    expect(Sentry.browserSessionIntegration).toHaveBeenCalledWith({ lifecycle: 'route' });
+    expect(options?.integrations).toContainEqual({ name: 'BrowserSession' });
   });
 
   it('does not initialize outside production', () => {

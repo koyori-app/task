@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
-import { expect, userEvent, waitFor, within } from 'storybook/test';
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test';
 import { ref } from 'vue';
 
 import MarkdownEditor from '@/components/markdown/MarkdownEditor.vue';
@@ -246,5 +246,41 @@ export const PasteFailsAfterSaveFailed: Story = {
     await pasteFile(canvasElement, 'b.png', 'image/png');
     pasteAfterSave.calls[2].resolve({ id: FILE_ID, name: 'b.png', mimeType: 'image/png' });
     await waitFor(() => expect(out(canvasElement)).toBe(`![b.png](${FILE_URL})\n`));
+  },
+};
+
+const markdownSubmitSpy = fn();
+
+/** Mod-Enter の押しっぱなし（repeat）は確定しない。作成ダイアログの説明で失敗後に送り直さないため */
+export const RepeatedModEnterDoesNotSubmit: Story = {
+  args: { onSubmit: markdownSubmitSpy },
+  beforeEach: () => markdownSubmitSpy.mockClear(),
+  render: withControls,
+  play: async ({ canvasElement }) => {
+    const editor = await waitFor(async () => {
+      const el = canvasElement.querySelector<HTMLElement>('[data-markdown-editor-input]');
+      await expect(el).toBeTruthy();
+      return el!;
+    });
+    await userEvent.click(editor);
+    await userEvent.keyboard('説明');
+    await waitFor(() => expect(out(canvasElement)).toBe('説明'));
+    const press = (repeat: boolean) =>
+      editor.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          code: 'Enter',
+          ctrlKey: true,
+          repeat,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+    press(true);
+    await expect(markdownSubmitSpy).not.toHaveBeenCalled();
+    await expect(out(canvasElement)).toBe('説明');
+    press(false);
+    await expect(markdownSubmitSpy).toHaveBeenCalledTimes(1);
   },
 };

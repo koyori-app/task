@@ -28,6 +28,8 @@ pub struct Model {
         on_delete = "SetNull"
     )]
     pub drive_folders: HasOne<super::drive_folders::Entity>,
+    #[sea_orm(has_many)]
+    pub drive_file_sections: HasMany<super::drive_file_sections::Entity>,
     #[sea_orm(
         belongs_to,
         from = "project_id",

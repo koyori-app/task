@@ -107,6 +107,18 @@ impl InnerApi {
         self.send(Method::PUT, segments, &[], Some(body)).await
     }
 
+    pub(super) async fn delete(&self, segments: &[&str]) -> Result<Value, ToolFailure> {
+        self.send(Method::DELETE, segments, &[], None).await
+    }
+
+    pub(super) async fn patch(
+        &self,
+        segments: &[&str],
+        body: &Value,
+    ) -> Result<Value, ToolFailure> {
+        self.send(Method::PATCH, segments, &[], Some(body)).await
+    }
+
     /// 渡すヘッダーは `Authorization`・`Accept`・（本文があれば）`Content-Type` だけ。
     /// `Cookie` と `Origin` は渡さないので、内向きの呼び出しはセッションでは認証されない
     async fn send(
@@ -258,6 +270,22 @@ mod tests {
             seen["headers"],
             serde_json::json!(["accept", "authorization", "content-type"])
         );
+
+        let seen = api
+            .patch(&["v1", "tenants"], &serde_json::json!({}))
+            .await
+            .unwrap();
+        assert_eq!(
+            seen["headers"],
+            serde_json::json!(["accept", "authorization", "content-type"])
+        );
+
+        let seen = api.delete(&["v1", "tenants"]).await.unwrap();
+        assert_eq!(
+            seen["headers"],
+            serde_json::json!(["accept", "authorization"])
+        );
+        assert_eq!(seen["authorization"], "Bearer pat-1");
     }
 
     #[test]

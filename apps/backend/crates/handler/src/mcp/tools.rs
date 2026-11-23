@@ -9,7 +9,7 @@ use payload::forge::LinkTaskPullRequestRequest;
 use payload::tasks::{AssigneeInput, CreateTaskRequest, UpdateTaskRequest};
 use rmcp::{
     ErrorData, ServerHandler,
-    handler::server::{common::Extension, wrapper::Parameters},
+    handler::server::{common::Extension, router::tool::ToolRouter, wrapper::Parameters},
     model::{CallToolResult, Implementation, ServerCapabilities, ServerConfig},
     tool, tool_handler, tool_router,
 };
@@ -21,10 +21,16 @@ use uuid::Uuid;
 use super::inner::{InnerApi, ToolFailure, ok};
 use super::resolve;
 
+mod notifications;
+mod sprints;
+mod task_ops;
+
 const INSTRUCTIONS: &str = "Tools for the task tracker. Refer to a task as KEY-N (project key and number, e.g. TASK-42) or by UUID together with `project`. \
 `tenant` is only needed when the personal access token is bound to more than one tenant; `whoami` shows the tenants and scopes of the token. \
-Labels, assignees, task types, milestones and sprints are passed by ID: use `list_project_options` to look up the IDs by name. \
+The notification list and read tools and `list_tenants` take no `tenant`. \
+Labels, assignees, task types, milestones and sprints are passed by name or UUID; a name that is not found or is ambiguous returns the candidates. The sprint tools take `sprint_id` as a UUID. Looking up a milestone or sprint by name needs the read:milestone or read:sprint scope. \
 Referring to a project by key or to a task as KEY-N needs the `read:project` scope; without it, pass UUIDs. \
+Review tools take the pull request number as `pr`; `repo` is only needed to read rounds recorded for another repository. \
 A failed call returns the HTTP status and message of the API, e.g. `403 forbidden` or `404 not-found`.";
 
 /// 担当者の役割。CLI（`crates/cli/src/commands/tasks.rs` の `ASSIGNEE_ROLE`）と同じ値
@@ -39,9 +45,19 @@ impl TaskMcp {
     pub(super) fn new(api: Router) -> Self {
         Self { api }
     }
+
+    /// ツールはモジュールごとのルーターに分け、ここで足し合わせる。和を `#[tool_handler]` の
+    /// 属性に直接書くと、マクロが `式.call(..)` と展開して最後の項にだけ掛かる
+    fn all_tools() -> ToolRouter<Self> {
+        Self::tool_router()
+            + Self::review_router()
+            + Self::task_ops_router()
+            + Self::sprints_router()
+            + Self::notifications_router()
+    }
 }
 
-#[tool_handler]
+#[tool_handler(router = Self::all_tools())]
 impl ServerHandler for TaskMcp {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
@@ -52,22 +68,15 @@ impl ServerHandler for TaskMcp {
 
 /// 失敗も `isError: true` の結果として返す。プロトコルのエラー（`Err`）にすると、
 /// クライアントが文面を利用者に見せない
-fn finish(result: Result<Value, ToolFailure>) -> Result<CallToolResult, ErrorData> {
+pub(super) fn finish(result: Result<Value, ToolFailure>) -> Result<CallToolResult, ErrorData> {
     Ok(match result {
         Ok(value) => ok(value),
         Err(failure) => failure.into(),
     })
 }
 
-fn parse_uuid(field: &str, value: &str) -> Result<Uuid, ToolFailure> {
+pub(super) fn parse_uuid(field: &str, value: &str) -> Result<Uuid, ToolFailure> {
     Uuid::parse_str(value).map_err(|_| ToolFailure::new(format!("{field} must be a UUID")))
-}
-
-fn parse_uuids(field: &str, values: &[String]) -> Result<Vec<Uuid>, ToolFailure> {
-    values
-        .iter()
-        .map(|value| parse_uuid(field, value))
-        .collect()
 }
 
 fn parse_optional_uuid(field: &str, value: Option<&str>) -> Result<Option<Uuid>, ToolFailure> {
@@ -89,7 +98,7 @@ fn parse_date(field: &str, value: &str) -> Result<NaiveDate, ToolFailure> {
         .map_err(|_| ToolFailure::new(format!("{field} must be YYYY-MM-DD")))
 }
 
-fn to_body<T: serde::Serialize>(request: &T) -> Result<Value, ToolFailure> {
+pub(super) fn to_body<T: serde::Serialize>(request: &T) -> Result<Value, ToolFailure> {
     serde_json::to_value(request)
         .map_err(|error| ToolFailure::new(format!("Could not build the request body: {error}")))
 }
@@ -106,7 +115,7 @@ fn set_priority(body: &mut Value, priority: Option<String>) {
 /// 使わない引数に `""` を入れてくるクライアントがある。名前として解決すると、
 /// 束縛が 1 件の PAT でも `tenant: ""` が「テナントが見つからない」になる。
 /// 本文（`title`・`description`・`body`）には付けない
-fn blank_as_none<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+pub(super) fn blank_as_none<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -208,6 +217,17 @@ struct TaskArgs {
 struct CreateTaskArgs {
     /// Project key or UUID
     project: String,
+    // 項目は一括作成の要素と共有する。flatten なので入力スキーマは平らなまま
+    #[serde(flatten)]
+    task: NewTaskArgs,
+    /// Tenant name or UUID. Only needed when the token is bound to more than one tenant
+    #[serde(default, deserialize_with = "blank_as_none")]
+    tenant: Option<String>,
+}
+
+// 作るタスク 1 件の項目（`create_task` と `bulk_create_tasks` の要素）。
+#[derive(Deserialize, JsonSchema)]
+struct NewTaskArgs {
     /// Task title
     title: String,
     /// Task description (Markdown)
@@ -221,19 +241,21 @@ struct CreateTaskArgs {
     /// Parent task UUID. A new task takes the parent's deadlines and planned start unless set here
     #[serde(default, deserialize_with = "blank_as_none")]
     parent_task_id: Option<String>,
-    /// Label UUIDs
-    label_ids: Option<Vec<String>>,
-    /// User UUIDs to assign
-    assignee_ids: Option<Vec<String>>,
-    /// Task type UUID
-    #[serde(default, deserialize_with = "blank_as_none")]
-    task_type_id: Option<String>,
-    /// Milestone UUID
-    #[serde(default, deserialize_with = "blank_as_none")]
-    milestone_id: Option<String>,
-    /// Sprint UUID
-    #[serde(default, deserialize_with = "blank_as_none")]
-    sprint_id: Option<String>,
+    /// Label names or UUIDs
+    #[serde(alias = "label_ids")]
+    labels: Option<Vec<String>>,
+    /// Assignee usernames or user UUIDs
+    #[serde(alias = "assignee_ids")]
+    assignees: Option<Vec<String>>,
+    /// Task type name or UUID
+    #[serde(default, alias = "task_type_id", deserialize_with = "blank_as_none")]
+    task_type: Option<String>,
+    /// Milestone name or UUID
+    #[serde(default, alias = "milestone_id", deserialize_with = "blank_as_none")]
+    milestone: Option<String>,
+    /// Sprint name or UUID
+    #[serde(default, alias = "sprint_id", deserialize_with = "blank_as_none")]
+    sprint: Option<String>,
     /// Soft deadline (RFC 3339, or YYYY-MM-DD for the start of that day in UTC)
     #[serde(default, deserialize_with = "blank_as_none")]
     soft_deadline: Option<String>,
@@ -245,9 +267,144 @@ struct CreateTaskArgs {
     planned_start_on: Option<String>,
     /// Estimate in minutes (1 or more)
     estimated_minutes: Option<i32>,
-    /// Tenant name or UUID. Only needed when the token is bound to more than one tenant
-    #[serde(default, deserialize_with = "blank_as_none")]
-    tenant: Option<String>,
+}
+
+/// 形を確かめた `NewTaskArgs`。状態と名前は文字列のまま持ち、API を呼ぶときに引く
+struct ParsedNewTask {
+    title: String,
+    description: Option<String>,
+    status: Option<String>,
+    priority: Option<String>,
+    parent_task_id: Option<Uuid>,
+    labels: Vec<String>,
+    assignees: Vec<String>,
+    task_type: Option<String>,
+    milestone: Option<String>,
+    sprint: Option<String>,
+    soft_deadline: Option<DateTime<Utc>>,
+    hard_deadline: Option<DateTime<Utc>>,
+    planned_start_on: Option<NaiveDate>,
+    estimated_minutes: Option<i32>,
+}
+
+/// 引数の形の誤りを、API を呼ぶ前に返す
+fn parse_new_task(args: NewTaskArgs) -> Result<ParsedNewTask, ToolFailure> {
+    let parent_task_id = parse_optional_uuid("parent_task_id", args.parent_task_id.as_deref())?;
+    let soft_deadline = args
+        .soft_deadline
+        .as_deref()
+        .map(|value| parse_deadline("soft_deadline", value))
+        .transpose()?;
+    let hard_deadline = args
+        .hard_deadline
+        .as_deref()
+        .map(|value| parse_deadline("hard_deadline", value))
+        .transpose()?;
+    let planned_start_on = args
+        .planned_start_on
+        .as_deref()
+        .map(|value| parse_date("planned_start_on", value))
+        .transpose()?;
+    Ok(ParsedNewTask {
+        title: args.title,
+        description: args.description,
+        status: args.status,
+        priority: args.priority,
+        parent_task_id,
+        labels: args.labels.unwrap_or_default(),
+        assignees: args.assignees.unwrap_or_default(),
+        task_type: args.task_type,
+        milestone: args.milestone,
+        sprint: args.sprint,
+        soft_deadline,
+        hard_deadline,
+        planned_start_on,
+        estimated_minutes: args.estimated_minutes,
+    })
+}
+
+/// 作るタスクの状態。UUID はそのまま使い、名前と省略のときだけ状態の一覧を引く。
+/// 一覧は `statuses` に取っておき、一括作成の要素の間で使い回す
+async fn status_for_new_task(
+    api: &InnerApi,
+    tenant_id: &str,
+    project_id: &str,
+    status: Option<&str>,
+    statuses: &mut Option<Vec<Value>>,
+) -> Result<Uuid, ToolFailure> {
+    if let Some(uuid) = status.and_then(|value| Uuid::parse_str(value).ok()) {
+        return Ok(uuid);
+    }
+    if statuses.is_none() {
+        *statuses = Some(resolve::list_statuses(api, tenant_id, project_id).await?);
+    }
+    let listed = statuses.as_deref().unwrap_or_default();
+    // 作成 API は `status_id` が必須。省略時は既定の状態を使う
+    let id = match status {
+        Some(name) => resolve::pick_status(listed, name)?,
+        None => resolve::pick_default_status(listed)?,
+    };
+    parse_uuid("status", &id)
+}
+
+/// 1 件分の作成の本文。状態・マイルストーン・スプリント・種別・ラベル・担当者の順に引き
+/// （CLI の `crates/cli/src/commands/tasks.rs` の作成と同じ順）、1 つでも引けなければ失敗する
+async fn new_task_body(
+    api: &InnerApi,
+    tenant_id: &str,
+    project_id: &str,
+    names: &mut resolve::ProjectNames<'_>,
+    statuses: &mut Option<Vec<Value>>,
+    task: ParsedNewTask,
+) -> Result<Value, ToolFailure> {
+    let status_id =
+        status_for_new_task(api, tenant_id, project_id, task.status.as_deref(), statuses).await?;
+    let milestone_id = match task.milestone.as_deref() {
+        Some(value) => Some(names.milestone(value).await?),
+        None => None,
+    };
+    let sprint_id = match task.sprint.as_deref() {
+        Some(value) => Some(names.sprint(value).await?),
+        None => None,
+    };
+    let task_type_id = match task.task_type.as_deref() {
+        Some(value) => Some(names.task_type(value).await?),
+        None => None,
+    };
+    let label_ids = names.labels(&task.labels).await?;
+    // 担当者は引いた後の ID で重複を除く（初出の順を保つ）
+    let mut assignees: Vec<AssigneeInput> = Vec::new();
+    for value in &task.assignees {
+        let user_id = names.user(value).await?;
+        if assignees.iter().all(|assignee| assignee.user_id != user_id) {
+            assignees.push(AssigneeInput {
+                user_id,
+                role: ASSIGNEE_ROLE.to_string(),
+            });
+        }
+    }
+
+    let mut body = to_body(&CreateTaskRequest {
+        title: task.title,
+        description: task.description,
+        status_id,
+        priority: None,
+        progress_pct: None,
+        parent_task_id: task.parent_task_id,
+        milestone_id,
+        task_type_id,
+        sprint_id,
+        soft_deadline: task.soft_deadline,
+        hard_deadline: task.hard_deadline,
+        planned_start_on: task.planned_start_on,
+        estimated_minutes: task.estimated_minutes,
+        require_all_assignees_done: false,
+        assignees,
+        label_ids,
+        custom_field_values: Vec::new(),
+    })?;
+    set_priority(&mut body, task.priority);
+    Ok(body)
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -271,10 +428,12 @@ struct UpdateTaskArgs {
     priority: Option<String>,
     /// Progress percentage (0-100)
     progress_pct: Option<i16>,
-    /// Label UUIDs to add, keeping the others
-    add_label_ids: Option<Vec<String>>,
-    /// Label UUIDs to remove, keeping the others
-    remove_label_ids: Option<Vec<String>>,
+    /// Label names or UUIDs to add, keeping the others
+    #[serde(alias = "add_label_ids")]
+    add_labels: Option<Vec<String>>,
+    /// Label names or UUIDs to remove, keeping the others
+    #[serde(alias = "remove_label_ids")]
+    remove_labels: Option<Vec<String>>,
     /// true moves the task into the archive, false brings it back
     is_archived: Option<bool>,
     /// Tenant name or UUID. Only needed when the token is bound to more than one tenant
@@ -371,7 +530,7 @@ async fn resolve_status(
 }
 
 impl TaskMcp {
-    fn inner(&self, parts: &Parts) -> Result<InnerApi, ToolFailure> {
+    pub(super) fn inner(&self, parts: &Parts) -> Result<InnerApi, ToolFailure> {
         InnerApi::from_parts(&self.api, parts)
     }
 
@@ -490,67 +649,13 @@ impl TaskMcp {
         args: CreateTaskArgs,
     ) -> Result<Value, ToolFailure> {
         // 引数の形の誤りは、何も呼ぶ前に返す
-        let parent_task_id = parse_optional_uuid("parent_task_id", args.parent_task_id.as_deref())?;
-        let milestone_id = parse_optional_uuid("milestone_id", args.milestone_id.as_deref())?;
-        let task_type_id = parse_optional_uuid("task_type_id", args.task_type_id.as_deref())?;
-        let sprint_id = parse_optional_uuid("sprint_id", args.sprint_id.as_deref())?;
-        let label_ids = parse_uuids("label_ids", &args.label_ids.unwrap_or_default())?;
-        let assignees = parse_uuids("assignee_ids", &args.assignee_ids.unwrap_or_default())?
-            .into_iter()
-            .map(|user_id| AssigneeInput {
-                user_id,
-                role: ASSIGNEE_ROLE.to_string(),
-            })
-            .collect();
-        let soft_deadline = args
-            .soft_deadline
-            .as_deref()
-            .map(|value| parse_deadline("soft_deadline", value))
-            .transpose()?;
-        let hard_deadline = args
-            .hard_deadline
-            .as_deref()
-            .map(|value| parse_deadline("hard_deadline", value))
-            .transpose()?;
-        let planned_start_on = args
-            .planned_start_on
-            .as_deref()
-            .map(|value| parse_date("planned_start_on", value))
-            .transpose()?;
-
+        let task = parse_new_task(args.task)?;
         let api = self.inner(parts)?;
         let tenant_id = resolve::tenant_id(&api, args.tenant.as_deref()).await?;
         let project_id = resolve::project_id(&api, &tenant_id, &args.project).await?;
-        // 作成 API は `status_id` が必須。省略時は既定の状態を引く
-        let status_id =
-            match resolve_status(&api, &tenant_id, &project_id, args.status.as_deref()).await? {
-                Some(status_id) => status_id,
-                None => {
-                    let statuses = resolve::list_statuses(&api, &tenant_id, &project_id).await?;
-                    parse_uuid("status", &resolve::pick_default_status(&statuses)?)?
-                }
-            };
-
-        let mut body = to_body(&CreateTaskRequest {
-            title: args.title,
-            description: args.description,
-            status_id,
-            priority: None,
-            progress_pct: None,
-            parent_task_id,
-            milestone_id,
-            task_type_id,
-            sprint_id,
-            soft_deadline,
-            hard_deadline,
-            planned_start_on,
-            estimated_minutes: args.estimated_minutes,
-            require_all_assignees_done: false,
-            assignees,
-            label_ids,
-            custom_field_values: Vec::new(),
-        })?;
-        set_priority(&mut body, args.priority);
+        let mut names = resolve::ProjectNames::new(&api, &tenant_id, &project_id);
+        let body =
+            new_task_body(&api, &tenant_id, &project_id, &mut names, &mut None, task).await?;
         api.post(
             &[
                 "v1",
@@ -570,12 +675,6 @@ impl TaskMcp {
         parts: &Parts,
         args: UpdateTaskArgs,
     ) -> Result<Value, ToolFailure> {
-        let add_label_ids = parse_uuids("add_label_ids", &args.add_label_ids.unwrap_or_default())?;
-        let remove_label_ids = parse_uuids(
-            "remove_label_ids",
-            &args.remove_label_ids.unwrap_or_default(),
-        )?;
-
         let api = self.inner(parts)?;
         let path = TaskPath::resolve(
             &api,
@@ -591,6 +690,11 @@ impl TaskMcp {
             args.status.as_deref(),
         )
         .await?;
+        let mut names = resolve::ProjectNames::new(&api, &path.tenant_id, &path.project_id);
+        let add_label_ids = names.labels(&args.add_labels.unwrap_or_default()).await?;
+        let remove_label_ids = names
+            .labels(&args.remove_labels.unwrap_or_default())
+            .await?;
 
         // 指定の無い項目は `None` / 既定値のまま送る。API は `None` を「変更なし」と読む
         // （CLI の `update_request` と同じ送り方）
@@ -692,6 +796,17 @@ impl TaskMcp {
     }
 
     #[tool(
+        description = "List the tenants this token can be used in. Needs the read:tenant scope.",
+        annotations(read_only_hint = true)
+    )]
+    async fn list_tenants(
+        &self,
+        Extension(parts): Extension<Parts>,
+    ) -> Result<CallToolResult, ErrorData> {
+        finish(async { self.inner(&parts)?.get(&["v1", "tenants"], &[]).await }.await)
+    }
+
+    #[tool(
         description = "List the projects of the tenant. Needs the read:project scope.",
         annotations(read_only_hint = true)
     )]
@@ -712,7 +827,7 @@ impl TaskMcp {
     }
 
     #[tool(
-        description = "List the statuses, labels, task types, milestones, sprints or assignable users of a project. Use it to look up the IDs that create_task and update_task take. Scopes: read:task for statuses, labels and task_types; read:milestone for milestones; read:sprint for sprints; write:task for assignable_users.",
+        description = "List the statuses, labels, task types, milestones, sprints or assignable users of a project. Use it to see the names and IDs that create_task and update_task take. Scopes: read:task for statuses, labels and task_types; read:milestone for milestones; read:sprint for sprints; write:task for assignable_users.",
         annotations(read_only_hint = true)
     )]
     async fn list_project_options(
@@ -853,10 +968,8 @@ mod tests {
     #[test]
     fn ids_must_be_uuids() {
         assert_eq!(
-            parse_uuids("label_ids", &["bug".to_string()])
-                .unwrap_err()
-                .message,
-            "label_ids must be a UUID"
+            parse_uuid("parent_task_id", "x").unwrap_err().message,
+            "parent_task_id must be a UUID"
         );
         assert_eq!(
             parse_date("planned_start_on", "12/01").unwrap_err().message,
@@ -889,6 +1002,65 @@ mod tests {
         assert_eq!(args.description.as_deref(), Some(""));
         assert_eq!(args.status, None);
         assert_eq!(args.priority, None);
+
+        let args: CreateTaskArgs =
+            serde_json::from_value(json!({ "project": "K", "title": "x", "milestone": "" }))
+                .unwrap();
+        assert_eq!(args.task.milestone, None);
+    }
+
+    /// `create_task` の項目を `NewTaskArgs` に切り出しても、引数とスキーマは平らなまま
+    #[test]
+    fn create_task_arguments_stay_flat() {
+        let args: CreateTaskArgs = serde_json::from_value(json!({
+            "project": "K",
+            "title": "x",
+            "estimated_minutes": 30,
+            "tenant": "acme",
+        }))
+        .unwrap();
+        assert_eq!(args.project, "K");
+        assert_eq!(args.task.title, "x");
+        assert_eq!(args.task.estimated_minutes, Some(30));
+        assert_eq!(args.tenant.as_deref(), Some("acme"));
+
+        let schema = serde_json::to_value(schemars::schema_for!(CreateTaskArgs)).unwrap();
+        let properties = schema["properties"].as_object().expect("properties");
+        for name in ["project", "title", "labels", "estimated_minutes", "tenant"] {
+            assert!(properties.contains_key(name), "{name}: {schema}");
+        }
+        assert!(!properties.contains_key("task"), "{schema}");
+        assert_eq!(schema["required"], json!(["project", "title"]));
+    }
+
+    /// `_id` の付いた旧名も受け続ける
+    #[test]
+    fn old_argument_names_are_still_accepted() {
+        let args: CreateTaskArgs = serde_json::from_value(json!({
+            "project": "K",
+            "title": "x",
+            "label_ids": ["a"],
+            "assignee_ids": ["u"],
+            "task_type_id": "t",
+            "milestone_id": "m",
+            "sprint_id": "s",
+        }))
+        .unwrap();
+        let task = args.task;
+        assert_eq!(task.labels, Some(vec!["a".to_string()]));
+        assert_eq!(task.assignees, Some(vec!["u".to_string()]));
+        assert_eq!(task.task_type.as_deref(), Some("t"));
+        assert_eq!(task.milestone.as_deref(), Some("m"));
+        assert_eq!(task.sprint.as_deref(), Some("s"));
+
+        let args: UpdateTaskArgs = serde_json::from_value(json!({
+            "task": "KEY-1",
+            "add_label_ids": ["a"],
+            "remove_label_ids": ["b"],
+        }))
+        .unwrap();
+        assert_eq!(args.add_labels, Some(vec!["a".to_string()]));
+        assert_eq!(args.remove_labels, Some(vec!["b".to_string()]));
     }
 
     #[test]

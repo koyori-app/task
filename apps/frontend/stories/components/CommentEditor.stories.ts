@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
-import { expect, userEvent, waitFor, within } from 'storybook/test';
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test';
 import { ref } from 'vue';
 
 import CommentEditor from '@/components/tasks/CommentEditor.vue';
@@ -543,5 +543,131 @@ export const PasteThenSwitchScope: Story = {
     await new Promise((resolve) => setTimeout(resolve, 100));
     await expect(out(canvasElement)).toBe('');
     await expect(uploadNote(canvasElement)).toBeNull();
+  },
+};
+
+/** `submit` の受け手。器の v-bind="args" で listener として渡る */
+const submitSpy = fn();
+
+/** Ctrl+Enter（Mac は ⌘+Enter も）は送信で、既定の空行の挿入はしない */
+export const SubmitWithModEnter: Story = {
+  args: { onSubmit: submitSpy },
+  beforeEach: () => submitSpy.mockClear(),
+  render: withValue(''),
+  play: async ({ canvasElement }) => {
+    await ready(canvasElement);
+    await userEvent.keyboard('本文');
+    await waitFor(() => expect(out(canvasElement)).toBe('本文'));
+
+    await userEvent.keyboard('{Control>}{Enter}{/Control}');
+    await waitFor(() => expect(submitSpy).toHaveBeenCalledTimes(1));
+    await expect(out(canvasElement)).toBe('本文');
+  },
+};
+
+/** 変換中の Ctrl+Enter は IME の操作で、送らず空行も入れない */
+export const ModEnterWhileComposing: Story = {
+  args: { onSubmit: submitSpy },
+  beforeEach: () => submitSpy.mockClear(),
+  render: withValue(''),
+  play: async ({ canvasElement }) => {
+    const editor = await ready(canvasElement);
+    editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }));
+    const line = editor.querySelector('.cm-line')!;
+    line.append(document.createTextNode('あ'));
+    editor.dispatchEvent(new CompositionEvent('compositionupdate', { bubbles: true, data: 'あ' }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    editor.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Enter',
+        code: 'Enter',
+        keyCode: 229,
+        ctrlKey: true,
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await expect(submitSpy).not.toHaveBeenCalled();
+    await expect(out(canvasElement)).toBe('あ');
+    editor.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: 'あ' }));
+  },
+};
+
+/**
+ * 送信中（disabled）もフォーカスは入力欄に残り、その間の打鍵は本文にも body（一覧の単打ショートカット）にも
+ * 届かない。戻った後は caret の位置もそのままで、続きが末尾に入る（送信が失敗して下書きが残った時）
+ */
+export const KeepsFocusAndCaretWhileDisabled: Story = {
+  render: (args: Record<string, unknown>) => ({
+    components: { CommentEditor },
+    setup() {
+      const value = ref('');
+      const disabled = ref(false);
+      const { modelValue: _ignored, ...rest } = args;
+      return { args: rest, value, disabled };
+    },
+    template: `
+      <div style="width: 420px">
+        <CommentEditor v-model="value" v-bind="args" :disabled="disabled" aria-label="コメントを入力" />
+        <button type="button" data-testid="toggle" @click="disabled = !disabled">切り替え</button>
+        <pre data-testid="out" style="font-size: 11px; white-space: pre-wrap">{{ value }}</pre>
+      </div>`,
+  }),
+  play: async ({ canvasElement }) => {
+    const editor = await ready(canvasElement);
+    await userEvent.keyboard('送る');
+    await waitFor(() => expect(out(canvasElement)).toBe('送る'));
+
+    // フォーカスを動かさずに切り替える（送信の開始と終わり）
+    const toggle = within(canvasElement).getByTestId('toggle');
+    const inEditor = () => editor.closest('.cm-editor')!.contains(document.activeElement);
+    toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await waitFor(() => expect(content(canvasElement).getAttribute('aria-readonly')).toBe('true'));
+    await expect(inEditor()).toBe(true);
+    // 送信中の打鍵は本文に入らず、フォーカスも入力欄から動かない
+    await userEvent.keyboard('t');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await expect(out(canvasElement)).toBe('送る');
+    await expect(inEditor()).toBe(true);
+
+    toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await waitFor(() => expect(content(canvasElement).getAttribute('aria-readonly')).toBeNull());
+    await expect(inEditor()).toBe(true);
+    await userEvent.keyboard('続き');
+    await waitFor(() => expect(out(canvasElement)).toBe('送る続き'));
+  },
+};
+
+/** Ctrl+Enter の押しっぱなし（repeat）は送らない。離して押し直せば送る */
+export const RepeatedModEnterDoesNotSubmit: Story = {
+  args: { onSubmit: submitSpy },
+  beforeEach: () => submitSpy.mockClear(),
+  render: withValue(''),
+  play: async ({ canvasElement }) => {
+    const editor = await ready(canvasElement);
+    await userEvent.keyboard('本文');
+    await waitFor(() => expect(out(canvasElement)).toBe('本文'));
+    const press = (repeat: boolean) => {
+      const event = new KeyboardEvent('keydown', {
+        key: 'Enter',
+        code: 'Enter',
+        ctrlKey: true,
+        repeat,
+        bubbles: true,
+        cancelable: true,
+      });
+      editor.dispatchEvent(event);
+      return event;
+    };
+
+    const repeated = press(true);
+    await expect(repeated.defaultPrevented).toBe(true);
+    await expect(submitSpy).not.toHaveBeenCalled();
+    await expect(out(canvasElement)).toBe('本文');
+
+    press(false);
+    await expect(submitSpy).toHaveBeenCalledTimes(1);
   },
 };

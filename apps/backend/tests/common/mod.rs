@@ -817,6 +817,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_search_vector ON tasks USING GIN(search_vec
         r#"
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE INDEX IF NOT EXISTS idx_tasks_title_trgm ON tasks USING GIN (title gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_drive_file_sections_body_trgm ON drive_file_sections USING GIN (body gin_trgm_ops);
 "#,
     )
     .await

@@ -600,10 +600,9 @@ function commitEditing(field: EditableField) {
   cancelEditing();
 }
 
-// 説明の編集: 破棄・全消去は確認を挟む。blur では保存も破棄もしない
+// 説明の編集: 破棄は確認を挟む。blur では保存も破棄もしない
 const discardConfirmOpen = ref(false);
 const pendingField = ref<EditableField | null>(null);
-const clearConfirmOpen = ref(false);
 
 // 子タスクへの移動などでは同じインスタンスのまま task だけが替わる。書きかけを持ち越すと
 // 移った先のタスクへ前のタスクの下書きが保存されるので、編集と確認を閉じる
@@ -612,7 +611,6 @@ watch(
   () => {
     discardConfirmOpen.value = false;
     pendingField.value = null;
-    clearConfirmOpen.value = false;
     cancelEditing();
   },
 );
@@ -641,11 +639,6 @@ function confirmDiscardDescription() {
 function cancelDiscardDescription() {
   discardConfirmOpen.value = false;
   pendingField.value = null;
-}
-
-function confirmClearDescription() {
-  clearConfirmOpen.value = false;
-  clearDescription();
 }
 
 function onEditKeydown(event: KeyboardEvent, field: EditableField) {
@@ -730,12 +723,6 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
   if (field === 'planned_start_on') emit('save:planned_start_on', null);
   else if (field === 'soft_deadline') emit('save:soft_deadline', null);
   else emit('save:hard_deadline', null);
-  cancelEditing();
-}
-
-function clearDescription() {
-  discardDraft('description');
-  emit('save:description', null);
   cancelEditing();
 }
 </script>
@@ -1429,16 +1416,7 @@ function clearDescription() {
                   />
                 </div>
                 <Button
-                  v-if="editingField === 'description' && task.description"
-                  type="button"
-                  variant="ghost"
-                  :disabled="isFieldUpdating('description')"
-                  label="クリア"
-                  @mousedown.prevent
-                  @click="clearConfirmOpen = true"
-                />
-                <Button
-                  v-else-if="editingField !== 'description' && freshDescriptionHtml"
+                  v-if="editingField !== 'description' && freshDescriptionHtml"
                   type="button"
                   variant="ghost"
                   ariaLabel="説明を編集"
@@ -1538,15 +1516,6 @@ function clearDescription() {
                 destructive
                 :on-confirm="confirmDiscardDescription"
                 :on-cancel="cancelDiscardDescription"
-              />
-              <ConfirmDialog
-                :open="clearConfirmOpen"
-                title="説明を消しますか？"
-                message="説明をすべて消して保存します。この操作は取り消せません。"
-                confirm-label="消す"
-                destructive
-                :on-confirm="confirmClearDescription"
-                :on-cancel="() => (clearConfirmOpen = false)"
               />
               <!-- 概要へのリアクション。説明が空の間と編集中は出さない -->
               <ReactionBar

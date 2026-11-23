@@ -112,9 +112,18 @@ export function useTaskComments(params: UseTaskCommentsParams) {
     enabled: computed(() => !!tenantId.value && !!projectId.value && !!taskId.value),
   });
 
-  const createCommentMutation = apiClient.useMutation('post', LIST_COMMENTS_PATH);
-  const updateCommentMutation = apiClient.useMutation('put', COMMENT_PATH);
-  const deleteCommentMutation = apiClient.useMutation('delete', COMMENT_PATH);
+  // オフラインでも一時停止せずに要求を出し、通信エラーならすぐ失敗にする（既定の networkMode 'online' は
+  // 一時停止して、復帰まで送信中・保存中・削除中のまま戻らない）。回線が切れていれば要求は届かないので、
+  // 押し直しても二重にならない。回線が生きていれば届いて成功として扱う
+  const createCommentMutation = apiClient.useMutation('post', LIST_COMMENTS_PATH, {
+    networkMode: 'always',
+  });
+  const updateCommentMutation = apiClient.useMutation('put', COMMENT_PATH, {
+    networkMode: 'always',
+  });
+  const deleteCommentMutation = apiClient.useMutation('delete', COMMENT_PATH, {
+    networkMode: 'always',
+  });
 
   function taskPathParams() {
     return {
@@ -160,8 +169,10 @@ export function useTaskComments(params: UseTaskCommentsParams) {
         body: { body, parent_comment_id: parentCommentId ?? null },
       });
       // 作成レスポンス（TaskCommentResponse）は一覧のスレッド形と型が違い
-      // user 情報も含まないため、一覧を invalidate して取り直す
-      await invalidateAfterCommentMutation(queryKey);
+      // user 情報も含まないため、一覧を invalidate して取り直す。
+      // 待たない。成否は POST で決まり、取り直しの遅延・失敗・一時停止で入力欄を止めない
+      // （invalidateQueries は取り直しの失敗で reject しない）
+      void invalidateAfterCommentMutation(queryKey);
       return true;
     } catch (error) {
       // 失敗の出し先をフォームごとに分ける: 返信の失敗を最下部の新規投稿

@@ -269,6 +269,108 @@ describe('CreateTaskDialog double-submit guard', () => {
   });
 });
 
+describe('CreateTaskDialog の Ctrl+Enter で作成', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    isHydrated.value = true;
+    isPending.value = false;
+    mutateAsync.mockReset();
+    mutateAsync.mockImplementation(() => {
+      isPending.value = true;
+      return new Promise(() => {});
+    });
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined as never);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  function titleKeydown(init: KeyboardEventInit) {
+    const event = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      bubbles: true,
+      cancelable: true,
+      ...init,
+    });
+    getTitleInput().dispatchEvent(event);
+    return event;
+  }
+
+  it.each([
+    ['Ctrl', { ctrlKey: true }],
+    ['⌘', { metaKey: true }],
+  ])('タイトルで %s+Enter を押すと作成する', async (_, modifier) => {
+    mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('キーで作る');
+
+    const event = titleKeydown(modifier);
+    await flushPromises();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(mutateAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['変換中（isComposing）', { isComposing: true }],
+    ['変換中（keyCode 229）', { keyCode: 229 }],
+    ['押しっぱなし', { repeat: true }],
+    ['Shift を足した', { shiftKey: true }],
+    ['Alt を足した', { altKey: true }],
+  ])('%s の Ctrl+Enter では作成しない', async (_, init) => {
+    mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('キーで作る');
+
+    const event = titleKeydown({ ctrlKey: true, ...init });
+    await flushPromises();
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('修飾キー無しの Enter は止めない（form の暗黙の送信に任せる）', async () => {
+    mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('キーで作る');
+
+    expect(titleKeydown({}).defaultPrevented).toBe(false);
+  });
+
+  it('説明の submit（Ctrl+Enter）で作成する', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('説明から作る');
+
+    wrapper.getComponent({ name: 'MarkdownEditorStub' }).vm.$emit('submit');
+    await flushPromises();
+
+    expect(mutateAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('作成中はタイトルの Ctrl+Enter でも説明の submit でも 2 回目を送らない', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('一度だけ');
+
+    titleKeydown({ ctrlKey: true });
+    await flushPromises();
+    expect(isPending.value).toBe(true);
+
+    titleKeydown({ ctrlKey: true });
+    wrapper.getComponent({ name: 'MarkdownEditorStub' }).vm.$emit('submit');
+    await flushPromises();
+
+    expect(mutateAsync).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('CreateTaskDialog a11y and cache invalidation', () => {
   let queryClient: QueryClient;
   let invalidateSpy: ReturnType<typeof vi.spyOn>;
