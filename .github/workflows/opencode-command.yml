@@ -66,7 +66,7 @@ jobs:
 
       - name: Run opencode
         if: steps.origin.outputs.same_repo == 'true'
-        uses: anomalyco/opencode/github@dc2ffcf8bf26f9e669b6aa22b95f50e12be15e06 # v2.2.6
+        uses: anomalyco/opencode/github@c0ad18b402eb2827fc1ee71c171b1177b3fc02d1 # v2.3.2
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
