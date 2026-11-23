@@ -595,6 +595,35 @@ async fn full_flow_connects_and_calls_tools() {
     assert_eq!(created["title"], "OAuth で作る");
 }
 
+/// OAuth で渡せる scope に `write:sprint` は無いので、スプリントの開始は全 scope の接続でも
+/// 403。読み取りは通る
+#[tokio::test]
+async fn oauth_connection_cannot_start_a_sprint() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let res = app
+        .post_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{}/sprints",
+                fx.tp.tenant_id, fx.tp.project_id
+            ),
+            json!({ "name": "week-1", "start_date": "2026-12-01", "end_date": "2026-12-14" }),
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::CREATED, "スプリントを作れる");
+    let sprint = json_body(res).await["id"]
+        .as_str()
+        .expect("sprint id")
+        .to_string();
+    let tokens = connect(&app, &[fx.tp.tenant_id], &ALL_SCOPES).await;
+    let args = json!({ "project": fx.tp.project_id.to_string(), "sprint_id": sprint });
+
+    let outcome = call(&app, &tokens.access, "start_sprint", args.clone()).await;
+    assert_eq!(outcome.error(), "403 forbidden");
+    let shown = call(&app, &tokens.access, "get_sprint", args).await.json();
+    assert_eq!(shown["status"], "planning");
+}
+
 #[tokio::test]
 async fn access_token_is_rejected_outside_the_mcp_endpoint() {
     let mut app = TestApp::new().await;

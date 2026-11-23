@@ -36,6 +36,7 @@ mod github_snippets_integration;
 mod job_max_attempts_integration;
 mod job_retry_limit_integration;
 mod mcp_integration;
+mod mcp_more_tools_integration;
 mod mcp_oauth_integration;
 mod mcp_reviews_integration;
 mod my_tasks_integration;

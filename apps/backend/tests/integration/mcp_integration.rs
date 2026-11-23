@@ -19,14 +19,21 @@ use uuid::Uuid;
 
 const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
 
-/// docs/dev/features/mcp.md の API の表にある 18 ツール。増減したら `tools_list_returns_every_tool` が落ちる
-const TOOL_NAMES: [&str; 18] = [
+/// docs/dev/features/mcp.md の API の表にあるツール。増減したら `tools_list_returns_every_tool` が落ちる
+const TOOL_NAMES: [&str; 31] = [
     "add_task_comment",
+    "bulk_create_tasks",
     "carry_over_review",
+    "complete_sprint",
     "create_task",
+    "delete_task",
+    "get_notification_settings",
     "get_review_summary",
+    "get_sprint",
     "get_task",
     "link_pull_request",
+    "list_my_tasks",
+    "list_notifications",
     "list_project_options",
     "list_projects",
     "list_review_findings",
@@ -34,8 +41,14 @@ const TOOL_NAMES: [&str; 18] = [
     "list_task_comments",
     "list_task_pull_requests",
     "list_tasks",
+    "list_tenants",
+    "mark_all_notifications_read",
+    "mark_notification_read",
     "search_tasks",
+    "start_sprint",
     "submit_review",
+    "unlink_pull_request",
+    "update_notification_settings",
     "update_review_finding",
     "update_task",
     "whoami",
@@ -99,18 +112,18 @@ async fn mcp_with(
 }
 
 /// ツールの結果。`is_error` と、本文の文字列（成功は API の JSON、失敗はエラー文）。
-pub(super) struct ToolOutcome {
-    pub(super) is_error: bool,
-    pub(super) text: String,
+pub(crate) struct ToolOutcome {
+    pub(crate) is_error: bool,
+    pub(crate) text: String,
 }
 
 impl ToolOutcome {
-    pub(super) fn json(&self) -> Value {
+    pub(crate) fn json(&self) -> Value {
         assert!(!self.is_error, "ツールが失敗した: {}", self.text);
         serde_json::from_str(&self.text).expect("tool result json")
     }
 
-    pub(super) fn error(&self) -> &str {
+    pub(crate) fn error(&self) -> &str {
         assert!(self.is_error, "ツールが成功した: {}", self.text);
         &self.text
     }
@@ -131,21 +144,21 @@ async fn outcome_of(response: Response) -> ToolOutcome {
     }
 }
 
-pub(super) async fn call(app: &TestApp, token: &str, name: &str, arguments: Value) -> ToolOutcome {
+pub(crate) async fn call(app: &TestApp, token: &str, name: &str, arguments: Value) -> ToolOutcome {
     outcome_of(app.mcp(Some(token), tool_call_body(name, arguments)).await).await
 }
 
-pub(super) struct Fixture {
-    pub(super) user: TestUser,
-    pub(super) tp: TestTenantProject,
-    pub(super) project_key: String,
-    todo: Uuid,
-    done: Uuid,
+pub(crate) struct Fixture {
+    pub(crate) user: TestUser,
+    pub(crate) tp: TestTenantProject,
+    pub(crate) project_key: String,
+    pub(crate) todo: Uuid,
+    pub(crate) done: Uuid,
 }
 
 /// ユーザー・テナント・プロジェクトと状態 2 つ（`Todo` が既定、`Done` が完了）を作る。
 /// 状態の作成にセッションが要るので、`app` のクライアントはログイン済みになる。
-pub(super) async fn fixture(app: &mut TestApp) -> Fixture {
+pub(crate) async fn fixture(app: &mut TestApp) -> Fixture {
     let user = app.insert_user_default().await;
     let tp = app.insert_tenant_project(user.id).await;
     app.login_session_no_content(&user.email, &user.password)
@@ -171,13 +184,18 @@ async fn project_key(app: &TestApp, project_id: Uuid) -> String {
         .key
 }
 
-pub(super) async fn api_pat(app: &TestApp, fx: &Fixture) -> String {
+pub(crate) async fn api_pat(app: &TestApp, fx: &Fixture) -> String {
     app.insert_pat(fx.user.id, fx.tp.tenant_id, vec![Scope::Api], None)
         .await
 }
 
 /// `create_task` で 1 件作り、(`KEY-N`, UUID) を返す。
-async fn create_task(app: &TestApp, token: &str, fx: &Fixture, title: &str) -> (String, String) {
+pub(crate) async fn create_task(
+    app: &TestApp,
+    token: &str,
+    fx: &Fixture,
+    title: &str,
+) -> (String, String) {
     let created = call(
         app,
         token,
@@ -398,6 +416,19 @@ async fn tools_list_returns_every_tool() {
     assert_ne!(read_only("create_task"), Some(true));
     assert_eq!(read_only("list_review_findings"), Some(true));
     assert_ne!(read_only("submit_review"), Some(true));
+    assert_eq!(read_only("list_my_tasks"), Some(true));
+    assert_ne!(read_only("delete_task"), Some(true));
+
+    // `create_task` の項目は一括作成と共有する構造体を flatten したもの。入力スキーマは平らなまま
+    let properties = tools
+        .iter()
+        .find(|tool| tool["name"] == "create_task")
+        .expect("create_task")["inputSchema"]["properties"]
+        .as_object()
+        .expect("properties");
+    assert!(properties.contains_key("title"), "{properties:?}");
+    assert!(properties.contains_key("project"), "{properties:?}");
+    assert!(!properties.contains_key("task"), "{properties:?}");
 }
 
 #[tokio::test]
@@ -1199,7 +1230,7 @@ async fn create_option(app: &TestApp, fx: &Fixture, collection: &str, body: Valu
         .expect("created id")
 }
 
-async fn create_label(app: &TestApp, fx: &Fixture, name: &str) -> Uuid {
+pub(crate) async fn create_label(app: &TestApp, fx: &Fixture, name: &str) -> Uuid {
     create_option(
         app,
         fx,
@@ -1229,7 +1260,7 @@ async fn create_milestone(app: &TestApp, fx: &Fixture, name: &str) -> Uuid {
     .await
 }
 
-async fn create_sprint(app: &TestApp, fx: &Fixture, name: &str) -> Uuid {
+pub(crate) async fn create_sprint(app: &TestApp, fx: &Fixture, name: &str) -> Uuid {
     create_option(
         app,
         fx,
@@ -1239,7 +1270,7 @@ async fn create_sprint(app: &TestApp, fx: &Fixture, name: &str) -> Uuid {
     .await
 }
 
-async fn username(app: &TestApp, user_id: Uuid) -> String {
+pub(crate) async fn username(app: &TestApp, user_id: Uuid) -> String {
     users::Entity::find_by_id(user_id)
         .one(&app.state.db)
         .await
@@ -1248,7 +1279,7 @@ async fn username(app: &TestApp, user_id: Uuid) -> String {
         .username
 }
 
-async fn task_count(app: &TestApp, fx: &Fixture) -> usize {
+pub(crate) async fn task_count(app: &TestApp, fx: &Fixture) -> usize {
     tasks::Entity::find()
         .filter(tasks::Column::ProjectId.eq(fx.tp.project_id))
         .all(&app.state.db)

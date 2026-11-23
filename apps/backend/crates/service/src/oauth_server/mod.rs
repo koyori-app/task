@@ -22,7 +22,9 @@ pub const REFRESH_TOKEN_TTL_DAYS: i64 = 90;
 /// 認可コードの寿命。
 pub const CODE_TTL_SECS: u64 = 300;
 
-/// OAuth で渡せる scope。MCP のツールが要る scope の全部で、これ以外は渡さない。
+/// OAuth で渡せる scope。MCP のツールが要る scope のうち `write:sprint` を除いたもので、これ以外は渡さない。
+/// `write:sprint`（スプリントの開始と完了）は戻せない管理の操作なので渡さない
+/// （docs/dev/features/mcp.md の決定の記録）。
 pub const GRANTABLE_SCOPES: [Scope; 8] = [
     Scope::ReadTenant,
     Scope::ReadProject,
