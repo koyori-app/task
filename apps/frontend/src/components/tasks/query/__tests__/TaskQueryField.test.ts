@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { defineComponent, h, ref } from 'vue';
+import { flushPromises, mount } from '@vue/test-utils';
 import TaskQueryField from '../TaskQueryField.vue';
 describe('Enter confirms the task query', () => {
   it('does not commit while typing or composing, commits on Enter', async () => {
@@ -26,6 +27,9 @@ describe('Enter confirms the task query', () => {
     expect(w.emitted('update:modelValue')?.at(-1)).toEqual(['la']);
     await input.setValue('label:b');
     await input.trigger('keydown', { key: 'ArrowDown' });
+    await input.trigger('keydown', { key: 'Enter' });
+    // 選んだ値は入れるだけで、検索は確定しない
+    expect(w.emitted('update:modelValue')?.at(-1)).toEqual(['la']);
     await input.trigger('keydown', { key: 'Enter' });
     expect(w.emitted('update:modelValue')?.at(-1)).toEqual(['label:bug']);
     w.unmount();
@@ -86,7 +90,97 @@ describe('Enter confirms the task query', () => {
     await w.get('input').trigger('keydown', { key: 'ArrowDown' });
     await w.get('input').trigger('keydown', { key: 'ArrowDown' });
     await w.get('input').trigger('keydown', { key: 'Enter' });
+    expect(w.get('input').element.value).toBe('label:bugfix,');
+    await w.get('input').trigger('keydown', { key: 'Enter' });
     expect(w.emitted('update:modelValue')?.at(-1)).toEqual(['label:bugfix']);
+    w.unmount();
+  });
+  it('keeps the search open after picking a value, so more values can be picked', async () => {
+    const w = mount(TaskQueryField, { props: { modelValue: '', suggestData } });
+    const input = w.get('input');
+    await input.trigger('focusin');
+    await input.setValue('label:');
+    await input.trigger('keydown', { key: 'ArrowDown' });
+    await input.trigger('keydown', { key: 'Enter' });
+    expect(input.element.value).toBe('label:bug,');
+    expect(w.emitted('update:modelValue')).toBeUndefined();
+    expect(input.attributes('aria-expanded')).toBe('true');
+    // 選んだ bug と、選んだ値を捨てる「ラベルなし」は出ない
+    const rows = w.findAll('[role="option"]');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.text()).toContain('bugfix');
+    await input.trigger('keydown', { key: 'ArrowDown' });
+    await input.trigger('keydown', { key: 'Enter' });
+    expect(input.element.value).toBe('label:bug,bugfix,');
+    expect(w.emitted('update:modelValue')).toBeUndefined();
+    await input.trigger('keydown', { key: 'Enter' });
+    expect(w.emitted('update:modelValue')).toEqual([['label:bug,bugfix']]);
+    w.unmount();
+  });
+  it.each([
+    ['sort:', 'ArrowDown', 'sort:created'],
+    ['label:', 'ArrowUp', 'no:label'],
+  ])('confirms %s with %s right away (single value or the none row)', async (value, key, out) => {
+    const w = mount(TaskQueryField, { props: { modelValue: '', suggestData } });
+    const input = w.get('input');
+    await input.trigger('focusin');
+    await input.setValue(value);
+    await input.trigger('keydown', { key });
+    await input.trigger('keydown', { key: 'Enter' });
+    expect(w.emitted('update:modelValue')?.at(-1)).toEqual([out]);
+    w.unmount();
+  });
+  it('leaves the caret at the end of the remaining words when a picked value confirms', async () => {
+    // 親が v-model で同じ tick のうちに式を返すと、下書きは語だけになる
+    const Host = defineComponent(() => {
+      const query = ref('');
+      return () =>
+        h(TaskQueryField, {
+          modelValue: query.value,
+          'onUpdate:modelValue': (v: string) => (query.value = v),
+          suggestData,
+        });
+    });
+    const w = mount(Host, { attachTo: document.body });
+    const input = w.get('input');
+    await input.trigger('focusin');
+    await input.setValue('sort:c あいうえおかきくけこさしすせそ');
+    input.element.setSelectionRange(6, 6);
+    await input.trigger('keyup');
+    await input.trigger('keydown', { key: 'ArrowDown' });
+    await input.trigger('keydown', { key: 'Enter' });
+    await flushPromises();
+    expect(input.element.value).toBe('あいうえおかきくけこさしすせそ');
+    expect(input.element.selectionStart).toBe(15);
+    w.unmount();
+  });
+  it('picks a value before a trailing word and keeps the caret after the value', async () => {
+    const w = mount(TaskQueryField, { props: { modelValue: '', suggestData } });
+    const input = w.get('input');
+    await input.trigger('focusin');
+    await input.setValue('label:b 通知');
+    input.element.setSelectionRange(7, 7);
+    await input.trigger('keyup');
+    await input.trigger('keydown', { key: 'ArrowDown' });
+    await input.trigger('keydown', { key: 'Enter' });
+    await w.vm.$nextTick();
+    expect(input.element.value).toBe('label:bug, 通知');
+    expect(input.element.selectionStart).toBe(10);
+    expect(w.text()).toContain('label: の候補');
+    expect(w.emitted('update:modelValue')).toBeUndefined();
+    await input.trigger('keydown', { key: 'Enter' });
+    expect(w.emitted('update:modelValue')?.at(-1)).toEqual(['label:bug 通知']);
+    w.unmount();
+  });
+  it.each([
+    ['label:bug,', 'label:bug'],
+    ['label:', 'label:""'],
+  ])('drops leftover empty values of %s on Enter', async (value, expected) => {
+    const w = mount(TaskQueryField, { props: { modelValue: '', suggestData } });
+    await w.get('input').trigger('focusin');
+    await w.get('input').setValue(value);
+    await w.get('input').trigger('keydown', { key: 'Enter' });
+    expect(w.emitted('update:modelValue')?.at(-1)).toEqual([expected]);
     w.unmount();
   });
   it('ignores Enter on inner buttons', async () => {
@@ -125,6 +219,8 @@ describe('Enter confirms the task query', () => {
     await w.get('input').setValue('label:b');
     await w.get('input').trigger('keydown', { key: 'ArrowDown' });
     await w.setProps({ suggestData: build() });
+    await w.get('input').trigger('keydown', { key: 'Enter' });
+    expect(w.get('input').element.value).toBe('label:bug,');
     await w.get('input').trigger('keydown', { key: 'Enter' });
     expect(w.emitted('update:modelValue')?.at(-1)).toEqual(['label:bug']);
     w.unmount();
@@ -226,14 +322,15 @@ describe('Enter confirms the task query', () => {
     expect(input.attributes('aria-expanded')).toBe('true');
     w.unmount();
   });
-  it('closes the candidates after a pointer click on a value candidate', async () => {
+  it('keeps the candidates open after a pointer click on a value candidate, without searching', async () => {
     const w = mount(TaskQueryField, { props: { modelValue: '', suggestData } });
     const input = w.get('input');
     await input.trigger('focusin');
     await input.setValue('label:b');
     await w.findAll('[role="option"]')[0]!.trigger('click');
-    expect(w.emitted('update:modelValue')?.at(-1)).toEqual(['label:bug']);
-    expect(input.attributes('aria-expanded')).toBe('false');
+    expect(w.emitted('update:modelValue')).toBeUndefined();
+    expect(input.attributes('aria-expanded')).toBe('true');
+    expect(input.element.value).toBe('label:bug,');
     w.unmount();
   });
   it('re-reads the caret after a candidate is inserted, so moving back to the old position updates candidates', async () => {

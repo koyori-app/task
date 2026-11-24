@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { tokenizeTaskQuery, serializeTaskQuery } from '../tokenize';
+import { tokenizeTaskQuery, serializeTaskQuery, dropEmptyValues } from '../tokenize';
 import { hasFilter, setQualifierValues, qualifierValues, setSort, sortOf } from '../edit';
 const cases = JSON.parse(
   readFileSync('../backend/crates/service/src/task_query/fixtures/tokens.json', 'utf8'),
@@ -34,5 +34,13 @@ describe('shared task query grammar', () => {
     expect(hasFilter(expr)).toBe(true);
     expect(hasFilter('sort:title')).toBe(false);
     expect(setQualifierValues(expr, 'status', [])).toBe('sort:priority-desc 通知');
+  });
+  it.each([
+    ['label:bug,', 'label:bug'],
+    ['label:,bug,', 'label:bug'],
+    ['label:', 'label:""'],
+    ['通知 label:bug, -is:', 'label:bug -is:"" 通知'],
+  ])('drops empty values of %s', (input, expected) => {
+    expect(serializeTaskQuery(dropEmptyValues(tokenizeTaskQuery(input)))).toBe(expected);
   });
 });

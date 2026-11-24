@@ -77,6 +77,17 @@ export function tokenizeTaskQuery(input: string): QueryToken[] {
   }
   return tokens;
 }
+/**
+ * 値を 1 つ以上持つ条件から空の値を外す（`label:bug,` → `label:bug`）。候補を選ぶと末尾にカンマが残るため。
+ * 値が全部空の条件（`label:`）と語はそのまま返し、backend の empty-value のエラー表示を残す。
+ */
+export function dropEmptyValues(tokens: QueryToken[]): QueryToken[] {
+  return tokens.map((t) =>
+    t.kind === 'qualifier' && t.values.some((v) => v)
+      ? { ...t, values: t.values.filter((v) => v) }
+      : t,
+  );
+}
 export function quoteValue(value: string): string {
   return !value || Array.from(value).some((c) => space(c) || c === ',' || c === '"')
     ? `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`

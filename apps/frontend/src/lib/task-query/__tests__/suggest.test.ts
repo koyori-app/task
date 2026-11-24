@@ -34,7 +34,7 @@ describe('query completion', () => {
     expect(suggestionContext('status:"In', 10)).toMatchObject({ kind: 'values', prefix: 'In' });
     expect(keyCandidates('la')[0]?.value).toBe('label');
   });
-  it('completes keys without committing, values with committing', () => {
+  it('completes keys and partial values without committing, adding a comma after the value', () => {
     const context = suggestionContext('label:b', 7)!;
     const candidates = valueCandidates('label', 'b', {
       labels: [
@@ -44,13 +44,72 @@ describe('query completion', () => {
     });
     expect(candidates[0]?.value).toBe('bug');
     expect(applySuggestion('label:b', context, candidates[0]!)).toEqual({
-      draft: 'label:bug',
-      commit: true,
+      draft: 'label:bug,',
+      caret: 10,
+      commit: false,
     });
     expect(applySuggestion('la', suggestionContext('la', 2)!, keyCandidates('la')[0]!)).toEqual({
       draft: 'label:',
+      caret: 6,
       commit: false,
     });
+  });
+  const apply = (draft: string, caret: number, candidate: Parameters<typeof applySuggestion>[2]) =>
+    applySuggestion(draft, suggestionContext(draft, caret)!, candidate);
+  it('commits exact matches, single-value keys and the none row right away', () => {
+    expect(apply('label:BUG', 9, { value: 'bug', label: 'bug' })).toEqual({
+      draft: 'label:bug',
+      caret: 9,
+      commit: true,
+    });
+    expect(apply('sort:', 5, { value: 'created', label: '作成日' })).toEqual({
+      draft: 'sort:created',
+      caret: 12,
+      commit: true,
+    });
+    expect(
+      apply('label:bug,', 10, { value: 'label', label: 'ラベルなし', key: 'no' }),
+    ).toMatchObject({ draft: 'no:label', commit: true });
+  });
+  it('keeps chosen values, negation, trailing words and quoting when picking', () => {
+    expect(apply('label:bug,b', 11, { value: 'bugfix', label: 'bugfix' })).toMatchObject({
+      draft: 'label:bug,bugfix,',
+      commit: false,
+    });
+    expect(apply('-label:b', 8, { value: 'bug', label: 'bug' })).toMatchObject({
+      draft: '-label:bug,',
+      commit: false,
+    });
+    expect(apply('label:b 通知', 7, { value: 'bug', label: 'bug' })).toEqual({
+      draft: 'label:bug, 通知',
+      caret: 10,
+      commit: false,
+    });
+    const quoted = apply('status:', 7, { value: 'In Progress', label: 'In Progress' });
+    expect(quoted).toEqual({
+      draft: 'status:"In Progress",',
+      caret: 'status:"In Progress",'.length,
+      commit: false,
+    });
+  });
+  it('hides chosen values and the none row once a value is chosen', () => {
+    const data = {
+      labels: [
+        { id: '1', name: 'bug' },
+        { id: '2', name: 'feature' },
+      ],
+      members: [{ id: '3', username: 'alice' }],
+    };
+    expect(valueCandidates('label', '', data, ['BUG']).map((c) => c.label)).toEqual(['feature']);
+    expect(valueCandidates('label', '', data).map((c) => c.label)).toEqual([
+      'bug',
+      'feature',
+      'ラベルなし',
+    ]);
+    const assignees = valueCandidates('assignee', '', data, ['@alice']).map((c) => c.value);
+    expect(assignees).not.toContain('alice');
+    expect(assignees).toContain('@me');
+    expect(assignees).not.toContain('assignee');
   });
   it('serializes single-value flags as separate AND terms', () => {
     expect(toggleFlag('is:archived', 'is', 'subtask', true)).toBe('is:archived is:subtask');
