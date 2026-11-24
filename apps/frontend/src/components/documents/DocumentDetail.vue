@@ -32,7 +32,7 @@ import {
   MAX_DOCUMENT_TITLE_LENGTH,
 } from '@/lib/documents/name';
 import { selectionTitle } from '@/lib/documents/selection';
-import { formatTaskDate } from '@/lib/task-display';
+import { formatTaskDate, taskSeqKey } from '@/lib/task-display';
 // KFM のサイドカー CSS（タスク詳細の TaskDetailHub と同じ組）
 import '@/lib/remark-gfm/style.css';
 import '@/lib/remark-koyori-alerts/style.css';
@@ -405,7 +405,10 @@ async function onTaskCreated(task: CreatedTask, { keepOpen }: { keepOpen: boolea
     .catch(() => null);
   // 409 は既に結び付いている（本文の参照から付いた等）ので失敗扱いにしない
   if (!result || (result.error && result.response.status !== 409)) {
-    linkError.value = 'タスクは作成しましたが、このドキュメントに結び付けられませんでした';
+    // 続けて作成するときはダイアログの裏に出るので、どのタスクが漏れたかをキーで示す
+    linkError.value = keepOpen
+      ? `タスク ${taskSeqKey(props.projectKey, task.seq_id)} は作成しましたが、このドキュメントに結び付けられませんでした`
+      : 'タスクは作成しましたが、このドキュメントに結び付けられませんでした';
   }
   await queryClient.invalidateQueries({ queryKey: tasksKey.value });
 }

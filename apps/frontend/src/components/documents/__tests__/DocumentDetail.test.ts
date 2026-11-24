@@ -558,6 +558,25 @@ describe('DocumentDetail のタスク作成', () => {
     ]);
   });
 
+  it('続けて作成で結び付けに失敗したら、どのタスクかをキーで示す', async () => {
+    const original = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: Request | string, init?: RequestInit) => {
+      if (typeof input !== 'string' && new URL(input.url).pathname.endsWith('/attachments')) {
+        throw new TypeError('Failed to fetch');
+      }
+      return original(input, init);
+    });
+    const wrapper = mountDetail();
+    const dialog = await openWithSelection(wrapper);
+
+    dialog.vm.$emit('created', { id: 'task-9', seq_id: 9 }, { keepOpen: true });
+    await flushPromises();
+
+    expect(wrapper.get('[role="alert"]').text()).toBe(
+      'タスク ENG-9 は作成しましたが、このドキュメントに結び付けられませんでした',
+    );
+  });
+
   it('続けて作成しないときは閉じて結び付ける', async () => {
     const wrapper = mountDetail();
     const dialog = await openWithSelection(wrapper);
