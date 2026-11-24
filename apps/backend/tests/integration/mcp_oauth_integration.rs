@@ -13,8 +13,8 @@
 //! 外へは取りに行かない。
 
 use crate::common::{
-    TEST_OAUTH_CLIENT, TestApp, TestTenantProject, TestUser, create_status, insert_extra_project,
-    insert_tenant, json_body,
+    TEST_OAUTH_CLIENT, TestApp, TestTenantProject, TestUser, create_status, file_id_of,
+    insert_extra_project, insert_tenant, json_body, upload_drive_file,
 };
 use axum::http::StatusCode;
 use backend::utils::desktop_auth::s256_challenge;
@@ -38,7 +38,7 @@ use uuid::Uuid;
 const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
 const REDIRECT_URI: &str = "https://client.test/callback";
 const STATE: &str = "state-xyz";
-const ALL_SCOPES: [&str; 8] = [
+const ALL_SCOPES: [&str; 9] = [
     "read:tenant",
     "read:project",
     "read:task",
@@ -47,6 +47,7 @@ const ALL_SCOPES: [&str; 8] = [
     "read:sprint",
     "read:review",
     "write:review",
+    "read:drive",
 ];
 
 // ---- 道具 ----
@@ -686,6 +687,37 @@ async fn consent_narrows_the_scope() {
         .await
         .json();
     assert_eq!(listed["total"], 0, "{listed}");
+}
+
+/// ドライブの本文は、`read:drive` を許可した接続でだけ読める。
+/// Drive の行を作るので、他の Drive の試験と同じ鍵で直列化する。
+#[tokio::test]
+#[serial_test::serial(drive)]
+async fn get_document_needs_the_read_drive_scope() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    const BODY: &str = "# 仕様\n\n本文 oauthdocword\n";
+    let file = upload_drive_file(
+        &app,
+        fx.tp.tenant_id,
+        None,
+        "spec.md",
+        "text/markdown",
+        BODY.as_bytes(),
+    )
+    .await;
+    let arguments = json!({ "document": file_id_of(&file).to_string() });
+
+    let tokens = connect(&app, &[fx.tp.tenant_id], &["read:task"]).await;
+    let denied = call(&app, &tokens.access, "get_document", arguments.clone()).await;
+    assert_eq!(denied.error(), "403 forbidden");
+
+    // 対照: `read:drive` を許可した接続では本文が返る
+    let tokens = connect(&app, &[fx.tp.tenant_id], &["read:task", "read:drive"]).await;
+    assert_eq!(tokens.scope, "read:task read:drive");
+    let document = call(&app, &tokens.access, "get_document", arguments).await;
+    assert!(!document.is_error, "{}", document.text);
+    assert_eq!(document.text, BODY);
 }
 
 #[tokio::test]

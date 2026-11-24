@@ -32185,12 +32185,20 @@
       "ReviewedPullRequest": {
         "type": "object",
         "description": "レビューのある PR の一覧行。画面の PR 一覧が使う。",
-        "required": ["pr_number", "rounds", "unresolved", "blocking", "blocking_fixed", "state"],
+        "required": [
+          "pr_number",
+          "rounds",
+          "unresolved",
+          "blocking",
+          "blocking_fixed",
+          "unresolved_fixed",
+          "state"
+        ],
         "properties": {
           "blocking": {
             "type": "integer",
             "format": "int64",
-            "description": "マージを塞いでいる件数（High / Medium かつ open / fixing / fixed）\n\n**可否の断定はここからは出せない。** 可否には鮮度と連携の有無も要り\n（`ReviewSummary` + `mergeVerdict` の片道降格）、この一覧はその材料を\n持たない。一覧に `mergeable` を置いていた頃、詳細パネルが「リポジトリ\n未確定」と言う横で一覧だけ「マージ可」と出る矛盾が実際に起きた",
+            "description": "マージを塞いでいる件数（High / Medium かつ open / fixing / fixed）\n\n**可否の断定はここからは出せない。** 可否には鮮度と連携の有無も要り\n（`ReviewSummary` + `mergeGateView` の片道降格）、この一覧はその材料を\n持たない。一覧に `mergeable` を置いていた頃、詳細パネルが「リポジトリ\n未確定」と言う横で一覧だけ「マージ可」と出る矛盾が実際に起きた",
             "minimum": 0
           },
           "blocking_fixed": {
@@ -32198,6 +32206,14 @@
             "format": "int64",
             "description": "`blocking` のうち fixed の件数（`blocking` の内数）。修正済みでレビュー側の\n確認（verified）を待っている分で、`blocking - blocking_fixed` が open / fixing の残り",
             "minimum": 0
+          },
+          "host": {
+            "type": ["string", "null"],
+            "description": "PR 行のホスト（`github` など）。PR 行が無ければ `null`"
+          },
+          "html_url": {
+            "type": ["string", "null"],
+            "description": "ホスト上の PR の URL。PR 行が無い、または webhook をまだ受けていなければ `null`"
           },
           "last_reviewed_at": {
             "type": ["string", "null"],
@@ -32228,6 +32244,10 @@
             "format": "uuid",
             "description": "自然キー（プロジェクト・リポジトリ・番号）で結んだ PR 行。無ければ null"
           },
+          "repository": {
+            "type": ["string", "null"],
+            "description": "集計対象のリポジトリ（`owner/name`）。GitHub 連携が無ければ `null`"
+          },
           "rounds": {
             "type": "integer",
             "format": "int32",
@@ -32241,6 +32261,12 @@
             "type": "integer",
             "format": "int64",
             "description": "未解決（open / fixing / fixed）の指摘数。重大度は問わない",
+            "minimum": 0
+          },
+          "unresolved_fixed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "未解決のうち fixed の件数（`unresolved` の内数。重大度は問わない）",
             "minimum": 0
           }
         }
