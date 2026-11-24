@@ -1,40 +1,67 @@
 <script setup lang="ts">
 import { Loader2 } from '@lucide/vue';
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
+import { navigate } from 'vike/client/router';
 import { usePageContext } from 'vike-vue/usePageContext';
 
-import ReviewFindingsView from '@/components/reviews/ReviewFindingsView.vue';
+import ReviewPullRequestList from '@/components/reviews/ReviewPullRequestList.vue';
+import { useHydrated } from '@/composables/useHydrated';
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
-import { useMeQuery } from '@/lib/api-vue-query';
-import { parseReviewFindingsUrlState } from '@/lib/review-findings-url-state';
+import { legacyReviewDetailHref, parseReviewListUrlState } from '@/lib/review-url-state';
 
 const pageContext = usePageContext();
 const tenantDisplayId = computed(() => String(pageContext.routeParams.tenant ?? ''));
 const projectKey = computed(() => String(pageContext.routeParams.projectKey ?? ''));
 
 type UrlParsedContext = {
-  urlParsed?: {
-    search?: Record<string, string>;
-    pathname?: string;
-    searchOriginal?: string | null;
-  };
+  urlParsed?: { search?: Record<string, string>; pathname?: string };
 };
+const urlParsed = computed(() => (pageContext as UrlParsedContext | undefined)?.urlParsed);
 
 /** SSR でも client navigation でも、最初に描く状態は URL だけから決める。 */
-const initialUrl = computed(() =>
-  parseReviewFindingsUrlState((pageContext as UrlParsedContext | undefined)?.urlParsed?.search),
-);
+const initialUrl = computed(() => parseReviewListUrlState(urlParsed.value?.search));
 
 /**
- * 現在の URL（pathname + search）。SSR の findingHref が path を自前で組まずに
- * 済むよう渡す——自前で組むと、この画面が持たぬ query が SSR 出力の链から落ちる。
+ * 旧 URL（`/reviews?pr=N`）の転送先。投稿済みの GitHub の要約コメントと通知メールの
+ * リンクがこの形で残っているので、詳細（`/reviews/N`）へ届かせる。
  */
-const requestUrl = computed(() => {
-  const parsed = (pageContext as UrlParsedContext | undefined)?.urlParsed;
-  if (!parsed?.pathname) return null;
-  return `${parsed.pathname}${parsed.searchOriginal ?? ''}`;
+const legacyHref = computed(() =>
+  urlParsed.value?.pathname
+    ? legacyReviewDetailHref(urlParsed.value.pathname, urlParsed.value.search)
+    : null,
+);
+/** `pr` があるのに転送できない（番号として読めない）。一覧を出して知らせる */
+const legacyWarnings = computed(() => {
+  const raw = urlParsed.value?.search?.pr;
+  return raw !== undefined && legacyHref.value === null
+    ? [`URL の PR 番号「${raw.slice(0, 40)}」は正の整数ではないため無視しました。`]
+    : [];
 });
+
+// 親が描き直すたびに新しい配列を渡すと、一覧の watch が古い URL の状態へ戻す
+const urlWarnings = computed(() => [...legacyWarnings.value, ...initialUrl.value.warnings]);
+
+/** 転送に失敗した先。読み込み中のまま止めず、手で開けるリンクを出す */
+const redirectFailedHref = ref<string | null>(null);
+async function redirectLegacy(href: string) {
+  redirectFailedHref.value = null;
+  try {
+    await navigate(href, { overwriteLastHistoryEntry: true });
+  } catch {
+    redirectFailedHref.value = href;
+  }
+}
+
+// 同じ +Page.vue の中の遷移（一覧を開いたまま旧 URL へ移る）でも転送する
+const hydrated = useHydrated();
+watch(
+  [hydrated, legacyHref],
+  ([ready, href]) => {
+    if (ready && href) void redirectLegacy(href);
+  },
+  { immediate: true },
+);
 
 const {
   tenantId,
@@ -50,23 +77,26 @@ const {
   isError: isProjectError,
 } = useResolvedProjectId(tenantId, projectKey);
 
-const meQuery = useMeQuery();
-
+// 転送を待つ間は読み込み中の表示だけを出す（SSR も同じ表示になる）
 const isLoading = computed(
-  () => isTenantResolving.value || isProjectResolving.value || meQuery.isPending.value,
+  () => legacyHref.value !== null || isTenantResolving.value || isProjectResolving.value,
 );
-const isError = computed(
-  () =>
-    isTenantResolveError.value ||
-    isProjectError.value ||
-    (meQuery.isError.value && !meQuery.data.value),
-);
+const isError = computed(() => isTenantResolveError.value || isProjectError.value);
 const isNotFound = computed(() => isTenantNotFound.value || isProjectNotFound.value);
 </script>
 
 <template>
   <div class="flex flex-col gap-6 px-4 pt-2 pb-10">
-    <div v-if="isLoading" class="flex justify-center py-16">
+    <div
+      v-if="legacyHref !== null && redirectFailedHref === legacyHref"
+      class="text-muted-foreground flex flex-col items-center gap-2 py-16 text-center text-sm"
+      data-testid="legacy-redirect-failed"
+    >
+      <p>PR の詳細へ移れませんでした</p>
+      <a class="text-link underline underline-offset-2" :href="legacyHref">PR の詳細を開く</a>
+    </div>
+
+    <div v-else-if="isLoading" class="flex justify-center py-16">
       <Loader2 class="text-muted-foreground h-8 w-8 animate-spin" />
     </div>
 
@@ -83,20 +113,18 @@ const isNotFound = computed(() => isTenantNotFound.value || isProjectNotFound.va
 
       vike-vue はクライアント遷移で同じ `+Page.vue` に解決される URL 間では
       コンポーネントを差し替えず patch するため、これが無いとクエリの引数
-      （setup 時の値で固定される）も、選択中の PR や絞り込みも前のプロジェクトの
-      ままになる。設定画面（`settings/+Page.vue`）と同じ扱い。
+      （setup 時の値で固定される）も、絞り込みも前のプロジェクトのままになる。
+      設定画面（`settings/+Page.vue`）と同じ扱い。
     -->
-    <ReviewFindingsView
-      v-else-if="tenantId && projectId && meQuery.data.value"
+    <ReviewPullRequestList
+      v-else-if="tenantId && projectId"
       :key="projectId"
       :tenant-id="tenantId"
       :tenant-slug="tenantDisplayId"
       :project-id="projectId"
       :project-key="projectKey"
-      :viewer-id="meQuery.data.value.id"
       :initial-url-state="initialUrl.state"
-      :initial-url-warnings="initialUrl.warnings"
-      :request-url="requestUrl"
+      :initial-url-warnings="urlWarnings"
     />
   </div>
 </template>

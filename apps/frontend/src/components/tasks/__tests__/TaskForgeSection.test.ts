@@ -220,7 +220,7 @@ describe('TaskForgeSection', () => {
     });
     const badges = wrapper.findAll('[data-forge-unresolved]');
     expect(badges.map((b) => b.text())).toEqual(['2 件が未解決', '未解決なし']);
-    expect(badges[0]!.attributes('href')).toBe('/acme/projects/TASK/reviews?pr=87');
-    expect(badges[1]!.attributes('href')).toBe('/acme/projects/TASK/reviews?pr=88');
+    expect(badges[0]!.attributes('href')).toBe('/acme/projects/TASK/reviews/87');
+    expect(badges[1]!.attributes('href')).toBe('/acme/projects/TASK/reviews/88');
   });
 });

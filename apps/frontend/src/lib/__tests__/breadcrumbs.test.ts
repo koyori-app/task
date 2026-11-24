@@ -18,6 +18,7 @@ describe('パンくずのルート台帳', () => {
     ['/acme/projects/ENG/tasks', ''],
     ['/acme/projects/ENG/settings', 'プロジェクト設定'],
     ['/acme/projects/ENG/reviews', 'レビュー'],
+    ['/acme/projects/ENG/reviews/231', 'レビュー'],
     ['/acme/projects/ENG/tasks/ENG-3', ''],
     ['/acme/projects/ENG/docs', 'ドキュメント'],
     ['/acme/projects/ENG/docs/file-1', ''],
@@ -29,6 +30,7 @@ describe('パンくずのルート台帳', () => {
         taskId: 'ENG-3',
         userId: 'u-1',
         fileId: 'file-1',
+        prNumber: '231',
       })?.name,
     ).toBe(name);
   });
