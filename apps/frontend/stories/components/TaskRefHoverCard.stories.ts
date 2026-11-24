@@ -5,7 +5,8 @@ import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
 import { createPinia, setActivePinia } from 'pinia';
 import CommentBody from '@/components/tasks/CommentBody.vue';
 import { htmlTheme } from '../html-theme';
-/** 開くまで通信せず、成功は共有キャッシュ、403・404は閲覧不可として表示する。 */
+/** 開くまで通信せず、成功は共有キャッシュ、403・404は閲覧不可として表示する。
+ * カードは状態をアイコン（円の埋まり方）で出し、説明 2 行とラベルを持つ。開くリンクは持たない。 */
 const TENANT = '11111111-1111-4111-8111-111111111111';
 const USER = '22222222-2222-4222-8222-222222222222';
 type Mode =
@@ -48,7 +49,11 @@ function mock(mode: Mode) {
               ],
         );
       if (url.pathname.endsWith('/statuses'))
-        return json([{ id: 'status', name: '進行中', color: '#3b82f6', is_done_state: false }]);
+        return json([
+          { id: 'todo', name: '未着手', color: '#94a3b8', position: 0, is_done_state: false },
+          { id: 'status', name: '進行中', color: '#3b82f6', position: 1, is_done_state: false },
+          { id: 'done', name: '完了', color: '#22c55e', position: 2, is_done_state: true },
+        ]);
       if (url.pathname.includes('/users/')) return json({ username: 'taro', membership: 'Member' });
       taskCalls++;
       if (mode === 'loading') return new Promise<Response>(() => {});
@@ -74,6 +79,11 @@ function mock(mode: Mode) {
               ? '2020-01-01T00:00:00Z'
               : '2099-01-01T00:00:00Z',
         is_archived: mode === 'overdue',
+        description:
+          mode === 'minimal'
+            ? null
+            : '説明の中の TASK ID にホバーすると、タスクの情報を出す。\n一覧の行でも同じカードを使う。\n3 行目は切れる。',
+        labels: mode === 'minimal' ? [] : [{ id: 'l1', name: 'frontend', color: '#3b82f6' }],
       });
     };
     return () => {
@@ -135,10 +145,7 @@ function story(mode: Mode, light = false): Story {
       }
       if (mode === 'loading') {
         await expect(card.getByText('読み込み中…')).toBeVisible();
-        await expect(card.getByRole('link', { name: 'タスクを開く' })).toHaveAttribute(
-          'href',
-          link.getAttribute('href'),
-        );
+        await expect(card.getByText('TASK-58')).toBeVisible();
         return;
       }
       if (mode === 'failed') {
@@ -158,11 +165,34 @@ function story(mode: Mode, light = false): Story {
           await expect(getComputedStyle(overdue).color).toBe(getComputedStyle(probe).color);
           probe.remove();
         }
-        if (mode === 'other') await expect(card.getByText(/別のプロジェクト/)).toBeVisible();
+        // ID は出す。プロジェクト名は出さない
+        await expect(card.getByText(mode === 'other' ? 'ENG-58' : 'TASK-58')).toBeVisible();
+        await expect(card.queryByText(/別のプロジェクト|タスク管理/)).toBeNull();
+        if (mode === 'minimal') {
+          await expect(dialog.querySelector('[data-task-ref-description]')).toBeNull();
+          await expect(card.queryByRole('list', { name: 'ラベル' })).toBeNull();
+        } else {
+          // ステータスはアイコンで出し、名前は読み上げ専用。進行中は 3 段の 2 番目 = 扇形
+          await expect(dialog.querySelector('[data-task-status-icon]')).toHaveAttribute(
+            'data-fill',
+            'partial',
+          );
+          await expect(card.getByText('進行中')).toHaveClass('sr-only');
+          await expect(card.getByText('frontend')).toBeVisible();
+          // 説明は 2 行で切る（3 行ぶんの高さにならない）
+          const description = dialog.querySelector<HTMLElement>('[data-task-ref-description]')!;
+          const lineHeight = Number.parseFloat(getComputedStyle(description).lineHeight);
+          await expect(description.getBoundingClientRect().height).toBeLessThanOrEqual(
+            lineHeight * 2 + 1,
+          );
+          await expect(description.scrollHeight).toBeGreaterThan(description.clientHeight);
+        }
       }
-      await expect(card.getByRole('link', { name: 'タスクを開く' }).getAttribute('href')).toBe(
-        link.getAttribute('href'),
-      );
+      // 幅は 320px。開くリンクと「Esc で閉じる」の行は持たない
+      await expect(dialog.getBoundingClientRect().width).toBe(320);
+      await expect(getComputedStyle(dialog).borderRadius).toBe('6px');
+      await expect(card.queryByRole('link')).toBeNull();
+      await expect(card.queryByText(/Esc/)).toBeNull();
       await userEvent.unhover(link);
       await waitFor(() => expect(canvas.queryByRole('dialog')).toBeNull());
       await userEvent.hover(link);
@@ -206,8 +236,7 @@ export const Keyboard: Story = {
     await userEvent.tab();
     await expect(link).toHaveFocus();
     await canvas.findByRole('dialog', { name: 'TASK-58 のタスク' });
-    await userEvent.tab();
-    await expect(canvas.getByRole('link', { name: 'タスクを開く' })).toHaveFocus();
+    // カードの中に操作は無い（開くのは起点のリンク）。Esc で閉じる
     await userEvent.keyboard('{Escape}');
     await waitFor(() => expect(canvas.queryByRole('dialog')).toBeNull());
   },

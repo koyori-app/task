@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, inject, ref } from 'vue';
+import { Paperclip } from '@lucide/vue';
+import { computed, inject, ref, useTemplateRef } from 'vue';
 import { navigate } from 'vike/client/router';
 import { useData } from 'vike-vue/useData';
 import { usePageContext } from 'vike-vue/usePageContext';
@@ -9,7 +10,8 @@ import TaskAttachments from '@/components/tasks/TaskAttachments.vue';
 import TaskComments from '@/components/tasks/TaskComments.vue';
 import TaskDetailHub from '@/components/tasks/TaskDetailHub.vue';
 import TaskForgeSection from '@/components/tasks/TaskForgeSection.vue';
-import SimilarTasksList from '@/components/tasks/SimilarTasksList.vue';
+import TaskImplementationPullRequests from '@/components/tasks/TaskImplementationPullRequests.vue';
+import TaskSimilarRows from '@/components/tasks/TaskSimilarRows.vue';
 import TaskBlockingPanel from '@/components/tasks/TaskBlockingPanel.vue';
 import TaskSubtaskPanel from '@/components/tasks/TaskSubtaskPanel.vue';
 import { Button } from '@koyori-app/ui-vue';
@@ -167,6 +169,13 @@ const membersState = computed(() => ({
 }));
 const rowMutations = useTaskRowMutations({ tenantId, projectId });
 
+// サブタスクと似ているタスクの行のステータスは、一覧の行と同じ口で変える（飛行中と失敗は行に出る）
+function onRowStatusChange(task: TaskResponse, statusId: string) {
+  void rowMutations.setStatus(task, statusId);
+}
+/** 添付ファイルの欄。説明の見出しの 📎 からファイルの選択を開く */
+const attachmentsRef = useTemplateRef<InstanceType<typeof TaskAttachments>>('attachments');
+
 function onToggleAssignee(userId: string, checked: boolean) {
   const task = displayTask.value;
   if (!task) return;
@@ -262,14 +271,11 @@ const similarQuery = useSimilarTasks({
   title: () => displayTask.value?.title ?? '',
   excludeTaskId: () => displayTask.value?.id,
 });
-
-function openSimilarTask(seqId: number) {
-  void navigate(taskDetailHref(tenantDisplayId.value, projectKey.value, seqId));
-}
 </script>
 
 <template>
   <TaskDetailHub
+    :reserve-close="false"
     :reaction-controller="reactionController"
     :current-user-id="currentUserId"
     :task="displayTask"
@@ -323,13 +329,6 @@ function openSimilarTask(seqId: number) {
     @delete-request="openDeleteDialog"
   >
     <template v-if="displayTask" #main>
-      <TaskAttachments
-        :tenant-id="tenantId"
-        :project-id="projectId"
-        :task-id="taskId"
-        :current-user-id="currentUserId"
-        :is-tenant-owner="isTenantOwner"
-      />
       <TaskSubtaskPanel
         :tenant-id="tenantId"
         :project-id="projectId"
@@ -343,24 +342,33 @@ function openSimilarTask(seqId: number) {
         :parent-saved="savedField === 'parent_task_id'"
         :statuses="statuses"
         :project-key="projectKey"
+        :tenant-display-id="tenantDisplayId"
+        :row-pending="rowMutations.pending.value"
+        :row-errors="rowMutations.errors.value"
         @open="openRelatedTask"
         @change-parent="onChangeParent"
+        @update:status="onRowStatusChange"
       />
       <TaskBlockingPanel
         :tenant-id="tenantId"
         :project-id="projectId"
         :task-id="taskId"
         :task-uuid="displayTask.id"
+        :task="displayTask"
         :statuses="statuses"
         :project-key="projectKey"
+        :tenant-display-id="tenantDisplayId"
         @open="openRelatedTask"
       />
-      <SimilarTasksList
-        class="border-t pt-5"
+      <TaskSimilarRows
         :tasks="similarQuery.data.value?.tasks ?? []"
+        :statuses="statuses"
         :tenant-display-id="tenantDisplayId"
         :project-key="projectKey"
-        @select="openSimilarTask"
+        :row-pending="rowMutations.pending.value"
+        :row-errors="rowMutations.errors.value"
+        @open="openRelatedTask"
+        @update:status="onRowStatusChange"
       />
       <TaskForgeSection
         :tenant-id="tenantId"
@@ -368,6 +376,39 @@ function openSimilarTask(seqId: number) {
         :task-id="taskId"
         :tenant-display-id="tenantDisplayId"
         :project-key="projectKey"
+        :task-title="displayTask.title"
+      />
+    </template>
+    <!-- 題の上の行: このタスクを実装する PR（リポジトリ欄には出さない） -->
+    <template v-if="displayTask" #meta>
+      <TaskImplementationPullRequests
+        :tenant-id="tenantId"
+        :project-id="projectId"
+        :task-id="taskId"
+        :tenant-display-id="tenantDisplayId"
+        :project-key="projectKey"
+      />
+    </template>
+    <template v-if="displayTask" #description-actions>
+      <Button
+        type="button"
+        variant="ghost"
+        ariaLabel="ファイルを添付"
+        :disabled="attachmentsRef?.uploading"
+        @click="attachmentsRef?.openPicker()"
+      >
+        <template #icon><Paperclip class="size-4" aria-hidden="true" /></template>
+      </Button>
+    </template>
+    <template v-if="displayTask" #attachments>
+      <TaskAttachments
+        ref="attachments"
+        :tenant-id="tenantId"
+        :project-id="projectId"
+        :task-id="taskId"
+        :current-user-id="currentUserId"
+        :is-tenant-owner="isTenantOwner"
+        :members="members"
       />
     </template>
     <template #header-actions>

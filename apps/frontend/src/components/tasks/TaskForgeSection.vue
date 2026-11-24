@@ -1,30 +1,42 @@
 <script setup lang="ts">
 import { GitCommitHorizontal, MoreHorizontal, Plus } from '@lucide/vue';
-import { useQuery, useQueryClient } from '@tanstack/vue-query';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 
+import ForgeCommitCard from '@/components/tasks/ForgeCommitCard.vue';
+import ForgePullRequestCard from '@/components/tasks/ForgePullRequestCard.vue';
 import TaskForgeMergeEffectsBadge from '@/components/tasks/TaskForgeMergeEffectsBadge.vue';
 import TaskForgePullRequestLinkDialog from '@/components/tasks/TaskForgePullRequestLinkDialog.vue';
+import TaskForgeUnlinkDialog from '@/components/tasks/TaskForgeUnlinkDialog.vue';
 import TaskIssueSourceRow from '@/components/tasks/TaskIssueSourceRow.vue';
-import { Button, Dialog, Dropdown, type DropdownItem } from '@koyori-app/ui-vue';
-import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
-import type { components } from '@/generated/api';
-import { apiClient, fetchClient } from '@/lib/api-vue-query';
+import {
+  Avatar,
+  Button,
+  Dropdown,
+  HoverCard,
+  TabPanel,
+  Tabs,
+  type DropdownItem,
+} from '@koyori-app/ui-vue';
+import { useNow } from '@/composables/useNow';
+import {
+  useTaskForge,
+  useTaskForgePullRequestActions,
+  type TaskForgePullRequest,
+} from '@/composables/useTaskForge';
 import { pullRequestState as prState } from '@/lib/forge-pull-request';
 import { reviewDetailHref } from '@/lib/review-url-state';
-import { httpUrl } from '@/lib/task-activity';
+import { httpUrl, relativeTime } from '@/lib/task-activity';
 
 import TaskForgeBranches from './TaskForgeBranches.vue';
 
 /**
- * タスク詳細の「リポジトリ」セクション。タスクに結ばれた PR とコミットを並べる
- * （docs/dev/features/tasks/github-tasks/index.md の「画面」）。
+ * タスク詳細の「リポジトリ」セクション。タスクに触れているだけの PR・コミット・ブランチを
+ * タブで並べる（docs/dev/features/tasks/github-tasks/index.md の「画面」）。
+ *
+ * このタスクを実装する PR はここに出さず、題の上のピル（TaskImplementationPullRequests）に出す。
+ * forge の取得はピルと同じクエリキーで分け合う。
  */
-const FORGE_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/forge' as const;
-const UNLINK_PATH =
-  '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/forge/pull-requests/{pull_request_id}' as const;
-
-type PullRequest = components['schemas']['TaskForgePullRequest'];
+type TabValue = 'pull_requests' | 'commits' | 'branches';
 
 const props = defineProps<{
   tenantId: string | null;
@@ -33,27 +45,17 @@ const props = defineProps<{
   /** レビュー画面へのリンクに使う（`/{tenant}/projects/{key}/reviews`） */
   tenantDisplayId: string;
   projectKey: string;
+  /** 取り込み元の Issue のホバーカードに出すタスクの題 */
+  taskTitle?: string | null;
 }>();
 
-const forgeQuery = useQuery({
-  queryKey: computed(() => [
-    'get',
-    FORGE_PATH,
-    { tenantId: props.tenantId, projectId: props.projectId, taskId: props.taskId },
-  ]),
-  queryFn: async ({ signal }) => {
-    const { data, error } = await fetchClient.GET(FORGE_PATH, {
-      params: {
-        path: { tenant_id: props.tenantId!, project_id: props.projectId!, id: props.taskId },
-      },
-      signal,
-    });
-    if (error) throw error;
-    return data;
-  },
-  enabled: computed(() => !!props.tenantId && !!props.projectId && !!props.taskId),
-  retry: false,
-});
+const target = {
+  tenantId: () => props.tenantId,
+  projectId: () => props.projectId,
+  taskId: () => props.taskId,
+};
+const forgeQuery = useTaskForge(target);
+const actions = useTaskForgePullRequestActions(target);
 
 // 連携先は forge と一緒に返る。null なら未連携（読み込み前・取得失敗はボタンを止めない）
 const repository = computed(() => forgeQuery.data.value?.repository);
@@ -63,74 +65,71 @@ const repoFullName = computed(() =>
 );
 const isLinkOpen = ref(false);
 
-const queryClient = useQueryClient();
-const unlinkMutation = apiClient.useMutation('delete', UNLINK_PATH);
-const unlinkTarget = ref<PullRequest | null>(null);
-const unlinkError = ref<string | null>(null);
-const PR_ACTION_ITEMS: DropdownItem[] = [
-  { value: 'unlink', label: 'リンクを外す', destructive: true },
-];
-
-function onUnlinkClose() {
-  if (unlinkMutation.isPending.value) return;
-  unlinkTarget.value = null;
-}
-
-async function confirmUnlink() {
-  const target = unlinkTarget.value;
-  if (!target || !props.tenantId || !props.projectId) return;
-  unlinkError.value = null;
-  try {
-    await unlinkMutation.mutateAsync({
-      params: {
-        path: {
-          tenant_id: props.tenantId,
-          project_id: props.projectId,
-          id: props.taskId,
-          pull_request_id: target.id,
-        },
-      },
-    });
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['get', FORGE_PATH] }),
-      queryClient.invalidateQueries({ queryKey: ['get', ACTIVITIES_PATH] }),
-    ]);
-    unlinkTarget.value = null;
-  } catch {
-    unlinkError.value = 'リンクを外せませんでした';
-  }
-}
-
-const pullRequests = computed(() => forgeQuery.data.value?.pull_requests ?? []);
+const allPullRequests = computed(() => forgeQuery.data.value?.pull_requests ?? []);
+/** 一覧に出すのは言及だけの PR。実装の PR は題の上のピルに出る */
+const pullRequests = computed(() => allPullRequests.value.filter((pr) => pr.role === 'mention'));
 const commits = computed(() => forgeQuery.data.value?.commits ?? []);
 const branches = computed(() => forgeQuery.data.value?.branches ?? []);
 // GitLab は Merge Request と呼ぶ
 const pullRequestHeading = computed(() =>
-  pullRequests.value.length > 0 && pullRequests.value.every((pr) => pr.host === 'gitlab')
+  allPullRequests.value.length > 0 && allPullRequests.value.every((pr) => pr.host === 'gitlab')
     ? 'Merge Requests'
     : 'Pull Requests',
 );
+const nothingLinked = computed(
+  () => !allPullRequests.value.length && !commits.value.length && !branches.value.length,
+);
 
-// 未解決件数は `read:review` が無い・レビューが無い PR では null（表示しない）
-function reviewHref(pr: PullRequest): string {
+const tabItems = computed(() => [
+  { value: 'pull_requests', label: `${pullRequestHeading.value} ${pullRequests.value.length}` },
+  { value: 'commits', label: `コミット ${commits.value.length}` },
+  { value: 'branches', label: `ブランチ ${branches.value.length}` },
+]);
+/**
+ * 既定のタブは、Pull Requests → コミット → ブランチの順で最初に 1 件以上あるもの。
+ * 実装の PR を一覧に出さないので、Pull Requests が 0 件のタスクが多い。
+ */
+const defaultTab = computed<TabValue>(() => {
+  if (pullRequests.value.length) return 'pull_requests';
+  if (commits.value.length) return 'commits';
+  if (branches.value.length) return 'branches';
+  return 'pull_requests';
+});
+// 利用者が選んだ後は、件数が変わっても動かさない
+const selectedTab = ref<TabValue | null>(null);
+const tab = computed(() => selectedTab.value ?? defaultTab.value);
+// オーバーレイと右ペインは別のタスクへ移っても同じインスタンス
+watch(
+  () => props.taskId,
+  () => {
+    selectedTab.value = null;
+  },
+);
+
+const PR_ACTION_ITEMS = computed<DropdownItem[]>(() => [
+  { value: 'implementation', label: '実装 PR にする', disabled: actions.rolePending.value },
+  { value: 'unlink', label: 'リンクを外す', destructive: true },
+]);
+
+function onPullRequestAction(pullRequest: TaskForgePullRequest, value: string) {
+  if (value === 'implementation') void actions.setRole(pullRequest, 'implementation');
+  else if (value === 'unlink') actions.requestUnlink(pullRequest);
+}
+
+function reviewHref(pr: TaskForgePullRequest): string {
   return reviewDetailHref(props.tenantDisplayId, props.projectKey, pr.number);
 }
 
-const SOURCE_LABELS: Record<string, string> = {
-  title: 'タイトル',
-  body: '本文',
-  branch: 'ブランチ',
-  manual: '手動',
-};
+const now = useNow();
 </script>
 
 <template>
-  <section class="space-y-2" aria-label="リポジトリ" data-task-forge-section>
-    <div class="flex items-center justify-between gap-2">
+  <section class="border-t pt-5" aria-label="リポジトリ" data-task-forge-section>
+    <div class="mb-1 flex min-h-8 items-center justify-between gap-2">
       <h2 class="text-sm font-semibold">リポジトリ</h2>
       <Button
         type="button"
-        variant="ghost"
+        variant="tertiary"
         :disabled="notConnected"
         :aria-describedby="notConnected ? 'forge-link-disabled-reason' : undefined"
         label="PR をリンク"
@@ -139,10 +138,13 @@ const SOURCE_LABELS: Record<string, string> = {
         <template #icon><Plus class="size-4" aria-hidden="true" /></template>
       </Button>
     </div>
-    <p v-if="notConnected" id="forge-link-disabled-reason" class="text-xs text-muted-foreground">
+    <p
+      v-if="notConnected"
+      id="forge-link-disabled-reason"
+      class="mb-2 text-xs text-muted-foreground"
+    >
       PR をリンクするには、プロジェクト設定でリポジトリを連携してください
     </p>
-    <TaskIssueSourceRow v-if="forgeQuery.data.value?.issue" :issue="forgeQuery.data.value.issue" />
 
     <p v-if="forgeQuery.isLoading.value" class="text-sm text-muted-foreground">読み込み中…</p>
     <div
@@ -152,121 +154,143 @@ const SOURCE_LABELS: Record<string, string> = {
       リポジトリの情報を読み込めませんでした
       <Button type="button" variant="tertiary" label="再試行" @click="forgeQuery.refetch()" />
     </div>
-    <p
-      v-else-if="!pullRequests.length && !commits.length && !branches.length"
-      class="text-sm text-muted-foreground"
-    >
-      まだ PR もコミットもありません
-    </p>
-    <template v-else>
-      <div v-if="pullRequests.length" class="space-y-1">
-        <h3 class="text-xs font-medium text-muted-foreground">{{ pullRequestHeading }}</h3>
-        <ul class="space-y-1">
-          <li
-            v-for="pr in pullRequests"
-            :key="pr.id"
-            class="flex items-center gap-2 text-sm"
-            data-forge-pull-request
-          >
-            <component
-              :is="prState(pr.state).icon"
-              class="size-4 shrink-0"
-              :class="prState(pr.state).class"
-              aria-hidden="true"
-            />
-            <span class="sr-only">{{ prState(pr.state).label }}</span>
-            <a
-              v-if="httpUrl(pr.html_url)"
-              :href="httpUrl(pr.html_url)!"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="min-w-0 flex-1 truncate hover:underline"
-              :title="pr.title"
-            >
-              <span class="text-muted-foreground">#{{ pr.number }}</span> {{ pr.title }}
-            </a>
-            <span v-else class="min-w-0 flex-1 truncate" :title="pr.title">
-              <span class="text-muted-foreground">#{{ pr.number }}</span> {{ pr.title }}
-            </span>
-            <span
-              v-for="source in pr.sources"
-              :key="source"
-              class="shrink-0 rounded border px-1 text-xs text-muted-foreground"
-            >
-              {{ SOURCE_LABELS[source] ?? source }}
-            </span>
-            <TaskForgeMergeEffectsBadge v-if="tenantId" :tenant-id="tenantId" :pull-request="pr" />
-            <span v-if="!pr.commits_complete" class="shrink-0 text-xs text-muted-foreground">
-              コミット一覧は一部のみ
-            </span>
-            <span v-if="pr.author_handle" class="shrink-0 text-xs text-muted-foreground">
-              {{ pr.author_handle }}
-            </span>
-            <a
-              v-if="pr.unresolved != null"
-              :href="reviewHref(pr)"
-              class="shrink-0 text-xs underline underline-offset-2"
-              :class="pr.unresolved ? 'text-destructive' : 'text-muted-foreground'"
-              data-forge-unresolved
-              >{{ pr.unresolved ? `${pr.unresolved} 件が未解決` : '未解決なし' }}</a
-            >
-            <Dropdown
-              top-layer
-              variant="ghost"
-              :ariaLabel="`#${pr.number} の操作`"
-              :items="PR_ACTION_ITEMS"
-              :on-select="
-                () => {
-                  unlinkError = null;
-                  unlinkTarget = pr;
-                }
-              "
-            >
-              <template #icon><MoreHorizontal class="size-4" aria-hidden="true" /></template>
-            </Dropdown>
-          </li>
-        </ul>
-      </div>
+    <!-- タブの行の右端に取り込み元を置く。狭い幅ではタブの下へ回す -->
+    <div v-else class="relative [&_[role=tabpanel]]:px-0 [&_[role=tabpanel]]:py-2">
+      <Tabs
+        id="task-forge-tabs"
+        label="リポジトリ"
+        :items="tabItems"
+        :value="tab"
+        :on-value-change="(value: string) => (selectedTab = value as TabValue)"
+      >
+        <TaskIssueSourceRow
+          v-if="forgeQuery.data.value?.issue"
+          class="mt-2 sm:absolute sm:top-0 sm:right-0 sm:mt-0 sm:h-9 sm:max-w-[55%]"
+          :issue="forgeQuery.data.value.issue"
+          :title="taskTitle"
+        />
 
-      <div v-if="commits.length" class="space-y-1">
-        <h3 class="text-xs font-medium text-muted-foreground">Commits</h3>
-        <ul class="space-y-1">
-          <li
-            v-for="commit in commits"
-            :key="commit.id"
-            class="flex items-center gap-2 text-sm"
-            data-forge-commit
-          >
-            <GitCommitHorizontal class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-            <a
-              v-if="httpUrl(commit.html_url)"
-              :href="httpUrl(commit.html_url)!"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="shrink-0 font-mono text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
-              >{{ commit.sha.slice(0, 7) }}</a
+        <TabPanel value="pull_requests">
+          <ul v-if="pullRequests.length" class="divide-y divide-border/60">
+            <li
+              v-for="pr in pullRequests"
+              :key="pr.id"
+              class="flex min-h-12 items-center gap-2 py-1.5 text-sm"
+              data-forge-pull-request
             >
-            <span v-else class="shrink-0 font-mono text-xs text-muted-foreground">{{
-              commit.sha.slice(0, 7)
-            }}</span>
-            <span class="min-w-0 flex-1 truncate" :title="commit.message">{{
-              commit.message
-            }}</span>
-            <span class="shrink-0 text-xs text-muted-foreground">
-              {{ commit.author_handle || commit.author_name }}
-            </span>
-          </li>
-        </ul>
-      </div>
+              <component
+                :is="prState(pr.state).icon"
+                class="size-4 shrink-0"
+                :class="prState(pr.state).class"
+                aria-hidden="true"
+              />
+              <span class="sr-only">{{ prState(pr.state).label }}</span>
+              <div class="min-w-0 flex-1">
+                <HoverCard :label="`#${pr.number} の PR`">
+                  <span class="block min-w-0">
+                    <a
+                      v-if="httpUrl(pr.html_url)"
+                      :href="httpUrl(pr.html_url)!"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="block truncate font-medium hover:underline"
+                      >{{ pr.title || `#${pr.number}` }}</a
+                    >
+                    <span v-else class="block truncate font-medium">{{
+                      pr.title || `#${pr.number}`
+                    }}</span>
+                  </span>
+                  <template #content>
+                    <ForgePullRequestCard :pull-request="pr" :review-href="reviewHref(pr)" />
+                  </template>
+                </HoverCard>
+                <div class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                  <span class="shrink-0 font-mono">#{{ pr.number }}</span>
+                  <template v-if="pr.author_handle">
+                    <span aria-hidden="true">・</span>
+                    <Avatar :name="pr.author_handle" :size="14" />
+                    <span class="truncate">{{ pr.author_handle }}</span>
+                  </template>
+                  <!-- 利用者の操作を待つ状態なので、ホバーしなくても見える行の中に出す -->
+                  <TaskForgeMergeEffectsBadge
+                    v-if="tenantId"
+                    :tenant-id="tenantId"
+                    :pull-request="pr"
+                  />
+                </div>
+              </div>
+              <Dropdown
+                top-layer
+                variant="ghost"
+                class="shrink-0"
+                :ariaLabel="`#${pr.number} の操作`"
+                :items="PR_ACTION_ITEMS"
+                :on-select="(value: string) => onPullRequestAction(pr, value)"
+              >
+                <template #icon><MoreHorizontal class="size-4" aria-hidden="true" /></template>
+              </Dropdown>
+            </li>
+          </ul>
+          <p v-else class="text-sm text-muted-foreground" data-forge-empty>
+            {{
+              nothingLinked ? 'まだ PR もコミットもありません' : '触れているだけの PR はありません'
+            }}
+          </p>
+          <p v-if="actions.roleError.value" role="alert" class="mt-1 text-sm text-destructive">
+            {{ actions.roleError.value }}
+          </p>
+        </TabPanel>
 
-      <TaskForgeBranches
-        v-if="branches.length && tenantId && projectId"
-        :tenant-id="tenantId"
-        :project-id="projectId"
-        :task-id="taskId"
-        :branches="branches"
-      />
-    </template>
+        <TabPanel value="commits">
+          <ul v-if="commits.length" class="divide-y divide-border/60">
+            <li
+              v-for="commit in commits"
+              :key="commit.id"
+              class="flex min-h-12 items-center gap-2 py-1.5 text-sm"
+              data-forge-commit
+            >
+              <GitCommitHorizontal
+                class="size-4 shrink-0 text-muted-foreground"
+                aria-hidden="true"
+              />
+              <div class="min-w-0 flex-1">
+                <HoverCard :label="`${commit.sha.slice(0, 7)} のコミット`">
+                  <span class="block truncate font-medium">{{ commit.message }}</span>
+                  <template #content><ForgeCommitCard :commit="commit" /></template>
+                </HoverCard>
+                <div class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                  <a
+                    v-if="httpUrl(commit.html_url)"
+                    :href="httpUrl(commit.html_url)!"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="shrink-0 font-mono underline underline-offset-2 hover:text-foreground"
+                    >{{ commit.sha.slice(0, 7) }}</a
+                  >
+                  <span v-else class="shrink-0 font-mono">{{ commit.sha.slice(0, 7) }}</span>
+                  <span aria-hidden="true">・</span>
+                  <span class="truncate">{{ commit.author_handle || commit.author_name }}</span>
+                  <span aria-hidden="true">・</span>
+                  <span class="shrink-0">{{ relativeTime(commit.committed_at, now) }}</span>
+                </div>
+              </div>
+            </li>
+          </ul>
+          <p v-else class="text-sm text-muted-foreground">コミットはありません</p>
+        </TabPanel>
+
+        <TabPanel value="branches">
+          <TaskForgeBranches
+            v-if="branches.length && tenantId && projectId"
+            :tenant-id="tenantId"
+            :project-id="projectId"
+            :task-id="taskId"
+            :branches="branches"
+          />
+          <p v-else class="text-sm text-muted-foreground">ブランチはありません</p>
+        </TabPanel>
+      </Tabs>
+    </div>
 
     <TaskForgePullRequestLinkDialog
       v-if="isLinkOpen && tenantId && projectId"
@@ -276,33 +300,12 @@ const SOURCE_LABELS: Record<string, string> = {
       :repo-full-name="repoFullName"
       @close="isLinkOpen = false"
     />
-    <Dialog
-      :open="unlinkTarget !== null"
-      title="PR のリンクを外しますか？"
-      :description="
-        unlinkTarget
-          ? `#${unlinkTarget.number} とこのタスクのリンクをすべて外します。PR のタイトル・本文にタスクの ID が残っていると、次に PR が更新されたときに再びリンクされます。`
-          : ''
-      "
-      :on-close="onUnlinkClose"
-    >
-      <p v-if="unlinkError" role="alert" class="text-sm text-destructive">{{ unlinkError }}</p>
-      <template #actions>
-        <Button
-          type="button"
-          variant="tertiary"
-          :disabled="unlinkMutation.isPending.value"
-          label="キャンセル"
-          @click="unlinkTarget = null"
-        />
-        <Button
-          type="button"
-          variant="danger"
-          :disabled="unlinkMutation.isPending.value"
-          :label="unlinkMutation.isPending.value ? '外しています…' : 'リンクを外す'"
-          @click="confirmUnlink"
-        />
-      </template>
-    </Dialog>
+    <TaskForgeUnlinkDialog
+      :target="actions.unlinkTarget.value"
+      :pending="actions.unlinkPending.value"
+      :error="actions.unlinkError.value"
+      @cancel="actions.cancelUnlink"
+      @confirm="actions.confirmUnlink"
+    />
   </section>
 </template>

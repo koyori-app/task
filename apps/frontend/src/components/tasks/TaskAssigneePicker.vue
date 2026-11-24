@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { getActivePinia } from 'pinia';
-import { PhUserPlus } from '@phosphor-icons/vue';
+import { PhPencilSimple, PhUserPlus } from '@phosphor-icons/vue';
 
 import UserAvatar from '@/components/UserAvatar.vue';
 import type { SelectableUser } from '@/components/users/types';
@@ -33,8 +33,13 @@ const props = withDefaults(
     maxDisplay?: number;
     /** 自分の id。候補の先頭に置く。省けばログイン中の利用者 */
     currentUserId?: string | null;
+    /**
+     * トリガーの見た目。`avatars`（既定）は選んだ人のアバターの束。`icon` は鉛筆だけの小さなボタンで、
+     * 担当者を別の所（縦リスト）に並べている画面が編集の入口として置く。
+     */
+    trigger?: 'avatars' | 'icon';
   }>(),
-  { maxDisplay: 3, currentUserId: undefined },
+  { maxDisplay: 3, currentUserId: undefined, trigger: 'avatars' },
 );
 
 const emit = defineEmits<{
@@ -52,7 +57,7 @@ const hiddenCount = computed(() => Math.max(0, props.selected.length - props.max
 
 <template>
   <UserSelector
-    label="担当者"
+    :label="trigger === 'icon' ? '担当者を編集' : '担当者'"
     :users="members"
     :model-value="selectedIds"
     :disabled="disabled"
@@ -65,7 +70,8 @@ const hiddenCount = computed(() => Math.max(0, props.selected.length - props.max
   >
     <template #trigger>
       <!-- 重ねたアバターも装飾。名前は Picker の aria-label で読ませる -->
-      <span v-if="selected.length" class="flex items-center">
+      <PhPencilSimple v-if="trigger === 'icon'" class="size-4" aria-hidden="true" />
+      <span v-else-if="selected.length" class="flex items-center">
         <UserAvatar
           v-for="user in shown"
           :key="user.id"

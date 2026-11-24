@@ -6,7 +6,7 @@ import { nextTick, ref } from 'vue';
 const subtasksState = vi.hoisted(() => ({
   loading: { value: false },
   error: { value: false },
-  subtasks: { value: [] as Array<{ id: string; title: string; status_id: string }> },
+  subtasks: { value: [] as Array<Record<string, unknown>> },
   parentTask: { value: null as { id: string; seq_id: number; title: string } | null },
   createPending: { value: false },
   createError: { value: null as string | null },
@@ -24,9 +24,35 @@ import TaskSubtaskComposer from '@/components/tasks/TaskSubtaskComposer.vue';
 
 enableAutoUnmount(afterEach);
 
+/** 行に出す項目を持つサブタスク（一覧の応答と同じ形） */
+function subtask(id: string, title: string, overrides: Record<string, unknown> = {}) {
+  return {
+    id,
+    seq_id: 7,
+    title,
+    status_id: 'status-todo',
+    priority: 'High',
+    assignees: [{ role: 'assignee', user: { id: 'u1', username: 'yupix', avatar_url: null } }],
+    labels: [{ id: 'l1', name: 'bug', color: '#f00' }],
+    soft_deadline: null,
+    hard_deadline: null,
+    completed_at: null,
+    is_archived: false,
+    description: null,
+    ...overrides,
+  };
+}
+
+const statuses = [
+  { id: 'status-todo', name: 'Todo', color: '#888', position: 0, is_done_state: false },
+  { id: 'status-doing', name: 'Doing', color: '#00f', position: 1, is_done_state: false },
+  { id: 'status-done', name: 'Done', color: '#0a0', position: 2, is_done_state: true },
+];
+
 function mountPanel(
   statusUpdating = false,
   overrides: { parentTaskId?: string | null; parentUpdating?: boolean } = {},
+  extra: Record<string, unknown> = {},
 ) {
   return mount(TaskSubtaskPanel, {
     props: {
@@ -41,6 +67,8 @@ function mountPanel(
       parentError: null,
       statuses: [],
       projectKey: 'TASK',
+      tenantDisplayId: 'acme',
+      ...extra,
     },
     global: { plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]] },
   });
@@ -94,15 +122,103 @@ describe('TaskSubtaskPanel', () => {
   });
 
   it('親が取得できない子でも追加UIを出さず、既存の子への導線は残す', async () => {
-    subtasksState.subtasks.value = [
-      { id: 'grandchild-id', title: '既存の孫', status_id: 'status-todo' },
-    ];
+    subtasksState.subtasks.value = [subtask('grandchild-id', '既存の孫')];
     const wrapper = mountPanel();
     await wrapper.setProps({ parentTaskId: 'deleted-parent-id' });
     expect(wrapper.findComponent(TaskSubtaskComposer).exists()).toBe(false);
     expect(buttonByText(wrapper, 'サブタスクを追加')).toBeUndefined();
-    await wrapper.get('li button').trigger('click');
+    await wrapper.get('[data-task-row] a').trigger('click');
     expect(wrapper.emitted('open')?.[0]).toEqual([subtasksState.subtasks.value[0]]);
+  });
+
+  describe('一覧の行', () => {
+    it('サブタスクを行（ステータスのアイコン・題・ID・ラベル・担当・優先度）で並べる', () => {
+      subtasksState.subtasks.value = [
+        subtask('a', '設計', { seq_id: 11 }),
+        subtask('b', '実装', { seq_id: 12, status_id: 'status-done' }),
+      ];
+      const wrapper = mountPanel(false, {}, { statuses });
+
+      const rows = wrapper.findAll('[data-task-row]');
+      expect(rows.map((row) => row.attributes('data-task-seq-key'))).toEqual([
+        'TASK-11',
+        'TASK-12',
+      ]);
+      expect(rows[0].get('a').attributes('href')).toBe('/acme/projects/TASK/tasks/TASK-11');
+      expect(rows[0].text()).toContain('設計');
+      expect(rows[0].text()).toContain('bug');
+      expect(rows[0].get('[data-task-status-icon]').attributes('data-fill')).toBe('empty');
+      expect(rows[1].get('[data-task-status-icon]').attributes('data-fill')).toBe('done');
+      // 件数の数字と、色の点 + ステータス名の古い行は出さない
+      expect(wrapper.get('h2').element.parentElement!.textContent).not.toMatch(/\d/);
+      expect(wrapper.find('li > button').exists()).toBe(false);
+    });
+
+    it('行の区切りは行の間だけ（外枠の線を引かない）', () => {
+      subtasksState.subtasks.value = [subtask('a', '設計')];
+      const list = mountPanel(false, {}, { statuses }).get('[data-task-subtask-list]');
+
+      expect(list.classes()).toContain('divide-y');
+      expect(list.classes()).not.toContain('border-y');
+      // 狭い器で期限と優先度を隠すので、器はコンテナクエリの基準になる
+      expect(list.classes()).toContain('@container');
+    });
+
+    it('行のホバーカードの器を 1 つ置き、行の題と ID のブロックを起点にする', async () => {
+      subtasksState.subtasks.value = [subtask('a', '設計'), subtask('b', '実装')];
+      const wrapper = mountPanel(false, {}, { statuses });
+      // 器（一覧の要素）は mount の後に入る
+      await nextTick();
+
+      const cards = wrapper.findAllComponents({ name: 'TaskRowHoverCard' });
+      expect(cards).toHaveLength(1);
+      expect(cards[0].props('tasks')).toEqual(subtasksState.subtasks.value);
+      expect(cards[0].props('container')).toBe(wrapper.get('[data-task-subtask-list]').element);
+      expect(
+        wrapper.findAll('[data-task-row-card]').map((el) => el.attributes('data-task-id')),
+      ).toEqual(['a', 'b']);
+    });
+
+    it('行のメニューで選んだステータスを update:status で返す', async () => {
+      subtasksState.subtasks.value = [subtask('a', '設計')];
+      const wrapper = mountPanel(false, {}, { statuses });
+
+      const doing = wrapper
+        .findAll('[role="menuitemradio"]')
+        .find((item) => item.text() === 'Doing')!;
+      await doing.trigger('click');
+      expect(wrapper.emitted('update:status')).toEqual([
+        [subtasksState.subtasks.value[0], 'status-doing'],
+      ]);
+    });
+
+    it('飛行中の行はメニューを止め、失敗は行の下に出す', () => {
+      subtasksState.subtasks.value = [subtask('a', '設計'), subtask('b', '実装')];
+      const wrapper = mountPanel(
+        false,
+        {},
+        { statuses, rowPending: { a: 'status_id' }, rowErrors: { b: '更新に失敗しました' } },
+      );
+
+      const [first, second] = wrapper.findAll('[data-task-row]');
+      expect(
+        first.get('button[aria-label^="TASK-7 のステータス"]').attributes('disabled'),
+      ).toBeDefined();
+      expect(
+        second.get('button[aria-label^="TASK-7 のステータス"]').attributes('disabled'),
+      ).toBeUndefined();
+      expect(first.find('[role="alert"]').exists()).toBe(false);
+      expect(second.get('[role="alert"]').text()).toBe('更新に失敗しました');
+    });
+
+    it('追加の入口は見出しの右の 1 つだけ', () => {
+      subtasksState.subtasks.value = [subtask('a', '設計')];
+      const wrapper = mountPanel(false, {}, { statuses });
+
+      const addButtons = wrapper.findAll('button').filter((b) => b.text() === 'サブタスクを追加');
+      expect(addButtons).toHaveLength(1);
+      expect(addButtons[0].element.parentElement).toBe(wrapper.get('h2').element.parentElement);
+    });
   });
 
   it('Composerを開いた後に子タスクへ変わったら入力欄を閉じ、保持された送信も拒否する', async () => {
@@ -305,7 +421,7 @@ describe('TaskSubtaskPanel', () => {
     });
 
     it('自分自身・今の親・直下の子を候補から除く', async () => {
-      subtasksState.subtasks.value = [{ id: 'child-id', title: '子', status_id: 'status-todo' }];
+      subtasksState.subtasks.value = [subtask('child-id', '子')];
       stubApi((url) =>
         url.includes('/tasks/search')
           ? jsonResponse({

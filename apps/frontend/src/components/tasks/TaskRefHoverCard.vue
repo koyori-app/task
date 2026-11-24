@@ -6,10 +6,10 @@ import { useTaskRefCard } from '@/composables/useTaskRefCard';
 import type { TenantUuid } from '@/lib/api-ids';
 import {
   TASK_REF_CARD_SELECTOR,
+  taskRefCardProps,
   taskRefCardTarget,
   type TaskRefCardTarget,
 } from '@/lib/task-ref-card';
-import { formatDeadline, PRIORITY_CONFIG, type ApiPriority } from '@/lib/task-display';
 /** 本文のリンクを委譲で受ける。開くまで一覧も取得せず、閉じた後の取得は完了させる。 */
 const props = defineProps<{
   container: HTMLElement | null;
@@ -25,22 +25,9 @@ const label = computed(() => (target.value ? `${target.value.seqKey} のタス�
 const cardProps = computed(() => {
   if (!target.value) return null;
   const task = card.task.value;
-  const priority = task?.priority;
-  return {
-    ...target.value,
-    state: card.state.value,
-    projectName: card.projectName.value,
-    title: task?.title,
-    status: card.status.value,
-    priority:
-      priority && Object.hasOwn(PRIORITY_CONFIG, priority) ? (priority as ApiPriority) : null,
-    assignees: task?.assignees.map((a) => a.user),
-    archived: task?.is_archived,
-    deadline: formatDeadline(task?.soft_deadline ?? task?.hard_deadline, {
-      done: card.status.value?.done ?? !!task?.completed_at,
-      completedAt: task?.completed_at,
-    }),
-  };
+  // 取得できたら、一覧の行のカードと同じ形の中身にする
+  if (task) return taskRefCardProps(task, card.statuses.value, target.value);
+  return { ...target.value, state: card.state.value };
 });
 </script>
 <template>

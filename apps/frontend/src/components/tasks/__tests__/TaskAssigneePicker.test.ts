@@ -162,3 +162,23 @@ describe('TaskAssigneePicker の保存が遅れて反映される時', () => {
     expect(optionOf(wrapper, 'user-2').attributes('aria-selected')).toBe('false');
   });
 });
+
+describe('TaskAssigneePicker のトリガー', () => {
+  const selected = [members[0]];
+
+  it('既定は選んだ人のアバターの束で、読み上げ名は「担当者: 名前」', () => {
+    const wrapper = mountPicker({ members, selected });
+
+    expect(pickerTrigger(wrapper.element, '担当者')).toBeDefined();
+    expect(wrapper.findAllComponents({ name: 'UserAvatar' }).length).toBeGreaterThan(0);
+  });
+
+  it('icon は鉛筆だけのボタンで、読み上げ名は「担当者を編集」', () => {
+    const wrapper = mountPicker({ members, selected, trigger: 'icon' });
+
+    const trigger = pickerTrigger(wrapper.element, '担当者を編集');
+    // 選んだ人のアバターはトリガーに並べない（担当者は呼ぶ側が別に並べている）
+    expect(trigger.querySelector('img, [data-user-avatar]')).toBeNull();
+    expect(trigger.querySelector('svg')).not.toBeNull();
+  });
+});

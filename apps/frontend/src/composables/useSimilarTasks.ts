@@ -3,7 +3,8 @@ import { useQuery } from '@tanstack/vue-query';
 
 import { apiClient } from '@/lib/api-vue-query';
 
-const SIMILAR_TASKS_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/similar' as const;
+export const SIMILAR_TASKS_PATH =
+  '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/similar' as const;
 
 const SIMILAR_TASKS_LIMIT = 5;
 /** 1 文字では似ているかの判定にならないので問い合わせない */

@@ -3,9 +3,8 @@ import { useQuery } from '@tanstack/vue-query';
 import { useResolvedProjectId } from '@/composables/useResolvedProjectId';
 import { LIST_STATUSES_PATH } from '@/composables/useTaskDetail';
 import { fetchClient } from '@/lib/api-vue-query';
-import type { components } from '@/generated/api';
 import type { TenantUuid } from '@/lib/api-ids';
-import type { TaskRefCardTarget } from '@/lib/task-ref-card';
+import { taskRefCardStatus, type TaskRefCardTarget } from '@/lib/task-ref-card';
 
 import { GET_TASK_PATH, fetchTask } from '@/lib/task-query';
 
@@ -60,17 +59,13 @@ export function useTaskRefCard(
   });
   return {
     state,
-    projectName: computed(
-      () =>
-        resolved.projectsQuery.data.value?.find(
-          (p: components['schemas']['ProjectResponse']) => p.id === resolved.projectId.value,
-        )?.name ?? null,
-    ),
     task: computed(() => (state.value === 'ready' ? (taskQuery.data.value ?? null) : null)),
-    status: computed(() => {
-      if (state.value !== 'ready') return null;
-      const value = statusesQuery.data.value?.find((s) => s.id === taskQuery.data.value?.status_id);
-      return value ? { name: value.name, color: value.color, done: value.is_done_state } : null;
-    }),
+    /** カードのアイコン（円の埋まり方）を並び順から出すので、ステータスの一覧ごと返す */
+    statuses: computed(() => statusesQuery.data.value ?? []),
+    status: computed(() =>
+      state.value === 'ready'
+        ? taskRefCardStatus(statusesQuery.data.value ?? [], taskQuery.data.value?.status_id)
+        : null,
+    ),
   };
 }

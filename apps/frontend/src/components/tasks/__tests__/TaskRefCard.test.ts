@@ -6,20 +6,48 @@ const base = {
   seqKey: 'TASK-58',
   href: '/acme/projects/TASK/tasks/TASK-58',
 };
-it('タスクの属性とリンクを表示する', () => {
+it('タスクの属性を表示する。状態はアイコンで出し、名前は読み上げにだけ渡す', () => {
   const wrapper = mount(TaskRefCard, {
     props: {
       ...base,
       title: '題',
-      status: { name: '進行中', color: '#fff', done: false },
+      description: '1 行目\n2 行目\n3 行目',
+      status: {
+        name: '進行中',
+        color: '#fff',
+        done: false,
+        fill: { kind: 'partial', fraction: 0.5 },
+      },
       priority: 'High',
       deadline: { label: '今日', overdue: true },
+      labels: [{ id: 'l1', name: 'bug', color: '#f00' }],
       archived: true,
     },
   });
-  for (const text of ['題', '進行中', '高', '今日', 'アーカイブ済み', '担当者なし'])
+  for (const text of [
+    'TASK-58',
+    '題',
+    '1 行目',
+    '高',
+    '今日',
+    'bug',
+    'アーカイブ済み',
+    '担当者なし',
+  ])
     expect(wrapper.text()).toContain(text);
-  expect(wrapper.get('a.kfm-task-ref').attributes('href')).toBe(base.href);
+  // ステータスの名前は見える文字にしない
+  expect(wrapper.get('.sr-only').text()).toBe('進行中');
+  expect(wrapper.get('[data-task-status-icon]').attributes('data-fill')).toBe('partial');
+  // 説明は 2 行で切る（CSS の line-clamp。中身は全部渡す）
+  expect(wrapper.get('[data-task-ref-description]').classes()).toContain('description');
+  // プロジェクト名と「タスクを開く / Esc で閉じる」の行は出さない
+  expect(wrapper.find('a').exists()).toBe(false);
+  expect(wrapper.text()).not.toContain('Esc');
+});
+it('説明もラベルも無いタスクは、その行を出さない', () => {
+  const wrapper = mount(TaskRefCard, { props: { ...base, title: '題', labels: [] } });
+  expect(wrapper.find('[data-task-ref-description]').exists()).toBe(false);
+  expect(wrapper.find('.labels').exists()).toBe(false);
 });
 it.each([0, 3, 4])('担当者 %i 人の境界', (count) => {
   const wrapper = mount(TaskRefCard, {
@@ -31,9 +59,8 @@ it.each([0, 3, 4])('担当者 %i 人の境界', (count) => {
   expect(wrapper.findAllComponents({ name: 'UserAvatar' })).toHaveLength(Math.min(count, 3));
   expect(wrapper.text().includes('+1')).toBe(count === 4);
 });
-it.each(['loading', 'unavailable', 'error'] as const)('%s の文言とリンク', (state) => {
+it.each(['loading', 'unavailable', 'error'] as const)('%s の文言', (state) => {
   const wrapper = mount(TaskRefCard, { props: { ...base, state } });
-  expect(wrapper.find('a').exists()).toBe(state !== 'unavailable');
   expect(wrapper.text()).toContain(
     {
       loading: '読み込み中…',
