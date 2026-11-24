@@ -401,11 +401,31 @@ export const Narrow390: Story = {
   },
 };
 
+const KEEP_OPEN_KEY = 'create-task-keep-open';
+
+/**
+ * 「続けて作成」を切った状態に固定する。VRT は同じオリジンでストーリーを並べて描くので、
+ * KeepOpenAfterCreate が書いた値が残ったり、storage イベントで別のページから同期されたりする。
+ * 残った値を消し、ほかのページからの storage イベントもこのストーリーの間は届かないようにする
+ */
+function pinKeepOpenOff() {
+  localStorage.removeItem(KEEP_OPEN_KEY);
+  const block = (event: StorageEvent) => {
+    if (event.key === KEEP_OPEN_KEY) event.stopImmediatePropagation();
+  };
+  window.addEventListener('storage', block, { capture: true });
+  return () => window.removeEventListener('storage', block, { capture: true });
+}
+
 export const Success201: Story = {
   beforeEach() {
     const mock = mockCreate();
     createdSpy.mockClear();
-    return mock.restore;
+    const unpin = pinKeepOpenOff();
+    return () => {
+      unpin();
+      mock.restore();
+    };
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement.ownerDocument.body);
@@ -418,6 +438,7 @@ export const Success201: Story = {
     await user.type(canvas.getByLabelText('進捗率'), '30');
     await user.click(canvas.getByRole('button', { name: /^優先度/ }));
     await user.click(await canvas.findByRole('option', { name: '高' }));
+    await expect(canvas.getByRole('checkbox', { name: '続けて作成' })).not.toBeChecked();
     const submit = await canvas.findByRole('button', { name: '作成' });
     await waitFor(() => expect(submit).toBeEnabled());
     await user.click(submit);
@@ -446,7 +467,48 @@ export const Success201: Story = {
     });
     await expect(createdSpy).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'task-created', seq_id: 42 }),
+      { keepOpen: false },
     );
+  },
+};
+
+/** 「続けて作成」を入れて 1 件作ったあと。入力は空に戻り、作ったタスクへのリンクが出る */
+export const KeepOpenAfterCreate: Story = {
+  beforeEach() {
+    const mock = mockCreate();
+    createdSpy.mockClear();
+    openChangeSpy.mockClear();
+    localStorage.removeItem(KEEP_OPEN_KEY);
+    return () => {
+      mock.restore();
+      // ほかのストーリーへ入り切りを持ち越さない
+      localStorage.removeItem(KEEP_OPEN_KEY);
+    };
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const user = userEvent.setup();
+    await user.click(await canvas.findByRole('checkbox', { name: '続けて作成' }));
+    await user.type(await canvas.findByLabelText(/タイトル/), '新しいタスク');
+    await user.click(canvas.getByRole('button', { name: /^優先度/ }));
+    await user.click(await canvas.findByRole('option', { name: '高' }));
+    const submit = await canvas.findByRole('button', { name: '作成' });
+    await waitFor(() => expect(submit).toBeEnabled());
+    await user.click(submit);
+
+    const link = await canvas.findByRole('link', { name: 'ENG-42' });
+    await expect(link).toHaveAttribute('href', '/acme/projects/ENG/tasks/ENG-42');
+    await expect(link.closest('[role="status"]')).toHaveTextContent('タスクを作成しました');
+    await expect(createdSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'task-created', seq_id: 42 }),
+      { keepOpen: true },
+    );
+    await expect(openChangeSpy).not.toHaveBeenCalledWith(false);
+    const title = canvas.getByLabelText(/タイトル/);
+    await expect(title).toHaveValue('');
+    await waitFor(() => expect(title).toHaveFocus());
+    await expect(canvas.getByRole('button', { name: /^優先度/ })).toHaveTextContent('中');
+    await expect(canvas.getByRole('checkbox', { name: '続けて作成' })).toBeChecked();
   },
 };
 

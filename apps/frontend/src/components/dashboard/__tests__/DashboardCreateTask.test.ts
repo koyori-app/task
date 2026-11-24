@@ -32,7 +32,20 @@ const status = {
   is_default_done: false,
   created_at: '2026-09-22T00:00:00Z',
 };
-function setup(response: (request: Request) => Response, extra: { currentUserId?: string } = {}) {
+const otherProject = {
+  ...project,
+  id: '00000000-0000-4000-8000-000000000003',
+  key: 'OTH',
+  name: 'Other',
+};
+function setup(
+  response: (request: Request) => Response,
+  extra: {
+    currentUserId?: string;
+    projects?: (typeof project)[];
+    initialProjectId?: string;
+  } = {},
+) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (req: Request) => response(req)),
@@ -66,10 +79,44 @@ describe('DashboardCreateTask', () => {
       statuses: [status],
     });
     const task = { id: 't', seq_id: 12 };
-    editor.vm.$emit('created', task);
+    editor.vm.$emit('created', task, { keepOpen: false });
     await flushPromises();
-    expect(wrapper.emitted('created')).toEqual([[task, project]]);
+    expect(wrapper.emitted('created')).toEqual([[task, project, { keepOpen: false }]]);
     expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+  });
+  it('続けて作成するときは閉じずに created だけを上げる', async () => {
+    const wrapper = setup((req) => json(req.url.endsWith('/statuses') ? [status] : []));
+    await flushPromises();
+    button('次へ').click();
+    await flushPromises();
+    const editor = wrapper.getComponent({ name: 'CreateTaskDialog' });
+    const first = { id: 't1', seq_id: 12 };
+    const second = { id: 't2', seq_id: 13 };
+    editor.vm.$emit('created', first, { keepOpen: true });
+    editor.vm.$emit('created', second, { keepOpen: true });
+    await flushPromises();
+    expect(wrapper.emitted('created')).toEqual([
+      [first, project, { keepOpen: true }],
+      [second, project, { keepOpen: true }],
+    ]);
+    expect(wrapper.emitted('update:open')).toBeUndefined();
+    expect(wrapper.findComponent({ name: 'CreateTaskDialog' }).exists()).toBe(true);
+  });
+  it.each([
+    ['一覧にある ID ならそのプロジェクト', otherProject.id, 'OTH'],
+    ['一覧に無い ID なら先頭', 'missing', 'KOY'],
+    ['未指定なら先頭', undefined, 'KOY'],
+  ])('initialProjectId: %s を選ぶ', async (_, initialProjectId, expectedKey) => {
+    const wrapper = setup((req) => json(req.url.endsWith('/statuses') ? [status] : []), {
+      projects: [project, otherProject],
+      initialProjectId,
+    });
+    await flushPromises();
+    button('次へ').click();
+    await flushPromises();
+    expect(wrapper.getComponent({ name: 'CreateTaskDialog' }).props('projectKey')).toBe(
+      expectedKey,
+    );
   });
   it('現在のユーザーを担当者の初期値として渡す。未指定なら空', async () => {
     const respond = (req: Request) => json(req.url.endsWith('/statuses') ? [status] : []);

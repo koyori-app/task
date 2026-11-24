@@ -623,7 +623,9 @@ function taskKey(task: TaskRow) {
 
 type CreatedTask = components['schemas']['TaskDetailResponse'];
 
-function onTaskCreated(task: CreatedTask) {
+function onTaskCreated(task: CreatedTask, { keepOpen }: { keepOpen: boolean }) {
+  // 続けて作成するときは開いたままにする（一覧はダイアログが invalidate する）
+  if (keepOpen) return;
   isCreateDialogOpen.value = false;
   // 分割ビューが出せる画面では作成タスクを右ペインで開く。狭い画面は詳細ページへ遷移。
   if (canInline.value) {
