@@ -27,6 +27,7 @@ import {
   type DropdownItem,
 } from '@koyori-app/ui-vue';
 import UserSelector from '@/components/users/UserSelector.vue';
+import LabelMark from '@/components/tasks/LabelMark.vue';
 import MarkdownEditor from '@/components/markdown/MarkdownEditor.vue';
 import SimilarTasksList from '@/components/tasks/SimilarTasksList.vue';
 import TaskDatesChip from '@/components/tasks/TaskDatesChip.vue';
@@ -812,11 +813,7 @@ async function submit(event: SubmitEvent) {
                         :key="label.id"
                         class="inline-flex items-center gap-1"
                       >
-                        <span
-                          class="inline-block size-2 rounded-full"
-                          :style="{ backgroundColor: label.color }"
-                          aria-hidden="true"
-                        />
+                        <LabelMark :label="label" />
                         {{ label.name }}
                       </span>
                       <span v-if="selectedLabels.length > 3">+{{ selectedLabels.length - 3 }}</span>

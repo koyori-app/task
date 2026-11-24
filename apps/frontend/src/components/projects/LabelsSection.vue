@@ -4,6 +4,7 @@ import { PhPencilSimple, PhPlus, PhTrash } from '@phosphor-icons/vue';
 import { computed, ref } from 'vue';
 import { Button, Dialog } from '@koyori-app/ui-vue';
 import LabelFormDialog from '@/components/projects/LabelFormDialog.vue';
+import LabelMark from '@/components/tasks/LabelMark.vue';
 import { apiClient, projectLabelsQueryOptions } from '@/lib/api-vue-query';
 import type { ProjectUuid, TenantUuid } from '@/lib/api-ids';
 import type { components } from '@/generated/api';
@@ -104,11 +105,7 @@ async function confirmDelete() {
         <span
           class="inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium"
         >
-          <span
-            class="size-2 shrink-0 rounded-full"
-            :style="{ backgroundColor: label.color }"
-            aria-hidden="true"
-          />
+          <LabelMark :label="label" />
           {{ label.name }}
         </span>
         <span class="min-w-0 flex-1 truncate text-sm text-muted-foreground">

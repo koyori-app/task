@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import { SmilePlus } from '@lucide/vue';
 import { useForm } from '@tanstack/vue-form';
 import { type } from 'arktype';
 import { useQueryClient } from '@tanstack/vue-query';
 import { computed, ref, useId } from 'vue';
 import { Button, Dialog, Field, Input, Textarea } from '@koyori-app/ui-vue';
+import AnchoredPanel from '@/components/reactions/AnchoredPanel.vue';
+import EmojiPicker from '@/components/reactions/EmojiPicker.vue';
 import { apiClient } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
 
@@ -56,6 +59,7 @@ const schema = type({
   name: nonBlankName,
   color: COLOR_PATTERN,
   description: 'string',
+  icon_emoji: 'string | null',
 });
 
 const createMutation = apiClient.useMutation('post', LABELS_PATH);
@@ -68,6 +72,7 @@ const form = useForm({
     name: props.label?.name ?? '',
     color: props.label?.color ?? LABEL_COLOR_PRESETS[0],
     description: props.label?.description ?? '',
+    icon_emoji: (props.label?.icon_emoji ?? null) as string | null,
   },
   validators: { onSubmit: schema },
   onSubmit: async ({ value }) => {
@@ -79,16 +84,24 @@ const form = useForm({
     };
     try {
       if (props.label) {
+        // 絵文字は変えたときだけ送る。外したときは clear_icon_emoji で色の丸に戻す
+        const original = props.label.icon_emoji ?? null;
+        const emojiChange =
+          value.icon_emoji === original
+            ? {}
+            : value.icon_emoji
+              ? { icon_emoji: value.icon_emoji }
+              : { clear_icon_emoji: true };
         await updateMutation.mutateAsync({
           params: {
             path: { tenant_id: props.tenantId, project_id: props.projectId, id: props.label.id },
           },
-          body,
+          body: { ...body, ...emojiChange },
         });
       } else {
         await createMutation.mutateAsync({
           params: { path: { tenant_id: props.tenantId, project_id: props.projectId } },
-          body,
+          body: value.icon_emoji ? { ...body, icon_emoji: value.icon_emoji } : body,
         });
       }
       await queryClient.invalidateQueries({ queryKey: ['get', LABELS_PATH] });
@@ -98,6 +111,22 @@ const form = useForm({
     }
   },
 });
+
+// 絵文字があるあいだは色がどこにも出ないので、色の欄を隠す（値は保ったまま送る）
+const iconEmoji = form.useStore((state) => state.values.icon_emoji);
+
+const emojiButtonRef = ref<HTMLButtonElement | null>(null);
+const emojiPickerOpen = ref(false);
+
+function closeEmojiPicker(restoreFocus: boolean) {
+  emojiPickerOpen.value = false;
+  if (restoreFocus) emojiButtonRef.value?.focus();
+}
+
+function selectEmoji(emoji: string) {
+  form.setFieldValue('icon_emoji', emoji);
+  closeEmojiPicker(true);
+}
 
 function onClose() {
   // 保存リクエスト進行中はダイアログを閉じない（結果の見逃し防止）
@@ -110,7 +139,7 @@ function onClose() {
   <Dialog
     :open="true"
     :title="label ? 'ラベルを編集' : 'ラベルを作成'"
-    description="タスクの分類に使う名前・色・説明を設定します。"
+    description="タスクの分類に使う名前・絵文字または色・説明を設定します。"
     :on-close="onClose"
   >
     <form :id="formId" class="flex flex-col gap-4" @submit.prevent="form.handleSubmit">
@@ -131,7 +160,49 @@ function onClose() {
         </template>
       </form.Field>
 
-      <form.Field name="color">
+      <form.Field name="icon_emoji">
+        <template #default="{ field }">
+          <Field id="label-emoji" label="絵文字">
+            <div class="flex items-center gap-2">
+              <button
+                ref="emojiButtonRef"
+                type="button"
+                class="inline-flex size-9 items-center justify-center rounded-md border text-lg leading-none hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+                :aria-label="
+                  field.state.value ? `絵文字 ${field.state.value} を変更` : '絵文字を選ぶ'
+                "
+                aria-haspopup="dialog"
+                :aria-expanded="emojiPickerOpen"
+                @click="emojiPickerOpen = !emojiPickerOpen"
+              >
+                <span v-if="field.state.value" aria-hidden="true">{{ field.state.value }}</span>
+                <SmilePlus v-else :size="16" aria-hidden="true" />
+              </button>
+              <Button
+                v-if="field.state.value"
+                type="button"
+                variant="ghost"
+                label="絵文字なし"
+                @click="field.handleChange(null)"
+              />
+            </div>
+          </Field>
+          <AnchoredPanel
+            v-if="emojiPickerOpen"
+            :anchor="emojiButtonRef"
+            light-dismiss
+            @dismiss="closeEmojiPicker(false)"
+          >
+            <EmojiPicker
+              :selected="field.state.value ? [field.state.value] : []"
+              @select="selectEmoji"
+              @close="closeEmojiPicker(true)"
+            />
+          </AnchoredPanel>
+        </template>
+      </form.Field>
+
+      <form.Field v-if="!iconEmoji" name="color">
         <template #default="{ field }">
           <Field
             id="label-color"

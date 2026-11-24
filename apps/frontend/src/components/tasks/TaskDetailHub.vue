@@ -37,6 +37,7 @@ import type { ComponentPublicInstance } from 'vue';
 import type { components } from '@/generated/api';
 import type { EditableField, MutatingField } from '@/components/tasks/editable-field';
 import TaskRefHoverCard from '@/components/tasks/TaskRefHoverCard.vue';
+import LabelMark from '@/components/tasks/LabelMark.vue';
 import { hasTaskRefCards } from '@/lib/task-ref-card';
 import MentionHoverCard from '@/components/tasks/MentionHoverCard.vue';
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
@@ -1219,11 +1220,7 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                               :key="label.id"
                               class="inline-flex items-center gap-1.5 rounded bg-muted px-2 py-0.5 text-xs"
                             >
-                              <span
-                                class="inline-block size-2 rounded-full"
-                                :style="{ backgroundColor: label.color }"
-                                aria-hidden="true"
-                              />
+                              <LabelMark :label="label" />
                               {{ label.name }}
                             </span>
                           </span>
