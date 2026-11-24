@@ -1654,7 +1654,8 @@ export const ListViewOverlaySubtaskBack: Story = {
 
     await user.click(await canvas.findByRole('button', { name: 'OAuth 対応を実装する' }));
     const dialog = await screen.findByRole('dialog');
-    await user.click(await within(dialog).findByRole('button', { name: /PKCE の検証を追加する/ }));
+    // サブタスクは一覧の行で、題のリンクを押すと開く
+    await user.click(await within(dialog).findByRole('link', { name: 'PKCE の検証を追加する' }));
     await expectOverlayHeading('PKCE の検証を追加する');
 
     // 子で Esc → 閉じずに親へ戻る
