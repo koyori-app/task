@@ -64,6 +64,10 @@ import {
 import { PRIORITY_CONFIG } from '@/lib/task-display';
 import { DEADLINE_ORDER_MESSAGE } from '@/lib/task-date';
 
+// 「続けて作成」はブラウザに覚えさせるので、テストの間で持ち越さない
+beforeEach(() => localStorage.clear());
+afterEach(() => localStorage.clear());
+
 const statuses = [
   {
     id: 'status-1',
@@ -460,7 +464,7 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
         queryKey: ['get', '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/search'],
       });
     });
-    expect(wrapper.emitted('created')?.[0]).toEqual([createdTask]);
+    expect(wrapper.emitted('created')?.[0]).toEqual([createdTask, { keepOpen: false }]);
     wrapper.unmount();
   });
 
@@ -516,6 +520,127 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
     expect(getTitleInput().value).toBe('');
     expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
     wrapper.unmount();
+  });
+});
+
+describe('CreateTaskDialog 続けて作成', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    isHydrated.value = true;
+    isPending.value = false;
+    mutateAsync.mockReset();
+    mutateAsync.mockResolvedValue(createdTask);
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined as never);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  function keepOpenCheckbox() {
+    const input = [
+      ...document.body.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+    ].find((el) => el.closest('label')?.textContent?.includes('続けて作成'));
+    if (!input) throw new Error('keep-open checkbox not found');
+    return input;
+  }
+  const confirmOpen = () => !!findButton('破棄する')?.closest('dialog[open]');
+  const createdLink = () => document.body.querySelector<HTMLAnchorElement>('[role="status"] a');
+
+  async function create(title: string) {
+    await new DOMWrapper(getTitleInput()).setValue(title);
+    await new DOMWrapper(getForm()).trigger('submit');
+    await flushPromises();
+  }
+
+  it('入れて作成すると開いたまま入力を空に戻し、タイトルに戻って作ったタスクへのリンクを出す', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(keepOpenCheckbox()).setValue(true);
+    await wrapper
+      .getComponent({ name: 'MarkdownEditorStub' })
+      .vm.$emit('update:modelValue', '説明');
+    keepOpenCheckbox().focus();
+
+    await create('1 件目');
+
+    expect(wrapper.emitted('created')).toEqual([[createdTask, { keepOpen: true }]]);
+    expect(wrapper.emitted('update:open')).toBeUndefined();
+    expect(getTitleInput().value).toBe('');
+    expect(document.activeElement).toBe(getTitleInput());
+    expect(createdLink()?.closest('[role="status"]')?.textContent).toContain(
+      'タスクを作成しました',
+    );
+    expect(createdLink()?.textContent).toBe('PROJ-1');
+    expect(createdLink()?.getAttribute('href')).toBe('/acme/projects/PROJ/tasks/PROJ-1');
+    expect(createdLink()?.getAttribute('target')).toBe('_blank');
+    // 空に戻したので、閉じても破棄の確認は出ない
+    clickButton('取り消す');
+    await nextTick();
+    expect(confirmOpen()).toBe(false);
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+  });
+
+  it('入れずに作成すると keepOpen: false を上げる', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    expect(keepOpenCheckbox().checked).toBe(false);
+    await create('1 件目');
+    expect(wrapper.emitted('created')).toEqual([[createdTask, { keepOpen: false }]]);
+  });
+
+  it('続けて 2 件作ると created が 2 回上がり、表示のキーが 2 件目に替わる', async () => {
+    const second = { ...createdTask, id: 'task-2', seq_id: 2 };
+    mutateAsync.mockResolvedValueOnce(createdTask).mockResolvedValueOnce(second);
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(keepOpenCheckbox()).setValue(true);
+
+    await create('1 件目');
+    expect(createdLink()?.textContent).toBe('PROJ-1');
+    await create('2 件目');
+
+    expect(wrapper.emitted('created')).toEqual([
+      [createdTask, { keepOpen: true }],
+      [second, { keepOpen: true }],
+    ]);
+    expect(mutateAsync.mock.calls.map(([vars]) => vars.body.title)).toEqual(['1 件目', '2 件目']);
+    expect(createdLink()?.textContent).toBe('PROJ-2');
+  });
+
+  it('initialTitle で開いて続けて作成したあと、何も入れずに閉じても確認しない', async () => {
+    const wrapper = mountDialog(queryClient, { initialTitle: '選択範囲' });
+    await nextTick();
+    await new DOMWrapper(keepOpenCheckbox()).setValue(true);
+    await new DOMWrapper(getForm()).trigger('submit');
+    await flushPromises();
+    expect(mutateAsync.mock.calls[0]![0].body.title).toBe('選択範囲');
+    expect(getTitleInput().value).toBe('');
+
+    pressEscape();
+    await nextTick();
+    expect(confirmOpen()).toBe(false);
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+  });
+
+  it('入り切りはブラウザに残り、開き直しても入っている', async () => {
+    const first = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(keepOpenCheckbox()).setValue(true);
+    expect(localStorage.getItem('create-task-keep-open')).toBe('true');
+    first.unmount();
+    document.body.innerHTML = '';
+
+    const second = mountDialog(queryClient);
+    await nextTick();
+    expect(keepOpenCheckbox().checked).toBe(true);
+    await create('覚えた設定で作る');
+    expect(second.emitted('created')?.[0]).toEqual([createdTask, { keepOpen: true }]);
   });
 });
 
@@ -1915,7 +2040,7 @@ describe('CreateTaskDialog similar tasks', () => {
     await new DOMWrapper(getForm()).trigger('submit');
     await flushPromises();
     expect(mutateAsync).toHaveBeenCalledTimes(1);
-    expect(wrapper.emitted('created')?.[0]).toEqual([createdTask]);
+    expect(wrapper.emitted('created')?.[0]).toEqual([createdTask, { keepOpen: false }]);
     wrapper.unmount();
   });
 });

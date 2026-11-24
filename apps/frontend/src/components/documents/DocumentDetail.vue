@@ -392,8 +392,10 @@ useKeyboardShortcuts({
   },
 });
 
-async function onTaskCreated(task: CreatedTask) {
-  createTaskOpen.value = false;
+async function onTaskCreated(task: CreatedTask, { keepOpen }: { keepOpen: boolean }) {
+  // 続けて作成するときは開いたままにし、2 件目に選択範囲のタイトルを入れ直さない
+  if (keepOpen) createTaskTitle.value = '';
+  else createTaskOpen.value = false;
   // null はオフライン・切断で fetch が reject したとき
   const result = await fetchClient
     .POST(ATTACHMENTS_PATH, {

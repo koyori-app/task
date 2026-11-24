@@ -505,12 +505,68 @@ describe('DocumentDetail 通信の失敗', () => {
     const wrapper = mountDetail();
     await flushPromises();
 
-    wrapper.findComponent({ name: 'CreateTaskDialog' }).vm.$emit('created', { id: 'task-9' });
+    wrapper
+      .findComponent({ name: 'CreateTaskDialog' })
+      .vm.$emit('created', { id: 'task-9' }, { keepOpen: false });
     await flushPromises();
 
     expect(wrapper.get('[role="alert"]').text()).toBe(
       'タスクは作成しましたが、このドキュメントに結び付けられませんでした',
     );
+  });
+});
+
+describe('DocumentDetail のタスク作成', () => {
+  /** 本文の文字を選んで T で開く。作成ダイアログの initialTitle に選択範囲が入る */
+  async function openWithSelection(wrapper: ReturnType<typeof mountDetail>) {
+    await flushPromises();
+    const body = wrapper.get({ ref: 'body' }).element;
+    window.getSelection()!.selectAllChildren(body);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 't', cancelable: true }));
+    await flushPromises();
+    return wrapper.getComponent({ name: 'CreateTaskDialog' });
+  }
+  let attachments: string[];
+  beforeEach(() => {
+    attachments = [];
+    const original = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: Request | string, init?: RequestInit) => {
+      if (typeof input !== 'string' && input.method === 'POST') {
+        const path = new URL(input.url).pathname;
+        if (path.endsWith('/attachments')) {
+          attachments.push(path);
+          return Response.json({}, { status: 201 });
+        }
+      }
+      return original(input, init);
+    });
+  });
+
+  it('続けて作成するときは開いたまま結び付け、2 件目のタイトルを空にする', async () => {
+    const wrapper = mountDetail();
+    const dialog = await openWithSelection(wrapper);
+    expect(dialog.props('open')).toBe(true);
+    expect(dialog.props('initialTitle')).not.toBe('');
+
+    dialog.vm.$emit('created', { id: 'task-9' }, { keepOpen: true });
+    await flushPromises();
+
+    expect(dialog.props('open')).toBe(true);
+    expect(dialog.props('initialTitle')).toBe('');
+    expect(attachments).toEqual([
+      '/api/v1/tenants/tenant-1/projects/project-1/tasks/task-9/attachments',
+    ]);
+  });
+
+  it('続けて作成しないときは閉じて結び付ける', async () => {
+    const wrapper = mountDetail();
+    const dialog = await openWithSelection(wrapper);
+
+    dialog.vm.$emit('created', { id: 'task-9' }, { keepOpen: false });
+    await flushPromises();
+
+    expect(dialog.props('open')).toBe(false);
+    expect(attachments).toHaveLength(1);
   });
 });
 

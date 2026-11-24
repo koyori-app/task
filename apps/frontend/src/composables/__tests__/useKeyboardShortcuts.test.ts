@@ -106,3 +106,67 @@ describe('useKeyboardShortcuts', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 });
+
+function mountShortcuts(bindings: Record<string, () => void>, options?: { fallback?: boolean }) {
+  return mount(
+    defineComponent({
+      setup() {
+        useKeyboardShortcuts(bindings, options);
+        return () => h('div');
+      },
+    }),
+    { attachTo: document.body },
+  );
+}
+
+describe('useKeyboardShortcuts の fallback', () => {
+  // クライアント遷移の後はレイアウト（fallback）が先に mount されるので、両方の順を見る
+  it.each([
+    ['画面が先', false],
+    ['fallback が先', true],
+  ])('同じキーを画面も持つときは画面だけを呼ぶ（%s）', (_, fallbackFirst) => {
+    const primary = vi.fn();
+    const fallback = vi.fn();
+    if (fallbackFirst) mountShortcuts({ t: fallback }, { fallback: true });
+    mountShortcuts({ t: primary });
+    if (!fallbackFirst) mountShortcuts({ t: fallback }, { fallback: true });
+    press();
+    expect(primary).toHaveBeenCalledOnce();
+    expect(fallback).not.toHaveBeenCalled();
+  });
+
+  it('画面の handler が何もしなくても fallback は呼ばない', () => {
+    const fallback = vi.fn();
+    mountShortcuts({ t: fallback }, { fallback: true });
+    mountShortcuts({ t: () => {} });
+    press();
+    expect(fallback).not.toHaveBeenCalled();
+  });
+
+  it('画面を unmount すると fallback を呼ぶ', () => {
+    const fallback = vi.fn();
+    mountShortcuts({ t: fallback }, { fallback: true });
+    const page = mountShortcuts({ t: vi.fn() });
+    page.unmount();
+    press();
+    expect(fallback).toHaveBeenCalledOnce();
+  });
+
+  it('fallback だけなら呼び、既定の動作を止める', () => {
+    const fallback = vi.fn();
+    mountShortcuts({ t: fallback }, { fallback: true });
+    const event = press();
+    expect(fallback).toHaveBeenCalledOnce();
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('画面が別のキーだけを持つときは fallback を呼ぶ', () => {
+    const fallback = vi.fn();
+    const other = vi.fn();
+    mountShortcuts({ t: fallback }, { fallback: true });
+    mountShortcuts({ n: other });
+    press();
+    expect(fallback).toHaveBeenCalledOnce();
+    expect(other).not.toHaveBeenCalled();
+  });
+});
