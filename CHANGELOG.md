@@ -2,6 +2,19 @@
 
 このファイルは git-cliff（cliff.toml）が生成する。手で編集しない。
 
+## [0.1.57](https://github.com/koyori-app/task/compare/v0.1.56...v0.1.57) - 2026-11-25
+
+レビュー画面を PR の一覧と詳細の 2 画面に作り直し、タスク作成ダイアログで続けて作成できテナント内のどのページからも T で作れるようにし、MCP に仕様書の検索と取得のツールを足し、検索欄で値の候補を続けて複数選べるようにした
+
+### 機能追加
+
+- **mcp**: 仕様書の検索と取得のツールを足す ([TASK-570](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-570)) ([#1238](https://github.com/koyori-app/task/pull/1238))
+- **frontend**: レビュー画面を PR の一覧と PR の詳細の 2 画面に作り直す ([TASK-585](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-585)) ([#1251](https://github.com/koyori-app/task/pull/1251))
+- **frontend**: タスク作成ダイアログで続けて作成でき、テナント内のどのページからも T で作れるようにする ([TASK-548](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-548))（[TASK-582](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-582) を解決） ([#1293](https://github.com/koyori-app/task/pull/1293))
+
+### 修正
+
+- **frontend**: 検索欄で値の候補を選んでも確定せず、続けて複数の値を選べるようにする ([TASK-584](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-584)) ([#1292](https://github.com/koyori-app/task/pull/1292))
 ## [0.1.56](https://github.com/koyori-app/task/compare/v0.1.55...v0.1.56) - 2026-11-24
 
 ガントを横スクロールとスワイプで送れるようにし、Drive の Markdown 本文をプロジェクト内で検索できるようにし、MCP に CLI の残りの操作とレビュー系のツールを足して名前での指定を受けるようにし、コメントと新規タスクを Ctrl+Enter で送れるようにし、細かいデザインの不具合と OAuth の同意の応答を直した
