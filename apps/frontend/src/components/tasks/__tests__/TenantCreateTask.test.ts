@@ -135,7 +135,7 @@ describe('TenantCreateTask', () => {
   });
 
   it.each([true, false])(
-    '作成したらマイタスクとカレンダーを取り直す（keepOpen: %s）',
+    '作成したらマイタスクとカレンダー・ガントを取り直す（keepOpen: %s）',
     async (keepOpen) => {
       const { wrapper, client } = setup();
       await flushPromises();
@@ -145,6 +145,7 @@ describe('TenantCreateTask', () => {
       expect(invalidate.mock.calls.map(([filters]) => filters)).toEqual([
         { queryKey: ['get', '/v1/tenants/{tenant_id}/users/me/tasks'] },
         { queryKey: ['get', '/v1/tenants/{tenant_id}/schedule'] },
+        { queryKey: ['get', '/v1/tenants/{tenant_id}/schedule/unscheduled'] },
       ]);
     },
   );

@@ -8,6 +8,7 @@ import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts';
 import { useResolvedTenantId } from '@/composables/useResolvedTenantId';
 import type { components } from '@/generated/api';
 import { useMeQuery, useProjectsQuery } from '@/lib/api-vue-query';
+import { UNSCHEDULED_PATH } from '@/lib/gantt/unscheduled';
 
 /**
  * テナント配下のどのページからも T でプロジェクトを選んでタスクを作る入口。
@@ -46,11 +47,13 @@ useKeyboardShortcuts(
   { fallback: true },
 );
 
-// タスク一覧と検索は CreateTaskDialog が更新する。ここではマイタスクとカレンダーを足す
+// タスク一覧と検索は CreateTaskDialog が更新する。ここではマイタスクとカレンダー・ガントを足す
+// （ガントの「期間未設定」は schedule とは別のキーなので、日付の無いタスクはそちらで出る）
 function onCreated() {
   void Promise.all([
     queryClient.invalidateQueries({ queryKey: ['get', MY_TASKS_PATH] }),
     queryClient.invalidateQueries({ queryKey: ['get', SCHEDULE_PATH] }),
+    queryClient.invalidateQueries({ queryKey: ['get', UNSCHEDULED_PATH] }),
   ]);
 }
 </script>
