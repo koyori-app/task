@@ -120,7 +120,8 @@ function select(value: string) {
   const result = applySuggestion(draft.value, context.value, candidate);
   draft.value = result.draft;
   caret.value = result.caret;
-  syncCaret(result.caret);
+  // 確定する候補では位置を渡さない。親が式を返すと下書きは語だけになり、位置がずれるため
+  syncCaret(result.commit ? undefined : result.caret);
   if (result.commit) commit();
 }
 function remove(index: number) {

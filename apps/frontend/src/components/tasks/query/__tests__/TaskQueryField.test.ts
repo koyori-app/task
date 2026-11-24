@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { defineComponent, h, ref } from 'vue';
+import { flushPromises, mount } from '@vue/test-utils';
 import TaskQueryField from '../TaskQueryField.vue';
 describe('Enter confirms the task query', () => {
   it('does not commit while typing or composing, commits on Enter', async () => {
@@ -127,6 +128,30 @@ describe('Enter confirms the task query', () => {
     await input.trigger('keydown', { key });
     await input.trigger('keydown', { key: 'Enter' });
     expect(w.emitted('update:modelValue')?.at(-1)).toEqual([out]);
+    w.unmount();
+  });
+  it('leaves the caret at the end of the remaining words when a picked value confirms', async () => {
+    // 親が v-model で同じ tick のうちに式を返すと、下書きは語だけになる
+    const Host = defineComponent(() => {
+      const query = ref('');
+      return () =>
+        h(TaskQueryField, {
+          modelValue: query.value,
+          'onUpdate:modelValue': (v: string) => (query.value = v),
+          suggestData,
+        });
+    });
+    const w = mount(Host, { attachTo: document.body });
+    const input = w.get('input');
+    await input.trigger('focusin');
+    await input.setValue('sort:c あいうえおかきくけこさしすせそ');
+    input.element.setSelectionRange(6, 6);
+    await input.trigger('keyup');
+    await input.trigger('keydown', { key: 'ArrowDown' });
+    await input.trigger('keydown', { key: 'Enter' });
+    await flushPromises();
+    expect(input.element.value).toBe('あいうえおかきくけこさしすせそ');
+    expect(input.element.selectionStart).toBe(15);
     w.unmount();
   });
   it('picks a value before a trailing word and keeps the caret after the value', async () => {
