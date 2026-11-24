@@ -128,6 +128,7 @@ mod tests {
             color: "#000000".into(),
             icon_url: None,
             project_id: None,
+            icon_emoji: None,
         }
     }
 

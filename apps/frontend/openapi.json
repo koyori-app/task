@@ -29207,6 +29207,9 @@
           "description": {
             "type": "string"
           },
+          "icon_emoji": {
+            "type": ["string", "null"]
+          },
           "icon_url": {
             "type": ["string", "null"]
           },
@@ -30648,6 +30651,9 @@
           "description": {
             "type": "string"
           },
+          "icon_emoji": {
+            "type": ["string", "null"]
+          },
           "name": {
             "type": "string"
           }
@@ -30662,6 +30668,10 @@
           },
           "description": {
             "type": "string"
+          },
+          "icon_emoji": {
+            "type": ["string", "null"],
+            "description": "色の丸の代わりに出す絵文字。無ければ画面は色の丸を出す"
           },
           "icon_url": {
             "type": ["string", "null"]
@@ -34082,6 +34092,10 @@
       "UpdateLabelRequest": {
         "type": "object",
         "properties": {
+          "clear_icon_emoji": {
+            "type": "boolean",
+            "description": "絵文字を外して色の丸に戻す。`icon_emoji` より優先する"
+          },
           "clear_icon_url": {
             "type": "boolean"
           },
@@ -34089,6 +34103,9 @@
             "type": ["string", "null"]
           },
           "description": {
+            "type": ["string", "null"]
+          },
+          "icon_emoji": {
             "type": ["string", "null"]
           },
           "icon_url": {
