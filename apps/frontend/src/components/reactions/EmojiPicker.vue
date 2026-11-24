@@ -20,6 +20,7 @@ import {
   emojiKey,
   frequentEmojiEntries,
   loadEmojiData,
+  MAX_EMOJI_VERSION,
   readEmojiUseCounts,
   recordEmojiUse,
   searchEmoji,
@@ -44,7 +45,14 @@ const CATEGORY_ICONS: Record<EmojiCategoryKey, Component> = {
   flags: Flag,
 };
 
-const props = withDefaults(defineProps<{ selected?: string[] }>(), { selected: () => [] });
+const props = withDefaults(
+  defineProps<{
+    selected?: string[];
+    /** true なら Unicode の版で絞らない（OS で描けない絵文字も出る）。既定は MAX_EMOJI_VERSION まで */
+    allVersions?: boolean;
+  }>(),
+  { selected: () => [], allVersions: false },
+);
 
 const emit = defineEmits<{ select: [emoji: string]; close: [] }>();
 
@@ -67,16 +75,24 @@ async function load() {
 const isSearching = computed(() => query.value.trim().length > 0);
 const selectedKeys = computed(() => new Set(props.selected.map(emojiKey)));
 
+function inVersion(entry: EmojiEntry) {
+  return props.allVersions || entry.version <= MAX_EMOJI_VERSION;
+}
+
 /**
  * 「よく使う」は開いた時の回数で固定する。`localStorage` は反応しないので、データが同じ間は
  * この computed が再計算されず、開いている間に並びが変わらない。
  */
 const frequent = computed(() =>
-  emojiDataset.value ? frequentEmojiEntries(emojiDataset.value, readEmojiUseCounts()) : [],
+  emojiDataset.value
+    ? frequentEmojiEntries(emojiDataset.value, readEmojiUseCounts(), inVersion)
+    : [],
 );
 
 const results = computed(() =>
-  emojiDataset.value && isSearching.value ? searchEmoji(emojiDataset.value, query.value) : [],
+  emojiDataset.value && isSearching.value
+    ? searchEmoji(emojiDataset.value, query.value).filter(inVersion)
+    : [],
 );
 
 const sections = computed(() => {
@@ -101,7 +117,10 @@ const sections = computed(() => {
       category: 'frequent' as EmojiCategoryKey,
       entries: frequent.value,
     },
-    ...dataset.sections,
+    ...dataset.sections.flatMap((section) => {
+      const entries = section.entries.filter(inVersion);
+      return entries.length > 0 ? [{ ...section, entries }] : [];
+    }),
   ];
 });
 

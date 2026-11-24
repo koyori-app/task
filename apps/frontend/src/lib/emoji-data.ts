@@ -7,8 +7,11 @@
  */
 import { shallowRef } from 'vue';
 
-/** これより新しい Unicode 版の絵文字は OS で描けないことが多いので出さない */
-const MAX_EMOJI_VERSION = 15;
+/**
+ * これより新しい Unicode 版の絵文字は OS で描けないことが多いので、リアクションのピッカーには出さない。
+ * データには全版を入れ、上限はピッカーが用途ごとに決める（ラベルは版で絞らない）
+ */
+export const MAX_EMOJI_VERSION = 15;
 
 export const EMOJI_CATEGORIES = [
   { key: 'frequent', label: 'よく使う', groups: [] },
@@ -32,6 +35,8 @@ export interface EmojiEntry {
   shortcode: string | null;
   /** 検索用に正規化した日本語名・タグ・shortcode */
   searchText: string;
+  /** Unicode の絵文字の版 */
+  version: number;
 }
 
 interface EmojiSection {
@@ -78,7 +83,7 @@ function buildEmojiDataset(
   const byGroup = new Map<number, EmojiEntry[]>();
   const byEmoji = new Map<string, EmojiEntry>();
   const usable = raw
-    .filter((item) => item.group !== undefined && item.version <= MAX_EMOJI_VERSION)
+    .filter((item) => item.group !== undefined)
     .toSorted((a, b) => (a.order ?? 0) - (b.order ?? 0));
   for (const item of usable) {
     const codes = [shortcodes[item.hexcode] ?? []].flat();
@@ -88,6 +93,7 @@ function buildEmojiDataset(
       label: item.label,
       shortcode: codes[0] ?? null,
       searchText: normalizeForSearch([item.label, ...(item.tags ?? []), ...codes].join('\n')),
+      version: item.version,
     };
     const group = item.group as number;
     byGroup.set(group, [...(byGroup.get(group) ?? []), entry]);
@@ -160,15 +166,20 @@ export function recordEmojiUse(emoji: string): void {
   }
 }
 
-/** 回数の多い順。同数は既定の並び、使ったことの無いものは既定の並びで埋める */
+/**
+ * 回数の多い順。同数は既定の並び、使ったことの無いものは既定の並びで埋める。
+ * `include` で除く項目は、件数で切る前に除く（版の上限で減っても 16 件を保つ）
+ */
 export function frequentEmojiEntries(
   dataset: EmojiDataset,
   counts: Record<string, number>,
+  include: (entry: EmojiEntry) => boolean = () => true,
 ): EmojiEntry[] {
   const keys = [...new Set([...DEFAULT_FREQUENT_EMOJI.map(emojiKey), ...Object.keys(counts)])];
   return keys
     .toSorted((a, b) => (counts[b] ?? 0) - (counts[a] ?? 0))
     .flatMap((key) => dataset.byEmoji.get(key) ?? [])
+    .filter(include)
     .slice(0, FREQUENT_EMOJI_COUNT);
 }
 

@@ -405,8 +405,8 @@ describe('LabelsSection', () => {
     expect(bugRow?.querySelector('.rounded-full[style*="background-color"]')).not.toBeNull();
   });
 
-  it('作成で絵文字を選ぶと色の欄が消え、POST に icon_emoji が入る', async () => {
-    createMutateAsync.mockResolvedValue({ ...bugLabel, name: 'design', icon_emoji: '🎨' });
+  it('作成で絵文字を選ぶと色の欄が消え、POST に icon_emoji が入る（Unicode 16 の 🫟 も選べる）', async () => {
+    createMutateAsync.mockResolvedValue({ ...bugLabel, name: 'design', icon_emoji: '🫟' });
     mountView();
     await flushPromises();
 
@@ -414,8 +414,8 @@ describe('LabelsSection', () => {
     await flushPromises();
     expect(document.body.querySelector('#label-color')).not.toBeNull();
 
-    await pickEmoji('art', '🎨');
-    expect(document.body.querySelector('button[aria-label="絵文字 🎨 を変更"]')).not.toBeNull();
+    await pickEmoji('splatter', '🫟');
+    expect(document.body.querySelector('button[aria-label="絵文字 🫟 を変更"]')).not.toBeNull();
     expect(document.body.querySelector('#label-color')).toBeNull();
 
     await input('label-name').setValue('design');
@@ -424,7 +424,7 @@ describe('LabelsSection', () => {
 
     expect(createMutateAsync).toHaveBeenCalledWith({
       params: { path: { tenant_id: TENANT_UUID, project_id: PROJECT_UUID } },
-      body: { name: 'design', color: '#ef4444', description: '', icon_emoji: '🎨' },
+      body: { name: 'design', color: '#ef4444', description: '', icon_emoji: '🫟' },
     });
   });
 

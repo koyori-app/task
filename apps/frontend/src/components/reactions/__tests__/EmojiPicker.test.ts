@@ -60,6 +60,28 @@ describe('EmojiPicker', () => {
     expect(emoji).not.toContain('🏽');
   });
 
+  it('既定は Unicode 15 より新しい絵文字を検索にも「よく使う」にも出さない', async () => {
+    localStorage.setItem(RECENT_EMOJI_STORAGE_KEY, JSON.stringify({ '🫟': 5 }));
+    const wrapper = await mountPicker();
+    const frequent = wrapper.findAll('[role="rowgroup"]')[0];
+    expect(frequent?.findAll('[role="gridcell"]')).toHaveLength(16);
+    expect(frequent?.text()).not.toContain('🫟');
+    await search(wrapper, 'splatter');
+    expect(cellEmoji(wrapper)).toEqual([]);
+  });
+
+  it('allVersions なら Unicode 16 の絵文字も一覧・検索・「よく使う」に出て選べる', async () => {
+    localStorage.setItem(RECENT_EMOJI_STORAGE_KEY, JSON.stringify({ '🫟': 5 }));
+    const wrapper = mount(EmojiPicker, { attachTo: document.body, props: { allVersions: true } });
+    await flushPromises();
+    expect(cellEmoji(wrapper)[0]).toBe('🫟');
+    expect(cellEmoji(wrapper)).toContain('🫩');
+    await search(wrapper, 'splatter');
+    expect(cellEmoji(wrapper)).toEqual(['🫟']);
+    await wrapper.get('[role="gridcell"]').trigger('click');
+    expect(wrapper.emitted('select')).toEqual([['🫟']]);
+  });
+
   it('localStorage が使えなくても既定の並びで動き、選べる', async () => {
     vi.stubGlobal('localStorage', {
       getItem: () => {

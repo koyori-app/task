@@ -193,7 +193,9 @@ function onClose() {
             light-dismiss
             @dismiss="closeEmojiPicker(false)"
           >
+            <!-- ラベルは版で絞らない（タスクの例の 🫟 は Unicode 16） -->
             <EmojiPicker
+              all-versions
               :selected="field.state.value ? [field.state.value] : []"
               @select="selectEmoji"
               @close="closeEmojiPicker(true)"
