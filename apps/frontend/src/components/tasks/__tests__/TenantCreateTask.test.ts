@@ -142,9 +142,9 @@ describe('TenantCreateTask', () => {
       const invalidate = vi.spyOn(client, 'invalidateQueries');
       creator(wrapper).vm.$emit('created', { id: 't', seq_id: 1 }, koy, { keepOpen });
       await flushPromises();
-      expect(invalidate.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([
-        ['get', '/v1/tenants/{tenant_id}/users/me/tasks'],
-        ['get', '/v1/tenants/{tenant_id}/schedule'],
+      expect(invalidate.mock.calls.map(([filters]) => filters)).toEqual([
+        { queryKey: ['get', '/v1/tenants/{tenant_id}/users/me/tasks'] },
+        { queryKey: ['get', '/v1/tenants/{tenant_id}/schedule'] },
       ]);
     },
   );
