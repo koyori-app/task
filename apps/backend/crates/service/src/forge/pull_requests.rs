@@ -393,7 +393,8 @@ pub async fn unlink(
     if deleted.rows_affected == 0 {
         return Ok(false);
     }
-    // 役割の上書きはリンクと同じ寿命。残すと、自動リンクが戻ったときに前の上書きが生き返る
+    // 手で外したら役割の上書きも消す。残すと、自動リンクが戻ったときに前の上書きが生き返る。
+    // PR イベントがリンクを消す経路（`apply_pull_request`）は上書きに触れないので、そちらでは残る
     forge_pull_request_roles::Entity::delete_many()
         .filter(forge_pull_request_roles::Column::PullRequestId.eq(pull_request_id))
         .filter(forge_pull_request_roles::Column::TaskId.eq(task_id))
