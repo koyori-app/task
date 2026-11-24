@@ -20,13 +20,14 @@ use uuid::Uuid;
 const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
 
 /// docs/dev/features/mcp.md の API の表にあるツール。増減したら `tools_list_returns_every_tool` が落ちる
-const TOOL_NAMES: [&str; 31] = [
+const TOOL_NAMES: [&str; 33] = [
     "add_task_comment",
     "bulk_create_tasks",
     "carry_over_review",
     "complete_sprint",
     "create_task",
     "delete_task",
+    "get_document",
     "get_notification_settings",
     "get_review_summary",
     "get_sprint",
@@ -44,6 +45,7 @@ const TOOL_NAMES: [&str; 31] = [
     "list_tenants",
     "mark_all_notifications_read",
     "mark_notification_read",
+    "search_documents",
     "search_tasks",
     "start_sprint",
     "submit_review",
@@ -256,7 +258,7 @@ async fn request_without_credentials_is_401_with_www_authenticate() {
             .and_then(|value| value.to_str().ok()),
         Some(
             format!(
-                "Bearer resource_metadata=\"{origin}/.well-known/oauth-protected-resource/api/mcp\", scope=\"read:tenant read:project read:task write:task read:milestone read:sprint read:review write:review\""
+                "Bearer resource_metadata=\"{origin}/.well-known/oauth-protected-resource/api/mcp\", scope=\"read:tenant read:project read:task write:task read:milestone read:sprint read:review write:review read:drive\""
             )
             .as_str()
         )
@@ -280,7 +282,7 @@ async fn unknown_bearer_is_401() {
             .and_then(|value| value.to_str().ok()),
         Some(
             format!(
-                "Bearer error=\"invalid_token\", resource_metadata=\"{origin}/.well-known/oauth-protected-resource/api/mcp\", scope=\"read:tenant read:project read:task write:task read:milestone read:sprint read:review write:review\""
+                "Bearer error=\"invalid_token\", resource_metadata=\"{origin}/.well-known/oauth-protected-resource/api/mcp\", scope=\"read:tenant read:project read:task write:task read:milestone read:sprint read:review write:review read:drive\""
             )
             .as_str()
         )
@@ -413,6 +415,8 @@ async fn tools_list_returns_every_tool() {
             .as_bool()
     };
     assert_eq!(read_only("get_task"), Some(true));
+    assert_eq!(read_only("get_document"), Some(true));
+    assert_eq!(read_only("search_documents"), Some(true));
     assert_ne!(read_only("create_task"), Some(true));
     assert_eq!(read_only("list_review_findings"), Some(true));
     assert_ne!(read_only("submit_review"), Some(true));
@@ -429,6 +433,20 @@ async fn tools_list_returns_every_tool() {
     assert!(properties.contains_key("title"), "{properties:?}");
     assert!(properties.contains_key("project"), "{properties:?}");
     assert!(!properties.contains_key("task"), "{properties:?}");
+
+    // 文書を返すツールは、返す文が信頼しないデータであることを説明に書く
+    for name in ["search_documents", "get_document"] {
+        let description = tools
+            .iter()
+            .find(|tool| tool["name"] == name)
+            .expect("tool")["description"]
+            .as_str()
+            .expect("description");
+        assert!(
+            description.contains("untrusted data"),
+            "{name}: {description}"
+        );
+    }
 }
 
 #[tokio::test]

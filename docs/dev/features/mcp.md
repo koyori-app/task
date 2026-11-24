@@ -1,6 +1,6 @@
 ---
 title: MCP サーバー
-description: MCP クライアントが PAT か OAuth でタスクを読み書きできるエンドポイント
+description: MCP クライアントが PAT か OAuth でタスクを読み書きし、ドライブの Markdown を読めるエンドポイント
 status: partial
 updated: 2026-11-21
 sidebar:
@@ -10,10 +10,10 @@ sidebar:
 ## 概要
 
 backend は MCP（Model Context Protocol）のサーバーを `POST /mcp` で公開する。
-Claude Code などの MCP クライアントは、URL と PAT を設定するか、OAuth で接続を許可すると、タスクを読み書きできる。
+Claude Code などの MCP クライアントは、URL と PAT を設定するか、OAuth で接続を許可すると、タスクを読み書きでき、ドライブの Markdown の文書を検索して読める。
 CLI を入れにくい環境で、CLI の代わりに使うためのものである。
 OAuth の認可サーバーも backend が兼ね、claude.ai、Claude Code、ChatGPT、Codex からコネクタとして接続できる。
-ツールは 31 個で、タスクを実装する流れで使うもの、レビュー指摘を扱うもの、タスクの一括作成と削除、自分のタスク、スプリント、通知、テナントの一覧がある。
+ツールは 33 個で、タスクを実装する流れで使うもの、レビュー指摘を扱うもの、タスクの一括作成と削除、自分のタスク、スプリント、通知、テナントの一覧、ドライブの文書を読むものがある。
 
 ## 用語
 
@@ -60,7 +60,7 @@ SDK の rmcp 3.11 が対応するバージョンの要求を受ける。
 
 | 要求 | `WWW-Authenticate` |
 |---|---|
-| `Authorization` が無い | `Bearer resource_metadata="<公開の origin>/.well-known/oauth-protected-resource/api/mcp", scope="read:tenant read:project read:task write:task read:milestone read:sprint read:review write:review"` |
+| `Authorization` が無い | `Bearer resource_metadata="<公開の origin>/.well-known/oauth-protected-resource/api/mcp", scope="read:tenant read:project read:task write:task read:milestone read:sprint read:review write:review read:drive"` |
 | Bearer はあるが無効 | 上の値の `Bearer` の直後に `error="invalid_token", ` を足したもの |
 
 ### OAuth での接続
@@ -205,12 +205,22 @@ PAT は `~/.claude.json` に平文で保存され、シェルの履歴にも残�
 文面は API の状態コードと `message` を並べたもので、例は `403 forbidden`、`404 not-found`、`409 github-integration-missing` である。
 引数の誤りは API を呼ぶ前に `parent_task_id must be a UUID` や `findings[1].line: range min: 1` のような文面で返す。
 
+`get_document` だけは JSON ではなく、ファイルの Markdown の本文をそのまま返す。
+Markdown でないファイルは `The file is not a Markdown document` で断る。ファイルの種類はアップロードした利用者の申告なので、文面には入れない。
+4 MiB を超える本文は返さず、`200 The response is larger than 4194304 bytes` を返す。
+本文を最後まで読めなかったときは `200 The response body could not be read` を返す。
+UTF-8 として読めない本文は `200 The response is not valid UTF-8` を返す。
+
+`search_documents` のファイル名、見出しの経路、抜粋と、`get_document` の本文は、利用者が書いた文である。
+文書に紛れた指示にクライアントが従わないよう、2 つのツールの説明とサーバーの説明に、信頼しないデータとして扱うことを書いている。
+
 任意の引数のうち `tenant`、`project`、`status`、`priority`、`q`、`sort`、`filter`、`cursor`、`task_type`、`milestone`、`sprint`、`file`、`repo`、`from_repo`、ID、日付は、空文字を省略として読む。
 `title`、`description`、`body`、`summary`、`note` は空文字のまま API へ渡す。
 
 ### テナントの決め方
 
-`whoami`、`list_tenants`、`list_notifications`、`mark_notification_read`、`mark_all_notifications_read` を除く全ツールは引数 `tenant` を受ける。
+`whoami`、`get_document`、`list_tenants`、`list_notifications`、`mark_notification_read`、`mark_all_notifications_read` を除く全ツールは引数 `tenant` を受ける。
+`get_document` はファイルの UUID だけで引き、テナントとプロジェクトはファイル自身のものを使う。
 `get_notification_settings` と `update_notification_settings` は、`project` が UUID のとき `tenant` を読まない。
 
 | `tenant` | テナント |
@@ -361,6 +371,8 @@ UUID は確かめずに API へ渡す。
 | `mark_all_notifications_read` | なし | `PATCH /v1/users/me/notifications/read-all` |
 | `get_notification_settings` | `project` | `GET /v1/users/me/notification-settings/{project}` |
 | `update_notification_settings` | `project`、`in_app_events`、`email_events` | 上の `GET` と `PUT` |
+| `search_documents` | `project`、`q`、`limit`、`offset` | `GET …/projects/{project}/documents/search` |
+| `get_document` | `document` | `GET /v1/drive/files/{document}/content` |
 
 `create_task` と `update_task` は、`_id` の付いた旧名（`label_ids`、`assignee_ids`、`task_type_id`、`milestone_id`、`sprint_id`、`add_label_ids`、`remove_label_ids`）も同じ引数として受ける。
 
@@ -379,6 +391,10 @@ UUID は確かめずに API へ渡す。
 `submit_review` は API を呼ぶ前に、`head_sha` が 40 桁の小文字 16 進であること、`title` と `body` が空白だけでないこと、起票の上限と範囲を確かめる。`head_sha` の前後の空白は落として読む。
 `update_review_finding` は API を呼ぶ前に、`note` の上限を確かめる。
 `get_review_summary` は API の集計をそのまま返す。PR の HEAD との照合は、呼び出し側が `latest_head_sha` で行う。
+
+`search_documents` は、プロジェクトのドライブにある Markdown を節の単位で探す。`q` の語は空白で区切り、全部を含む節が当たる。
+結果の 1 件は節で、見出しの経路 `heading_path`、抜粋 `excerpt`、ファイルの `file_id` を持つ。検索の規則は[ファイルの本文の検索](/dev/features/drive/files#本文の検索)にある。
+`get_document` の `document` には、この `file_id` を渡す。節だけを取ることはできず、ファイルの本文の全体が返る。
 
 `bulk_create_tasks` は 1 回に 100 件までを、全件作るか 1 件も作らないかで作る。
 要素は `create_task` から `project` と `tenant` を除いた項目を持ち、名前の引き方も同じである。
@@ -425,6 +441,7 @@ OAuth で接続したとき、`whoami` は許可の ID と、クライアント�
 | `get_sprint` | PAT か許可の持ち主 | `read:sprint` |
 | `start_sprint` | PAT の持ち主 | `write:sprint` |
 | `complete_sprint` | PAT の持ち主 | `write:sprint` と `write:task` |
+| `search_documents`、`get_document` | PAT か許可の持ち主 | `read:drive` |
 
 `write:task` は `read:task` を含むので、`unlink_pull_request` と `update_notification_settings` が先に読む一覧も `write:task` で読める。
 PAT と許可での通知の一覧と既読は、持つ scope に応じた種別に限る。`read:task` か `write:task` でタスクの通知を、`read:review` か `write:review` でレビューの通知を扱う。
@@ -446,6 +463,11 @@ ID を引く呼び出しが 403 のときは、考えられる原因を文面に
 403 は scope が足りないときのほか、束縛していないテナントやプロジェクトを指したときにも返るので、原因は断定しない。
 例は `403 forbidden (could not look up project key "TASK": the token may lack the read:project scope, or it is not allowed in this tenant; if the scope is missing, pass the project UUID instead)` である。
 
+`get_document` の届く範囲は、本文の配信 API と同じである。
+プロジェクトに入れる人のほか、フォルダを利用者指定で共有された人も読める。テナント直下のファイルは、そのテナントに所属する人が読める。
+`search_documents` に出るのは、指したプロジェクトに入れる人から見た、そのプロジェクトのファイルだけである。
+そのため、検索には出ないが、ファイルの UUID を知っていれば `get_document` で読めるファイルがある。
+
 OAuth の同意と許可の管理は次のとおりである。
 
 | 操作 | 誰が | スコープ |
@@ -458,7 +480,7 @@ OAuth の同意と許可の管理は次のとおりである。
 テナントが 2FA を必須にしていれば、2FA を設定した利用者だけが同意できる。
 選んだテナントのうち 1 つでも条件を満たさなければ、全体を断る。
 
-OAuth で渡せる scope は `read:tenant`、`read:project`、`read:task`、`write:task`、`read:milestone`、`read:sprint`、`read:review`、`write:review` の 8 つに限る。
+OAuth で渡せる scope は、ツールが使う `read:tenant`、`read:project`、`read:task`、`write:task`、`read:milestone`、`read:sprint`、`read:review`、`write:review`、`read:drive` の 9 つに限る。
 `write:sprint` は渡せないので、`start_sprint` と `complete_sprint` は PAT でだけ使える。
 利用者は同意画面で、クライアントが求めた scope の一部だけを許可できる。
 
@@ -483,7 +505,7 @@ OAuth で渡せる scope は `read:tenant`、`read:project`、`read:task`、`wri
 - `client_id` の host。クライアントが名乗る名前は自己申告なので、host を主に出し、名前は添えて出す
 - 許可のあとの戻り先の host
 - テナントの選択。候補は自分が所属するテナントで、1 件なら選んだ状態で始める
-- クライアントが求めた scope のチェックボックス。すべてチェックした状態で始める
+- クライアントが求めた scope のチェックボックス。`read:drive` を含め、すべてチェックした状態で始める
 - 「許可する」と「拒否する」
 
 戻り先が利用者の端末（loopback）のクライアントでは、表示を次のように変える。対象は Claude Code と Codex CLI である。
@@ -512,6 +534,10 @@ OAuth で渡せる scope は `read:tenant`、`read:project`、`read:task`、`wri
 - 動的なクライアントの登録（DCR）は受けない
 - `private_key_jwt` でのクライアントの認証は受けない
 - scope を後から足す手順（403 `insufficient_scope`）は無い。ツールの scope の不足は、従来どおり `isError` の結果で返る
+- `read:drive` を渡せるようにする前に同意した許可は `read:drive` を持たない。`search_documents` と `get_document` は `403 forbidden` になる。使うには、「連携中のアプリ」で接続を解除し、クライアントから接続し直す
+- `get_document` は節だけを返せず、範囲を指定して分けて取ることもできない。4 MiB を超える本文と、Markdown でないファイルは返さない
+- MCP クライアントは、ツールの結果の大きさに 4 MiB より小さい上限を持つことがある。その上限を超える本文は、クライアントの側で切られるか捨てられ、読めない
+- 検索の索引は本文の先頭 1 MiB までなので、それより後ろの文は `search_documents` に当たらない
 - 同意画面では、プロジェクト単位の束縛を選べない
 - ブラウザーから直接トークンを取る MCP クライアント向けの CORS は無い
 - 認可の要求の誤り（`response_type`、PKCE、`resource`、`scope`）は画面に出すだけで、クライアントへはリダイレクトで伝えない
@@ -562,3 +588,7 @@ OAuth で渡せる scope は `read:tenant`、`read:project`、`read:task`、`wri
 | 2026-11-21 | ツールをモジュールごとのルーターに分けて足し合わせる | ツールを足すほかの作業と、同じファイルの同じ行を触らずに済む |
 | 2026-11-21 | `unlink_pull_request` を戻せない操作に数えず、説明に破壊的と書かない | 外れるのはリンクの行だけで、PR の行は残り、`link_pull_request` で同じ PR をつなぎ直せる。消える `closes` も、つなぎ直すときに渡し直せる。戻す手段が無い `delete_task` などと同じ語を使うと、クライアントが確かめを求める操作が増え、本当に戻せない操作が目立たなくなる |
 | 2026-11-21 | `.mcp.json` をリポジトリ直下に置き、`headers` を書かず OAuth で接続する。2026-11-18 の「置かず、設定例を書く」を改める | 本番のエンドポイントが `https://task.koyori.app/api/mcp` に決まった。`headers` に `${TASK_TOKEN}` を書くと、未設定の人に設定の警告が出て接続が失敗し、OAuth に切り替わらない。同じ名前の user スコープの定義にも勝つので、OAuth で接続済みの人の接続も失敗に変わる |
+| 2026-11-21 | ドライブの文書のツール `search_documents` と `get_document` を足す。2026-11-18 の「12 個」を、レビュー指摘の 6 個と CLI の残りの操作の 13 個と合わせて 33 個に改める | 外部の AI が仕様書を引いて答えられるようにする。書き込みは足さない |
+| 2026-11-21 | `get_document` は既存の本文の配信 API を呼び直す | ツールでできる操作を、PAT で REST API を直接呼んだときと同じに保つ。検索と同じ範囲に絞るには別の API が要り、認可の規則が 2 箇所に分かれる |
+| 2026-11-21 | OAuth で渡せる scope に `read:drive` を足す | 2 つのツールが要る。同意画面で利用者がチェックを外せば、ドライブを渡さずに接続できる |
+| 2026-11-21 | 既存の許可の scope は書き換えず、接続し直しを求める | 許可は利用者が画面で選んだ scope を持つ。自動で足すと、同意していないドライブの本文を外部のクライアントに渡すことになる |
