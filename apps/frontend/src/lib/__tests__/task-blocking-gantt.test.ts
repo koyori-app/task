@@ -96,6 +96,18 @@ describe('buildBlockingChart', () => {
     expect(chart.notes).toEqual([]);
   });
 
+  it('される側に開始予定日が無ければ、期限があっても normal（期限の日を「開始」と書かない）', () => {
+    const blocker = task(30, { hard_deadline: '2026-11-25' });
+    // このタスクは締切だけ
+    const deadlineOnly = task(42, { hard_deadline: '2026-11-20' });
+    const chart = build([blocker], [], deadlineOnly);
+    expect(chart.deps.map((d) => d.state)).toEqual(['normal']);
+    expect(chart.notes).toEqual([]);
+    // 目標と締切だけ（開始なし）でも同じ
+    const softAndHard = task(42, { soft_deadline: '2026-11-18', hard_deadline: '2026-11-20' });
+    expect(build([blocker], [], softAndHard).notes).toEqual([]);
+  });
+
   it('開始だけは 1 日の棒、期限だけは期限の日の点、どちらも無ければ今日の 1 日の棒', () => {
     const startOnly = task(30, { planned_start_on: '2026-11-12' });
     const deadlineOnly = task(31, { soft_deadline: '2026-11-19T00:00:00.000Z' });

@@ -70,8 +70,8 @@ function span(task: BlockingChartTask, today: string) {
     start,
     end: deadline ?? start,
     deadline,
-    // 依存の食い違いを見るときの「開始」。開始が無ければ棒の左端（期限の日）
-    begins: start,
+    // 依存の食い違いを見るときの「開始」。開始予定日が無ければ比べない（期限の日を開始と呼ばない）
+    begins: planned,
     undated: false,
     point: !planned,
   };
