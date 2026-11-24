@@ -413,10 +413,12 @@ describe('TaskForgeSection', () => {
 
     const source = wrapper.get('[data-forge-issue-source]');
     expect(source.get('a').text()).toBe('acme/backend#12');
-    // タブと同じ器（relative）の中で、sm 以上は右端へ絶対配置する
-    const container = wrapper.get('[role="tablist"]').element.closest('.relative')!;
+    // タブと同じ器の中に置く。横に並べるかは画面の幅ではなく、器の幅（コンテナクエリ）で決める
+    const container = wrapper.get('[role="tablist"]').element.closest('[data-forge-tabs]')!;
     expect(container.contains(source.element)).toBe(true);
-    expect(source.classes()).toEqual(expect.arrayContaining(['sm:absolute', 'sm:right-0']));
+    expect(container.classList.contains('@container')).toBe(true);
+    expect(source.classes()).toEqual(expect.arrayContaining(['@xl:absolute', '@xl:right-0']));
+    expect(source.classes().some((name) => name.startsWith('sm:'))).toBe(false);
   });
 
   it('取り込み元が無ければ行を出さない', async () => {

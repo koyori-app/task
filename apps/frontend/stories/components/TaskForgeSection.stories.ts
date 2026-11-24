@@ -310,6 +310,50 @@ export const NarrowTabs: Story = {
   globals: { viewport: { value: 'mobile1', isRotated: false } },
 };
 
+export const SourceBesideTabsAtAnyWidth: Story = {
+  name: '取り込み元は、セクションがどの幅でもタブに重ならない',
+  beforeEach: mockFetch({
+    // 件数が 2 桁のタブと、長い参照・反映待ち（縮まない文字）の組み合わせ
+    pullRequests: Array.from({ length: 12 }, (_, i) => pullRequest(40 + i)),
+    commits: Array.from({ length: 12 }, (_, i) => commit(`a3f92c${i}`, 'fix: 期限の比較')),
+    branches: [branch],
+    issue: {
+      ...issue,
+      repo_owner: 'koyori-application-platform',
+      repo_name: 'task-tracker-backend-services',
+      number: 12345,
+      pending_push: true,
+    },
+  }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const tablist = await canvas.findByRole('tablist');
+    const source = canvasElement.querySelector<HTMLElement>('[data-forge-issue-source]')!;
+    const section = canvasElement.querySelector<HTMLElement>('[data-forge-tabs]')!;
+    // 右ペインの最小（280）から、横に並ぶ幅の前後、広い幅まで
+    for (const width of [280, 400, 520, 575, 576, 640, 960]) {
+      canvasElement.style.width = `${width}px`;
+      await waitFor(() => expect(section.getBoundingClientRect().width).toBeLessThanOrEqual(width));
+      const tabs = tablist.getBoundingClientRect();
+      const rect = source.getBoundingClientRect();
+      const beside = rect.top < tabs.bottom && rect.bottom > tabs.top;
+      // 横に並ぶならタブの右、並ばないならタブの下
+      if (beside) await expect(rect.left, `幅 ${width}`).toBeGreaterThanOrEqual(tabs.right);
+      else await expect(rect.top, `幅 ${width}`).toBeGreaterThanOrEqual(tabs.bottom);
+      // 中身が取り込み元の枠からも、セクションからもはみ出さない
+      await expect(source.scrollWidth, `幅 ${width}`).toBeLessThanOrEqual(source.clientWidth);
+      await expect(rect.right, `幅 ${width}`).toBeLessThanOrEqual(
+        section.getBoundingClientRect().right + 0.5,
+      );
+      // 行の中の反映待ち（ホバーカードの中のものではない）
+      const pending = source.querySelector<HTMLElement>(':scope > .shrink-0')!;
+      await expect(pending).toHaveTextContent('GitHub への反映待ち');
+      await expect(pending).toBeVisible();
+    }
+    canvasElement.style.width = '';
+  },
+};
+
 export const DefaultTabWithoutMentions: Story = {
   name: '言及の PR が無ければ、最初に件数のあるタブ（コミット）を開く',
   beforeEach: mockFetch({

@@ -154,8 +154,15 @@ const now = useNow();
       リポジトリの情報を読み込めませんでした
       <Button type="button" variant="tertiary" label="再試行" @click="forgeQuery.refetch()" />
     </div>
-    <!-- タブの行の右端に取り込み元を置く。狭い幅ではタブの下へ回す -->
-    <div v-else class="relative [&_[role=tabpanel]]:px-0 [&_[role=tabpanel]]:py-2">
+    <!--
+      タブの行の右端に取り込み元を置く。横に並べるかは画面の幅ではなくこの欄の幅で決める
+      （右ペインは画面が広くても狭い）。並べるときはタブの幅を空け、足りなければタブの下へ回す
+    -->
+    <div
+      v-else
+      class="@container relative [&_[role=tabpanel]]:px-0 [&_[role=tabpanel]]:py-2"
+      data-forge-tabs
+    >
       <Tabs
         id="task-forge-tabs"
         label="リポジトリ"
@@ -165,7 +172,7 @@ const now = useNow();
       >
         <TaskIssueSourceRow
           v-if="forgeQuery.data.value?.issue"
-          class="mt-2 sm:absolute sm:top-0 sm:right-0 sm:mt-0 sm:h-9 sm:max-w-[55%]"
+          class="mt-2 @xl:absolute @xl:top-0 @xl:right-0 @xl:mt-0 @xl:h-9 @xl:max-w-[calc(100%-21rem)]"
           :issue="forgeQuery.data.value.issue"
           :title="taskTitle"
         />
