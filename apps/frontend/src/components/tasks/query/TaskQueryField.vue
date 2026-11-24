@@ -9,7 +9,12 @@ import {
   type ComboboxTag,
 } from '@koyori-app/ui-vue';
 import { Search } from '@lucide/vue';
-import { tokenizeTaskQuery, serializeToken, serializeTaskQuery } from '@/lib/task-query/tokenize';
+import {
+  tokenizeTaskQuery,
+  serializeToken,
+  serializeTaskQuery,
+  dropEmptyValues,
+} from '@/lib/task-query/tokenize';
 import {
   suggestionContext,
   keyCandidates,
@@ -28,7 +33,7 @@ const committed = ref('');
 const syntax = ref(false);
 const caret = ref(0);
 /**
- * 確定（Enter・候補のクリック）のあとは候補を出さない。確定で下書きが空になると、キーの候補が結果の上にかぶさって
+ * 確定のあとは候補を出さない。確定で下書きが空になると、キーの候補が結果の上にかぶさって
  * Esc か欄の外を押すまで消えないため。次の入力・↑↓・欄のクリック・欄への再フォーカスで戻す。
  */
 const closed = ref(false);
@@ -59,7 +64,7 @@ const candidates = computed(() => {
   return c?.kind === 'keys'
     ? keyCandidates(c.prefix)
     : c?.kind === 'values'
-      ? valueCandidates(c.key, c.prefix, props.suggestData ?? {})
+      ? valueCandidates(c.key, c.prefix, props.suggestData ?? {}, c.chosen)
       : [];
 });
 /**
@@ -105,16 +110,17 @@ function commit() {
   closed.value = true;
   emit(
     'update:modelValue',
-    serializeTaskQuery(tokenizeTaskQuery(`${committed.value} ${draft.value}`)),
+    serializeTaskQuery(dropEmptyValues(tokenizeTaskQuery(`${committed.value} ${draft.value}`))),
   );
 }
+/** 値を入れる。確定しない候補では一覧を開いたままにし、続けて残りの値を選ばせる。 */
 function select(value: string) {
   const candidate = candidates.value.find((c) => optionValue(c) === value);
   if (!candidate || !context.value) return;
   const result = applySuggestion(draft.value, context.value, candidate);
   draft.value = result.draft;
-  caret.value = draft.value.length;
-  syncCaret();
+  caret.value = result.caret;
+  syncCaret(result.caret);
   if (result.commit) commit();
 }
 function remove(index: number) {
@@ -125,10 +131,13 @@ function remove(index: number) {
  * 値を差し替えると入力欄のキャレットは末尾へ動くが、Combobox が覚えている位置は古いまま。
  * 古いままだと、のちに矢印でその位置へ戻しても動いたと見なされず、候補が古い文脈で出る。
  * keyup を送って Combobox にいまの位置を数え直させる。
+ * 後ろに語が残る下書きでは、値を差し替えるとブラウザがキャレットを末尾へ動かすので `at` へ戻す。
  */
-function syncCaret() {
+function syncCaret(at?: number) {
   nextTick(() => {
-    root.value?.querySelector('input')?.dispatchEvent(new Event('keyup'));
+    const input = root.value?.querySelector('input');
+    if (at !== undefined) input?.setSelectionRange(at, at);
+    input?.dispatchEvent(new Event('keyup'));
   });
 }
 function reopen(event: Event) {
@@ -183,7 +192,7 @@ onClickOutside(root, () => {
         ></template
       >
       <template #footer
-        >↑↓ で選ぶ　Enter で入れる　Esc で閉じる<br />「-」を前に付けると除外（-label:bug）</template
+        >↑↓ で選ぶ　Enter で入れる（続けて選べます）　選ばずに Enter で検索　Esc で閉じる<br />「-」を前に付けると除外（-label:bug）</template
       >
     </Combobox>
     <div v-if="syntax" class="absolute inset-x-0 top-full z-50 mt-1"><TaskQuerySyntaxCard /></div>
