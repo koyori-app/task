@@ -36,6 +36,8 @@ fn pull_request_json(id: &str, number: i32) -> serde_json::Value {
         "commits_complete": true,
         "sources": ["manual"],
         "closes": false,
+        "role": "mention",
+        "head_branch": null,
         "unresolved": null,
     })
 }

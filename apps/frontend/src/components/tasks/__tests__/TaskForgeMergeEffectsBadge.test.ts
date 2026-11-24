@@ -31,6 +31,8 @@ const pullRequest = {
   commits_complete: false,
   sources: ['body'],
   closes: true,
+  role: 'implementation',
+  head_branch: null,
   unresolved: null,
 };
 

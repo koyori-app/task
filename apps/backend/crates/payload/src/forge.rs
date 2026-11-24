@@ -49,9 +49,23 @@ pub struct TaskForgePullRequest {
     pub sources: Vec<String>,
     /// どれかの参照元がクローズキーワード付きか
     pub closes: bool,
+    /// このタスクに対する役割。`implementation`（このタスクを実装する PR）/ `mention`（触れているだけ）。
+    /// 手で入れ替えていればその値、無ければ題とリンクから決めた値
+    pub role: String,
+    /// head のブランチ名。この列を足す前に受けた PR は、次の PR イベントまで null
+    pub head_branch: Option<String>,
     /// マージを塞いでいるレビュー指摘（High / Medium の open / fixing / fixed）の件数。
     /// レビューの無い PR、タスクと別プロジェクトの PR 行、`read:review` を持たない PAT では null
     pub unresolved: Option<i64>,
+}
+
+/// コミットやブランチの側から見た PR（行の中に出すだけの最小の項目）
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TaskForgePullRequestRef {
+    pub number: i32,
+    /// `open` / `closed` / `merged` / `unknown`
+    pub state: String,
+    pub html_url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -65,6 +79,8 @@ pub struct TaskForgeCommit {
     pub sha: String,
     /// メッセージの先頭行
     pub message: String,
+    /// メッセージの 2 行目以降（前後の空白を除く）。無ければ空文字列
+    pub body: String,
     /// ホスト上のアカウント名。解決できなければ空文字列
     pub author_handle: String,
     /// git の author 名
@@ -72,6 +88,8 @@ pub struct TaskForgeCommit {
     #[schema(value_type = String, format = "date-time")]
     pub committed_at: DateTime<Utc>,
     pub html_url: String,
+    /// このコミットを含む PR。番号の昇順
+    pub pull_requests: Vec<TaskForgePullRequestRef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -87,6 +105,15 @@ pub struct TaskForgeBranch {
     pub html_url: String,
     #[schema(value_type = String, format = "date-time")]
     pub created_at: DateTime<Utc>,
+    /// 同じリポジトリでこのブランチを head にしている PR。番号の昇順
+    pub pull_requests: Vec<TaskForgePullRequestRef>,
+}
+
+/// `PUT /tasks/{id}/forge/pull-requests/{pull_request_id}/role`
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SetTaskPullRequestRoleRequest {
+    /// `implementation` / `mention`
+    pub role: String,
 }
 
 /// `POST /tasks/{id}/forge/pull-requests`。リポジトリはプロジェクトの現在の連携先で決まるので受け取らない

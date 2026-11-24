@@ -11,6 +11,7 @@ pub mod forge_commit_links;
 pub mod forge_commits;
 pub mod forge_pull_request_commits;
 pub mod forge_pull_request_links;
+pub mod forge_pull_request_roles;
 pub mod forge_pull_requests;
 pub mod forge_webhook_deliveries;
 pub mod github_integrations;

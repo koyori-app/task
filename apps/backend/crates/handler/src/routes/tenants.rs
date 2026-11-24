@@ -135,6 +135,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::forge::get_task_forge))
                         .routes(routes!(crate::handlers::forge::link_task_pull_request))
                         .routes(routes!(crate::handlers::forge::unlink_task_pull_request))
+                        .routes(routes!(crate::handlers::forge::set_task_pull_request_role))
                         .routes(routes!(crate::handlers::forge::delete_task_forge_branch))
                         .routes(routes!(crate::handlers::time_tracking::get_time_summary))
                         .routes(routes!(crate::handlers::time_tracking::list_time_logs))

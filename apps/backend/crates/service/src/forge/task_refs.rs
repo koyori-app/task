@@ -76,6 +76,39 @@ pub fn extract_limited(text: &str, limit: usize) -> Vec<TaskRef> {
     refs
 }
 
+/// 題の末尾の `(KEY-N)` が指す参照。このリポジトリの PR の題の決まり（`feat: … (TASK-123)`）を
+/// 「この PR はそのタスクの実装」と読むために使う。
+///
+/// 題（末尾の空白を除く）が `(…)` で終わり、括弧の中が `KEY-N` をカンマ・読点・空白で区切った
+/// 並びだけのときに、その参照を返す。それ以外（`(see TASK-1)`、題の途中の `TASK-1`）は空。
+pub fn title_tail_refs(title: &str) -> Vec<TaskRef> {
+    let Some(inner) = title
+        .trim_end()
+        .strip_suffix(')')
+        .and_then(|rest| rest.rfind('(').map(|open| &rest[open + 1..]))
+    else {
+        return Vec::new();
+    };
+    // 参照そのもの（キーワードを除く KEY-N の範囲）を取り除いた残りが区切りだけか
+    let mut rest = String::new();
+    let mut last = 0;
+    for cap in TASK_REF_RE.captures_iter(inner) {
+        let (Some(key), Some(number)) = (cap.get(2), cap.get(3)) else {
+            continue;
+        };
+        rest.push_str(&inner[last..key.start()]);
+        last = number.end();
+    }
+    rest.push_str(&inner[last..]);
+    if !rest
+        .chars()
+        .all(|c| c.is_whitespace() || matches!(c, ',' | '、' | '，'))
+    {
+        return Vec::new();
+    }
+    extract(inner)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResolvedTaskRef {
     pub task_id: Uuid,
@@ -262,5 +295,33 @@ mod tests {
     #[test]
     fn duplicate_references_merge_and_keep_closes() {
         assert_eq!(extract("TASK-1 と Fixes task-1"), vec![r("TASK", 1, true)]);
+    }
+
+    #[test]
+    fn title_tail_refs_reads_only_a_trailing_parenthesized_list() {
+        for (title, expected) in [
+            ("feat: x (TASK-1)", vec![r("TASK", 1, false)]),
+            (
+                "x (TASK-1, ENG-2)",
+                vec![r("TASK", 1, false), r("ENG", 2, false)],
+            ),
+            (
+                "x (TASK-1、ENG-2 TASK-3)",
+                vec![r("TASK", 1, false), r("ENG", 2, false), r("TASK", 3, false)],
+            ),
+            ("x (task-1)", vec![r("TASK", 1, false)]),
+            ("x (TASK-1)  ", vec![r("TASK", 1, false)]),
+            ("x (see TASK-1)", vec![]),
+            ("x (Closes TASK-1)", vec![]),
+            ("x TASK-1", vec![]),
+            ("(TASK-1) x", vec![]),
+            ("x (#12)", vec![]),
+            ("x (TASK-1", vec![]),
+            ("x ()", vec![]),
+            ("x (TASK-99999999999)", vec![]),
+            ("", vec![]),
+        ] {
+            assert_eq!(title_tail_refs(title), expected, "{title:?}");
+        }
     }
 }
