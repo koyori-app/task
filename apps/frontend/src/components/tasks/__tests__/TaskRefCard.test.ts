@@ -44,6 +44,23 @@ it('タスクの属性を表示する。状態はアイコンで出し、名前�
   expect(wrapper.find('a').exists()).toBe(false);
   expect(wrapper.text()).not.toContain('Esc');
 });
+it('絵文字を持つラベルは色の丸の代わりに絵文字を出す', () => {
+  const wrapper = mount(TaskRefCard, {
+    props: {
+      ...base,
+      title: '題',
+      labels: [
+        { id: 'l1', name: 'デザイン', color: '#8b5cf6', icon_emoji: '🎨' },
+        { id: 'l2', name: 'bug', color: '#f00', icon_emoji: null },
+      ],
+    },
+  });
+  const [design, bug] = wrapper.findAll('.label');
+  expect(design!.text()).toBe('🎨デザイン');
+  expect(design!.find('[style*="background-color"]').exists()).toBe(false);
+  // 対照: 絵文字を持たないラベルは色の丸
+  expect(bug!.find('[style*="background-color"]').exists()).toBe(true);
+});
 it('説明もラベルも無いタスクは、その行を出さない', () => {
   const wrapper = mount(TaskRefCard, { props: { ...base, title: '題', labels: [] } });
   expect(wrapper.find('[data-task-ref-description]').exists()).toBe(false);

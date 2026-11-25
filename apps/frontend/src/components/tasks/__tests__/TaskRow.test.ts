@@ -72,6 +72,23 @@ describe('TaskRow', () => {
     expect(wrapper.get('[data-task-row-priority]').text()).toContain('高');
   });
 
+  it('絵文字を持つラベルは色の丸の代わりに絵文字を出す', () => {
+    const wrapper = mountRow({
+      task: task({
+        labels: [
+          { id: 'l1', name: 'デザイン', description: '', color: '#8b5cf6', icon_emoji: '🎨' },
+          { id: 'l2', name: 'bug', description: '', color: '#ff0000', icon_emoji: null },
+        ],
+      }),
+    });
+
+    const [design, bug] = wrapper.findAll('[data-task-row-label]');
+    expect(design!.text()).toBe('🎨デザイン');
+    expect(design!.find('[style*="background-color"]').exists()).toBe(false);
+    // 対照: 絵文字を持たないラベルは色の丸
+    expect(bug!.find('[style*="background-color"]').exists()).toBe(true);
+  });
+
   it('ステータスの名前は文字で並べず、ホバーと読み上げ名に出す', () => {
     const wrapper = mountRow();
 

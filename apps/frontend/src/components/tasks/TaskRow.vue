@@ -4,6 +4,7 @@ import { Dropdown } from '@koyori-app/ui-vue';
 import { computed } from 'vue';
 
 import UserAvatar from '@/components/UserAvatar.vue';
+import LabelMark from '@/components/tasks/LabelMark.vue';
 import TaskStatusIcon from '@/components/tasks/TaskStatusIcon.vue';
 import TaskTitleLink from '@/components/tasks/TaskTitleLink.vue';
 import type { components } from '@/generated/api';
@@ -100,11 +101,7 @@ function onSelectStatus(statusId: string) {
             class="inline-flex min-w-0 items-center gap-1.5 rounded-md bg-muted px-1.5 text-xs"
             data-task-row-label
           >
-            <span
-              class="inline-block size-2 shrink-0 rounded-full"
-              :style="{ backgroundColor: label.color }"
-              aria-hidden="true"
-            />
+            <LabelMark :label="label" />
             <span class="truncate">{{ label.name }}</span>
           </span>
         </div>

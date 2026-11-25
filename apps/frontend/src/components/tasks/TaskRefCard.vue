@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { CalendarDays, Flag, Info } from '@lucide/vue';
 import UserAvatar from '@/components/UserAvatar.vue';
+import LabelMark from '@/components/tasks/LabelMark.vue';
 import TaskStatusIcon from '@/components/tasks/TaskStatusIcon.vue';
 import { PRIORITY_CONFIG, type ApiPriority } from '@/lib/task-display';
 import type { TaskRefCardStatus } from '@/lib/task-ref-card';
@@ -20,7 +21,7 @@ const props = defineProps<{
   priority?: ApiPriority | null;
   assignees?: { id: string; username: string; avatar_url?: string | null }[];
   deadline?: { label: string; overdue: boolean } | null;
-  labels?: { id: string; name: string; color: string }[];
+  labels?: { id: string; name: string; color: string; icon_emoji?: string | null }[];
   archived?: boolean;
 }>();
 const priorityInfo = computed(() => (props.priority ? PRIORITY_CONFIG[props.priority] : null));
@@ -70,9 +71,7 @@ const priorityInfo = computed(() => (props.priority ? PRIORITY_CONFIG[props.prio
       </div>
       <ul v-if="labels?.length" class="labels" aria-label="ラベル">
         <li v-for="label in labels" :key="label.id" class="label">
-          <span class="dot" :style="{ backgroundColor: label.color }" aria-hidden="true" />{{
-            label.name
-          }}
+          <LabelMark :label="label" />{{ label.name }}
         </li>
       </ul>
     </template>
@@ -174,12 +173,6 @@ const priorityInfo = computed(() => (props.priority ? PRIORITY_CONFIG[props.prio
   border-radius: var(--koyori-radius-md, 6px);
   background: var(--koyori-color-surface-hover);
   font-size: 12px;
-}
-.dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex: none;
 }
 p {
   margin: 0;
