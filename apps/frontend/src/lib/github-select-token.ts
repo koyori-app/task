@@ -21,6 +21,16 @@ const PENDING_KEY = `${STORAGE_KEY_PREFIX}:pending`;
 const FRAGMENT_PARAM = 'github_select';
 
 /**
+ * 認可トークン（GitHub のユーザー認可で確かめたインストールの候補を引くためのもの）。
+ *
+ * callback は選択トークンと同じくフラグメント（`#github_installations=...`）で返す。
+ * 選択トークンとは別のキーに退避し、互いに上書きも破棄もしない。
+ */
+const AUTHORIZE_STORAGE_KEY_PREFIX = 'github-authorize-token';
+const AUTHORIZE_PENDING_KEY = `${AUTHORIZE_STORAGE_KEY_PREFIX}:pending`;
+const AUTHORIZE_FRAGMENT_PARAM = 'github_installations';
+
+/**
  * 退避したトークンと、それを受け取ったページのパス。
  *
  * パスを添えるのは、引き取り先を着地ページに限るため。プロジェクト ID は
@@ -30,6 +40,10 @@ type PendingStash = { token: string; path: string };
 
 function projectKey(projectId: string) {
   return `${STORAGE_KEY_PREFIX}:${projectId}`;
+}
+
+function authorizeProjectKey(projectId: string) {
+  return `${AUTHORIZE_STORAGE_KEY_PREFIX}:${projectId}`;
 }
 
 /**
@@ -88,15 +102,22 @@ export function stashSelectTokenFromUrl() {
 
   const url = new URL(window.location.href);
   const hash = new URLSearchParams(url.hash.slice(1));
-  const token = hash.get(FRAGMENT_PARAM);
-  if (!token) return;
+  // 選択トークンと認可トークンは別々の退避先へ入れる。backend はどちらかを単独の
+  // フラグメントで返すが、他の断片と同居していてもそれだけを抜いて残りは保つ。
+  let stashed = false;
+  for (const [param, pendingKey] of [
+    [FRAGMENT_PARAM, PENDING_KEY],
+    [AUTHORIZE_FRAGMENT_PARAM, AUTHORIZE_PENDING_KEY],
+  ] as const) {
+    const token = hash.get(param);
+    if (!token) continue;
+    const stash: PendingStash = { token, path: url.pathname };
+    writeStorage(pendingKey, JSON.stringify(stash));
+    hash.delete(param);
+    stashed = true;
+  }
+  if (!stashed) return;
 
-  const stash: PendingStash = { token, path: url.pathname };
-  writeStorage(PENDING_KEY, JSON.stringify(stash));
-
-  // backend はトークンを単独のフラグメントで返すが、他の断片と同居していても
-  // それだけを抜いて残りは保つ。
-  hash.delete(FRAGMENT_PARAM);
   const rest = hash.toString();
   url.hash = rest ? `#${rest}` : '';
   window.history.replaceState(window.history.state, '', url);
@@ -117,7 +138,7 @@ export function stashSelectTokenFromUrl() {
 export function takeSelectToken(projectId: string): string | null {
   if (typeof window === 'undefined') return null;
 
-  const pending = takePendingToken();
+  const pending = takePendingToken(PENDING_KEY);
   if (pending) {
     writeStorage(projectKey(projectId), pending);
     return pending;
@@ -126,13 +147,13 @@ export function takeSelectToken(projectId: string): string | null {
 }
 
 /** 着地ページで一時退避したトークンを 1 回だけ引き取る */
-function takePendingToken(): string | null {
-  const raw = readStorage(PENDING_KEY);
+function takePendingToken(pendingKey: string): string | null {
+  const raw = readStorage(pendingKey);
   if (!raw) return null;
 
   // 引き取りは 1 回だけ。パスが違って引き取らなかった分も、あとで別プロジェクトに
   // 紛れ込まないよう捨てる（トークンは backend 側も 10 分で切れる）。
-  removeStorage(PENDING_KEY);
+  removeStorage(pendingKey);
 
   let stash: PendingStash;
   try {
@@ -155,4 +176,28 @@ export function forgetSelectToken(projectId: string) {
   if (typeof window === 'undefined') return;
   removeStorage(projectKey(projectId));
   removeStorage(PENDING_KEY);
+}
+
+/**
+ * このプロジェクト向けの認可トークンを取り出す。
+ *
+ * 規則は {@link takeSelectToken} と同じ（着地ページと同じパスで 1 回だけ引き取り、
+ * 以降はプロジェクト単位の退避先から読む。引き取れたら以前のものを上書きする）。
+ */
+export function takeAuthorizeToken(projectId: string): string | null {
+  if (typeof window === 'undefined') return null;
+
+  const pending = takePendingToken(AUTHORIZE_PENDING_KEY);
+  if (pending) {
+    writeStorage(authorizeProjectKey(projectId), pending);
+    return pending;
+  }
+  return readStorage(authorizeProjectKey(projectId));
+}
+
+/** 使い終わった（または無効になった）認可トークンを捨てる */
+export function forgetAuthorizeToken(projectId: string) {
+  if (typeof window === 'undefined') return;
+  removeStorage(authorizeProjectKey(projectId));
+  removeStorage(AUTHORIZE_PENDING_KEY);
 }

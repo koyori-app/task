@@ -3,9 +3,11 @@ import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
 import IntegrationsSection from '../IntegrationsSection.vue';
 import {
+  forgetAuthorizeToken,
   forgetSelectToken,
   keepSelectToken,
   stashSelectTokenFromUrl,
+  takeAuthorizeToken,
 } from '@/lib/github-select-token';
 
 const TENANT_UUID = '11111111-1111-1111-1111-111111111111';
@@ -46,7 +48,27 @@ type MockState = {
   holdConnect?: Promise<Response>;
   /** POST /github/reuse を、この Promise が解決するまで返さない */
   holdReuse?: Promise<Response>;
+  /** 400 以上を設定すると GET /github/authorize が失敗する */
+  authorizeStatus?: number;
+  /** GET /github/authorized-installations が返す候補（省略時は AUTHORIZED_CANDIDATE の 1 件） */
+  authorizedInstallations?: { candidate_id: string; account_login: string }[];
+  /** 400 以上を設定すると GET /github/authorized-installations が失敗する */
+  authorizedInstallationsStatus?: number;
+  /** 400 以上を設定すると POST /github/authorized-installations/select が失敗する */
+  authorizedSelectStatus?: number;
+  /** 上の失敗の本文の message（省略時は 'error'） */
+  authorizedSelectMessage?: string;
 };
+
+const AUTHORIZE_URL = 'https://github.com/login/oauth/authorize?client_id=Iv1.test&state=abc';
+const AUTHORIZE_TOKEN = 'authorize-token-1';
+const AUTHORIZED_CANDIDATE = {
+  candidate_id: '00000000-0000-4000-8000-0000000000bb',
+  account_login: 'other-tenant-org',
+};
+const AUTHORIZED_SELECT_TOKEN = 'authorized-select-token-1';
+const AUTHORIZE_BUTTON = 'インストール済みのアカウント・組織を GitHub で確認';
+const AUTHORIZE_EXPIRED = '確認の有効期限が切れました';
 
 const DEFAULT_REPOSITORIES = [
   { owner: 'koyori-app', name: 'koyori' },
@@ -74,6 +96,25 @@ function stubFetch(state: MockState) {
     if (method === 'GET' && pathname.endsWith('/github/install')) {
       if (state.installStatus) return jsonResponse({ message: 'error' }, state.installStatus);
       return jsonResponse({ url: INSTALL_URL });
+    }
+    if (method === 'GET' && pathname.endsWith('/github/authorize')) {
+      if (state.authorizeStatus) return jsonResponse({ message: 'error' }, state.authorizeStatus);
+      return jsonResponse({ url: AUTHORIZE_URL });
+    }
+    if (method === 'GET' && pathname.endsWith('/github/authorized-installations')) {
+      if (state.authorizedInstallationsStatus)
+        return jsonResponse({ message: 'error' }, state.authorizedInstallationsStatus);
+      return jsonResponse({
+        installations: state.authorizedInstallations ?? [AUTHORIZED_CANDIDATE],
+      });
+    }
+    if (method === 'POST' && pathname.endsWith('/github/authorized-installations/select')) {
+      if (state.authorizedSelectStatus)
+        return jsonResponse(
+          { message: state.authorizedSelectMessage ?? 'error' },
+          state.authorizedSelectStatus,
+        );
+      return jsonResponse({ select_token: AUTHORIZED_SELECT_TOKEN });
     }
     if (method === 'GET' && pathname.endsWith('/github/integration')) {
       if (state.integrationStatus)
@@ -139,7 +180,13 @@ function stubFetch(state: MockState) {
 }
 
 function mountSection(
-  options: { selectToken?: string; callbackError?: string; stashedToken?: string } = {},
+  options: {
+    selectToken?: string;
+    callbackError?: string;
+    stashedToken?: string;
+    /** GitHub のユーザー認可から戻ったときの認可トークン（フラグメント） */
+    authorizeToken?: string;
+  } = {},
 ) {
   // callback からの戻りは URL で表現される。選択トークンだけはフラグメント
   // （クエリだとアクセスログ・Referer に残るため）。
@@ -147,6 +194,8 @@ function mountSection(
   if (options.callbackError !== undefined) search.set('github_error', options.callbackError);
   const hash = new URLSearchParams();
   if (options.selectToken !== undefined) hash.set('github_select', options.selectToken);
+  if (options.authorizeToken !== undefined)
+    hash.set('github_installations', options.authorizeToken);
   const query = search.toString();
   const fragment = hash.toString();
   const url = `/settings${query ? `?${query}` : ''}`;
@@ -223,6 +272,7 @@ afterEach(() => {
   // （sessionStorage が使えないとき用のメモリ退避も含めて捨てる）
   window.sessionStorage.clear();
   forgetSelectToken(PROJECT_UUID);
+  forgetAuthorizeToken(PROJECT_UUID);
 });
 
 describe('IntegrationsSection', () => {
@@ -1220,5 +1270,278 @@ describe('IntegrationsSection', () => {
     // 「を連携中」で見る。リポジトリ選択の一覧にも同じ名前が出るため
     expect(document.body.textContent).not.toContain('を連携中');
     expect(bodyButton('連携する')).toBeTruthy();
+  });
+
+  // 他のテナントで連携済みのアカウント・組織は「利用中」の候補に出ない。インストール画面へ
+  // 進んでも GitHub は既存のインストールの設定画面を出すだけなので、GitHub のユーザー認可で
+  // 利用者が見えるインストールを確かめ、そこから選ぶ（TASK-593）。
+  describe('GitHub で確認したアカウント・組織', () => {
+    it('「インストール済みのアカウント・組織を GitHub で確認」で GitHub のユーザー認可へ遷移する', async () => {
+      const fetchMock = stubFetch({ connected: false });
+      const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+      mountSection();
+      await flushPromises();
+
+      clickBodyButton('連携する');
+      await flushPromises();
+      expect(document.body.textContent).toContain(
+        '他のテナントで連携済みのアカウント・組織は、GitHub',
+      );
+      expect(assignSpy).not.toHaveBeenCalled();
+
+      clickBodyButton(AUTHORIZE_BUTTON);
+      await flushPromises();
+
+      const [authorizeCall] = requestsTo(fetchMock, '/github/authorize');
+      expect(authorizeCall!.url).toContain(`/tenants/${TENANT_UUID}/projects/${PROJECT_UUID}/`);
+      expect(assignSpy).toHaveBeenCalledWith(AUTHORIZE_URL);
+      // インストール画面の URL は取りに行かない
+      expect(requestsTo(fetchMock, '/github/install')).toHaveLength(0);
+    });
+
+    it('確認画面の URL の取得に失敗したらエラーを表示し、再度押せる', async () => {
+      stubFetch({ connected: false, authorizeStatus: 500 });
+      const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+      mountSection();
+      await flushPromises();
+
+      clickBodyButton('連携する');
+      await flushPromises();
+      clickBodyButton(AUTHORIZE_BUTTON);
+      await flushPromises();
+
+      expect(document.body.textContent).toContain('GitHub の確認画面の URL を取得できませんでした');
+      expect(assignSpy).not.toHaveBeenCalled();
+      expect(bodyButton(AUTHORIZE_BUTTON)?.disabled).toBe(false);
+    });
+
+    it('認可トークンを持って戻ると、候補をヘッダー付きで取得して表示し、URL からトークンを落とす', async () => {
+      const fetchMock = stubFetch({ connected: false });
+      mountSection({ authorizeToken: AUTHORIZE_TOKEN });
+      await flushPromises();
+
+      const [listCall] = requestsTo(fetchMock, '/github/authorized-installations');
+      expect(listCall!.headers.get('X-Github-Authorize-Token')).toBe(AUTHORIZE_TOKEN);
+      // トークンはクエリに載せない
+      expect(listCall!.url).not.toContain(AUTHORIZE_TOKEN);
+      expect(window.location.hash).toBe('');
+      expect(document.body.textContent).toContain('GitHub で確認したアカウント・組織');
+      expect(document.body.textContent).toContain('other-tenant-org');
+      expect(bodyButton('これを使う')).toBeTruthy();
+    });
+
+    it('候補を選ぶと選択トークンを受け取り、リポジトリ選択 → 接続へ進む', async () => {
+      const fetchMock = stubFetch({ connected: false });
+      const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+      mountSection({ authorizeToken: AUTHORIZE_TOKEN });
+      await flushPromises();
+
+      clickBodyButton('これを使う');
+      await flushPromises();
+
+      const [selectCall] = requestsTo(fetchMock, '/github/authorized-installations/select');
+      expect(await selectCall!.clone().json()).toEqual({
+        authorize_token: AUTHORIZE_TOKEN,
+        candidate_id: AUTHORIZED_CANDIDATE.candidate_id,
+      });
+      const [repositoriesCall] = requestsTo(fetchMock, '/github/repositories');
+      expect(repositoriesCall!.headers.get('X-Github-Select-Token')).toBe(AUTHORIZED_SELECT_TOKEN);
+      expect(document.body.textContent).toContain('koyori-app/docs');
+
+      clickSelectButton(1);
+      await flushPromises();
+
+      const [connectCall] = requestsTo(fetchMock, '/github/connect');
+      expect(await connectCall!.clone().json()).toEqual({
+        select_token: AUTHORIZED_SELECT_TOKEN,
+        repo_owner: 'koyori-app',
+        repo_name: 'docs',
+      });
+      expect(document.body.textContent).toContain('を連携中');
+      // 連携が済んだら認可トークンも捨てる
+      expect(takeAuthorizeToken(PROJECT_UUID)).toBeNull();
+      expect(document.body.textContent).not.toContain('GitHub で確認したアカウント・組織');
+      expect(assignSpy).not.toHaveBeenCalled();
+    });
+
+    it('連携済みなら、認可トークンがあっても候補のパネルを出さない', async () => {
+      stubFetch({ connected: true });
+      mountSection({ authorizeToken: AUTHORIZE_TOKEN });
+      await flushPromises();
+
+      expect(document.body.textContent).not.toContain('GitHub で確認したアカウント・組織');
+    });
+
+    it.each([400, 403])(
+      '候補の取得が %i なら認可トークンを捨て、期限切れを伝えてやり直しの入口を出す',
+      async (status) => {
+        stubFetch({ connected: false, authorizedInstallationsStatus: status });
+        mountSection({ authorizeToken: AUTHORIZE_TOKEN });
+        await flushPromises();
+
+        expect(document.body.textContent).toContain(AUTHORIZE_EXPIRED);
+        expect(takeAuthorizeToken(PROJECT_UUID)).toBeNull();
+        expect(bodyButton('再試行')).toBeUndefined();
+        // 案内しているボタンが押せる状態で出ている
+        expect(bodyButton(AUTHORIZE_BUTTON)).toBeTruthy();
+      },
+    );
+
+    it('候補の取得が一時障害ならトークンを捨てず、再試行で取り直せる', async () => {
+      const state: MockState = { connected: false, authorizedInstallationsStatus: 503 };
+      const fetchMock = stubFetch(state);
+      mountSection({ authorizeToken: AUTHORIZE_TOKEN });
+      await flushPromises();
+
+      expect(document.body.textContent).toContain(
+        'GitHub で確認したアカウント・組織を取得できませんでした',
+      );
+      expect(takeAuthorizeToken(PROJECT_UUID)).toBe(AUTHORIZE_TOKEN);
+
+      state.authorizedInstallationsStatus = undefined;
+      clickBodyButton('再試行');
+      await flushPromises();
+
+      expect(requestsTo(fetchMock, '/github/authorized-installations')).toHaveLength(2);
+      expect(document.body.textContent).toContain('other-tenant-org');
+      expect(document.body.textContent).not.toContain('取得できませんでした');
+    });
+
+    it('選択が 400 なら認可トークンを捨て、期限切れを伝える', async () => {
+      stubFetch({ connected: false, authorizedSelectStatus: 400 });
+      mountSection({ authorizeToken: AUTHORIZE_TOKEN });
+      await flushPromises();
+
+      clickBodyButton('これを使う');
+      await flushPromises();
+
+      expect(document.body.textContent).toContain(AUTHORIZE_EXPIRED);
+      expect(takeAuthorizeToken(PROJECT_UUID)).toBeNull();
+      expect(bodyButton('これを使う')).toBeUndefined();
+      expect(document.body.textContent).not.toContain('連携するリポジトリを選択');
+    });
+
+    it('選択が 403（forbidden）なら 400 と同じく期限切れとして扱う', async () => {
+      stubFetch({
+        connected: false,
+        authorizedSelectStatus: 403,
+        authorizedSelectMessage: 'forbidden',
+      });
+      mountSection({ authorizeToken: AUTHORIZE_TOKEN });
+      await flushPromises();
+
+      clickBodyButton('これを使う');
+      await flushPromises();
+
+      expect(document.body.textContent).toContain(AUTHORIZE_EXPIRED);
+      expect(takeAuthorizeToken(PROJECT_UUID)).toBeNull();
+    });
+
+    it('選択が 403（管理者権限が足りない）なら理由を伝え、トークンと候補は残す', async () => {
+      stubFetch({
+        connected: false,
+        authorizedSelectStatus: 403,
+        authorizedSelectMessage: 'github-installation-admin-required',
+      });
+      mountSection({ authorizeToken: AUTHORIZE_TOKEN });
+      await flushPromises();
+
+      clickBodyButton('これを使う');
+      await flushPromises();
+
+      expect(document.body.textContent).toContain(
+        'GitHub App が見えるすべてのリポジトリの管理者権限が必要です',
+      );
+      expect(document.body.textContent).not.toContain(AUTHORIZE_EXPIRED);
+      expect(takeAuthorizeToken(PROJECT_UUID)).toBe(AUTHORIZE_TOKEN);
+      expect(bodyButton('これを使う')?.disabled).toBe(false);
+      expect(document.body.textContent).not.toContain('連携するリポジトリを選択');
+    });
+
+    it('選択が 409 ならリポジトリが無いことを伝え、トークンは残す', async () => {
+      stubFetch({
+        connected: false,
+        authorizedSelectStatus: 409,
+        authorizedSelectMessage: 'github-installation-no-repositories',
+      });
+      mountSection({ authorizeToken: AUTHORIZE_TOKEN });
+      await flushPromises();
+
+      clickBodyButton('これを使う');
+      await flushPromises();
+
+      expect(document.body.textContent).toContain(
+        'このインストールにはリポジトリが 1 件も含まれていません',
+      );
+      expect(takeAuthorizeToken(PROJECT_UUID)).toBe(AUTHORIZE_TOKEN);
+    });
+
+    it('選択が 409（全件を確認できない）ならその理由を伝え、トークンは残す', async () => {
+      stubFetch({
+        connected: false,
+        authorizedSelectStatus: 409,
+        authorizedSelectMessage: 'github-installation-repositories-incomplete',
+      });
+      mountSection({ authorizeToken: AUTHORIZE_TOKEN });
+      await flushPromises();
+
+      clickBodyButton('これを使う');
+      await flushPromises();
+
+      expect(document.body.textContent).toContain(
+        'このインストールのリポジトリを全件確認できませんでした',
+      );
+      expect(document.body.textContent).not.toContain('リポジトリが 1 件も含まれていません');
+      expect(takeAuthorizeToken(PROJECT_UUID)).toBe(AUTHORIZE_TOKEN);
+      expect(document.body.textContent).not.toContain('連携するリポジトリを選択');
+    });
+
+    it('選択が 410 なら GitHub App が削除されていることを伝える', async () => {
+      stubFetch({ connected: false, authorizedSelectStatus: 410 });
+      mountSection({ authorizeToken: AUTHORIZE_TOKEN });
+      await flushPromises();
+
+      clickBodyButton('これを使う');
+      await flushPromises();
+
+      expect(document.body.textContent).toContain(
+        'このアカウント・組織では GitHub App が削除されています',
+      );
+      expect(takeAuthorizeToken(PROJECT_UUID)).toBe(AUTHORIZE_TOKEN);
+    });
+
+    it('選択が一時障害ならトークンを捨てず、同じ候補を選び直せる', async () => {
+      const state: MockState = { connected: false, authorizedSelectStatus: 502 };
+      stubFetch(state);
+      mountSection({ authorizeToken: AUTHORIZE_TOKEN });
+      await flushPromises();
+
+      clickBodyButton('これを使う');
+      await flushPromises();
+
+      expect(document.body.textContent).toContain(
+        'このアカウント・組織を選べませんでした。もう一度お試しください。',
+      );
+      expect(takeAuthorizeToken(PROJECT_UUID)).toBe(AUTHORIZE_TOKEN);
+
+      state.authorizedSelectStatus = undefined;
+      clickBodyButton('これを使う');
+      await flushPromises();
+
+      expect(document.body.textContent).toContain('連携するリポジトリを選択');
+      expect(document.body.textContent).not.toContain('選べませんでした');
+    });
+
+    it.each([
+      ['authorization_denied', 'GitHub での確認を完了できませんでした'],
+      ['no_installations', 'あなたの GitHub アカウントから使えるインストールがありません'],
+    ])('callback の理由 %s を文言にする', async (reason, message) => {
+      stubFetch({ connected: false });
+      mountSection({ callbackError: reason });
+      await flushPromises();
+
+      expect(document.body.textContent).toContain(message);
+      expect(window.location.search).not.toContain('github_error');
+    });
   });
 });
