@@ -740,7 +740,7 @@ async function confirmDisconnect() {
 
       <!-- GitHub のユーザー認可で確かめた、利用者が見えるアカウント・組織（他のテナントで連携済みのものを含む） -->
       <div
-        v-if="canManage && !integration?.connected && (authorizeToken || authorizedError)"
+        v-if="canManage && (authorizeToken || authorizedError)"
         class="rounded-[10px] border p-4"
       >
         <p class="text-sm font-medium">GitHub で確認したアカウント・組織</p>

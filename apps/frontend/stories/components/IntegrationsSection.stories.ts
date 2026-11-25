@@ -250,6 +250,24 @@ export const Connected: Story = {
   },
 };
 
+export const ConnectedAuthorizedInstallations: Story = {
+  name: '連携済み・GitHub で確認したアカウント・組織（認可から戻った直後）',
+  beforeEach: mockFetch({ connected: true, authorized: true }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+
+    await expect(canvas.findByText('koyori-app/koyori')).resolves.toBeInTheDocument();
+    await expect(
+      canvas.findByText('GitHub で確認したアカウント・組織'),
+    ).resolves.toBeInTheDocument();
+
+    // 選ぶと、連携先を選び直すリポジトリ選択へ進む
+    await user.click((await canvas.findAllByRole('button', { name: 'これを使う' }))[0]!);
+    await expect(canvas.findByText('acme-org/backend')).resolves.toBeInTheDocument();
+  },
+};
+
 const READ_ONLY_REASON =
   '連携の設定を変えられるのは、テナントのオーナーと Admin、プロジェクトの Admin です。';
 

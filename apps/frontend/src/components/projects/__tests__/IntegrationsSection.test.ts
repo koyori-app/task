@@ -1478,12 +1478,27 @@ describe('IntegrationsSection', () => {
       expect(assignSpy).not.toHaveBeenCalled();
     });
 
-    it('連携済みなら、認可トークンがあっても候補のパネルを出さない', async () => {
-      stubFetch({ connected: true });
+    // 連携済みのプロジェクトでも、インストール画面から戻った人が GitHub のユーザー認可へ
+    // 回されることがある（プロジェクトの Admin だけの人）。認可トークン付きで着地する。
+    it('連携済みでも、認可トークンを持って戻ると候補を出し、選ぶとリポジトリ選択へ進む', async () => {
+      const fetchMock = stubFetch({ connected: true });
       mountSection({ authorizeToken: AUTHORIZE_TOKEN });
       await flushPromises();
 
-      expect(document.body.textContent).not.toContain('GitHub で確認したアカウント・組織');
+      expect(document.body.textContent).toContain('GitHub で確認したアカウント・組織');
+      expect(document.body.textContent).toContain('other-tenant-org');
+
+      clickBodyButton('これを使う');
+      await flushPromises();
+
+      const [selectCall] = requestsTo(fetchMock, '/github/authorized-installations/select');
+      expect(await selectCall!.clone().json()).toEqual({
+        authorize_token: AUTHORIZE_TOKEN,
+        candidate_id: AUTHORIZED_CANDIDATE.candidate_id,
+      });
+      const [repositoriesCall] = requestsTo(fetchMock, '/github/repositories');
+      expect(repositoriesCall!.headers.get('X-Github-Select-Token')).toBe(AUTHORIZED_SELECT_TOKEN);
+      expect(document.body.textContent).toContain('koyori-app/docs');
     });
 
     it.each([400, 403])(
