@@ -198,7 +198,8 @@ pub async fn get_task_forge(
 
 async fn task_branches(state: &AppState, task_id: Uuid) -> Result<Vec<TaskForgeBranch>, AppError> {
     // ブランチを head にしている PR はまとめて 1 本で引く。同じ名前のブランチは別のリポジトリにも
-    // ありうるので、リポジトリまで一致させる。PR 行の持ち主はブランチのリンクと同じ連携のプロジェクトに限る
+    // ありうるので、リポジトリまで一致させる。PR の送り先だけでなく head のリポジトリも見る
+    // （フォークの同名ブランチからの PR を拾わない）。PR 行の持ち主はブランチのリンクと同じ連携のプロジェクトに限る
     let mut pull_requests = group_pull_request_refs(
         PullRequestRefRow::find_by_statement(Statement::from_sql_and_values(
             state.db.get_database_backend(),
@@ -209,6 +210,7 @@ async fn task_branches(state: &AppState, task_id: Uuid) -> Result<Vec<TaskForgeB
               AND p.host = b.host AND p.host_url = b.host_url
               AND p.repo_owner = b.repo_owner AND p.repo_name = b.repo_name
               AND p.head_branch = b.branch
+              AND p.head_repo_owner = b.repo_owner AND p.head_repo_name = b.repo_name
              WHERE b.task_id = $1
              ORDER BY p.number, p.id",
             [task_id.into()],

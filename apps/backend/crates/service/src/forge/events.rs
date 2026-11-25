@@ -60,6 +60,9 @@ pub enum ForgeEvent {
         /// 小文字 16 進
         head_sha: String,
         head_branch: String,
+        /// 欄を足す前に積まれたジョブには無いので、無ければ `None` で読む
+        #[serde(default)]
+        head_repo: Option<crate::forge::pull_requests::HeadRepo>,
         html_url: String,
         /// ホスト側で PR が最後に更新された時刻。配送順の逆転を見分ける世代に使う（§5）
         updated_at: DateTime<Utc>,

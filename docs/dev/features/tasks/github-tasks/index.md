@@ -170,6 +170,7 @@ PR / MR の実体である。`UNIQUE (project_id, host, host_url, repo_owner, re
 | `merge_effects_processed_at` | TIMESTAMPTZ | NULLABLE | `Closed { merged: true }` のマージ時副作用を完了した時刻。現在状態の世代とは独立に、NULL の間だけ処理する |
 | `merge_effects_acknowledged_by` | UUID | NULLABLE, FK→users SET NULL | 副作用を実行しないまま「確認済み」にした操作者。実際に副作用を処理した場合は NULL |
 | `head_branch` | VARCHAR | NULLABLE | head のブランチ名。PR イベントの共通処理が入れる。この列を足す前に受けた PR は、次の PR イベントまで NULL である |
+| `head_repo_owner` / `head_repo_name` | VARCHAR | NULLABLE | head のブランチがあるリポジトリ。フォークからの PR では `repo_owner` / `repo_name`（送り先）と違う。PR イベントの共通処理が入れ、フォークが消えた PR と、この列を足す前に受けた PR（次の PR イベントまで）は NULL である |
 | `commits_complete` | BOOLEAN | NOT NULL DEFAULT false | PR のコミット一覧を読み切れたか。false のあいだ[コミット集合の同期](/dev/features/tasks/github-tasks/webhook#pr-のコミット集合の同期)の削除を行わず、画面の表示にも使う。同期が一度も走っていない行（`Opened` / `Synchronize` を受けていない PR）も既定の false のままである |
 | `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
 
@@ -367,7 +368,7 @@ webhook の受信記録である。`UNIQUE (host, host_url, delivery_id)` を張
 - `body` はメッセージの 2 行目以降で、前後の空白を除く。無ければ空文字列である
 - `pull_requests` はそのコミットを含む PR（`forge_pull_request_commits`）で、`number` / `state` / `html_url` を番号の昇順で返す。含む PR が無ければ空の配列である
 
-`branches[]` は `forge_branch_links` の `id` / `host` / `host_url` / `repo_owner` / `repo_name` / `branch` / `html_url` / `created_at` で、新しい順である。`id` は `DELETE .../forge/branches/{link_id}` に使い、他タスクの `link_id` は 404 を返す。`pull_requests` は、同じ連携のプロジェクトの同じリポジトリで、そのブランチを `head_branch` に持つ PR である。形と並びはコミットのものと同じである。
+`branches[]` は `forge_branch_links` の `id` / `host` / `host_url` / `repo_owner` / `repo_name` / `branch` / `html_url` / `created_at` で、新しい順である。`id` は `DELETE .../forge/branches/{link_id}` に使い、他タスクの `link_id` は 404 を返す。`pull_requests` は、同じ連携のプロジェクトの同じリポジトリで、そのブランチを `head_branch` に持ち、head のリポジトリ（`head_repo_owner` / `head_repo_name`）もブランチと同じ PR である。フォークの同名ブランチからの PR は入らない。形と並びはコミットのものと同じである。
 
 `repository` はタスクのプロジェクトの現在の連携先で、連携が無ければ `null` である。手動リンクの可否と対象リポジトリの表示に使う。連携の管理 API（`GET .../github/integration`）はテナントオーナー専用なので、タスクを読める人なら誰でも読めるここに出す。
 

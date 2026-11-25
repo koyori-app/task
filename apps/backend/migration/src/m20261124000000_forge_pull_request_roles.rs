@@ -7,7 +7,7 @@ pub struct Migration;
 /// （docs/dev/features/tasks/github-tasks/index.md の「データ」）。
 ///
 /// 自動の判定は保存しない（応答のたびに題とリンクの行から計算する）ので、既存の行は書き換えない。
-/// `head_branch` は次の PR イベントで埋まる。
+/// `head_branch` と head のリポジトリ（`head_repo_owner` / `head_repo_name`）は次の PR イベントで埋まる。
 ///
 /// 起動時の SeaORM `sync()` が entity から表と列を先に作ることがあるので、すべて `IF NOT EXISTS` にする。
 #[async_trait::async_trait]
@@ -16,7 +16,10 @@ impl MigrationTrait for Migration {
         manager
             .get_connection()
             .execute_unprepared(
-                "ALTER TABLE forge_pull_requests ADD COLUMN IF NOT EXISTS head_branch VARCHAR",
+                "ALTER TABLE forge_pull_requests
+                     ADD COLUMN IF NOT EXISTS head_branch VARCHAR,
+                     ADD COLUMN IF NOT EXISTS head_repo_owner VARCHAR,
+                     ADD COLUMN IF NOT EXISTS head_repo_name VARCHAR",
             )
             .await?;
         // PR × タスクにつき 1 行。行があるときだけ自動の判定に勝つ
@@ -51,7 +54,10 @@ impl MigrationTrait for Migration {
             .get_connection()
             .execute_unprepared(
                 "DROP TABLE IF EXISTS forge_pull_request_roles;
-                 ALTER TABLE forge_pull_requests DROP COLUMN IF EXISTS head_branch;",
+                 ALTER TABLE forge_pull_requests
+                     DROP COLUMN IF EXISTS head_branch,
+                     DROP COLUMN IF EXISTS head_repo_owner,
+                     DROP COLUMN IF EXISTS head_repo_name;",
             )
             .await?;
         Ok(())

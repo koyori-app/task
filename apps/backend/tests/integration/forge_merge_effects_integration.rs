@@ -333,6 +333,7 @@ async fn concurrent_merge_effects_run_once() {
         merged_at: Some(at),
         head_sha: "a3f92c1e7b81d4000000000000000000000000aa".into(),
         head_branch: "feat/oauth".into(),
+        head_repo: None,
         html_url: format!("https://github.com/{REPO_OWNER}/{REPO_NAME}/pull/41"),
         updated_at: at,
     };

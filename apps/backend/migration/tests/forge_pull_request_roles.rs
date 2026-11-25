@@ -38,7 +38,10 @@ async fn applies_after_sync_created_the_table_and_columns() {
     // sync() が先に作った状態
     db.execute_unprepared(
         r#"
-        ALTER TABLE forge_pull_requests ADD COLUMN head_branch VARCHAR;
+        ALTER TABLE forge_pull_requests
+            ADD COLUMN head_branch VARCHAR,
+            ADD COLUMN head_repo_owner VARCHAR,
+            ADD COLUMN head_repo_name VARCHAR;
         CREATE TABLE forge_pull_request_roles (
             pull_request_id UUID NOT NULL REFERENCES forge_pull_requests(id) ON DELETE CASCADE,
             task_id         UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,

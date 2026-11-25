@@ -33,6 +33,8 @@ pub struct Model {
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
     pub head_branch: Option<String>,
+    pub head_repo_owner: Option<String>,
+    pub head_repo_name: Option<String>,
     #[sea_orm(has_many)]
     pub forge_pull_request_links: HasMany<super::forge_pull_request_links::Entity>,
     #[sea_orm(has_many)]

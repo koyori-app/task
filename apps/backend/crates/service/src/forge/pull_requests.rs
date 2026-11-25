@@ -11,6 +11,7 @@ use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
     QueryFilter, Statement, TransactionTrait, prelude::Uuid,
 };
+use serde::{Deserialize, Serialize};
 
 use entity::{forge_pull_request_links, forge_pull_request_roles, forge_pull_requests, projects};
 
@@ -87,8 +88,18 @@ pub struct PullRequestSnapshot {
     pub merged_at: Option<DateTime<Utc>>,
     pub head_sha: String,
     pub head_branch: String,
+    /// head のブランチがあるリポジトリ。フォークからの PR では送り先（`ForgeRepo`）と違う。
+    /// フォークが消えているとホストは返さない
+    pub head_repo: Option<HeadRepo>,
     pub html_url: String,
     pub updated_at: DateTime<Utc>,
+}
+
+/// PR の head のブランチがあるリポジトリ（同じホスト）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeadRepo {
+    pub owner: String,
+    pub name: String,
 }
 
 /// PR イベントを現在状態へ反映する。適用したら `true`、古いイベントで何もしなかったら `false`。
@@ -149,12 +160,15 @@ where
                                               number, title, author_handle, state, head_sha, html_url,
                                               merged_at, host_updated_at, merge_effects_processed_at,
                                               merge_effects_acknowledged_by, commits_complete,
-                                              created_at, updated_at, head_branch)
+                                              created_at, updated_at, head_branch,
+                                              head_repo_owner, head_repo_name)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NULL, NULL, false,
-                     now(), now(), $15)
+                     now(), now(), $15, $16, $17)
              ON CONFLICT (project_id, host, host_url, repo_owner, repo_name, number) DO UPDATE SET
                  title = EXCLUDED.title,
                  head_branch = EXCLUDED.head_branch,
+                 head_repo_owner = EXCLUDED.head_repo_owner,
+                 head_repo_name = EXCLUDED.head_repo_name,
                  author_handle = EXCLUDED.author_handle,
                  -- マージは取り消せないので、open / closed のスナップショットで戻さない
                  state = CASE WHEN forge_pull_requests.state = 'merged' THEN 'merged'
@@ -181,6 +195,8 @@ where
                 snapshot.merged_at.into(),
                 snapshot.updated_at.into(),
                 snapshot.head_branch.clone().into(),
+                snapshot.head_repo.as_ref().map(|r| r.owner.clone()).into(),
+                snapshot.head_repo.as_ref().map(|r| r.name.clone()).into(),
             ],
         ))
         .await?

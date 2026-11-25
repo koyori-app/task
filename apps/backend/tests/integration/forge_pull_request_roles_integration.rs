@@ -624,6 +624,7 @@ async fn commits_and_branches_carry_their_pull_requests() {
         (62, branch.clone()),
         (61, branch.clone()),
         (63, "main2".into()),
+        (64, branch.clone()),
     ] {
         let mut payload = pr_payload(
             fx.installation_id,
@@ -634,6 +635,11 @@ async fn commits_and_branches_carry_their_pull_requests() {
             "2026-10-01T00:00:00Z",
         );
         payload["pull_request"]["head"]["ref"] = head.into();
+        if number == 64 {
+            // フォークの同名ブランチからの PR
+            payload["pull_request"]["head"]["repo"] =
+                serde_json::json!({ "name": REPO_NAME, "owner": { "login": "someone" } });
+        }
         deliver(&app, &fx, &payload).await.expect("opened");
     }
 
@@ -709,7 +715,7 @@ async fn commits_and_branches_carry_their_pull_requests() {
     let branches = forge["branches"].as_array().expect("branches");
     assert_eq!(branches.len(), 1, "{forge}");
     assert_eq!(branches[0]["branch"], branch.as_str());
-    // 別のブランチを head にする #63 は入らない
+    // 別のブランチを head にする #63 も、フォークの同名ブランチからの #64 も入らない
     assert_eq!(numbers(&branches[0]), vec![61, 62]);
 
     forget_github_mock();
