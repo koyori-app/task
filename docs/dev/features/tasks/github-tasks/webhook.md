@@ -27,7 +27,7 @@ sidebar:
 | イベント | 持つもの |
 |---|---|
 | `Push` | `repo: ForgeRepo` / `ref_name` / `forced` / `before: Option<String>` / `after` / `commits_truncated` / `commits: Vec<ForgeCommit>` |
-| `PullRequest` | `repo: ForgeRepo` / `action: PrAction` / `number` / `title` / `body` / `author_handle` / `state` / `merged_at` / `head_sha` / `head_branch` / `html_url` / `updated_at`。`action` は `Opened` / `Edited` / `Synchronize` / `Closed { merged }` / `Reopened` |
+| `PullRequest` | `repo: ForgeRepo` / `action: PrAction` / `number` / `title` / `body` / `author_handle` / `state` / `merged_at` / `head_sha` / `head_branch` / `head_repo`（head のブランチがあるリポジトリの `owner` / `name`。フォークが消えた PR では無い）/ `html_url` / `updated_at`。`action` は `Opened` / `Edited` / `Synchronize` / `Closed { merged }` / `Reopened` |
 | `BranchCreated` | `repo: ForgeRepo` / `branch` / `html_url` |
 | `BranchDeleted` | `repo: ForgeRepo` / `branch` |
 

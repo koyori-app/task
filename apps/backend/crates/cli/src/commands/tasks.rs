@@ -2411,6 +2411,8 @@ mod tests {
             "commits_complete": false,
             "sources": ["manual"],
             "closes": false,
+            "role": "mention",
+            "head_branch": null,
             "unresolved": null,
         })
     }

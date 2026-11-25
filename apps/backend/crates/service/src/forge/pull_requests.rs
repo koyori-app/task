@@ -11,8 +11,9 @@ use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
     QueryFilter, Statement, TransactionTrait, prelude::Uuid,
 };
+use serde::{Deserialize, Serialize};
 
-use entity::{forge_pull_request_links, forge_pull_requests, projects};
+use entity::{forge_pull_request_links, forge_pull_request_roles, forge_pull_requests, projects};
 
 use super::commits::can_view_project;
 use super::events::ForgeRepo;
@@ -21,6 +22,60 @@ use crate::task_activities::{record_activity, record_activity_once};
 
 pub const PULL_REQUEST_LINKED_EVENT: &str = "forge_pull_request_linked";
 pub const PULL_REQUEST_UNLINKED_EVENT: &str = "forge_pull_request_unlinked";
+
+/// PR がタスクに対して持つ役割。表示の分け方だけに使い、マージ時の自動完了（`closes`）とは別に持つ。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PullRequestRole {
+    /// そのタスクを実装する PR
+    Implementation,
+    /// タスクに触れているだけの PR
+    Mention,
+}
+
+impl PullRequestRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Implementation => "implementation",
+            Self::Mention => "mention",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "implementation" => Some(Self::Implementation),
+            "mention" => Some(Self::Mention),
+            _ => None,
+        }
+    }
+}
+
+/// PR の役割を決める唯一の場所。手の上書き（`forge_pull_request_roles`）があればそれが勝つ。
+///
+/// 自動の判定は保存せず、呼ぶたびに PR の題とリンクの行から計算する。実装になるのは、
+/// どれかの参照元がクローズキーワード付き（手動リンクの「マージしたら完了にする」を含む）か、
+/// 題の末尾の `(KEY-N)` がこのタスクを指すとき。本文や題の途中の言及、ブランチ名だけは言及。
+pub fn pull_request_role(
+    title: &str,
+    sources: &[String],
+    closes: bool,
+    project_key: &str,
+    seq_id: i32,
+    overridden: Option<PullRequestRole>,
+) -> PullRequestRole {
+    if let Some(role) = overridden {
+        return role;
+    }
+    // 題の行が無い（題の参照が別テナントのタスクに解決された等）なら、題の末尾も数えない
+    let named_in_title_tail = sources.iter().any(|source| source == "title")
+        && task_refs::title_tail_refs(title)
+            .iter()
+            .any(|r| r.key.eq_ignore_ascii_case(project_key) && r.seq_id == seq_id);
+    if closes || named_in_title_tail {
+        PullRequestRole::Implementation
+    } else {
+        PullRequestRole::Mention
+    }
+}
 
 /// PR のある時点の状態。webhook のペイロードか、ホストの PR 取得 API の結果から作る。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,8 +88,18 @@ pub struct PullRequestSnapshot {
     pub merged_at: Option<DateTime<Utc>>,
     pub head_sha: String,
     pub head_branch: String,
+    /// head のブランチがあるリポジトリ。フォークからの PR では送り先（`ForgeRepo`）と違う。
+    /// フォークが消えているとホストは返さない
+    pub head_repo: Option<HeadRepo>,
     pub html_url: String,
     pub updated_at: DateTime<Utc>,
+}
+
+/// PR の head のブランチがあるリポジトリ（同じホスト）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeadRepo {
+    pub owner: String,
+    pub name: String,
 }
 
 /// PR イベントを現在状態へ反映する。適用したら `true`、古いイベントで何もしなかったら `false`。
@@ -95,11 +160,15 @@ where
                                               number, title, author_handle, state, head_sha, html_url,
                                               merged_at, host_updated_at, merge_effects_processed_at,
                                               merge_effects_acknowledged_by, commits_complete,
-                                              created_at, updated_at)
+                                              created_at, updated_at, head_branch,
+                                              head_repo_owner, head_repo_name)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NULL, NULL, false,
-                     now(), now())
+                     now(), now(), $15, $16, $17)
              ON CONFLICT (project_id, host, host_url, repo_owner, repo_name, number) DO UPDATE SET
                  title = EXCLUDED.title,
+                 head_branch = EXCLUDED.head_branch,
+                 head_repo_owner = EXCLUDED.head_repo_owner,
+                 head_repo_name = EXCLUDED.head_repo_name,
                  author_handle = EXCLUDED.author_handle,
                  -- マージは取り消せないので、open / closed のスナップショットで戻さない
                  state = CASE WHEN forge_pull_requests.state = 'merged' THEN 'merged'
@@ -125,6 +194,9 @@ where
                 snapshot.html_url.clone().into(),
                 snapshot.merged_at.into(),
                 snapshot.updated_at.into(),
+                snapshot.head_branch.clone().into(),
+                snapshot.head_repo.as_ref().map(|r| r.owner.clone()).into(),
+                snapshot.head_repo.as_ref().map(|r| r.name.clone()).into(),
             ],
         ))
         .await?
@@ -337,6 +409,13 @@ pub async fn unlink(
     if deleted.rows_affected == 0 {
         return Ok(false);
     }
+    // 手で外したら役割の上書きも消す。残すと、自動リンクが戻ったときに前の上書きが生き返る。
+    // PR イベントがリンクを消す経路（`apply_pull_request`）は上書きに触れないので、そちらでは残る
+    forge_pull_request_roles::Entity::delete_many()
+        .filter(forge_pull_request_roles::Column::PullRequestId.eq(pull_request_id))
+        .filter(forge_pull_request_roles::Column::TaskId.eq(task_id))
+        .exec(&txn)
+        .await?;
     record_activity(
         &txn,
         task_id,
@@ -352,4 +431,147 @@ pub async fn unlink(
     .await?;
     txn.commit().await?;
     Ok(true)
+}
+
+/// PR の役割を手で上書きする。その PR とタスクのリンクが 1 行も無ければ何も書かずに `false`。
+///
+/// リンクの行を `FOR UPDATE` で掴んでから書くので、`unlink` とは直列になる（先に外されていれば
+/// `false`、後から外されれば `unlink` が上書きも消す）。同時の上書きは後勝ち。
+pub async fn set_role(
+    db: &DatabaseConnection,
+    task_id: Uuid,
+    pull_request_id: Uuid,
+    role: PullRequestRole,
+    user_id: Uuid,
+) -> Result<bool, anyhow::Error> {
+    let txn = db.begin().await?;
+    let links = txn
+        .query_all_raw(Statement::from_sql_and_values(
+            txn.get_database_backend(),
+            "SELECT 1 FROM forge_pull_request_links
+             WHERE pull_request_id = $1 AND task_id = $2
+             FOR UPDATE",
+            [pull_request_id.into(), task_id.into()],
+        ))
+        .await?;
+    if links.is_empty() {
+        return Ok(false);
+    }
+    txn.execute_raw(Statement::from_sql_and_values(
+        txn.get_database_backend(),
+        "INSERT INTO forge_pull_request_roles (pull_request_id, task_id, role, set_by, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, now(), now())
+         ON CONFLICT (pull_request_id, task_id) DO UPDATE SET
+             role = EXCLUDED.role, set_by = EXCLUDED.set_by, updated_at = now()",
+        [
+            pull_request_id.into(),
+            task_id.into(),
+            role.as_str().into(),
+            user_id.into(),
+        ],
+    ))
+    .await?;
+    txn.commit().await?;
+    Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pull_request_role_prefers_the_override_then_closes_then_the_title_tail() {
+        use PullRequestRole::{Implementation, Mention};
+        let s = |sources: &[&str]| sources.iter().map(|v| (*v).to_owned()).collect::<Vec<_>>();
+        for (name, title, sources, closes, overridden, expected) in [
+            (
+                "上書きが実装",
+                "x",
+                s(&["body"]),
+                false,
+                Some(Implementation),
+                Implementation,
+            ),
+            (
+                "上書きが言及（自動は実装）",
+                "feat: x (TASK-7)",
+                s(&["title"]),
+                true,
+                Some(Mention),
+                Mention,
+            ),
+            (
+                "クローズキーワード",
+                "x",
+                s(&["body"]),
+                true,
+                None,
+                Implementation,
+            ),
+            (
+                "題の末尾",
+                "feat: x (TASK-7)",
+                s(&["title"]),
+                false,
+                None,
+                Implementation,
+            ),
+            (
+                "題の末尾（キーは小文字）",
+                "feat: x (task-7)",
+                s(&["title"]),
+                false,
+                None,
+                Implementation,
+            ),
+            (
+                "題の途中",
+                "TASK-7 を直す",
+                s(&["title"]),
+                false,
+                None,
+                Mention,
+            ),
+            ("ブランチ名だけ", "x", s(&["branch"]), false, None, Mention),
+            (
+                "末尾が別のキー",
+                "TASK-7 x (ENG-7)",
+                s(&["title"]),
+                false,
+                None,
+                Mention,
+            ),
+            (
+                "末尾が別の番号",
+                "TASK-7 x (TASK-70)",
+                s(&["title"]),
+                false,
+                None,
+                Mention,
+            ),
+            (
+                "題の行が無い",
+                "feat: x (TASK-7)",
+                s(&["body"]),
+                false,
+                None,
+                Mention,
+            ),
+        ] {
+            assert_eq!(
+                pull_request_role(title, &sources, closes, "TASK", 7, overridden),
+                expected,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn role_round_trips_through_its_wire_name() {
+        for role in [PullRequestRole::Implementation, PullRequestRole::Mention] {
+            assert_eq!(PullRequestRole::parse(role.as_str()), Some(role));
+        }
+        assert_eq!(PullRequestRole::parse("x"), None);
+        assert_eq!(PullRequestRole::parse(""), None);
+    }
 }

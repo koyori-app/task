@@ -6,15 +6,8 @@ import { useProjectFileUpload } from '@/composables/useProjectFileUpload';
 import type { ReactionController } from '@/composables/useReactions';
 import { useQueryClient } from '@tanstack/vue-query';
 import {
-  CalendarClock,
   CalendarDays,
-  ArrowRight,
   Check,
-  ChevronDown,
-  ChevronRight,
-  ChevronUp,
-  CheckCheck,
-  CircleDashed,
   Copy,
   EllipsisVertical,
   Flag,
@@ -25,11 +18,11 @@ import {
   Plus,
   ListChecks,
   SquarePen,
-  Star,
   Tag,
   Timer,
   User,
   UserPlus,
+  Workflow,
   X,
 } from '@lucide/vue';
 import { computed, nextTick, ref, watch } from 'vue';
@@ -40,12 +33,11 @@ import TaskRefHoverCard from '@/components/tasks/TaskRefHoverCard.vue';
 import LabelMark from '@/components/tasks/LabelMark.vue';
 import { hasTaskRefCards } from '@/lib/task-ref-card';
 import MentionHoverCard from '@/components/tasks/MentionHoverCard.vue';
-import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
 import TaskChecklistProgress from '@/components/tasks/TaskChecklistProgress.vue';
 import TaskCompletionRule from '@/components/tasks/TaskCompletionRule.vue';
 import TaskPropertyRow from '@/components/tasks/TaskPropertyRow.vue';
+import TaskStatusButton from '@/components/tasks/TaskStatusButton.vue';
 import {
-  AvatarGroup,
   Button,
   ConfirmDialog,
   Dropdown,
@@ -62,7 +54,6 @@ import { hasMentionCards } from '@/lib/mention-card';
 import {
   PRIORITY_CONFIG,
   clampProgressPct,
-  formatDeadline,
   formatProgressPct,
   formatTaskDate,
   isoToLocalDateInput,
@@ -70,6 +61,7 @@ import {
   taskSeqKey,
 } from '@/lib/task-display';
 import { DEADLINE_ORDER_MESSAGE, softNotBeforeHard } from '@/lib/task-date';
+import { formatDetailDate, remainingLabel } from '@/lib/task-date-display';
 // KFM サイドカー CSS の消費契約 (@/lib/markup-renderer/index.ts): v-html する消費側が
 // 明示 import する。GFM は器の kfm-content (KFM_CONTENT_CLASS) が無いと一行も当たらない。
 // content-class.ts は leaf module なので、この import で KFM コアが client へ載ることはない。
@@ -87,74 +79,83 @@ type StatusOption = components['schemas']['ProjectStatusResponse'];
 type LabelOption = components['schemas']['LabelResponse'];
 type TaskTypeOption = components['schemas']['TaskTypeResponse'];
 
-const props = defineProps<{
-  task: TaskDetail | null;
-  projectKey: string;
-  statuses: StatusOption[];
-  statusId: string;
-  statusUpdating?: boolean;
-  statusError?: string | null;
-  priorityUpdating?: boolean;
-  priorityError?: string | null;
-  /** 選べる種別（未指定なら種別は表示のみ。選べない間は渡さない） */
-  projectTaskTypes?: TaskTypeOption[];
-  taskTypeUpdating?: boolean;
-  taskTypeError?: string | null;
-  /** 担当者に選べるメンバー（未指定なら担当者は表示のみ） */
-  members?: { id: string; username: string; avatar_url?: string | null }[];
-  /** 担当者の更新中。ピッカーを止める（止めないと 2 回目が無言で捨てられる） */
-  assigneeUpdating?: boolean;
-  assigneeError?: string | null;
-  /** 完了条件（担当者ごとの完了）の更新中。切り替えと自分の分の操作を止める */
-  completionUpdating?: boolean;
-  completionError?: string | null;
-  /** 候補の取得状態。取得中・失敗を「候補 0 人」と混ぜない */
-  membersState?: { loading?: boolean; error?: boolean; onRetry?: () => void };
-  /** 担当者のプロフィール画面の URL。渡すと担当者名をリンクで並べる */
-  profileHref?: (userId: string) => string;
-  /** ログイン中ユーザーの ID。押した人の一覧で「自分」を示す */
-  currentUserId?: string | null;
-  /** 説明の札のカードがプロフィール API を引くテナント（UUID）。無ければカードは名前と画像だけ */
-  tenantId?: string | null;
-  /** 説明の札のカードの「プロフィールを見る」の道のテナント（表示用 id） */
-  mentionTenant?: string;
-  /** 絵文字リアクションの操作。渡さなければリアクションの UI を出さない */
-  reactionController?: ReactionController;
-  projectLabels?: LabelOption[];
-  projectLabelsLoading?: boolean;
-  projectLabelsError?: boolean;
-  labelsUpdating?: boolean;
-  labelsError?: string | null;
-  fieldUpdating?: Partial<Record<EditableField, boolean>>;
-  fieldErrors?: Partial<Record<EditableField, string>>;
-  /** 直近に保存が確定したフィールド。該当箇所に「保存しました」を出す（失敗表示が優先） */
-  savedField?: MutatingField | null;
-  loading?: boolean;
-  notFound?: boolean;
-  error?: boolean;
-  deleteDisabled?: boolean;
-  /**
-   * 'page'（既定）はフルページ用に広画面で 3 カラムへ展開する。
-   * 'pane' は分割ビューの狭い右ペイン用に常に 1 カラムで縦積みにする。
-   */
-  layout?: 'page' | 'pane';
-  /**
-   * サーバ (+data.ts) の renderDescription 出力。descriptionSource が最新の
-   * task.description と厳密一致するときだけ KFM HTML として v-html 表示する。
-   * null / 未指定・不一致はプレーンテキスト表示へフォールバックする
-   * (分割ビューのペイン等、サーバ生成 HTML を持たない消費側)。
-   * v-html に入れてよいのはこの prop だけ — task.description (生テキスト) を
-   * v-html へ流す経路を作ってはならない (SSR/sanitize 契約: @/lib/markup-renderer)。
-   */
-  descriptionHtml?: string | null;
-  /**
-   * descriptionHtml の描画元テキスト (+data.ts の descriptionSource)。
-   * descriptionHtml を渡す消費側は必ず対で渡す。task.description との厳密一致を
-   * 下の freshDescriptionHtml が照合し、古い HTML (保存直後の reload 完了前・
-   * reload 失敗・他者更新) が v-html に出る経路をコンポーネント側で塞ぐ。
-   */
-  descriptionSource?: string | null;
-}>();
+const props = withDefaults(
+  defineProps<{
+    task: TaskDetail | null;
+    projectKey: string;
+    statuses: StatusOption[];
+    statusId: string;
+    statusUpdating?: boolean;
+    statusError?: string | null;
+    priorityUpdating?: boolean;
+    priorityError?: string | null;
+    /** 選べる種別（未指定なら種別は表示のみ。選べない間は渡さない） */
+    projectTaskTypes?: TaskTypeOption[];
+    taskTypeUpdating?: boolean;
+    taskTypeError?: string | null;
+    /** 担当者に選べるメンバー（未指定なら担当者は表示のみ） */
+    members?: { id: string; username: string; avatar_url?: string | null }[];
+    /** 担当者の更新中。ピッカーを止める（止めないと 2 回目が無言で捨てられる） */
+    assigneeUpdating?: boolean;
+    assigneeError?: string | null;
+    /** 完了条件（担当者ごとの完了）の更新中。切り替えと自分の分の操作を止める */
+    completionUpdating?: boolean;
+    completionError?: string | null;
+    /** 候補の取得状態。取得中・失敗を「候補 0 人」と混ぜない */
+    membersState?: { loading?: boolean; error?: boolean; onRetry?: () => void };
+    /** 担当者のプロフィール画面の URL。渡すと担当者名をリンクで並べる */
+    profileHref?: (userId: string) => string;
+    /** ログイン中ユーザーの ID。押した人の一覧で「自分」を示す */
+    currentUserId?: string | null;
+    /** 説明の札のカードがプロフィール API を引くテナント（UUID）。無ければカードは名前と画像だけ */
+    tenantId?: string | null;
+    /** 説明の札のカードの「プロフィールを見る」の道のテナント（表示用 id） */
+    mentionTenant?: string;
+    /** 絵文字リアクションの操作。渡さなければリアクションの UI を出さない */
+    reactionController?: ReactionController;
+    projectLabels?: LabelOption[];
+    projectLabelsLoading?: boolean;
+    projectLabelsError?: boolean;
+    labelsUpdating?: boolean;
+    labelsError?: string | null;
+    fieldUpdating?: Partial<Record<EditableField, boolean>>;
+    fieldErrors?: Partial<Record<EditableField, string>>;
+    /** 直近に保存が確定したフィールド。該当箇所に「保存しました」を出す（失敗表示が優先） */
+    savedField?: MutatingField | null;
+    loading?: boolean;
+    notFound?: boolean;
+    error?: boolean;
+    deleteDisabled?: boolean;
+    /**
+     * 'page'（既定）はフルページ用に広画面で 3 カラムへ展開する。
+     * 'pane' は分割ビューの狭い右ペイン用に常に 1 カラムで縦積みにする。
+     */
+    layout?: 'page' | 'pane';
+    /**
+     * サーバ (+data.ts) の renderDescription 出力。descriptionSource が最新の
+     * task.description と厳密一致するときだけ KFM HTML として v-html 表示する。
+     * null / 未指定・不一致はプレーンテキスト表示へフォールバックする
+     * (分割ビューのペイン等、サーバ生成 HTML を持たない消費側)。
+     * v-html に入れてよいのはこの prop だけ — task.description (生テキスト) を
+     * v-html へ流す経路を作ってはならない (SSR/sanitize 契約: @/lib/markup-renderer)。
+     */
+    descriptionHtml?: string | null;
+    /**
+     * descriptionHtml の描画元テキスト (+data.ts の descriptionSource)。
+     * descriptionHtml を渡す消費側は必ず対で渡す。task.description との厳密一致を
+     * 下の freshDescriptionHtml が照合し、古い HTML (保存直後の reload 完了前・
+     * reload 失敗・他者更新) が v-html に出る経路をコンポーネント側で塞ぐ。
+     */
+    descriptionSource?: string | null;
+    /**
+     * 器が右上に閉じるボタンを重ねるか（既定 true。オーバーレイと分割ビューのペイン）。
+     * true の間は、上部バーと右の列の見出しの右端を閉じるボタンの分だけ空ける。フルページは false を渡し、
+     * 上部バーの右端を本文の右端に、見出しの右端をコメント欄の右端にそろえる。
+     */
+    reserveClose?: boolean;
+  }>(),
+  { reserveClose: true },
+);
 
 const queryClient = useQueryClient();
 /** 取得元の query は呼び出し側にあるので、表示中のうち失敗しているものだけをやり直す */
@@ -199,16 +200,6 @@ const priorityOptions = Object.entries(PRIORITY_CONFIG) as [
 
 const TASK_ACTION_ITEMS: DropdownItem[] = [{ value: 'delete', label: '削除', destructive: true }];
 
-const statusItems = computed<DropdownItem[]>(() =>
-  props.statuses.map((status) => ({
-    value: status.id,
-    label: status.name,
-    kind: 'radio',
-    checked: status.id === props.statusId,
-    disabled: props.statusUpdating || (doneBlocked.value && status.is_done_state),
-  })),
-);
-
 const priorityItems = computed<DropdownItem[]>(() =>
   priorityOptions.map(([value, config]) => ({
     value,
@@ -241,7 +232,7 @@ const taskTypeItems = computed<DropdownItem[]>(() => [
 
 /**
  * 担当者全員の完了が必要なタスクで、未完了の担当者が残っている間は完了へ直接移せない
- * （backend が 409 で止める）。移せないボタンは出さず、メニューの項目は無効にする。
+ * （backend が 409 で止める）。✓ は薄くして押せなくし、理由をツールチップで出す。メニューの項目は無効にする。
  */
 const doneBlocked = computed(
   () =>
@@ -250,22 +241,14 @@ const doneBlocked = computed(
     !resolvedStatus.value?.is_done_state,
 );
 
-/** 「完了にする」の移動先。既定の完了に印が無ければ並び順で最初の完了へ倒す。 */
-const doneStatus = computed(
-  () =>
-    props.statuses.find((status) => status.is_done_state && status.is_default_done) ??
-    props.statuses.find((status) => status.is_done_state),
+/** まだ自分の分を完了にしていない担当者の数。完了へ移せない理由に出す */
+const remainingAssignees = computed(
+  () => props.task?.assignees.filter((assignee) => !assignee.completed_at).length ?? 0,
 );
 
-/** ワークフロー順に並べたステータス。「次へ」はこの並びで 1 つ進む。 */
-const orderedStatuses = computed(() => [...props.statuses].sort((a, b) => a.position - b.position));
-
-/** 現在の次のステータス。最後なら null（矢印は出さない）。 */
-const nextStatus = computed(() => {
-  const index = orderedStatuses.value.findIndex((status) => status.id === props.statusId);
-  if (index < 0) return null;
-  return orderedStatuses.value[index + 1] ?? null;
-});
+/** 日付の表示の「今日」。見る人の時間帯の暦の日で数える */
+const today = new Date();
+const taskDone = computed(() => !!resolvedStatus.value?.is_done_state);
 
 // 達成率は常に保存済みの説明から数える。編集中の下書きは数えない
 const checklist = computed(() => countChecklist(props.task?.description));
@@ -763,17 +746,18 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
       >
         <div class="flex min-w-0 flex-col" :class="layout === 'pane' ? '' : 'lg:min-h-0 lg:flex-1'">
           <!--
-          上部バー（モック）。前後移動・スター・Share は対応する機能がまだ無いので
-          disabled で置く。押せるのに何も起きない状態にはしない。
+          上部バー。共有は対応する機能がまだ無いので disabled で置く（押せるのに何も起きない状態にはしない）。
+          右端は本文の右端にそろえる。器が閉じるボタンを重ねる間は、1 列に積む幅（lg 未満・ペイン）でだけ
+          その分を空ける。2 列では閉じるボタンは右の列の上にある。
         -->
-          <header class="flex h-12 shrink-0 items-center gap-1 border-b px-3 pr-12">
-            <Button type="button" variant="ghost" ariaLabel="前のタスク" disabled>
-              <template #icon><ChevronUp class="size-4" aria-hidden="true" /></template>
-            </Button>
-            <Button type="button" variant="ghost" ariaLabel="次のタスク" disabled>
-              <template #icon><ChevronDown class="size-4" aria-hidden="true" /></template>
-            </Button>
-
+          <header
+            class="flex h-12 shrink-0 items-center gap-1 border-b px-3"
+            :class="[
+              layout === 'pane' ? '' : 'lg:px-6',
+              reserveClose ? (layout === 'pane' ? 'pr-12' : 'pr-12 lg:pr-6') : '',
+            ]"
+            data-task-detail-topbar
+          >
             <div class="ml-auto flex items-center gap-1">
               <Button
                 type="button"
@@ -788,9 +772,6 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                   <X v-else-if="copyState === 'error'" class="size-3.5" aria-hidden="true" />
                   <Copy v-else class="size-3.5" aria-hidden="true" />
                 </template>
-              </Button>
-              <Button type="button" variant="ghost" ariaLabel="スター" disabled>
-                <template #icon><Star class="size-4" aria-hidden="true" /></template>
               </Button>
               <Button type="button" variant="tertiary" disabled label="共有">
                 <template #icon><UserPlus class="size-4" aria-hidden="true" /></template>
@@ -815,47 +796,54 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
               layout === 'pane' ? '' : 'lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:px-6 lg:py-5'
             "
           >
-            <!-- 種別。候補（1 件以上）を渡された消費側では選び直せる。渡されなければ名前だけを表示し、候補も種別も無ければ出さない -->
-            <div v-if="projectTaskTypes?.length || task.task_type" class="flex flex-col gap-1">
-              <Dropdown
-                v-if="projectTaskTypes?.length"
-                top-layer
-                variant="tertiary"
-                label="種別"
-                :icon="null"
-                :disabled="taskTypeUpdating"
-                :items="taskTypeItems"
-                :on-select="
-                  (value: string) => emit('change:task_type', value === NO_TASK_TYPE ? null : value)
-                "
-              >
-                <template #trigger>
-                  <span
-                    class="flex items-center gap-1.5 text-xs"
-                    :class="task.task_type ? '' : 'text-muted-foreground'"
-                  >
+            <!--
+              題の上の行。種別のチップと、消費側が足す札（実装の PR のピル）を 1 行に並べる。
+              種別は、候補（1 件以上）を渡された消費側では選び直せる。渡されなければ名前だけを表示する。
+            -->
+            <div class="flex flex-col gap-1" data-task-meta>
+              <div class="flex flex-wrap items-center gap-2 empty:hidden">
+                <Dropdown
+                  v-if="projectTaskTypes?.length"
+                  top-layer
+                  variant="tertiary"
+                  label="種別"
+                  :icon="null"
+                  :disabled="taskTypeUpdating"
+                  :items="taskTypeItems"
+                  :on-select="
+                    (value: string) =>
+                      emit('change:task_type', value === NO_TASK_TYPE ? null : value)
+                  "
+                >
+                  <template #trigger>
                     <span
-                      v-if="task.task_type"
-                      class="size-2 shrink-0 rounded-full"
-                      :style="{ backgroundColor: task.task_type.color }"
-                      aria-hidden="true"
-                    />
-                    <Shapes v-else class="size-3.5" aria-hidden="true" />
-                    <span class="truncate">{{ task.task_type?.name ?? '種別' }}</span>
-                  </span>
-                </template>
-              </Dropdown>
-              <span
-                v-else-if="task.task_type"
-                class="inline-flex h-7 w-fit items-center gap-1.5 rounded-md border px-2 text-xs"
-              >
+                      class="flex items-center gap-1.5 text-xs"
+                      :class="task.task_type ? '' : 'text-muted-foreground'"
+                    >
+                      <span
+                        v-if="task.task_type"
+                        class="size-2 shrink-0 rounded-full"
+                        :style="{ backgroundColor: task.task_type.color }"
+                        aria-hidden="true"
+                      />
+                      <Shapes v-else class="size-3.5" aria-hidden="true" />
+                      <span class="truncate">{{ task.task_type?.name ?? '種別' }}</span>
+                    </span>
+                  </template>
+                </Dropdown>
                 <span
-                  class="size-2 shrink-0 rounded-full"
-                  :style="{ backgroundColor: task.task_type.color }"
-                  aria-hidden="true"
-                />
-                {{ task.task_type.name }}
-              </span>
+                  v-else-if="task.task_type"
+                  class="inline-flex h-7 w-fit items-center gap-1.5 rounded-md border px-2 text-xs"
+                >
+                  <span
+                    class="size-2 shrink-0 rounded-full"
+                    :style="{ backgroundColor: task.task_type.color }"
+                    aria-hidden="true"
+                  />
+                  {{ task.task_type.name }}
+                </span>
+                <slot name="meta" />
+              </div>
               <p v-if="taskTypeError" class="text-xs text-destructive">{{ taskTypeError }}</p>
               <p
                 v-else-if="savedField === 'task_type'"
@@ -922,56 +910,16 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
           -->
             <div class="grid grid-cols-1 gap-x-12 sm:grid-cols-2">
               <div class="flex flex-col">
-                <TaskPropertyRow label="ステータス" :icon="CircleDashed">
-                  <div class="flex items-center gap-1">
-                    <!--
-                      ピルは 2 つのボタンでできている。名前を押すと一覧から選ぶ、
-                      右の矢印はワークフロー順の次へ 1 つ進める（入れ子のボタンは作れないので
-                      見た目だけ 1 つの器に見せる）。
-                    -->
-                    <div class="inline-flex h-7 max-w-full items-center rounded bg-muted">
-                      <!-- 一覧は根の中に出るので、器で切り取らない（overflow-hidden を付けない） -->
-                      <Dropdown
-                        top-layer
-                        class="min-w-0"
-                        label="ステータス"
-                        :disabled="statusUpdating"
-                        :icon="null"
-                        :items="statusItems"
-                        :on-select="(id: string) => emit('update:statusId', id)"
-                      >
-                        <template #trigger>
-                          <span class="truncate text-xs font-semibold uppercase tracking-wide">{{
-                            resolvedStatus?.name ?? '未設定'
-                          }}</span>
-                        </template>
-                      </Dropdown>
-
-                      <button
-                        v-if="nextStatus"
-                        type="button"
-                        class="inline-flex h-7 items-center rounded-r border-l border-background/60 px-1.5 hover:bg-muted-foreground/10 disabled:opacity-50"
-                        :aria-label="`${nextStatus.name} にする`"
-                        :title="`次へ: ${nextStatus.name}`"
-                        :disabled="statusUpdating || (nextStatus.is_done_state && doneBlocked)"
-                        @click="emit('update:statusId', nextStatus.id)"
-                      >
-                        <ChevronRight class="size-3.5 opacity-70" aria-hidden="true" />
-                      </button>
-                    </div>
-
-                    <!-- ✓ は完了扱いのステータスへ一手で移す -->
-                    <Button
-                      v-if="doneStatus && doneStatus.id !== statusId && !doneBlocked"
-                      type="button"
-                      variant="ghost"
-                      :ariaLabel="`${doneStatus.name} にする（完了）`"
-                      :disabled="statusUpdating"
-                      @click="emit('update:statusId', doneStatus.id)"
-                    >
-                      <template #icon><Check class="size-4" aria-hidden="true" /></template>
-                    </Button>
-                  </div>
+                <!-- ラベルのアイコンは円にしない（値の側の「円の埋まり方」と並ぶと Backlog に見える） -->
+                <TaskPropertyRow label="ステータス" :icon="Workflow">
+                  <TaskStatusButton
+                    :statuses="statuses"
+                    :status-id="statusId"
+                    :updating="statusUpdating"
+                    :done-blocked="doneBlocked"
+                    :remaining-assignees="remainingAssignees"
+                    @update:status-id="(id) => emit('update:statusId', id)"
+                  />
                   <p v-if="statusError" class="mt-1 text-xs text-destructive">{{ statusError }}</p>
                   <p
                     v-else-if="savedField === 'status_id'"
@@ -982,153 +930,188 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                   </p>
                 </TaskPropertyRow>
 
-                <!-- 日付は 1 行に 2 つ（参照の Start → Due） -->
+                <!--
+                  日付は縦に 3 行（開始 / 目標 = ソフト期限 / 締切 = ハード期限）。大きさの違う文字
+                  （名前 12px・日付 14px・残り 12px）を並べるので、ベースラインでそろえる。
+                  koyori の Input は date に max / aria-invalid を付けない。順序の食い違いは保存時に止め、
+                  下の alert で知らせる。
+                -->
                 <TaskPropertyRow label="日付" :icon="CalendarDays">
-                  <div class="flex flex-wrap items-center gap-1">
-                    <div v-if="editingField === 'planned_start_on'" class="flex items-center gap-1">
-                      <!-- koyori の Input は date に max / aria-invalid を付けない。期限より後かは保存時に止め、下の alert で知らせる -->
-                      <Input
-                        ref="editingControlRef"
-                        data-editing="planned_start_on"
-                        type="date"
-                        class="max-w-40"
-                        :disabled="isFieldUpdating('planned_start_on')"
-                        aria-label="開始予定日"
-                        :value="draftValue"
-                        :on-value-change="(v: string) => (draftValue = v)"
-                        :on-blur="() => commitEditing('planned_start_on')"
-                        @keydown="onEditKeydown($event, 'planned_start_on')"
-                      />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        class="shrink-0"
-                        ariaLabel="開始予定日を消す"
-                        :disabled="isFieldUpdating('planned_start_on')"
-                        @mousedown.prevent
-                        @click="clearDeadline('planned_start_on')"
-                      >
-                        <template #icon><X class="size-4" aria-hidden="true" /></template>
-                      </Button>
-                    </div>
-                    <button
-                      v-else
-                      type="button"
-                      class="inline-flex h-7 items-center gap-1.5 rounded px-1.5 text-sm hover:bg-muted"
-                      :class="task.planned_start_on ? '' : 'text-muted-foreground'"
-                      aria-label="開始予定日を編集"
-                      :disabled="isFieldUpdating('planned_start_on')"
-                      @click="startEditing('planned_start_on')"
+                  <div class="flex flex-col">
+                    <div
+                      class="flex min-h-8 items-baseline gap-2"
+                      data-task-date-row="planned_start_on"
                     >
-                      <CalendarDays class="size-4" aria-hidden="true" />
-                      {{ task.planned_start_on ?? '開始予定' }}
-                    </button>
-
-                    <ArrowRight class="size-3.5 text-muted-foreground" aria-hidden="true" />
-
-                    <div v-if="editingField === 'soft_deadline'" class="flex items-center gap-1">
-                      <Input
-                        ref="editingControlRef"
-                        data-editing="soft_deadline"
-                        type="date"
-                        class="max-w-40"
-                        :disabled="isFieldUpdating('soft_deadline')"
-                        aria-label="ソフト期限"
-                        :value="draftValue"
-                        :on-value-change="(v: string) => (draftValue = v)"
-                        :on-blur="() => commitEditing('soft_deadline')"
-                        @keydown="onEditKeydown($event, 'soft_deadline')"
-                      />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        class="shrink-0"
-                        ariaLabel="ソフト期限を消す"
-                        :disabled="isFieldUpdating('soft_deadline')"
-                        @mousedown.prevent
-                        @click="clearDeadline('soft_deadline')"
+                      <span class="w-7 shrink-0 text-xs text-muted-foreground">開始</span>
+                      <div
+                        v-if="editingField === 'planned_start_on'"
+                        class="flex items-center gap-1"
                       >
-                        <template #icon><X class="size-4" aria-hidden="true" /></template>
-                      </Button>
+                        <Input
+                          ref="editingControlRef"
+                          data-editing="planned_start_on"
+                          type="date"
+                          class="max-w-40"
+                          :disabled="isFieldUpdating('planned_start_on')"
+                          aria-label="開始予定日"
+                          :value="draftValue"
+                          :on-value-change="(v: string) => (draftValue = v)"
+                          :on-blur="() => commitEditing('planned_start_on')"
+                          @keydown="onEditKeydown($event, 'planned_start_on')"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          class="shrink-0"
+                          ariaLabel="開始予定日を消す"
+                          :disabled="isFieldUpdating('planned_start_on')"
+                          @mousedown.prevent
+                          @click="clearDeadline('planned_start_on')"
+                        >
+                          <template #icon><X class="size-4" aria-hidden="true" /></template>
+                        </Button>
+                      </div>
+                      <template v-else>
+                        <button
+                          type="button"
+                          class="-mx-1 rounded px-1 text-sm leading-8 hover:bg-muted"
+                          :class="
+                            false
+                              ? 'text-destructive'
+                              : task.planned_start_on
+                                ? ''
+                                : 'text-muted-foreground'
+                          "
+                          aria-label="開始予定日を編集"
+                          :disabled="isFieldUpdating('planned_start_on')"
+                          @click="startEditing('planned_start_on')"
+                        >
+                          {{ formatDetailDate(task.planned_start_on, today) }}
+                        </button>
+                      </template>
                     </div>
-                    <button
-                      v-else
-                      type="button"
-                      class="inline-flex h-7 items-center gap-1.5 rounded px-1.5 text-sm hover:bg-muted"
-                      :class="
-                        task.soft_deadline
-                          ? formatDeadline(task.soft_deadline, {
-                              done: resolvedStatus?.is_done_state,
-                            })?.overdue
-                            ? 'text-destructive'
-                            : ''
-                          : 'text-muted-foreground'
-                      "
-                      aria-label="ソフト期限を編集"
-                      :disabled="isFieldUpdating('soft_deadline')"
-                      @click="startEditing('soft_deadline')"
+                    <div
+                      class="flex min-h-8 items-baseline gap-2"
+                      data-task-date-row="soft_deadline"
                     >
-                      <CalendarDays class="size-4" aria-hidden="true" />
-                      {{
-                        formatDeadline(task.soft_deadline, {
-                          done: resolvedStatus?.is_done_state,
-                          completedAt: task.completed_at,
-                        })?.label ?? '期限'
-                      }}
-                    </button>
-
-                    <ArrowRight class="size-3.5 text-muted-foreground" aria-hidden="true" />
-
-                    <div v-if="editingField === 'hard_deadline'" class="flex items-center gap-1">
-                      <Input
-                        ref="editingControlRef"
-                        data-editing="hard_deadline"
-                        type="date"
-                        class="max-w-40"
-                        :disabled="isFieldUpdating('hard_deadline')"
-                        aria-label="ハード期限"
-                        :value="draftValue"
-                        :on-value-change="(v: string) => (draftValue = v)"
-                        :on-blur="() => commitEditing('hard_deadline')"
-                        @keydown="onEditKeydown($event, 'hard_deadline')"
-                      />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        class="shrink-0"
-                        ariaLabel="ハード期限を消す"
-                        :disabled="isFieldUpdating('hard_deadline')"
-                        @mousedown.prevent
-                        @click="clearDeadline('hard_deadline')"
-                      >
-                        <template #icon><X class="size-4" aria-hidden="true" /></template>
-                      </Button>
+                      <span class="w-7 shrink-0 text-xs text-muted-foreground">目標</span>
+                      <div v-if="editingField === 'soft_deadline'" class="flex items-center gap-1">
+                        <Input
+                          ref="editingControlRef"
+                          data-editing="soft_deadline"
+                          type="date"
+                          class="max-w-40"
+                          :disabled="isFieldUpdating('soft_deadline')"
+                          aria-label="ソフト期限"
+                          :value="draftValue"
+                          :on-value-change="(v: string) => (draftValue = v)"
+                          :on-blur="() => commitEditing('soft_deadline')"
+                          @keydown="onEditKeydown($event, 'soft_deadline')"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          class="shrink-0"
+                          ariaLabel="ソフト期限を消す"
+                          :disabled="isFieldUpdating('soft_deadline')"
+                          @mousedown.prevent
+                          @click="clearDeadline('soft_deadline')"
+                        >
+                          <template #icon><X class="size-4" aria-hidden="true" /></template>
+                        </Button>
+                      </div>
+                      <template v-else>
+                        <button
+                          type="button"
+                          class="-mx-1 rounded px-1 text-sm leading-8 hover:bg-muted"
+                          :class="
+                            remainingLabel(task.soft_deadline, today, taskDone)?.overdue
+                              ? 'text-destructive'
+                              : task.soft_deadline
+                                ? ''
+                                : 'text-muted-foreground'
+                          "
+                          aria-label="ソフト期限を編集"
+                          :disabled="isFieldUpdating('soft_deadline')"
+                          @click="startEditing('soft_deadline')"
+                        >
+                          {{ formatDetailDate(task.soft_deadline, today) }}
+                        </button>
+                        <span
+                          v-if="remainingLabel(task.soft_deadline, today, taskDone)"
+                          class="text-xs"
+                          :class="
+                            remainingLabel(task.soft_deadline, today, taskDone)?.overdue
+                              ? 'text-destructive'
+                              : 'text-muted-foreground'
+                          "
+                          data-task-date-remaining
+                        >
+                          {{ remainingLabel(task.soft_deadline, today, taskDone)?.text }}
+                        </span>
+                      </template>
                     </div>
-                    <button
-                      v-else
-                      type="button"
-                      class="inline-flex h-7 items-center gap-1.5 rounded px-1.5 text-sm hover:bg-muted"
-                      :class="
-                        task.hard_deadline
-                          ? formatDeadline(task.hard_deadline, {
-                              done: resolvedStatus?.is_done_state,
-                            })?.overdue
-                            ? 'text-destructive'
-                            : ''
-                          : 'text-muted-foreground'
-                      "
-                      aria-label="ハード期限を編集"
-                      :disabled="isFieldUpdating('hard_deadline')"
-                      @click="startEditing('hard_deadline')"
+                    <div
+                      class="flex min-h-8 items-baseline gap-2"
+                      data-task-date-row="hard_deadline"
                     >
-                      <CalendarClock class="size-4" aria-hidden="true" />
-                      {{
-                        formatDeadline(task.hard_deadline, {
-                          done: resolvedStatus?.is_done_state,
-                          completedAt: task.completed_at,
-                        })?.label ?? 'ハード期限'
-                      }}
-                    </button>
+                      <span class="w-7 shrink-0 text-xs text-muted-foreground">締切</span>
+                      <div v-if="editingField === 'hard_deadline'" class="flex items-center gap-1">
+                        <Input
+                          ref="editingControlRef"
+                          data-editing="hard_deadline"
+                          type="date"
+                          class="max-w-40"
+                          :disabled="isFieldUpdating('hard_deadline')"
+                          aria-label="ハード期限"
+                          :value="draftValue"
+                          :on-value-change="(v: string) => (draftValue = v)"
+                          :on-blur="() => commitEditing('hard_deadline')"
+                          @keydown="onEditKeydown($event, 'hard_deadline')"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          class="shrink-0"
+                          ariaLabel="ハード期限を消す"
+                          :disabled="isFieldUpdating('hard_deadline')"
+                          @mousedown.prevent
+                          @click="clearDeadline('hard_deadline')"
+                        >
+                          <template #icon><X class="size-4" aria-hidden="true" /></template>
+                        </Button>
+                      </div>
+                      <template v-else>
+                        <button
+                          type="button"
+                          class="-mx-1 rounded px-1 text-sm leading-8 hover:bg-muted"
+                          :class="
+                            remainingLabel(task.hard_deadline, today, taskDone)?.overdue
+                              ? 'text-destructive'
+                              : task.hard_deadline
+                                ? ''
+                                : 'text-muted-foreground'
+                          "
+                          aria-label="ハード期限を編集"
+                          :disabled="isFieldUpdating('hard_deadline')"
+                          @click="startEditing('hard_deadline')"
+                        >
+                          {{ formatDetailDate(task.hard_deadline, today) }}
+                        </button>
+                        <span
+                          v-if="remainingLabel(task.hard_deadline, today, taskDone)"
+                          class="text-xs"
+                          :class="
+                            remainingLabel(task.hard_deadline, today, taskDone)?.overdue
+                              ? 'text-destructive'
+                              : 'text-muted-foreground'
+                          "
+                          data-task-date-remaining
+                        >
+                          {{ remainingLabel(task.hard_deadline, today, taskDone)?.text }}
+                        </span>
+                      </template>
+                    </div>
                   </div>
                   <p
                     v-if="plannedStartAfterSoft"
@@ -1185,7 +1168,9 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                   :filled="task.estimated_minutes != null"
                   empty-text="未設定"
                 >
-                  <span v-if="task.estimated_minutes != null">{{ task.estimated_minutes }} 分</span>
+                  <span v-if="task.estimated_minutes != null" class="leading-8">
+                    {{ task.estimated_minutes }} 分
+                  </span>
                 </TaskPropertyRow>
 
                 <div data-task-labels>
@@ -1218,7 +1203,7 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                             <span
                               v-for="label in task.labels"
                               :key="label.id"
-                              class="inline-flex items-center gap-1.5 rounded bg-muted px-2 py-0.5 text-xs"
+                              class="inline-flex items-center gap-1.5 rounded-md bg-muted px-2 py-0.5 text-xs"
                             >
                               <LabelMark :label="label" />
                               {{ label.name }}
@@ -1254,65 +1239,29 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
               </div>
 
               <div class="flex flex-col">
-                <TaskPropertyRow
-                  label="担当者"
-                  :icon="User"
-                  :filled="members ? true : task.assignees.length > 0"
-                  empty-text="未設定"
-                >
-                  <!-- メンバーを渡された消費側では選び直せる。渡されなければ表示だけ -->
-                  <TaskAssigneePicker
-                    top-layer
-                    v-if="members"
-                    :members="members"
-                    :selected="task.assignees.map((assignee) => assignee.user)"
-                    :disabled="assigneeUpdating"
-                    :members-state="membersState"
-                    @toggle="(userId, checked) => emit('toggle:assignee', userId, checked)"
-                  />
-                  <AvatarGroup
-                    v-else-if="task.assignees.length"
-                    label="担当者"
-                    :items="
-                      task.assignees.map(({ user }) => ({
-                        name: user.username,
-                        src: user.avatar_url ?? undefined,
-                      }))
-                    "
-                    :max="3"
-                    :size="28"
-                  />
-                  <!-- ピッカーのトリガーはボタンなので、リンクは中に入れず横に並べる -->
-                  <div
-                    v-if="profileHref && task.assignees.length"
-                    class="mt-1 flex flex-wrap gap-x-2 text-xs"
-                    data-assignee-profile-links
-                  >
-                    <a
-                      v-for="assignee in task.assignees"
-                      :key="assignee.user.id"
-                      :href="profileHref(assignee.user.id)"
-                      class="text-muted-foreground hover:text-foreground hover:underline"
-                    >
-                      {{ assignee.user.username }}
-                    </a>
-                  </div>
-                  <p v-if="assigneeError" class="mt-1 text-xs text-destructive">
-                    {{ assigneeError }}
-                  </p>
-                </TaskPropertyRow>
-
-                <TaskPropertyRow label="完了条件" :icon="CheckCheck">
+                <!--
+                  担当者と完了条件は 1 つの欄。メンバーを渡された消費側では選び直せる。
+                  渡されなければ表示だけ。
+                -->
+                <TaskPropertyRow label="担当者" :icon="User">
                   <TaskCompletionRule
                     :task="task"
                     :current-user-id="currentUserId"
-                    :task-done="!!resolvedStatus?.is_done_state"
+                    :task-done="taskDone"
                     :updating="completionUpdating"
                     :error="completionError"
+                    :members="members"
+                    :members-state="membersState"
+                    :assignee-updating="assigneeUpdating"
+                    :profile-href="profileHref"
+                    @toggle:assignee="(userId, checked) => emit('toggle:assignee', userId, checked)"
                     @update:require-all="(value) => emit('update:require-all', value)"
                     @complete="emit('complete:mine')"
                     @reopen="emit('reopen:mine')"
                   />
+                  <p v-if="assigneeError" class="mt-1 text-xs text-destructive">
+                    {{ assigneeError }}
+                  </p>
                 </TaskPropertyRow>
 
                 <TaskPropertyRow label="優先度" :icon="Flag">
@@ -1321,27 +1270,29 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                     参照デザインへ載せ替え）。優先度の色は旗だけに載せる。文字に載せると
                     「中」や「高」が読めない。
                   -->
-                  <Dropdown
-                    top-layer
-                    label="優先度"
-                    :icon="null"
-                    :disabled="priorityUpdating"
-                    :items="priorityItems"
-                    :on-select="
-                      (value: string) => emit('change:priority', value as TaskDetail['priority'])
-                    "
-                  >
-                    <template #trigger>
-                      <span class="flex items-center gap-1.5">
-                        <Flag
-                          class="size-4"
-                          :style="{ color: PRIORITY_CONFIG[task.priority].color }"
-                          aria-hidden="true"
-                        />
-                        <span class="truncate">{{ PRIORITY_CONFIG[task.priority].label }}</span>
-                      </span>
-                    </template>
-                  </Dropdown>
+                  <div class="flex min-h-8 items-center">
+                    <Dropdown
+                      top-layer
+                      label="優先度"
+                      :icon="null"
+                      :disabled="priorityUpdating"
+                      :items="priorityItems"
+                      :on-select="
+                        (value: string) => emit('change:priority', value as TaskDetail['priority'])
+                      "
+                    >
+                      <template #trigger>
+                        <span class="flex items-center gap-1.5">
+                          <Flag
+                            class="size-4"
+                            :style="{ color: PRIORITY_CONFIG[task.priority].color }"
+                            aria-hidden="true"
+                          />
+                          <span class="truncate">{{ PRIORITY_CONFIG[task.priority].label }}</span>
+                        </span>
+                      </template>
+                    </Dropdown>
+                  </div>
                   <p v-if="priorityError" class="mt-1 text-xs text-destructive">
                     {{ priorityError }}
                   </p>
@@ -1355,30 +1306,32 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                 </TaskPropertyRow>
 
                 <TaskPropertyRow label="進捗" :icon="Percent">
-                  <Input
-                    v-if="editingField === 'progress_pct'"
-                    ref="editingControlRef"
-                    data-editing="progress_pct"
-                    type="number"
-                    :min="0"
-                    :max="100"
-                    class="max-w-24"
-                    :disabled="isFieldUpdating('progress_pct')"
-                    aria-label="進捗率"
-                    :value="draftValue"
-                    :on-value-change="(v: string) => (draftValue = v)"
-                    :on-blur="() => commitEditing('progress_pct')"
-                    @keydown="onEditKeydown($event, 'progress_pct')"
-                  />
-                  <button
-                    v-else
-                    type="button"
-                    class="inline-flex h-7 items-center rounded px-1.5 hover:bg-muted"
-                    :disabled="isFieldUpdating('progress_pct')"
-                    @click="startEditing('progress_pct')"
-                  >
-                    {{ formatProgressPct(task.progress_pct) }}
-                  </button>
+                  <div class="flex min-h-8 items-center">
+                    <Input
+                      v-if="editingField === 'progress_pct'"
+                      ref="editingControlRef"
+                      data-editing="progress_pct"
+                      type="number"
+                      :min="0"
+                      :max="100"
+                      class="max-w-24"
+                      :disabled="isFieldUpdating('progress_pct')"
+                      aria-label="進捗率"
+                      :value="draftValue"
+                      :on-value-change="(v: string) => (draftValue = v)"
+                      :on-blur="() => commitEditing('progress_pct')"
+                      @keydown="onEditKeydown($event, 'progress_pct')"
+                    />
+                    <button
+                      v-else
+                      type="button"
+                      class="inline-flex h-7 items-center rounded px-1.5 hover:bg-muted"
+                      :disabled="isFieldUpdating('progress_pct')"
+                      @click="startEditing('progress_pct')"
+                    >
+                      {{ formatProgressPct(task.progress_pct) }}
+                    </button>
+                  </div>
                   <p v-if="fieldError('progress_pct')" class="mt-1 text-xs text-destructive">
                     {{ fieldError('progress_pct') }}
                     <Button
@@ -1412,16 +1365,20 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                     :total="checklist.total"
                   />
                 </div>
-                <Button
-                  v-if="editingField !== 'description' && freshDescriptionHtml"
-                  type="button"
-                  variant="ghost"
-                  ariaLabel="説明を編集"
-                  :disabled="isFieldUpdating('description')"
-                  @click="startEditing('description')"
-                >
-                  <template #icon><Pencil class="size-4" aria-hidden="true" /></template>
-                </Button>
+                <!-- 消費側の操作（ファイルを添付）を ✏ の左に並べる -->
+                <div class="flex shrink-0 items-center gap-1">
+                  <slot name="description-actions" />
+                  <Button
+                    v-if="editingField !== 'description' && freshDescriptionHtml"
+                    type="button"
+                    variant="ghost"
+                    ariaLabel="説明を編集"
+                    :disabled="isFieldUpdating('description')"
+                    @click="startEditing('description')"
+                  >
+                    <template #icon><Pencil class="size-4" aria-hidden="true" /></template>
+                  </Button>
+                </div>
               </div>
 
               <MarkdownEditor
@@ -1514,6 +1471,8 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
                 :on-confirm="confirmDiscardDescription"
                 :on-cancel="cancelDiscardDescription"
               />
+              <!-- 添付ファイル。本文（チェックリストを含む）の下、リアクションの上に並べる -->
+              <slot name="attachments" />
               <!-- 概要へのリアクション。説明が空の間と編集中は出さない -->
               <ReactionBar
                 v-if="reactionController && task.description && editingField !== 'description'"
@@ -1577,10 +1536,13 @@ function clearDeadline(field: 'planned_start_on' | 'soft_deadline' | 'hard_deadl
               : 'lg:min-h-0 lg:w-[19rem] lg:shrink-0 lg:border-l'
           "
         >
-          <!-- 列の見出し。左の上部バーと高さを揃える（右端は器の閉じるボタン分を空ける） -->
+          <!-- 列の見出し。左の上部バーと高さを揃える。器が閉じるボタンを重ねる間だけ、右端をその分空ける -->
           <div
             class="flex items-center gap-1"
-            :class="layout === 'pane' ? '' : 'h-12 shrink-0 border-b px-4 pr-12'"
+            :class="
+              layout === 'pane' ? '' : ['h-12 shrink-0 border-b px-4', reserveClose ? 'pr-12' : '']
+            "
+            data-task-activity-heading
           >
             <h2 class="text-sm font-semibold">アクティビティ</h2>
             <div class="ml-auto flex items-center gap-0.5">

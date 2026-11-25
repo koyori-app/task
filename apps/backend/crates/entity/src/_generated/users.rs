@@ -35,6 +35,8 @@ pub struct Model {
     #[sea_orm(has_many)]
     pub drive_folders: HasMany<super::drive_folders::Entity>,
     #[sea_orm(has_many)]
+    pub forge_pull_request_roles: HasMany<super::forge_pull_request_roles::Entity>,
+    #[sea_orm(has_many)]
     pub forge_pull_requests: HasMany<super::forge_pull_requests::Entity>,
     #[sea_orm(has_many)]
     pub github_integrations: HasMany<super::github_integrations::Entity>,

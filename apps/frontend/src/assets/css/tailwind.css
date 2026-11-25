@@ -111,3 +111,13 @@
     @apply bg-background text-foreground;
   }
 }
+
+/*
+ * タスク詳細のホバーカード（タスク・PR・コミット・ブランチ・Issue）。幅 320px、角丸は 6px
+ * （koyori の md）にそろえる。幅と角丸は koyori の HoverCard のパネルが持つので、中身の
+ * 印（data-detail-hover-card）からパネルを指す。メンションのプロフィールのカードは koyori の既定のまま。
+ */
+[role='dialog']:has(> [data-detail-hover-card]) {
+  width: min(320px, calc(100vw - 2 * var(--koyori-menu-viewport-margin)));
+  border-radius: var(--koyori-radius-md);
+}

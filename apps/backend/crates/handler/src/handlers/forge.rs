@@ -11,18 +11,20 @@ use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, FromQueryResult, QueryFilter, QueryOrder,
     Statement, prelude::Uuid,
 };
+use std::collections::HashMap;
 
 use crate::AppState;
 use crate::error::{AppError, ServerError};
 use crate::extractors::AuthUser;
 use crate::handlers::tasks::resolve_task;
 use crate::openapi::CrudErrors;
-use entity::{forge_branch_links, github_integrations, tasks};
+use entity::{forge_branch_links, github_integrations, projects, tasks};
 use payload::forge::{
-    LinkTaskPullRequestRequest, TaskForgeBranch, TaskForgeCommit, TaskForgePullRequest,
-    TaskForgeRepository, TaskForgeResponse,
+    LinkTaskPullRequestRequest, SetTaskPullRequestRoleRequest, TaskForgeBranch, TaskForgeCommit,
+    TaskForgePullRequest, TaskForgePullRequestRef, TaskForgeRepository, TaskForgeResponse,
 };
 use service::forge::events::ForgeRepo;
+use service::forge::pull_requests::{PullRequestRole, pull_request_role};
 
 #[derive(FromQueryResult)]
 struct PullRequestRow {
@@ -43,6 +45,42 @@ struct PullRequestRow {
     /// 参照元をカンマで連結したもの（昇順）
     sources: String,
     closes: bool,
+    head_branch: Option<String>,
+    /// 手の上書き（`forge_pull_request_roles`）。無ければ NULL
+    role_override: Option<String>,
+}
+
+/// コミットやブランチに付ける PR。`owner` はそれを付ける相手（コミットの id / ブランチのリンクの id）
+#[derive(FromQueryResult)]
+struct PullRequestRefRow {
+    owner: Uuid,
+    number: i32,
+    state: String,
+    html_url: String,
+}
+
+/// `owner` ごとにまとめる。行は番号の昇順で渡す
+fn group_pull_request_refs(
+    rows: Vec<PullRequestRefRow>,
+) -> HashMap<Uuid, Vec<TaskForgePullRequestRef>> {
+    let mut grouped: HashMap<Uuid, Vec<TaskForgePullRequestRef>> = HashMap::new();
+    for row in rows {
+        grouped
+            .entry(row.owner)
+            .or_default()
+            .push(TaskForgePullRequestRef {
+                number: row.number,
+                state: row.state,
+                html_url: row.html_url,
+            });
+    }
+    grouped
+}
+
+/// メッセージを先頭行と、2 行目以降（前後の空白を除く）に分ける
+fn split_commit_message(message: &str) -> (String, String) {
+    let (subject, body) = message.split_once('\n').unwrap_or((message, ""));
+    (subject.trim_end().to_owned(), body.trim().to_owned())
 }
 
 #[derive(FromQueryResult)]
@@ -91,6 +129,21 @@ pub async fn get_task_forge(
     let pull_requests = task_pull_requests(&state, &auth, &task, None).await?;
 
     let backend = state.db.get_database_backend();
+    // コミットを含む PR はまとめて 1 本で引く（コミットごとに引かない）
+    let mut commit_pull_requests = group_pull_request_refs(
+        PullRequestRefRow::find_by_statement(Statement::from_sql_and_values(
+            backend,
+            "SELECT pc.commit_id AS owner, p.number, p.state, p.html_url
+             FROM forge_commit_links l
+             JOIN forge_pull_request_commits pc ON pc.commit_id = l.commit_id
+             JOIN forge_pull_requests p ON p.id = pc.pull_request_id
+             WHERE l.task_id = $1
+             ORDER BY p.number, p.id",
+            [task.id.into()],
+        ))
+        .all(&state.db)
+        .await?,
+    );
     let commits = CommitRow::find_by_statement(Statement::from_sql_and_values(
         backend,
         "SELECT c.id, c.host, c.host_url, c.repo_owner, c.repo_name, c.sha, c.message,
@@ -104,18 +157,23 @@ pub async fn get_task_forge(
     .all(&state.db)
     .await?
     .into_iter()
-    .map(|row| TaskForgeCommit {
-        id: row.id,
-        host: row.host,
-        host_url: row.host_url,
-        repo_owner: row.repo_owner,
-        repo_name: row.repo_name,
-        sha: row.sha,
-        message: row.message.lines().next().unwrap_or_default().to_owned(),
-        author_handle: row.author_handle,
-        author_name: row.author_name,
-        committed_at: row.committed_at,
-        html_url: row.html_url,
+    .map(|row| {
+        let (message, body) = split_commit_message(&row.message);
+        TaskForgeCommit {
+            id: row.id,
+            host: row.host,
+            host_url: row.host_url,
+            repo_owner: row.repo_owner,
+            repo_name: row.repo_name,
+            sha: row.sha,
+            message,
+            body,
+            author_handle: row.author_handle,
+            author_name: row.author_name,
+            committed_at: row.committed_at,
+            html_url: row.html_url,
+            pull_requests: commit_pull_requests.remove(&row.id).unwrap_or_default(),
+        }
     })
     .collect();
 
@@ -139,6 +197,27 @@ pub async fn get_task_forge(
 }
 
 async fn task_branches(state: &AppState, task_id: Uuid) -> Result<Vec<TaskForgeBranch>, AppError> {
+    // ブランチを head にしている PR はまとめて 1 本で引く。同じ名前のブランチは別のリポジトリにも
+    // ありうるので、リポジトリまで一致させる。PR の送り先だけでなく head のリポジトリも見る
+    // （フォークの同名ブランチからの PR を拾わない）。PR 行の持ち主はブランチのリンクと同じ連携のプロジェクトに限る
+    let mut pull_requests = group_pull_request_refs(
+        PullRequestRefRow::find_by_statement(Statement::from_sql_and_values(
+            state.db.get_database_backend(),
+            "SELECT b.id AS owner, p.number, p.state, p.html_url
+             FROM forge_branch_links b
+             JOIN forge_pull_requests p
+               ON p.project_id = b.project_id
+              AND p.host = b.host AND p.host_url = b.host_url
+              AND p.repo_owner = b.repo_owner AND p.repo_name = b.repo_name
+              AND p.head_branch = b.branch
+              AND p.head_repo_owner = b.repo_owner AND p.head_repo_name = b.repo_name
+             WHERE b.task_id = $1
+             ORDER BY p.number, p.id",
+            [task_id.into()],
+        ))
+        .all(&state.db)
+        .await?,
+    );
     Ok(forge_branch_links::Entity::find()
         .filter(forge_branch_links::Column::TaskId.eq(task_id))
         .order_by_desc(forge_branch_links::Column::CreatedAt)
@@ -155,6 +234,7 @@ async fn task_branches(state: &AppState, task_id: Uuid) -> Result<Vec<TaskForgeB
             branch: row.branch,
             html_url: row.html_url,
             created_at: row.created_at.into(),
+            pull_requests: pull_requests.remove(&row.id).unwrap_or_default(),
         })
         .collect())
 }
@@ -193,42 +273,64 @@ async fn task_pull_requests(
             .is_ok(),
     )
     .await?;
+    // 題の末尾の `(KEY-N)` をこのタスクと照らすためのキー。行ごとに引かない
+    let project_key = projects::Entity::find_by_id(task.project_id)
+        .one(db)
+        .await?
+        .ok_or(AppError::NotFound)?
+        .key;
     Ok(
         PullRequestRow::find_by_statement(Statement::from_sql_and_values(
             db.get_database_backend(),
             "SELECT p.id, p.project_id, p.host, p.host_url, p.repo_owner, p.repo_name, p.number,
                 p.title, p.author_handle, p.state, p.html_url, p.merged_at, p.merge_effects_processed_at,
-                p.commits_complete,
+                p.commits_complete, p.head_branch,
                 string_agg(l.source, ',' ORDER BY l.source) AS sources,
-                bool_or(l.closes) AS closes
+                bool_or(l.closes) AS closes,
+                r.role AS role_override
          FROM forge_pull_requests p
          JOIN forge_pull_request_links l ON l.pull_request_id = p.id
+         LEFT JOIN forge_pull_request_roles r ON r.pull_request_id = p.id AND r.task_id = $1
          WHERE l.task_id = $1 AND ($2::uuid IS NULL OR p.id = $2)
-         GROUP BY p.id
+         GROUP BY p.id, r.role
          ORDER BY p.created_at DESC, p.id DESC",
             [task.id.into(), only.into()],
         ))
         .all(db)
         .await?
         .into_iter()
-        .map(|row| TaskForgePullRequest {
-            id: row.id,
-            project_id: row.project_id,
-            host: row.host,
-            host_url: row.host_url,
-            repo_owner: row.repo_owner,
-            repo_name: row.repo_name,
-            number: row.number,
-            title: row.title,
-            author_handle: row.author_handle,
-            state: row.state,
-            html_url: row.html_url,
-            merged_at: row.merged_at,
-            merge_effects_processed_at: row.merge_effects_processed_at,
-            commits_complete: row.commits_complete,
-            sources: row.sources.split(',').map(str::to_owned).collect(),
-            closes: row.closes,
-            unresolved: unresolved.get(&row.id).copied(),
+        .map(|row| {
+            let sources: Vec<String> = row.sources.split(',').map(str::to_owned).collect();
+            let role = pull_request_role(
+                &row.title,
+                &sources,
+                row.closes,
+                &project_key,
+                task.seq_id,
+                // 知らない値の行は上書きが無いものとして扱う（書く口は parse を通す）
+                row.role_override.as_deref().and_then(PullRequestRole::parse),
+            );
+            TaskForgePullRequest {
+                id: row.id,
+                project_id: row.project_id,
+                host: row.host,
+                host_url: row.host_url,
+                repo_owner: row.repo_owner,
+                repo_name: row.repo_name,
+                number: row.number,
+                title: row.title,
+                author_handle: row.author_handle,
+                state: row.state,
+                html_url: row.html_url,
+                merged_at: row.merged_at,
+                merge_effects_processed_at: row.merge_effects_processed_at,
+                commits_complete: row.commits_complete,
+                sources,
+                closes: row.closes,
+                role: role.as_str().to_owned(),
+                head_branch: row.head_branch,
+                unresolved: unresolved.get(&row.id).copied(),
+            }
         })
         .collect(),
     )
@@ -366,6 +468,58 @@ pub async fn unlink_task_pull_request(
 
 #[axum::debug_handler]
 #[utoipa::path(
+    put,
+    path = "/{id}/forge/pull-requests/{pull_request_id}/role",
+    tag = "Tasks",
+    summary = "PR の役割（実装 / 言及）を手で決める",
+    description = "題やリンクから決まる役割を上書きする。上書きは PR イベントでは戻らず、\
+                   リンクを外すと一緒に消える。マージ時の自動完了（`closes`）は変えない。\
+                   その PR がこのタスクにリンクされていなければ 404",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("project_id" = Uuid, Path, description = "プロジェクトID"),
+        ("id" = String, Path, description = "タスクID"),
+        ("pull_request_id" = Uuid, Path, description = "PR の ID"),
+    ),
+    request_body = SetTaskPullRequestRoleRequest,
+    responses(
+        (status = 200, description = "役割を変えた PR", body = TaskForgePullRequest),
+        CrudErrors,
+    )
+)]
+pub async fn set_task_pull_request_role(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, project_id, id, pull_request_id)): Path<(Uuid, Uuid, String, Uuid)>,
+    Json(body): Json<SetTaskPullRequestRoleRequest>,
+) -> Result<Json<TaskForgePullRequest>, AppError> {
+    auth.require_scope(entity::scopes::Scope::WriteTask)?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
+    let task = resolve_task(&state, tenant_id, project_id, &id).await?;
+
+    let role = PullRequestRole::parse(&body.role).ok_or(AppError::BadRequest)?;
+    if !service::forge::pull_requests::set_role(
+        &state.db,
+        task.id,
+        pull_request_id,
+        role,
+        auth.user_id,
+    )
+    .await?
+    {
+        return Err(AppError::NotFound);
+    }
+    // 直後に外されていれば行が無い。そのときは外した側が勝ったので 404
+    let pull_request = task_pull_requests(&state, &auth, &task, Some(pull_request_id))
+        .await?
+        .pop()
+        .ok_or(AppError::NotFound)?;
+    Ok(Json(pull_request))
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
     delete,
     path = "/{id}/forge/branches/{link_id}",
     tag = "Tasks",
@@ -400,4 +554,26 @@ pub async fn delete_task_forge_branch(
         return Err(AppError::NotFound);
     }
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_commit_message;
+
+    #[test]
+    fn split_commit_message_separates_the_subject_from_the_trimmed_body() {
+        for (message, subject, body) in [
+            ("fix: x", "fix: x", ""),
+            ("fix: x\n", "fix: x", ""),
+            ("fix: x\n\n本文 1\n本文 2\n", "fix: x", "本文 1\n本文 2"),
+            ("fix: x\r\n\r\n本文", "fix: x", "本文"),
+            ("", "", ""),
+        ] {
+            assert_eq!(
+                split_commit_message(message),
+                (subject.to_owned(), body.to_owned()),
+                "{message:?}"
+            );
+        }
+    }
 }

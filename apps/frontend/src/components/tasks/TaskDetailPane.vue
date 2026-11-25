@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { X } from '@lucide/vue';
-import { computed, ref } from 'vue';
+import { Paperclip, X } from '@lucide/vue';
+import { computed, ref, useTemplateRef } from 'vue';
 
 import TaskActivityFilter from '@/components/tasks/TaskActivityFilter.vue';
 import TaskAttachments from '@/components/tasks/TaskAttachments.vue';
 import TaskComments from '@/components/tasks/TaskComments.vue';
 import TaskDetailHub from '@/components/tasks/TaskDetailHub.vue';
 import TaskForgeSection from '@/components/tasks/TaskForgeSection.vue';
-import SimilarTasksList from '@/components/tasks/SimilarTasksList.vue';
+import TaskImplementationPullRequests from '@/components/tasks/TaskImplementationPullRequests.vue';
+import TaskSimilarRows from '@/components/tasks/TaskSimilarRows.vue';
 import TaskBlockingPanel from '@/components/tasks/TaskBlockingPanel.vue';
 import TaskSubtaskPanel from '@/components/tasks/TaskSubtaskPanel.vue';
 import { Button } from '@koyori-app/ui-vue';
@@ -22,7 +23,7 @@ import { useRenderedDescription } from '@/composables/useRenderedDescription';
 import { useTaskDetail } from '@/composables/useTaskDetail';
 import { useSimilarTasks } from '@/composables/useSimilarTasks';
 import { useMeQuery } from '@/lib/api-vue-query';
-import { taskDetailHref, taskSeqKey, userProfileHref } from '@/lib/task-display';
+import { userProfileHref } from '@/lib/task-display';
 import type { components } from '@/generated/api';
 
 type TaskResponse = components['schemas']['TaskResponse'];
@@ -199,6 +200,13 @@ const membersState = computed(() => ({
 }));
 const rowMutations = useTaskRowMutations({ tenantId, projectId });
 
+// サブタスクと似ているタスクの行のステータスは、一覧の行と同じ口で変える（飛行中と失敗は行に出る）
+function onRowStatusChange(task: TaskResponse, statusId: string) {
+  void rowMutations.setStatus(task, statusId);
+}
+/** 添付ファイルの欄。説明の見出しの 📎 からファイルの選択を開く */
+const attachmentsRef = useTemplateRef<InstanceType<typeof TaskAttachments>>('attachments');
+
 function onToggleAssignee(userId: string, checked: boolean) {
   const task = displayTask.value;
   if (!task) return;
@@ -278,15 +286,6 @@ const similarQuery = useSimilarTasks({
   excludeTaskId: () => displayTask.value?.id,
 });
 
-// 候補はペイン内で切り替える（説明の KEY-N と同じ経路）。`open-task` は TaskResponse 全体を要るので使えない
-function openSimilarTask(seqId: number) {
-  emit('open-task-ref', {
-    projectKey: props.projectKey,
-    seqKey: taskSeqKey(props.projectKey, seqId),
-    href: taskDetailHref(props.tenantDisplayId, props.projectKey, seqId),
-  });
-}
-
 function openDeleteDialog() {
   deleteError.value = null;
   deleteDialogRef.value?.showModal();
@@ -361,13 +360,6 @@ function onDeleteDialogCancel(event: Event) {
         @delete-request="openDeleteDialog"
       >
         <template v-if="displayTask" #main>
-          <TaskAttachments
-            :tenant-id="tenantId"
-            :project-id="projectId"
-            :task-id="taskId"
-            :current-user-id="currentUserId"
-            :is-tenant-owner="isTenantOwner"
-          />
           <TaskSubtaskPanel
             :tenant-id="tenantId"
             :project-id="projectId"
@@ -381,24 +373,33 @@ function onDeleteDialogCancel(event: Event) {
             :parent-saved="savedField === 'parent_task_id'"
             :statuses="statuses"
             :project-key="projectKey"
+            :tenant-display-id="tenantDisplayId"
+            :row-pending="rowMutations.pending.value"
+            :row-errors="rowMutations.errors.value"
             @open="emit('open-task', $event)"
             @change-parent="onChangeParent"
+            @update:status="onRowStatusChange"
           />
           <TaskBlockingPanel
             :tenant-id="tenantId"
             :project-id="projectId"
             :task-id="taskId"
             :task-uuid="displayTask.id"
+            :task="displayTask"
             :statuses="statuses"
             :project-key="projectKey"
+            :tenant-display-id="tenantDisplayId"
             @open="emit('open-task', $event)"
           />
-          <SimilarTasksList
-            class="border-t pt-5"
+          <TaskSimilarRows
             :tasks="similarQuery.data.value?.tasks ?? []"
+            :statuses="statuses"
             :tenant-display-id="tenantDisplayId"
             :project-key="projectKey"
-            @select="openSimilarTask"
+            :row-pending="rowMutations.pending.value"
+            :row-errors="rowMutations.errors.value"
+            @open="emit('open-task', $event)"
+            @update:status="onRowStatusChange"
           />
           <TaskForgeSection
             :tenant-id="tenantId"
@@ -406,6 +407,39 @@ function onDeleteDialogCancel(event: Event) {
             :task-id="taskId"
             :tenant-display-id="tenantDisplayId"
             :project-key="projectKey"
+            :task-title="displayTask.title"
+          />
+        </template>
+        <!-- 題の上の行: このタスクを実装する PR（リポジトリ欄には出さない） -->
+        <template v-if="displayTask" #meta>
+          <TaskImplementationPullRequests
+            :tenant-id="tenantId"
+            :project-id="projectId"
+            :task-id="taskId"
+            :tenant-display-id="tenantDisplayId"
+            :project-key="projectKey"
+          />
+        </template>
+        <template v-if="displayTask" #description-actions>
+          <Button
+            type="button"
+            variant="ghost"
+            ariaLabel="ファイルを添付"
+            :disabled="attachmentsRef?.uploading"
+            @click="attachmentsRef?.openPicker()"
+          >
+            <template #icon><Paperclip class="size-4" aria-hidden="true" /></template>
+          </Button>
+        </template>
+        <template v-if="displayTask" #attachments>
+          <TaskAttachments
+            ref="attachments"
+            :tenant-id="tenantId"
+            :project-id="projectId"
+            :task-id="taskId"
+            :current-user-id="currentUserId"
+            :is-tenant-owner="isTenantOwner"
+            :members="members"
           />
         </template>
         <template #sidebar-actions>

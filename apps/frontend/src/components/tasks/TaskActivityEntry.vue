@@ -50,7 +50,8 @@ ValueLabel.props = ['value'];
 
 <template>
   <div class="flex items-start gap-2 px-2 py-1.5 text-xs" data-activity-history>
-    <span class="flex h-5 w-6 shrink-0 items-center justify-center">
+    <!-- コメント（TaskCommentItem）と同じ 20px + 同じ gap。本文の開始位置がそろう -->
+    <span class="flex h-5 w-5 shrink-0 items-center justify-center">
       <UserAvatar
         :user="{ name: entry.actor, account_kind: entry.items[0]?.user?.account_kind }"
         size="sm"

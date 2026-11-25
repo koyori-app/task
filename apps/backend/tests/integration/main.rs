@@ -29,6 +29,7 @@ mod forge_commit_links_integration;
 mod forge_manual_pull_request_links_integration;
 mod forge_merge_effects_integration;
 mod forge_pull_request_links_integration;
+mod forge_pull_request_roles_integration;
 mod forge_reviews_integration;
 mod github_http_integration;
 mod github_integration;

@@ -150,6 +150,16 @@ async fn returns_similar_titles_in_score_order_within_project() {
     let ids = hit_ids(&body);
     assert!(!ids.contains(&deleted), "削除済みは除く");
     assert!(!ids.contains(&other_task), "別プロジェクトは除く");
+    // 一覧の行にそのまま出せるよう、タスクの応答の項目（ステータス・担当・ラベルなど）を持つ
+    for hit in body["tasks"].as_array().expect("tasks array") {
+        assert_eq!(hit["status_id"], status_id.to_string(), "{hit}");
+        assert_eq!(hit["priority"], "Medium", "{hit}");
+        assert!(hit["seq_id"].is_i64(), "{hit}");
+        assert!(hit["assignees"].is_array(), "{hit}");
+        assert!(hit["labels"].is_array(), "{hit}");
+        assert!(hit.get("soft_deadline").is_some(), "{hit}");
+    }
+    assert_eq!(body["tasks"][0]["title"], "ログイン画面の修正");
 
     let body = similar(
         &app,

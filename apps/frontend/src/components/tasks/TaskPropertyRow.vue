@@ -19,9 +19,13 @@ defineProps<{
 </script>
 
 <template>
-  <div class="flex min-w-0 items-start gap-3 py-1.5">
+  <div class="flex min-w-0 items-start gap-3 py-1">
+    <!--
+      ラベルは高さ 32px の中央に置く。値の側は、1 行目が地の文なら leading-8、部品なら
+      min-h-8 items-center にして、1 行目の中心をラベルとそろえる（値が複数行でも 1 行目で合う）。
+    -->
     <div
-      class="flex w-28 shrink-0 items-center gap-2 pt-1 text-sm text-muted-foreground"
+      class="flex h-8 w-28 shrink-0 items-center gap-2 text-sm text-muted-foreground"
       aria-hidden="true"
     >
       <component :is="icon" class="size-4 shrink-0" />
@@ -29,7 +33,7 @@ defineProps<{
     </div>
     <div class="min-w-0 flex-1 text-sm">
       <slot />
-      <span v-if="filled === false && emptyText" class="text-muted-foreground">
+      <span v-if="filled === false && emptyText" class="leading-8 text-muted-foreground">
         {{ emptyText }}
       </span>
     </div>

@@ -23826,6 +23826,149 @@
         }
       }
     },
+    "/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/forge/pull-requests/{pull_request_id}/role": {
+      "put": {
+        "tags": ["Tasks"],
+        "summary": "PR の役割（実装 / 言及）を手で決める",
+        "description": "題やリンクから決まる役割を上書きする。上書きは PR イベントでは戻らず、リンクを外すと一緒に消える。マージ時の自動完了（`closes`）は変えない。その PR がこのタスクにリンクされていなければ 404",
+        "operationId": "set_task_pull_request_role",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "プロジェクトID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "タスクID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pull_request_id",
+            "in": "path",
+            "description": "PR の ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTaskPullRequestRoleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "役割を変えた PR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskForgePullRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/reactions/{emoji}": {
       "put": {
         "tags": ["Tasks"],
@@ -32983,6 +33126,17 @@
           }
         }
       },
+      "SetTaskPullRequestRoleRequest": {
+        "type": "object",
+        "description": "`PUT /tasks/{id}/forge/pull-requests/{pull_request_id}/role`",
+        "required": ["role"],
+        "properties": {
+          "role": {
+            "type": "string",
+            "description": "`implementation` / `mention`"
+          }
+        }
+      },
       "SeverityStateCount": {
         "type": "object",
         "required": ["severity", "state", "count"],
@@ -33015,26 +33169,23 @@
         "enum": ["Viewer"]
       },
       "SimilarTaskHit": {
-        "type": "object",
-        "required": ["id", "seq_id", "title", "score"],
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/TaskResponse",
+            "description": "一覧の行にそのまま出せるよう、タスクの応答（ステータス・担当・期限・優先度・ラベル）を平らに持つ"
           },
-          "score": {
-            "type": "number",
-            "format": "float",
-            "description": "trigram 類似度（0〜1）"
-          },
-          "seq_id": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "title": {
-            "type": "string"
+          {
+            "type": "object",
+            "required": ["score"],
+            "properties": {
+              "score": {
+                "type": "number",
+                "format": "float",
+                "description": "trigram 類似度（0〜1）"
+              }
+            }
           }
-        }
+        ]
       },
       "SimilarTasksResponse": {
         "type": "object",
@@ -33463,7 +33614,8 @@
           "repo_name",
           "branch",
           "html_url",
-          "created_at"
+          "created_at",
+          "pull_requests"
         ],
         "properties": {
           "branch": {
@@ -33487,6 +33639,13 @@
             "type": "string",
             "format": "uuid"
           },
+          "pull_requests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskForgePullRequestRef"
+            },
+            "description": "同じリポジトリでこのブランチを head にしている PR。番号の昇順"
+          },
           "repo_name": {
             "type": "string"
           },
@@ -33505,10 +33664,12 @@
           "repo_name",
           "sha",
           "message",
+          "body",
           "author_handle",
           "author_name",
           "committed_at",
-          "html_url"
+          "html_url",
+          "pull_requests"
         ],
         "properties": {
           "author_handle": {
@@ -33518,6 +33679,10 @@
           "author_name": {
             "type": "string",
             "description": "git の author 名"
+          },
+          "body": {
+            "type": "string",
+            "description": "メッセージの 2 行目以降（前後の空白を除く）。無ければ空文字列"
           },
           "committed_at": {
             "type": "string",
@@ -33539,6 +33704,13 @@
           "message": {
             "type": "string",
             "description": "メッセージの先頭行"
+          },
+          "pull_requests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskForgePullRequestRef"
+            },
+            "description": "このコミットを含む PR。番号の昇順"
           },
           "repo_name": {
             "type": "string"
@@ -33613,7 +33785,8 @@
           "html_url",
           "commits_complete",
           "sources",
-          "closes"
+          "closes",
+          "role"
         ],
         "properties": {
           "author_handle": {
@@ -33626,6 +33799,10 @@
           "commits_complete": {
             "type": "boolean",
             "description": "PR のコミット一覧を読み切れているか"
+          },
+          "head_branch": {
+            "type": ["string", "null"],
+            "description": "head のブランチ名。この列を足す前に受けた PR は、次の PR イベントまで null"
           },
           "host": {
             "type": "string",
@@ -33666,6 +33843,10 @@
           "repo_owner": {
             "type": "string"
           },
+          "role": {
+            "type": "string",
+            "description": "このタスクに対する役割。`implementation`（このタスクを実装する PR）/ `mention`（触れているだけ）。\n手で入れ替えていればその値、無ければ題とリンクから決めた値"
+          },
           "sources": {
             "type": "array",
             "items": {
@@ -33684,6 +33865,24 @@
             "type": ["integer", "null"],
             "format": "int64",
             "description": "マージを塞いでいるレビュー指摘（High / Medium の open / fixing / fixed）の件数。\nレビューの無い PR、タスクと別プロジェクトの PR 行、`read:review` を持たない PAT では null"
+          }
+        }
+      },
+      "TaskForgePullRequestRef": {
+        "type": "object",
+        "description": "コミットやブランチの側から見た PR（行の中に出すだけの最小の項目）",
+        "required": ["number", "state", "html_url"],
+        "properties": {
+          "html_url": {
+            "type": "string"
+          },
+          "number": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "state": {
+            "type": "string",
+            "description": "`open` / `closed` / `merged` / `unknown`"
           }
         }
       },
