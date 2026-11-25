@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { statusFill } from '@/lib/task-status-icon';
+import { statusFill, statusMenuItems } from '@/lib/task-status-icon';
 
 const s = (id: string, position: number, done = false) => ({ id, position, is_done_state: done });
 
@@ -55,5 +55,22 @@ describe('statusFill', () => {
     expect(statusFill(statuses, 'x')).toEqual({ kind: 'unknown', fraction: 0 });
     expect(statusFill(statuses, null)).toEqual({ kind: 'unknown', fraction: 0 });
     expect(statusFill([], 'a').kind).toBe('unknown');
+  });
+});
+
+describe('statusMenuItems', () => {
+  it('各項目の icon に、そのステータスの色と埋まり方を持たせる', () => {
+    const statuses = [
+      { ...s('todo', 0), name: 'Todo', color: '#64748b' },
+      { ...s('doing', 1), name: 'Doing', color: '#3b82f6' },
+      { ...s('done', 2, true), name: 'Done', color: '#16a34a' },
+    ];
+    const items = statusMenuItems(statuses, 'doing');
+    expect(items.map((item) => item.icon)).toEqual([
+      { status: { color: '#64748b' }, fill: { kind: 'empty', fraction: 0 } },
+      { status: { color: '#3b82f6' }, fill: { kind: 'partial', fraction: 0.5 } },
+      { status: { color: '#16a34a' }, fill: { kind: 'done', fraction: 1 } },
+    ]);
+    expect(items.map((item) => item.checked)).toEqual([false, true, false]);
   });
 });

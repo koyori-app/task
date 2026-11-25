@@ -127,6 +127,22 @@ describe('TaskStatusButton', () => {
     expect(checked.map((item) => item.text())).toEqual(['In Progress']);
   });
 
+  it('メニューの各項目に、そのステータスの色と埋まり方のアイコンを出す', () => {
+    const wrapper = mountButton({
+      statuses: statuses.map((s) => (s.id === 'Done' ? { ...s, color: '#16a34a' } : s)),
+    });
+    const items = wrapper.findAll('[role="menuitemradio"]');
+    const icons = items.map((item) => item.find('[data-task-status-icon]'));
+    expect(icons.every((icon) => icon.exists())).toBe(true);
+    expect(icons.map((icon) => icon.attributes('data-fill'))).toEqual([
+      'empty',
+      'partial',
+      'done',
+      'done',
+    ]);
+    expect(icons[3].html()).toContain('#16a34a');
+  });
+
   it('「次のステータスへ」のボタンは無い', () => {
     const wrapper = mountButton();
 

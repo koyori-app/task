@@ -118,6 +118,13 @@ describe('TaskRow', () => {
     expect(wrapper.emitted('update:status')).toBeUndefined();
   });
 
+  it('メニューの項目にもステータスのアイコンを出す（詳細のボタンと同じ関数で作る）', () => {
+    const wrapper = mountRow();
+    const items = wrapper.findAll('[role="menuitemradio"]');
+    expect(items.length).toBe(statuses.length);
+    expect(items.every((item) => item.find('[data-task-status-icon]').exists())).toBe(true);
+  });
+
   it('pending の間はメニューが止まる', async () => {
     const wrapper = mountRow({ pending: true });
 

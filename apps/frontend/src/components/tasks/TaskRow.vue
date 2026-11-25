@@ -77,6 +77,9 @@ function onSelectStatus(statusId: string) {
           <template #trigger>
             <TaskStatusIcon :status="status" :fill="fill" />
           </template>
+          <template #item-icon="{ item }">
+            <TaskStatusIcon :status="item.icon.status" :fill="item.icon.fill" />
+          </template>
         </Dropdown>
       </span>
 

@@ -48,7 +48,7 @@ const meta = {
     docs: {
       description: {
         component:
-          'タスク詳細のステータス。ステータスの色を 16% に薄めた背景のボタン（押すとメニュー）と、離して置いた ✓（既定の完了へ移す）。アイコンは並び順から計算した「円の埋まり方」。',
+          'タスク詳細のステータス。ステータスの色を 16% に薄めた背景のボタン（押すとメニュー）と、離して置いた ✓（既定の完了へ移す）。アイコンは並び順から計算した「円の埋まり方」で、メニューの各項目にも同じアイコンを出す（今のものは右端の ✓）。',
       },
     },
   },
@@ -72,7 +72,10 @@ export const AllStatuses: Story = {
     `,
   }),
   play: async ({ canvasElement }) => {
-    const icons = [...canvasElement.querySelectorAll('[data-task-status-icon]')];
+    // ボタンのアイコンだけ（メニューの項目にも同じアイコンがある）
+    const icons = [...canvasElement.querySelectorAll('[data-task-status-icon]')].filter(
+      (icon) => !icon.closest('[role="menuitemradio"]'),
+    );
     await expect(icons.map((icon) => icon.getAttribute('data-fill'))).toEqual([
       'empty',
       'partial',
@@ -149,15 +152,26 @@ export const HoverDone: Story = {
 };
 
 export const MenuOpen: Story = {
-  name: 'メニューを開いた状態（今のものに ✓）',
+  name: 'メニューを開いた状態（各項目にアイコン、今のものに ✓）',
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const page = within(canvasElement.ownerDocument.body);
     await userEvent.click(canvas.getByRole('button', { name: 'ステータス' }));
-    await expect(await page.findByRole('menuitemradio', { name: 'In Progress' })).toHaveAttribute(
-      'aria-checked',
-      'true',
+    const current = await page.findByRole('menuitemradio', { name: 'In Progress' });
+    await expect(current).toHaveAttribute('aria-checked', 'true');
+    // 各項目の名前の前にステータスのアイコン（16px）。文字の頭がそろう
+    const items = page.getAllByRole('menuitemradio');
+    const icons = items.map((item) => item.querySelector<SVGElement>('[data-task-status-icon]')!);
+    // 開くときの動きが終わってから見る
+    await waitFor(() =>
+      expect(
+        icons.map(
+          (icon) =>
+            icon.checkVisibility({ opacityProperty: true }) && icon.getBoundingClientRect().width,
+        ),
+      ).toEqual(icons.map(() => 16)),
     );
+    await expect(new Set(icons.map((icon) => icon.getBoundingClientRect().left)).size).toBe(1);
     await userEvent.click(page.getByRole('menuitemradio', { name: 'In Review' }));
     await expect(onUpdateStatusId).toHaveBeenCalledWith('review');
   },

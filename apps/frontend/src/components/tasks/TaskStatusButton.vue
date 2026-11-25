@@ -90,6 +90,9 @@ function complete() {
             }}</span>
           </span>
         </template>
+        <template #item-icon="{ item }">
+          <TaskStatusIcon :status="item.icon.status" :fill="item.icon.fill" />
+        </template>
       </Dropdown>
     </div>
 

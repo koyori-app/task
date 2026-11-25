@@ -35,6 +35,13 @@ export function statusFill(
 
 interface MenuStatus extends OrderedStatus {
   name: string;
+  color: string;
+}
+
+/** メニューの項目のアイコン。Dropdown の `#item-icon` スロットで `TaskStatusIcon` に渡す */
+interface StatusMenuIcon {
+  status: { color: string };
+  fill: StatusFill;
 }
 
 /** `@koyori-app/ui-vue` の DropdownItem のうち、ステータスのメニューが使う項目 */
@@ -44,13 +51,14 @@ export interface StatusMenuItem {
   kind: 'radio';
   checked: boolean;
   disabled: boolean;
+  icon: StatusMenuIcon;
 }
 
 /**
  * ステータスのメニューの項目。詳細のボタンと一覧の行のアイコンの両方がここから作る。
  *
- * 今の Dropdown は項目に名前と ✓ しか出せない。項目のアイコン（円の埋まり方）は
- * koyori-app/ui の対応の後にここで足す（UI-45）。
+ * 各項目の `icon` に、そのステータスの色と円の埋まり方を持たせる。描くのは呼び出し側の
+ * `#item-icon` スロット。アイコンのある項目では、Dropdown はラジオの選択を右端の ✓ で出す。
  */
 export function statusMenuItems(
   statuses: readonly MenuStatus[],
@@ -62,6 +70,7 @@ export function statusMenuItems(
     label: status.name,
     kind: 'radio',
     checked: status.id === statusId,
+    icon: { status: { color: status.color }, fill: statusFill(statuses, status.id) },
     // 完了条件を満たしていない間は、完了扱いのステータスへ直接は移せない（backend が 409 で止める）
     disabled: !!options.disabled || (!!options.doneBlocked && status.is_done_state),
   }));
