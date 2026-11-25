@@ -78,9 +78,12 @@ pub struct LabelExportItem {
     #[validate(regex(path = "common::validation::COLOR_REGEX"))]
     pub color: String,
     pub description: String,
-    #[serde(default)]
+    /// 欄が無ければ（絵文字を足す前に書き出したファイル）、`overwrite` でも今の絵文字を残す。
+    /// `null` なら絵文字を外す
+    #[serde(default, deserialize_with = "crate::nullable::deserialize_some")]
+    #[schema(value_type = Option<String>, nullable)]
     #[validate(custom(function = "crate::reactions::validate_emoji"))]
-    pub icon_emoji: Option<String>,
+    pub icon_emoji: Option<Option<String>>,
 }
 
 #[derive(Validate, Deserialize, ToSchema)]

@@ -207,7 +207,7 @@ pub async fn export_labels(
             name: l.name,
             color: l.color,
             description: l.description,
-            icon_emoji: l.icon_emoji,
+            icon_emoji: Some(l.icon_emoji),
         })
         .collect();
     Ok(Json(LabelExport {
@@ -257,7 +257,9 @@ pub async fn import_labels(
                     let mut active: labels::ActiveModel = l.into();
                     active.color = Set(item.color.clone());
                     active.description = Set(item.description.clone());
-                    active.icon_emoji = Set(item.icon_emoji.clone());
+                    if let Some(icon_emoji) = &item.icon_emoji {
+                        active.icon_emoji = Set(icon_emoji.clone());
+                    }
                     active.update(&txn).await?;
                 }
             }
@@ -269,7 +271,7 @@ pub async fn import_labels(
                     color: Set(item.color.clone()),
                     icon_url: Set(None),
                     project_id: Set(Some(project_id)),
-                    icon_emoji: Set(item.icon_emoji.clone()),
+                    icon_emoji: Set(item.icon_emoji.clone().flatten()),
                 }
                 .insert(&txn)
                 .await?;

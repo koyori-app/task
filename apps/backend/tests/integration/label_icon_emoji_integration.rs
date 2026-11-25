@@ -204,7 +204,7 @@ async fn label_icon_emoji_suite() {
     assert_eq!(by_name(&overwritten, "デザイン")["icon_emoji"], "🎨");
     assert_eq!(by_name(&overwritten, "デザイン")["color"], "#222222");
 
-    // overwrite で項目の無いファイルは絵文字を外す
+    // overwrite でも、欄の無いファイル（絵文字を足す前に書き出したもの）は絵文字を残す
     let without_field = app
         .post_json_with_session(
             &import_path,
@@ -217,7 +217,24 @@ async fn label_icon_emoji_suite() {
         .await;
     assert_eq!(without_field.status(), StatusCode::OK);
     let without_field: Value = without_field.json().await.expect("import json");
-    assert!(by_name(&without_field, "デザイン")["icon_emoji"].is_null());
+    assert_eq!(by_name(&without_field, "デザイン")["icon_emoji"], "🎨");
+
+    // overwrite で欄が null なら絵文字を外す
+    let null_field = app
+        .post_json_with_session(
+            &import_path,
+            json!({
+                "version": 1,
+                "on_conflict": "overwrite",
+                "labels": [
+                    { "name": "デザイン", "color": "#222222", "description": "", "icon_emoji": null },
+                ],
+            }),
+        )
+        .await;
+    assert_eq!(null_field.status(), StatusCode::OK);
+    let null_field: Value = null_field.json().await.expect("import json");
+    assert!(by_name(&null_field, "デザイン")["icon_emoji"].is_null());
 
     // import の項目の絵文字が不正なら 400
     let bad_import = app
