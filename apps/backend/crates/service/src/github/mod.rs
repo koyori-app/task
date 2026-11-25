@@ -15,6 +15,7 @@ pub mod repositories;
 pub mod review_summary_queue;
 pub mod snippets;
 pub mod sync;
+pub mod user_installations;
 pub mod webhook_events;
 
 pub use client::github_app;

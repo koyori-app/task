@@ -6,8 +6,13 @@ use utoipa::ToSchema;
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct GithubCallbackQuery {
-    pub installation_id: i64,
+    /// インストール画面からの戻りで GitHub が付ける。ユーザー認可だけの戻りには付かない。
+    #[serde(default)]
+    pub installation_id: Option<i64>,
     pub state: String,
+    /// ユーザー認可を拒否したときに GitHub が付ける理由（`access_denied` など）。
+    #[serde(default)]
+    pub error: Option<String>,
     /// GitHub が送る操作種別。"request" はオーナー承認待ちであり連携未完了。
     #[serde(default)]
     pub setup_action: Option<String>,
@@ -67,6 +72,26 @@ pub struct GithubReuseRequest {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct GithubReuseResponse {
     pub select_token: String,
+}
+
+/// GitHub のユーザー認可で確かめた、利用者が見えるインストール（連携の候補）。
+#[derive(Debug, Serialize, ToSchema)]
+pub struct GithubAuthorizedInstallationItem {
+    /// 候補の ID。`POST /github/authorized-installations/select` に渡す。
+    pub candidate_id: Uuid,
+    /// 表示名（インストール先のアカウント・組織）。
+    pub account_login: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct GithubAuthorizedInstallationsResponse {
+    pub installations: Vec<GithubAuthorizedInstallationItem>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct GithubAuthorizedSelectRequest {
+    pub authorize_token: String,
+    pub candidate_id: Uuid,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
