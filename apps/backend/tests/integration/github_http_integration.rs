@@ -18,7 +18,9 @@ async fn mount_github_api_mocks(server: &MockServer) {
         .and(path_regex(r"^/app/installations/\d+/access_tokens$"))
         .respond_with(|req: &wiremock::Request| {
             let id = installation_id_from_url(&req.url);
-            let token = if id >= OLD_ID_BASE {
+            let token = if id >= HUGE_ID_BASE {
+                "ghs_huge_repo_token"
+            } else if id >= OLD_ID_BASE {
                 "ghs_multi_repo_token"
             } else if id >= NO_REPO_ID_BASE {
                 "ghs_no_repo_token"
@@ -79,36 +81,12 @@ async fn mount_github_api_mocks(server: &MockServer) {
         .mount(server)
         .await;
 
-    Mock::given(method("GET"))
-        .and(path("/installation/repositories"))
-        .and(header("authorization", "Bearer ghs_multi_repo_token"))
-        // 1 ページ（100 件）に収まらない件数を返し、ページングを踏ませる
-        .respond_with(|req: &wiremock::Request| {
-            let number = |key: &str, fallback: usize| -> usize {
-                req.url
-                    .query_pairs()
-                    .find(|(name, _)| name == key)
-                    .and_then(|(_, value)| value.parse().ok())
-                    .unwrap_or(fallback)
-            };
-            let per_page = number("per_page", 30);
-            let start = (number("page", 1) - 1) * per_page;
-            let repositories: Vec<serde_json::Value> = (start
-                ..MULTI_REPO_COUNT.min(start + per_page))
-                .map(|i| {
-                    serde_json::json!({
-                        "full_name": format!("acme/repo-{i}"),
-                        "owner": { "login": "acme" }
-                    })
-                })
-                .collect();
-            ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "total_count": MULTI_REPO_COUNT,
-                "repositories": repositories,
-            }))
-        })
-        .mount(server)
-        .await;
+    for (token, count) in [
+        ("Bearer ghs_multi_repo_token", MULTI_REPO_COUNT),
+        ("Bearer ghs_huge_repo_token", HUGE_REPO_COUNT),
+    ] {
+        mount_paged_installation_repositories(server, token, count).await;
+    }
 
     Mock::given(method("DELETE"))
         .and(path_regex(r"^/app/installations/\d+$"))
@@ -177,7 +155,13 @@ async fn mount_github_api_mocks(server: &MockServer) {
         .and(path_regex(r"^/user/installations/\d+/repositories$"))
         .respond_with(|req: &wiremock::Request| {
             let id = installation_id_from_url(&req.url);
-            let names: Vec<String> = if id >= OLD_ID_BASE {
+            let names: Vec<String> = if id >= HUGE_ID_BASE {
+                // 一覧の取得上限（10,000 件）ちょうどまでが見え、その全部の admin。
+                // インストール側の最後の 1 件だけが、利用者からは見えない。
+                (0..HUGE_REPO_COUNT - 1)
+                    .map(|i| format!("repo-{i}"))
+                    .collect()
+            } else if id >= OLD_ID_BASE {
                 (0..MULTI_REPO_COUNT).map(|i| format!("repo-{i}")).collect()
             } else if id >= NO_REPO_ID_BASE {
                 Vec::new()
@@ -217,6 +201,43 @@ async fn mount_github_api_mocks(server: &MockServer) {
                 .collect();
             ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "total_count": names.len(),
+                "repositories": repositories,
+            }))
+        })
+        .mount(server)
+        .await;
+}
+
+/// このトークンのインストールが見えるリポジトリを、`count` 件ぶんページングして返す。
+/// 1 ページ（100 件）に収まらない件数を渡して、ページングを踏ませる。
+async fn mount_paged_installation_repositories(
+    server: &MockServer,
+    authorization: &'static str,
+    count: usize,
+) {
+    Mock::given(method("GET"))
+        .and(path("/installation/repositories"))
+        .and(header("authorization", authorization))
+        .respond_with(move |req: &wiremock::Request| {
+            let number = |key: &str, fallback: usize| -> usize {
+                req.url
+                    .query_pairs()
+                    .find(|(name, _)| name == key)
+                    .and_then(|(_, value)| value.parse().ok())
+                    .unwrap_or(fallback)
+            };
+            let per_page = number("per_page", 30);
+            let start = (number("page", 1) - 1) * per_page;
+            let repositories: Vec<serde_json::Value> = (start..count.min(start + per_page))
+                .map(|i| {
+                    serde_json::json!({
+                        "full_name": format!("acme/repo-{i}"),
+                        "owner": { "login": "acme" }
+                    })
+                })
+                .collect();
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "total_count": count,
                 "repositories": repositories,
             }))
         })
@@ -310,6 +331,15 @@ fn unique_multi_repo_installation_id() -> i64 {
 
 fn unique_no_repo_installation_id() -> i64 {
     NO_REPO_ID_BASE + (Uuid::new_v4().as_u128() % 900_000_000_000) as i64
+}
+
+/// この値以上は「一覧の取得上限（100 件 × 100 ページ）を 1 件だけ超えるインストール」。
+const HUGE_ID_BASE: i64 = 4_500_000_000_000;
+/// 取得上限の 10,000 件を越える件数。上限ちょうどでは、打ち切りを全件として扱う不具合が隠れる。
+const HUGE_REPO_COUNT: usize = 10_001;
+
+fn unique_huge_installation_id() -> i64 {
+    HUGE_ID_BASE + (Uuid::new_v4().as_u128() % 900_000_000_000) as i64
 }
 
 fn unique_old_installation_id() -> i64 {
@@ -908,6 +938,56 @@ async fn authorize_flow_scenarios(app: &mut TestApp, mock_server: &MockServer) {
             "github-installation-no-repositories",
         )
         .await;
+    }
+
+    // 一覧の取得上限（100 件 × 100 ページ）を超えるインストールは、全件を確かめられない → 409。
+    // インストール側は 10,001 件、利用者は先頭の 10,000 件の全部の admin で、最後の 1 件は
+    // 見えない。打ち切られた 10,000 件どうしを比べると一致してしまうので、GitHub の総数と
+    // 合わない一覧では選択トークンを発行しない。
+    {
+        let installation_id = unique_huge_installation_id();
+        let token = authorize_token(app, &tp_b2, &owner_code(installation_id)).await;
+        let candidate = only_candidate(app, &tp_b2, &token).await;
+        assert_select_rejected(
+            post_authorized_select(app, &tp_b2, &token, candidate).await,
+            StatusCode::CONFLICT,
+            "github-installation-repositories-incomplete",
+        )
+        .await;
+    }
+
+    // ユーザー側の一覧が総数に届かないまま終わったときも、部分的な一覧では認可しない → 409。
+    // 対照: 同じインストールで一覧が揃えば通る。
+    {
+        let installation_id = unique_installation_id();
+        let token = authorize_token(app, &tp_b2, &owner_code(installation_id)).await;
+        let candidate = only_candidate(app, &tp_b2, &token).await;
+        override_user_repositories(
+            mock_server,
+            installation_id,
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "total_count": 2,
+                "repositories": [{
+                    "name": "backend",
+                    "owner": { "login": "acme" },
+                    "permissions": { "admin": true }
+                }]
+            })),
+            Some(1),
+        )
+        .await;
+        assert_select_rejected(
+            post_authorized_select(app, &tp_b2, &token, candidate).await,
+            StatusCode::CONFLICT,
+            "github-installation-repositories-incomplete",
+        )
+        .await;
+        assert_eq!(
+            post_authorized_select(app, &tp_b2, &token, candidate)
+                .await
+                .status(),
+            StatusCode::OK
+        );
     }
 
     // 候補に無い candidate_id / でたらめなトークン / トークン無し → 400

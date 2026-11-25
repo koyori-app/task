@@ -30,7 +30,10 @@ use service::github::{
         GithubOAuthStatePayload, RepoSelectPayload, TTL_SECS,
     },
     repositories::{contains_repository, select_primary_repository},
-    user_installations::{covers_all_repositories, list_user_installation_repositories},
+    user_installations::{
+        covers_all_repositories, installation_repository_count, is_incomplete_listing,
+        list_user_installation_repositories,
+    },
     webhook_events,
 };
 
@@ -1324,6 +1327,23 @@ pub async fn select_authorized_github_installation(
             "github-installation-no-repositories".into(),
         ));
     }
+    // 上の一覧は 100 件 × 100 ページで止まり、残りがあっても成功として返る。読み切れて
+    // いない一覧で「全リポジトリの admin」を認めると、確かめていないリポジトリまで含めて
+    // インストール全体を任せることになる。GitHub の総数と一致するときだけ先へ進む。
+    let incomplete =
+        || AppError::ConflictDetail("github-installation-repositories-incomplete".into());
+    let total_count = installation_repository_count(&state.http_client, &access.token)
+        .await
+        .map_err(AppError::Internal)?;
+    if repositories.len() != total_count {
+        tracing::warn!(
+            installation_id,
+            listed = repositories.len(),
+            total_count,
+            "github authorized select: installation repositories were not fully listed"
+        );
+        return Err(incomplete());
+    }
 
     // 連携後は、インストールが見える全リポジトリから連携先を選べる（同じテナント内の
     // 再利用でも選べる）。1 件でも admin でないリポジトリがあると、利用者が GitHub 上で
@@ -1345,6 +1365,9 @@ pub async fn select_authorized_github_installation(
                 } else if is_installation_gone(&e) {
                     // 利用者からはもう見えない。
                     admin_required()
+                } else if is_incomplete_listing(&e) {
+                    // ユーザー側の一覧を読み切れなかった。部分的な一覧では認可しない。
+                    incomplete()
                 } else {
                     AppError::Internal(e)
                 }

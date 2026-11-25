@@ -484,6 +484,12 @@ async function selectAuthorizedInstallation(candidateId: string) {
         expireAuthorizeToken();
         return;
       }
+      if (response.status === 409 && reason === 'github-installation-repositories-incomplete') {
+        // リポジトリが多すぎて全件の権限を確かめられない。トークンは生きている
+        authorizedError.value =
+          'このインストールのリポジトリを全件確認できませんでした。リポジトリが 10,000 件を超える場合は、この方法では連携できません。';
+        return;
+      }
       if (response.status === 409) {
         authorizedError.value =
           'このインストールにはリポジトリが 1 件も含まれていません。GitHub 側でリポジトリを追加してから、もう一度お試しください。';

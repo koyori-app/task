@@ -1476,6 +1476,26 @@ describe('IntegrationsSection', () => {
       expect(takeAuthorizeToken(PROJECT_UUID)).toBe(AUTHORIZE_TOKEN);
     });
 
+    it('選択が 409（全件を確認できない）ならその理由を伝え、トークンは残す', async () => {
+      stubFetch({
+        connected: false,
+        authorizedSelectStatus: 409,
+        authorizedSelectMessage: 'github-installation-repositories-incomplete',
+      });
+      mountSection({ authorizeToken: AUTHORIZE_TOKEN });
+      await flushPromises();
+
+      clickBodyButton('これを使う');
+      await flushPromises();
+
+      expect(document.body.textContent).toContain(
+        'このインストールのリポジトリを全件確認できませんでした',
+      );
+      expect(document.body.textContent).not.toContain('リポジトリが 1 件も含まれていません');
+      expect(takeAuthorizeToken(PROJECT_UUID)).toBe(AUTHORIZE_TOKEN);
+      expect(document.body.textContent).not.toContain('連携するリポジトリを選択');
+    });
+
     it('選択が 410 なら GitHub App が削除されていることを伝える', async () => {
       stubFetch({ connected: false, authorizedSelectStatus: 410 });
       mountSection({ authorizeToken: AUTHORIZE_TOKEN });

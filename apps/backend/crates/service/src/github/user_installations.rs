@@ -12,8 +12,42 @@ use super::client::api_base;
 
 /// 1 ページあたりの取得件数（GitHub の上限）。
 const PER_PAGE: usize = 100;
-/// 読むページ数の上限。超えた分は「見えない」扱いになり、判定は拒否側に倒れる。
+/// 読むページ数の上限。超えて残りがあるときは、部分的な一覧を返さずエラーにする。
 const MAX_PAGES: usize = 100;
+
+/// 全件を読み切れなかったときのエラーの文言。[`is_incomplete_listing`] が見る。
+const INCOMPLETE_LISTING: &str = "list user installation repositories incomplete";
+
+/// [`list_user_installation_repositories`] が、全件を読み切れずに止めたエラーか。
+pub fn is_incomplete_listing(error: &anyhow::Error) -> bool {
+    error.to_string().starts_with(INCOMPLETE_LISTING)
+}
+
+/// `GET /installation/repositories` の応答のうち、件数だけ。
+#[derive(Debug, Deserialize)]
+struct RepositoryCount {
+    total_count: usize,
+}
+
+/// インストールが見えるリポジトリの総数を、GitHub の `total_count` で取る。
+///
+/// `forge-github` の一覧は 100 件 × 100 ページで止まり、残りがあっても部分的な一覧を
+/// 成功として返す。「全リポジトリの admin」の判定にその一覧を使うときは、この総数と
+/// 件数が一致することを確かめ、読み切れていない一覧では認可しない。
+pub async fn installation_repository_count(
+    http: &Client,
+    installation_access_token: &str,
+) -> Result<usize, anyhow::Error> {
+    let url = format!("{}/installation/repositories?per_page=1&page=1", api_base());
+    let body: RepositoryCount = super::commits::get_json(
+        http,
+        installation_access_token,
+        &url,
+        "count installation repositories",
+    )
+    .await?;
+    Ok(body.total_count)
+}
 
 /// 利用者から見た、インストール配下のリポジトリ 1 件。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,6 +95,7 @@ pub async fn list_user_installation_repositories(
     installation_id: i64,
 ) -> Result<Vec<UserInstallationRepository>, anyhow::Error> {
     let mut repositories = Vec::new();
+    let mut total_count = 0;
 
     for page in 1..=MAX_PAGES {
         let url = format!(
@@ -86,9 +121,19 @@ pub async fn list_user_installation_repositories(
                 }),
         );
 
-        if repositories.len() >= body.total_count || fetched < PER_PAGE {
+        total_count = body.total_count;
+        if repositories.len() >= total_count || fetched < PER_PAGE {
             break;
         }
+    }
+
+    // 残りがあるのに止めた（ページ数の上限、または途中で短いページが返った）。部分的な一覧を
+    // 成功として返すと、呼び出し側が「これで全部」として権限の判定に使ってしまう。
+    if repositories.len() < total_count {
+        anyhow::bail!(
+            "{INCOMPLETE_LISTING}: fetched {} of {total_count}",
+            repositories.len()
+        );
     }
 
     Ok(repositories)
