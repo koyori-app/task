@@ -2977,6 +2977,9 @@ async fn github_http_integration_suite() {
 
     // 17. 連携を変えられる人と、状態を読める人（TASK-595）
     integration_manager_scenarios(&mut app).await;
+
+    // 18. プロジェクト Admin の解除は、GitHub 側の App を外さない（TASK-595）
+    project_admin_disconnect_scenarios(&mut app, &mock_server).await;
 }
 
 fn import_path(tp: &TestTenantProject) -> String {
@@ -3495,6 +3498,63 @@ async fn integration_manager_scenarios(app: &mut TestApp) {
         &former,
         &owner,
     ] {
+        app.cleanup_user(user.id).await;
+    }
+    app.reset_session_client();
+}
+
+/// シナリオ 18: 最後の連携行を解除しても、GitHub 側のアンインストールはテナントの信頼で
+/// 任せられる人（オーナーと入れるテナント Admin）に限る（TASK-595）。
+///
+/// アンインストールは GitHub 側の組織の全対象リポジトリから App を外す。修正前は
+/// プロジェクト Admin の ACE だけの人が最後の連携を解除すると、App ごと消えていた。
+async fn project_admin_disconnect_scenarios(app: &mut TestApp, mock_server: &MockServer) {
+    let owner = app.insert_user(false, false).await;
+    let tenant_admin = app.insert_user(false, false).await;
+    let project_admin = app.insert_user(false, false).await;
+
+    let p = app.insert_tenant_project(owner.id).await;
+    insert_tenant_member(app, p.tenant_id, tenant_admin.id, TenantRole::Admin).await;
+    insert_tenant_member(app, p.tenant_id, project_admin.id, TenantRole::Member).await;
+    insert_project_member(app, p.project_id, project_admin.id, ProjectRole::Admin).await;
+
+    // プロジェクト Admin: 連携行は消えるが、他に使う行が無くても App は残す。
+    let p_id = unique_old_installation_id();
+    insert_integration(app, &p, owner.id, p_id, "repo-1").await;
+    login_as(app, &project_admin).await;
+    assert_eq!(
+        app.delete_with_session(&integration_path(&p))
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert!(find_integration(app, &p).await.is_none());
+    assert_eq!(
+        delete_installation_count(mock_server, p_id).await,
+        0,
+        "プロジェクト Admin の解除で GitHub App をアンインストールしない"
+    );
+
+    // 対照: テナント Admin とオーナーの解除は、最後の連携なら今までどおり App も外す。
+    for user in [&tenant_admin, &owner] {
+        let installation_id = unique_old_installation_id();
+        insert_integration(app, &p, owner.id, installation_id, "repo-2").await;
+        login_as(app, user).await;
+        assert_eq!(
+            app.delete_with_session(&integration_path(&p))
+                .await
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+        assert!(find_integration(app, &p).await.is_none());
+        assert_eq!(
+            delete_installation_count(mock_server, installation_id).await,
+            1,
+            "テナントの信頼で任せられる人の解除は GitHub App もアンインストールする"
+        );
+    }
+
+    for user in [&tenant_admin, &project_admin, &owner] {
         app.cleanup_user(user.id).await;
     }
     app.reset_session_client();

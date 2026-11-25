@@ -1760,7 +1760,7 @@ pub async fn delete_github_integration(
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, AppError> {
     let github = state.settings.require_github_app()?;
-    require_integration_manager(&state, &auth, tenant_id, project_id).await?;
+    let access = require_integration_manager(&state, &auth, tenant_id, project_id).await?;
 
     let integration = github_integrations::Entity::find()
         .filter(github_integrations::Column::ProjectId.eq(project_id))
@@ -1823,7 +1823,11 @@ pub async fn delete_github_integration(
 
         // GitHub 側を先に解除する（404/410 は冪等成功として処理済み）。DB を先に消すと、
         // GitHub 側の失敗時に installation_id が失われ再試行不能になる。
-        if !shared {
+        //
+        // アンインストールは GitHub 側の組織の全対象リポジトリから App を外すので、
+        // テナントの信頼で任せられる人に限る。プロジェクト `Admin` の ACE だけで通る人は、
+        // プロジェクトの連携行だけを解除し、App は GitHub 側に残す。
+        if !shared && access == IntegrationAccess::TenantTrusted {
             github_app(&state.http_client, github)
                 .delete_installation(installation_id)
                 .await
