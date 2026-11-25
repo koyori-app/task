@@ -3,7 +3,7 @@ import { SmilePlus } from '@lucide/vue';
 import { useForm } from '@tanstack/vue-form';
 import { type } from 'arktype';
 import { useQueryClient } from '@tanstack/vue-query';
-import { computed, ref, useId } from 'vue';
+import { computed, ref, useId, watch } from 'vue';
 import { Button, Dialog, Field, Input, Textarea } from '@koyori-app/ui-vue';
 import AnchoredPanel from '@/components/reactions/AnchoredPanel.vue';
 import EmojiPicker from '@/components/reactions/EmojiPicker.vue';
@@ -115,6 +115,14 @@ const form = useForm({
 // 絵文字があるあいだは色がどこにも出ないので、色の欄を隠す（値は保ったまま送る）
 const iconEmoji = form.useStore((state) => state.values.icon_emoji);
 
+// 不正な色のまま色の欄を隠すと、送信時の検証で止まっても理由がどこにも出ない。
+// 絵文字を選ぶときは、直前の有効な色（無ければ既定色）へ戻してから隠す
+const color = form.useStore((state) => state.values.color);
+let lastValidColor: string = COLOR_PATTERN.test(color.value) ? color.value : LABEL_COLOR_PRESETS[0];
+watch(color, (value) => {
+  if (COLOR_PATTERN.test(value)) lastValidColor = value;
+});
+
 const emojiButtonRef = ref<HTMLButtonElement | null>(null);
 const emojiPickerOpen = ref(false);
 
@@ -124,6 +132,9 @@ function closeEmojiPicker(restoreFocus: boolean) {
 }
 
 function selectEmoji(emoji: string) {
+  if (!COLOR_PATTERN.test(form.getFieldValue('color'))) {
+    form.setFieldValue('color', lastValidColor);
+  }
   form.setFieldValue('icon_emoji', emoji);
   closeEmojiPicker(true);
 }

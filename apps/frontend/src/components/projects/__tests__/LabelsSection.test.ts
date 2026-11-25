@@ -428,6 +428,40 @@ describe('LabelsSection', () => {
     });
   });
 
+  it('色が不正なまま絵文字を選ぶと直前の有効な色へ戻し、保存できる', async () => {
+    createMutateAsync.mockResolvedValue({ ...bugLabel, name: 'design', icon_emoji: '🐞' });
+    mountView();
+    await flushPromises();
+
+    clickBodyButton('新しいラベル');
+    await flushPromises();
+    await input('label-color').setValue('#123456');
+    await input('label-color').setValue('#12');
+    await pickEmoji('beetle', '🐞');
+    expect(document.body.querySelector('#label-color')).toBeNull();
+
+    await input('label-name').setValue('design');
+    await formEl().trigger('submit');
+    await flushPromises();
+
+    expect(createMutateAsync).toHaveBeenCalledWith({
+      params: { path: { tenant_id: TENANT_UUID, project_id: PROJECT_UUID } },
+      body: { name: 'design', color: '#123456', description: '', icon_emoji: '🐞' },
+    });
+
+    // 一度も有効な色を入れていなければ既定色へ戻す
+    createMutateAsync.mockClear();
+    clickBodyButton('新しいラベル');
+    await flushPromises();
+    await input('label-color').setValue('red');
+    await pickEmoji('beetle', '🐞');
+    await input('label-name').setValue('design');
+    await formEl().trigger('submit');
+    await flushPromises();
+
+    expect(createMutateAsync.mock.calls[0]?.[0].body.color).toBe('#ef4444');
+  });
+
   it('編集で既存の絵文字を出し、「絵文字なし」で色の欄が戻り PUT に clear_icon_emoji が入る', async () => {
     updateMutateAsync.mockResolvedValue({ ...designLabel, icon_emoji: null });
     queryState.labels = [designLabel];
