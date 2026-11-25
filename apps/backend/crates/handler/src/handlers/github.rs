@@ -12,11 +12,13 @@ use sea_orm::{
     QuerySelect, TransactionTrait,
 };
 use sha2::Sha256;
+use std::collections::HashSet;
 use subtle::ConstantTimeEq;
 
 use crate::AppState;
 use crate::error::{AppError, ServerError};
-use crate::extractors::{AuthUser, ensure_tenant_2fa};
+use crate::extractors::AuthUser;
+use crate::handlers::project_members::require_project_admin;
 use crate::openapi::CrudErrors;
 use crate::settings::GithubAppSettings;
 use entity::{github_integrations, github_issue_links, projects, tenants};
@@ -39,37 +41,47 @@ use service::github::{
 
 type HmacSha256 = Hmac<Sha256>;
 
-async fn require_tenant_owner(
+/// 連携を変えられる人: オーナー、プロジェクト Admin、そのプロジェクトに入れるテナント Admin
+/// （Webhook 管理と同じ式。docs/dev/design/tenant-project-authz.md）。セッション専用。
+///
+/// 2FA の強制とプロジェクトがテナントのものであることは `ensure_tenant_access` が見る。
+async fn require_integration_manager(
     state: &AppState,
-    tenant_id: Uuid,
-    user_id: Uuid,
-) -> Result<(), AppError> {
-    let tenant = tenants::Entity::find_by_id(tenant_id)
-        .one(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    if tenant.owner_id != user_id {
-        return Err(AppError::Forbidden);
-    }
-    // オーナー専用の口も 2FA 強制の対象（`AuthUser::ensure_tenant_owner` と同じ判定）
-    ensure_tenant_2fa(state, &tenant, user_id).await
-}
-
-async fn require_project_in_tenant(
-    state: &AppState,
+    auth: &AuthUser,
     tenant_id: Uuid,
     project_id: Uuid,
 ) -> Result<(), AppError> {
-    let exists = projects::Entity::find_by_id(project_id)
-        .filter(projects::Column::TenantId.eq(tenant_id))
-        .one(&state.db)
-        .await?
-        .is_some();
-    if exists {
-        Ok(())
-    } else {
-        Err(AppError::NotFound)
+    auth.require_session()?;
+    auth.ensure_tenant_access(state, tenant_id, Some(project_id))
+        .await?;
+    require_project_admin(&state.db, tenant_id, project_id, auth.user_id).await
+}
+
+/// `project_ids` のうち、本人が連携を変えられるプロジェクト。再利用の根拠を絞るのに使う。
+///
+/// installation からは GitHub 側の組織のリポジトリがまとめて見えることがある。本人が
+/// 変えられないプロジェクトの連携行を根拠にすると、入れないプロジェクトが使う組織の
+/// リポジトリを自分のプロジェクトへ連携できてしまう。
+///
+/// テナントへ入れること（2FA を含む）は呼び出し元が確かめておく。
+async fn manageable_project_ids(
+    state: &AppState,
+    tenant_id: Uuid,
+    user_id: Uuid,
+    project_ids: Vec<Uuid>,
+) -> Result<HashSet<Uuid>, AppError> {
+    let candidates: HashSet<Uuid> = project_ids.into_iter().collect();
+    let mut manageable = HashSet::with_capacity(candidates.len());
+    for project_id in candidates {
+        match require_project_admin(&state.db, tenant_id, project_id, user_id).await {
+            Ok(()) => {
+                manageable.insert(project_id);
+            }
+            Err(AppError::Forbidden) => {}
+            Err(error) => return Err(error),
+        }
     }
+    Ok(manageable)
 }
 
 fn install_redirect_url(github: &GithubAppSettings, state: &str) -> String {
@@ -160,9 +172,7 @@ pub async fn start_github_install(
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<GithubInstallUrlResponse>, AppError> {
     let github = state.settings.require_github_app()?;
-    auth.require_session()?;
-    require_tenant_owner(&state, tenant_id, auth.user_id).await?;
-    require_project_in_tenant(&state, tenant_id, project_id).await?;
+    require_integration_manager(&state, &auth, tenant_id, project_id).await?;
 
     let existing_installation_id = github_integrations::Entity::find()
         .filter(github_integrations::Column::ProjectId.eq(project_id))
@@ -210,9 +220,7 @@ pub async fn start_github_authorize(
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<GithubInstallUrlResponse>, AppError> {
     let github = state.settings.require_github_app()?;
-    auth.require_session()?;
-    require_tenant_owner(&state, tenant_id, auth.user_id).await?;
-    require_project_in_tenant(&state, tenant_id, project_id).await?;
+    require_integration_manager(&state, &auth, tenant_id, project_id).await?;
 
     // インストール画面を通らないので、束縛する installation はここでは決めない。
     // 候補は callback が GitHub に問い合わせて決める。
@@ -307,15 +315,14 @@ pub async fn github_callback(
         "github callback: state consumed"
     );
 
-    if let Err(e) = require_tenant_owner(&state, payload.tenant_id, auth.user_id).await {
-        tracing::warn!(tenant_id = %payload.tenant_id, "github callback: not a tenant owner");
-        return Err(e);
-    }
-    if let Err(e) = require_project_in_tenant(&state, payload.tenant_id, payload.project_id).await {
+    // install の時点で通っていても、ここで見直す（その後にロールを外された人を通さない）。
+    if let Err(e) =
+        require_integration_manager(&state, &auth, payload.tenant_id, payload.project_id).await
+    {
         tracing::warn!(
             tenant_id = %payload.tenant_id,
             project_id = %payload.project_id,
-            "github callback: project not in tenant"
+            "github callback: not allowed to manage the integration"
         );
         return Err(e);
     }
@@ -374,8 +381,15 @@ pub async fn github_callback(
                 // 正規に入れたものだと分かっている。1 インストールに複数リポジトリが見える
                 // 構成では「同じ org の別リポジトリを別プロジェクトへ」が普通に起きるので、
                 // 鮮度チェックだけで弾くと 10 分を過ぎた時点で連携できなくなる。
-                None if installation_used_in_tenant(&state, payload.tenant_id, installation_id)
-                    .await? =>
+                // 数えるのは、本人が連携を変えられるプロジェクトのものだけ。入れないプロジェクトが
+                // 使っているインストールは、新規と同じ確認（鮮度と code）へ回す。
+                None if installation_used_in_tenant(
+                    &state,
+                    payload.tenant_id,
+                    auth.user_id,
+                    installation_id,
+                )
+                .await? =>
                 {
                     Some(installation_id)
                 }
@@ -401,7 +415,8 @@ pub async fn github_callback(
     //
     // 束縛先が既に決まっている（expected_installation_id が Some）ときは省く。
     // その束縛に入るのは「state に載せた連携済みの ID」「このプロジェクトの選択待ちの
-    // 控え」「同じテナントが使用中のインストール」のいずれか。この所有者確認の導入後に
+    // 控え」「同じテナントが使用中のインストール（本人が連携を変えられるプロジェクトの
+    // もの）」のいずれか。この所有者確認の導入後に
     // 作られた束縛なら、どれも確認済みの callback からしか生まれない。導入前からある
     // github_integrations 行は鮮度チェックだけで作られており、この不変条件の対象外。
     // ここで code を要求すると、リポジトリを足して戻る・選び直すといった復旧の動線が、
@@ -806,20 +821,25 @@ async fn upsert_integration(
     }
 }
 
-/// そのテナントのどれかのプロジェクトが、既にこのインストールを使っているか。
+/// そのテナントのプロジェクトのうち、本人が連携を変えられるどれかが、既にこの
+/// インストールを使っているか。
 async fn installation_used_in_tenant(
     state: &AppState,
     tenant_id: Uuid,
+    user_id: Uuid,
     installation_id: i64,
 ) -> Result<bool, AppError> {
-    let used = github_integrations::Entity::find()
+    let project_ids = github_integrations::Entity::find()
         .filter(github_integrations::Column::InstallationId.eq(installation_id))
         .inner_join(projects::Entity)
         .filter(projects::Column::TenantId.eq(tenant_id))
-        .one(&state.db)
+        .all(&state.db)
         .await?
-        .is_some();
-    Ok(used)
+        .into_iter()
+        .map(|row| row.project_id)
+        .collect();
+    let manageable = manageable_project_ids(state, tenant_id, user_id, project_ids).await?;
+    Ok(!manageable.is_empty())
 }
 
 /// インストールが GitHub 側から消えているか。
@@ -929,9 +949,7 @@ pub async fn list_github_repositories(
     headers: HeaderMap,
 ) -> Result<Json<GithubRepositoriesResponse>, AppError> {
     state.settings.require_github_app()?;
-    auth.require_session()?;
-    require_tenant_owner(&state, tenant_id, auth.user_id).await?;
-    require_project_in_tenant(&state, tenant_id, project_id).await?;
+    require_integration_manager(&state, &auth, tenant_id, project_id).await?;
 
     let select_token = select_token_from_headers(&headers)?;
     // 一覧は何度でも開けるようトークンを消費しない（確定は POST /connect 側）。
@@ -972,9 +990,7 @@ pub async fn connect_github_repository(
     Json(body): Json<GithubConnectRequest>,
 ) -> Result<StatusCode, AppError> {
     let github = state.settings.require_github_app()?;
-    auth.require_session()?;
-    require_tenant_owner(&state, tenant_id, auth.user_id).await?;
-    require_project_in_tenant(&state, tenant_id, project_id).await?;
+    require_integration_manager(&state, &auth, tenant_id, project_id).await?;
 
     let stored = install_state::peek_select_token(&state.redis_client, &body.select_token)
         .await
@@ -1075,9 +1091,7 @@ pub async fn list_reusable_github_installations(
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<GithubReusableInstallationsResponse>, AppError> {
     state.settings.require_github_app()?;
-    auth.require_session()?;
-    require_tenant_owner(&state, tenant_id, auth.user_id).await?;
-    require_project_in_tenant(&state, tenant_id, project_id).await?;
+    require_integration_manager(&state, &auth, tenant_id, project_id).await?;
 
     // 候補はこのテナントの連携行だけから作る（App 全体のインストール一覧は見せない）。
     // 同じ installation を複数プロジェクトが使っていても 1 件にまとめ、最初の連携行を代表にする。
@@ -1088,9 +1102,18 @@ pub async fn list_reusable_github_installations(
         .order_by_asc(github_integrations::Column::Id)
         .all(&state.db)
         .await?;
-    let mut seen = std::collections::HashSet::new();
+    // 本人が連携を変えられるプロジェクトの行だけを候補にする（オーナーは全部）。
+    let manageable = manageable_project_ids(
+        &state,
+        tenant_id,
+        auth.user_id,
+        rows.iter().map(|row| row.project_id).collect(),
+    )
+    .await?;
+    let mut seen = HashSet::new();
     let installations = rows
         .into_iter()
+        .filter(|row| manageable.contains(&row.project_id))
         .filter(|row| seen.insert(row.installation_id))
         .map(|row| GithubReusableInstallationItem {
             source_integration_id: row.id,
@@ -1125,9 +1148,7 @@ pub async fn reuse_github_installation(
     Json(body): Json<GithubReuseRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let github = state.settings.require_github_app()?;
-    auth.require_session()?;
-    require_tenant_owner(&state, tenant_id, auth.user_id).await?;
-    require_project_in_tenant(&state, tenant_id, project_id).await?;
+    require_integration_manager(&state, &auth, tenant_id, project_id).await?;
 
     // installation_id はリクエストで受け取らず、同じテナントの連携行から引く。
     // 信頼する範囲は callback の `installation_used_in_tenant` と同じ。
@@ -1137,6 +1158,13 @@ pub async fn reuse_github_installation(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
+    // 入れない・管理できないプロジェクトの連携行は、存在しないのと同じ応答にする。
+    if manageable_project_ids(&state, tenant_id, auth.user_id, vec![source.project_id])
+        .await?
+        .is_empty()
+    {
+        return Err(AppError::NotFound);
+    }
 
     // 利用中の連携から来ているので、新規インストール向けの鮮度チェックや code は求めない。
     // GitHub 側で消えていれば 410。一時障害（403 を含む）は 5xx にして再試行させる。
@@ -1233,9 +1261,7 @@ pub async fn list_authorized_github_installations(
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AppError> {
     state.settings.require_github_app()?;
-    auth.require_session()?;
-    require_tenant_owner(&state, tenant_id, auth.user_id).await?;
-    require_project_in_tenant(&state, tenant_id, project_id).await?;
+    require_integration_manager(&state, &auth, tenant_id, project_id).await?;
 
     let token = authorize_token_from_headers(&headers)?;
     let payload = resolve_authorize_token(&state, &auth, tenant_id, project_id, token).await?;
@@ -1280,9 +1306,7 @@ pub async fn select_authorized_github_installation(
     Json(body): Json<GithubAuthorizedSelectRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let github = state.settings.require_github_app()?;
-    auth.require_session()?;
-    require_tenant_owner(&state, tenant_id, auth.user_id).await?;
-    require_project_in_tenant(&state, tenant_id, project_id).await?;
+    require_integration_manager(&state, &auth, tenant_id, project_id).await?;
 
     let payload =
         resolve_authorize_token(&state, &auth, tenant_id, project_id, &body.authorize_token)
@@ -1554,9 +1578,16 @@ pub async fn get_github_integration(
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<GithubIntegrationResponse>, AppError> {
     state.settings.require_github_app()?;
+    // 状態を読むだけなら、プロジェクトに入れる人でよい。変えられるかは `can_manage` で返す。
     auth.require_session()?;
-    require_tenant_owner(&state, tenant_id, auth.user_id).await?;
-    require_project_in_tenant(&state, tenant_id, project_id).await?;
+    auth.ensure_tenant_access(&state, tenant_id, Some(project_id))
+        .await?;
+    let can_manage =
+        match require_project_admin(&state.db, tenant_id, project_id, auth.user_id).await {
+            Ok(()) => true,
+            Err(AppError::Forbidden) => false,
+            Err(error) => return Err(error),
+        };
 
     let integration = github_integrations::Entity::find()
         .filter(github_integrations::Column::ProjectId.eq(project_id))
@@ -1569,12 +1600,14 @@ pub async fn get_github_integration(
             repo_owner: Some(row.repo_owner),
             repo_name: Some(row.repo_name),
             connected_at: Some(row.created_at.with_timezone(&chrono::Utc)),
+            can_manage,
         },
         None => GithubIntegrationResponse {
             connected: false,
             repo_owner: None,
             repo_name: None,
             connected_at: None,
+            can_manage,
         },
     }))
 }
@@ -1597,9 +1630,7 @@ pub async fn delete_github_integration(
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, AppError> {
     let github = state.settings.require_github_app()?;
-    auth.require_session()?;
-    require_tenant_owner(&state, tenant_id, auth.user_id).await?;
-    require_project_in_tenant(&state, tenant_id, project_id).await?;
+    require_integration_manager(&state, &auth, tenant_id, project_id).await?;
 
     let integration = github_integrations::Entity::find()
         .filter(github_integrations::Column::ProjectId.eq(project_id))
@@ -1746,9 +1777,7 @@ pub async fn import_github_issues(
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, AppError> {
     state.settings.require_github_app()?;
-    auth.require_session()?;
-    require_tenant_owner(&state, tenant_id, auth.user_id).await?;
-    require_project_in_tenant(&state, tenant_id, project_id).await?;
+    require_integration_manager(&state, &auth, tenant_id, project_id).await?;
 
     github_integrations::Entity::find()
         .filter(github_integrations::Column::ProjectId.eq(project_id))

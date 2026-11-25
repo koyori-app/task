@@ -32,6 +32,8 @@ pub struct GithubIntegrationResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = String, format = "date-time", nullable)]
     pub connected_at: Option<DateTime<Utc>>,
+    /// 見ている本人が連携を変えられるか（連携・解除・Issue の取り込み）。
+    pub can_manage: bool,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
