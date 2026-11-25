@@ -179,6 +179,48 @@ describe('TaskDatesChip の行の自動送り', () => {
     wrapper.unmount();
   });
 
+  it.each([
+    ['Enter', 'Enter'],
+    ['Space', ' '],
+  ])('%s を押し続けても、リピートは進めた先の行の日付を確定しない', async (_name, key) => {
+    const wrapper = mountChip({ autoAdvance: true });
+    await toggle(wrapper);
+    await selectRow('plannedStartOn');
+    panel()!.querySelector<HTMLElement>('[role="grid"] [tabindex="0"]')!.focus();
+    (document.activeElement as HTMLElement).dispatchEvent(
+      new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }),
+    );
+    await settle();
+    expect(activeRow()).toBe('softDeadline');
+    expect(dates(wrapper).plannedStartOn).not.toBe('');
+
+    // 押したままのリピートは、進めた先の期限のカレンダーへ届かない
+    const cell = document.activeElement as HTMLElement;
+    expect(cell.closest('[role="grid"]')).not.toBeNull();
+    for (let i = 0; i < 3; i += 1) {
+      const repeat = new KeyboardEvent('keydown', {
+        key,
+        repeat: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      (document.activeElement as HTMLElement).dispatchEvent(repeat);
+      await settle();
+      expect(repeat.defaultPrevented).toBe(true);
+    }
+    expect(activeRow()).toBe('softDeadline');
+    expect(dates(wrapper)).toMatchObject({ softDeadline: '', hardDeadline: '' });
+
+    // 対照: 押し直した（リピートでない）キーは、今までどおり確定して進む
+    (document.activeElement as HTMLElement).dispatchEvent(
+      new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }),
+    );
+    await settle();
+    expect(dates(wrapper).softDeadline).not.toBe('');
+    expect(activeRow()).toBe('hardDeadline');
+    wrapper.unmount();
+  });
+
   it('進めた先に値があっても進み、選び直すと上書きする', async () => {
     const wrapper = mountChip({
       autoAdvance: true,

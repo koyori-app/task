@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ArrowRight, CalendarClock, CalendarDays, X } from '@lucide/vue';
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { Calendar } from '@koyori-app/ui-vue';
 
 import AnchoredPanel from '@/components/reactions/AnchoredPanel.vue';
@@ -121,6 +121,24 @@ async function pickDay(value: string) {
     panel.value?.querySelector<HTMLElement>(`[data-date-field="${next}"]`);
   target?.focus();
 }
+
+/**
+ * 押し続けた Enter・Space のリピートをカレンダーへ届けない。koyori の Calendar は `repeat` を見ずに確定するので、
+ * 日を選んで次の行へ進んだ後も、押している間のリピートが進めた先のカレンダーで日を選んでしまう
+ * （未設定の行では今日が入る）。capture で受けて、カレンダーより先に止める
+ */
+function dropRepeatedConfirm(event: KeyboardEvent) {
+  if (!event.repeat || (event.key !== 'Enter' && event.key !== ' ')) return;
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+// Vue の listener にすると、パネルの Esc より先に Vue の listener を通ることになり、Vue がイベントの時刻と
+// listener を付けた時刻を比べて Esc を捨てうる。Vue の外の listener として付ける
+watch(panel, (element, previous) => {
+  previous?.removeEventListener('keydown', dropRepeatedConfirm, true);
+  element?.addEventListener('keydown', dropRepeatedConfirm, true);
+});
 
 function closeAndRefocus() {
   close();
