@@ -1,8 +1,10 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import {
+  forgetAuthorizeToken,
   forgetSelectToken,
   keepSelectToken,
   stashSelectTokenFromUrl,
+  takeAuthorizeToken,
   takeSelectToken,
 } from '../github-select-token';
 
@@ -19,6 +21,8 @@ function clearStashes() {
   window.sessionStorage.clear();
   forgetSelectToken(PROJECT_ID);
   forgetSelectToken(OTHER_PROJECT_ID);
+  forgetAuthorizeToken(PROJECT_ID);
+  forgetAuthorizeToken(OTHER_PROJECT_ID);
 }
 
 beforeEach(() => {
@@ -187,5 +191,91 @@ describe('forgetSelectToken', () => {
     forgetSelectToken(OTHER_PROJECT_ID);
 
     expect(takeSelectToken(PROJECT_ID)).toBe('token-1');
+  });
+});
+
+/** GitHub のユーザー認可から戻ったときの認可トークン（`#github_installations=`）。 */
+describe('認可トークン', () => {
+  it('フラグメントのトークンを退避し、URL から落とす', () => {
+    visit(SETTINGS_PATH, '#github_installations=auth-1');
+
+    stashSelectTokenFromUrl();
+
+    expect(window.location.hash).toBe('');
+    expect(takeAuthorizeToken(PROJECT_ID)).toBe('auth-1');
+  });
+
+  it('引き取ったあとは、同じプロジェクトなら何度でも読める', () => {
+    visit(SETTINGS_PATH, '#github_installations=auth-1');
+    stashSelectTokenFromUrl();
+
+    expect(takeAuthorizeToken(PROJECT_ID)).toBe('auth-1');
+    expect(takeAuthorizeToken(PROJECT_ID)).toBe('auth-1');
+  });
+
+  it('着地ページと違うパスでは引き取らず、その退避は捨てる', () => {
+    visit(SETTINGS_PATH, '#github_installations=auth-1');
+    stashSelectTokenFromUrl();
+
+    visit('/koyori/projects/OTHER/settings');
+    expect(takeAuthorizeToken(OTHER_PROJECT_ID)).toBeNull();
+
+    visit(SETTINGS_PATH);
+    expect(takeAuthorizeToken(PROJECT_ID)).toBeNull();
+  });
+
+  it('選択トークンとは別に退避する（互いに読めない）', () => {
+    visit(SETTINGS_PATH, '#github_installations=auth-1');
+    stashSelectTokenFromUrl();
+
+    expect(takeSelectToken(PROJECT_ID)).toBeNull();
+    expect(takeAuthorizeToken(PROJECT_ID)).toBe('auth-1');
+  });
+
+  it('選択トークンと同居していても、両方を退避して URL から落とす', () => {
+    visit(SETTINGS_PATH, '#foo=bar&github_select=token-1&github_installations=auth-1');
+
+    stashSelectTokenFromUrl();
+
+    expect(window.location.hash).toBe('#foo=bar');
+    expect(takeSelectToken(PROJECT_ID)).toBe('token-1');
+    expect(takeAuthorizeToken(PROJECT_ID)).toBe('auth-1');
+  });
+
+  it('選択トークンを捨てても認可トークンは残り、その逆も同じ', () => {
+    visit(SETTINGS_PATH, '#github_select=token-1&github_installations=auth-1');
+    stashSelectTokenFromUrl();
+    expect(takeSelectToken(PROJECT_ID)).toBe('token-1');
+    expect(takeAuthorizeToken(PROJECT_ID)).toBe('auth-1');
+
+    forgetSelectToken(PROJECT_ID);
+    expect(takeSelectToken(PROJECT_ID)).toBeNull();
+    expect(takeAuthorizeToken(PROJECT_ID)).toBe('auth-1');
+
+    keepSelectToken(PROJECT_ID, 'token-2');
+    forgetAuthorizeToken(PROJECT_ID);
+    expect(takeAuthorizeToken(PROJECT_ID)).toBeNull();
+    expect(takeSelectToken(PROJECT_ID)).toBe('token-2');
+  });
+
+  it('未引き取りの退避も捨てる', () => {
+    visit(SETTINGS_PATH, '#github_installations=auth-1');
+    stashSelectTokenFromUrl();
+
+    forgetAuthorizeToken(PROJECT_ID);
+
+    expect(takeAuthorizeToken(PROJECT_ID)).toBeNull();
+  });
+
+  it('sessionStorage へ書けなくても引き取れる', () => {
+    vi.spyOn(window.sessionStorage, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError');
+    });
+    visit(SETTINGS_PATH, '#github_installations=auth-1');
+
+    stashSelectTokenFromUrl();
+
+    expect(window.location.hash).toBe('');
+    expect(takeAuthorizeToken(PROJECT_ID)).toBe('auth-1');
   });
 });

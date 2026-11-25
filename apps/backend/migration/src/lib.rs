@@ -38,6 +38,7 @@ mod m20261117000000_apalis_migration_history_schema;
 mod m20261119000000_oauth_grants;
 mod m20261121000000_drive_file_sections;
 mod m20261124000000_forge_pull_request_roles;
+mod m20261124000000_label_icon_emoji;
 
 pub struct Migrator;
 
@@ -83,6 +84,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261119000000_oauth_grants::Migration),
             Box::new(m20261121000000_drive_file_sections::Migration),
             Box::new(m20261124000000_forge_pull_request_roles::Migration),
+            Box::new(m20261124000000_label_icon_emoji::Migration),
         ]
     }
 }

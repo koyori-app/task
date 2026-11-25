@@ -22,6 +22,7 @@ import type { components } from '@/generated/api';
 import type { TaskRowField } from '@/composables/useTaskRowMutations';
 import { TASK_ROW_GRID } from '@/components/tasks/task-grouped-columns';
 import TaskAssigneePicker from '@/components/tasks/TaskAssigneePicker.vue';
+import LabelMark from '@/components/tasks/LabelMark.vue';
 import TaskChecklistProgress from '@/components/tasks/TaskChecklistProgress.vue';
 import TaskIdCopyButton from '@/components/tasks/TaskIdCopyButton.vue';
 import UserAvatar from '@/components/UserAvatar.vue';
@@ -352,11 +353,7 @@ function selectFromKeyboard(event: KeyboardEvent) {
               :key="label.id"
               class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground"
             >
-              <span
-                class="inline-block size-2 rounded-full"
-                :style="{ backgroundColor: label.color }"
-                aria-hidden="true"
-              />
+              <LabelMark :label="label" />
               {{ label.name }}
             </span>
 
@@ -422,11 +419,7 @@ function selectFromKeyboard(event: KeyboardEvent) {
                 data-row-label
               >
                 <span aria-hidden="true">·</span>
-                <span
-                  class="size-2 shrink-0 rounded-full"
-                  :style="{ backgroundColor: firstLabel.color }"
-                  aria-hidden="true"
-                />
+                <LabelMark :label="firstLabel" />
                 <span class="min-w-0 truncate">{{ firstLabel.name }}</span>
                 <span v-if="hiddenLabelCount" class="shrink-0">+{{ hiddenLabelCount }}</span>
               </span>

@@ -37,6 +37,7 @@ mod github_issue_sync_integration;
 mod github_snippets_integration;
 mod job_max_attempts_integration;
 mod job_retry_limit_integration;
+mod label_icon_emoji_integration;
 mod mcp_documents_integration;
 mod mcp_integration;
 mod mcp_more_tools_integration;

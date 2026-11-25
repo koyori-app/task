@@ -15,6 +15,13 @@ pub fn tenant_github_routes() -> OpenApiRouter<AppState> {
             crate::handlers::github::list_reusable_github_installations
         ))
         .routes(routes!(crate::handlers::github::reuse_github_installation))
+        .routes(routes!(crate::handlers::github::start_github_authorize))
+        .routes(routes!(
+            crate::handlers::github::list_authorized_github_installations
+        ))
+        .routes(routes!(
+            crate::handlers::github::select_authorized_github_installation
+        ))
 }
 
 pub fn public_github_routes() -> OpenApiRouter<AppState> {
