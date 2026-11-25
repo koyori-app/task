@@ -17,6 +17,7 @@ pub struct Model {
     pub icon_url: Option<String>,
     #[sea_orm(unique_key = "labels_project_name_unique")]
     pub project_id: Option<Uuid>,
+    pub icon_emoji: Option<String>,
     #[sea_orm(
         belongs_to,
         from = "project_id",

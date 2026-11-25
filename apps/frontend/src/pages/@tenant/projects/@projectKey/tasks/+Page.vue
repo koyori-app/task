@@ -722,8 +722,9 @@ const columns: ColumnDef<TaskTableFeatures, TaskRow>[] = [
           h(Badge, {
             key: label.id,
             class: 'whitespace-nowrap',
-            label: label.name,
-            dotColor: label.color,
+            // 絵文字を持つラベルは色の点を出さず、絵文字を名前の前に置く
+            label: label.icon_emoji ? `${label.icon_emoji} ${label.name}` : label.name,
+            dotColor: label.icon_emoji ? undefined : label.color,
           }),
         ),
       );
