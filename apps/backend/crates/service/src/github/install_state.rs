@@ -74,6 +74,19 @@ pub async fn consume_state(
 
 const SELECT_KEY_PREFIX: &str = "github_repo_select:";
 
+/// 選択トークンを発行したときの根拠。インストールが見える全リポジトリを、何を理由に
+/// その利用者へ任せたか。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SelectBasis {
+    /// 利用者がそのプロジェクトのオーナーか、入れるテナント `Admin` だった。
+    /// 使うたびに、今もそうであることを確かめる。
+    #[default]
+    TenantTrust,
+    /// 利用者がインストールが見える全リポジトリの admin であることを GitHub が答えた。
+    GithubVerified,
+}
+
 /// リポジトリ選択用トークンの中身。callback で発行し、選択 API で照合する。
 /// `installation_id` をリクエストで受け取らずここに束縛するのが要点。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,6 +95,10 @@ pub struct RepoSelectPayload {
     pub project_id: Uuid,
     pub user_id: Uuid,
     pub installation_id: i64,
+    /// 根拠の無い保存済みのトークンは `TenantTrust` として読む（厳しい側。根拠を足す前に
+    /// 発行できたのはオーナーだけ）。
+    #[serde(default)]
+    pub basis: SelectBasis,
 }
 
 pub async fn store_select_token(
@@ -339,7 +356,35 @@ pub async fn peek_pending_installation(
 
 #[cfg(test)]
 mod tests {
-    use super::{GithubOAuthStateKind, GithubOAuthStatePayload};
+    use super::{GithubOAuthStateKind, GithubOAuthStatePayload, RepoSelectPayload, SelectBasis};
+
+    /// 根拠を足す前に保存された選択トークン（`basis` が無い）は、テナントの信頼として読める。
+    #[test]
+    fn select_token_without_basis_reads_as_tenant_trust() {
+        let raw = r#"{
+            "tenant_id": "00000000-0000-0000-0000-000000000001",
+            "project_id": "00000000-0000-0000-0000-000000000002",
+            "user_id": "00000000-0000-0000-0000-000000000003",
+            "installation_id": 42
+        }"#;
+        let payload: RepoSelectPayload = serde_json::from_str(raw).unwrap();
+        assert_eq!(payload.basis, SelectBasis::TenantTrust);
+    }
+
+    #[test]
+    fn select_basis_round_trips_as_snake_case() {
+        let raw = r#"{
+            "tenant_id": "00000000-0000-0000-0000-000000000001",
+            "project_id": "00000000-0000-0000-0000-000000000002",
+            "user_id": "00000000-0000-0000-0000-000000000003",
+            "installation_id": 42,
+            "basis": "github_verified"
+        }"#;
+        let payload: RepoSelectPayload = serde_json::from_str(raw).unwrap();
+        assert_eq!(payload.basis, SelectBasis::GithubVerified);
+        let value = serde_json::to_value(&payload).unwrap();
+        assert_eq!(value["basis"], "github_verified");
+    }
 
     /// 種別を足す前に保存された state（`kind` が無い）は、インストールの経路として読める。
     #[test]

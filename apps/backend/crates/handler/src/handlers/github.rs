@@ -17,8 +17,10 @@ use subtle::ConstantTimeEq;
 
 use crate::AppState;
 use crate::error::{AppError, ServerError};
-use crate::extractors::AuthUser;
-use crate::handlers::project_members::require_project_admin;
+use crate::extractors::{AuthUser, has_tenant_access};
+use crate::handlers::project_members::{
+    ProjectAdminGround, project_admin_ground, require_project_admin,
+};
 use crate::openapi::CrudErrors;
 use crate::settings::GithubAppSettings;
 use entity::{github_integrations, github_issue_links, projects, tenants};
@@ -29,7 +31,7 @@ use service::github::{
     github_app,
     install_state::{
         self, AuthorizedInstallation, AuthorizedInstallationsPayload, GithubOAuthStateKind,
-        GithubOAuthStatePayload, RepoSelectPayload, TTL_SECS,
+        GithubOAuthStatePayload, RepoSelectPayload, SelectBasis, TTL_SECS,
     },
     repositories::{contains_repository, select_primary_repository},
     user_installations::{
@@ -41,47 +43,106 @@ use service::github::{
 
 type HmacSha256 = Hmac<Sha256>;
 
+/// 連携を変えられる人が、連携先を何を根拠に選べるか。
+///
+/// インストールからは GitHub 側の組織のリポジトリがまとめて見える。それをどれでも連携先に
+/// 選ばせてよいかは、連携を変えてよいかとは別の問いで、プロジェクト `Admin` の ACE は
+/// GitHub 側の組織について何も言っていない。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IntegrationAccess {
+    /// オーナー、またはそのプロジェクトに入れるテナント `Admin`。テナントが使っている
+    /// インストールを、テナントの信頼で任せられる。
+    TenantTrusted,
+    /// プロジェクト `Admin` の ACE だけで通る人。連携先は GitHub の確認
+    /// （インストールが見える全リポジトリの admin）でしか選べない。
+    ProjectAdmin,
+}
+
+/// 入口と、再利用の根拠にする連携行の両方が通る唯一の判定。
+///
+/// 所属・2FA・プロジェクトへ入れることは `has_tenant_access` が見る。連携を変えられなければ 403。
+async fn integration_access(
+    state: &AppState,
+    user_id: Uuid,
+    tenant_id: Uuid,
+    project_id: Uuid,
+) -> Result<IntegrationAccess, AppError> {
+    has_tenant_access(state, user_id, tenant_id, Some(project_id)).await?;
+    match project_admin_ground(&state.db, tenant_id, project_id, user_id).await? {
+        Some(ProjectAdminGround::TenantOwner | ProjectAdminGround::TenantAdmin) => {
+            Ok(IntegrationAccess::TenantTrusted)
+        }
+        Some(ProjectAdminGround::ProjectAce) => Ok(IntegrationAccess::ProjectAdmin),
+        None => Err(AppError::Forbidden),
+    }
+}
+
 /// 連携を変えられる人: オーナー、プロジェクト Admin、そのプロジェクトに入れるテナント Admin
 /// （Webhook 管理と同じ式。docs/dev/design/tenant-project-authz.md）。セッション専用。
 ///
-/// 2FA の強制とプロジェクトがテナントのものであることは `ensure_tenant_access` が見る。
+/// 戻り値は、その人が連携先を選べる根拠。連携先を選ばない口は捨ててよい。
 async fn require_integration_manager(
     state: &AppState,
     auth: &AuthUser,
     tenant_id: Uuid,
     project_id: Uuid,
-) -> Result<(), AppError> {
+) -> Result<IntegrationAccess, AppError> {
     auth.require_session()?;
-    auth.ensure_tenant_access(state, tenant_id, Some(project_id))
-        .await?;
-    require_project_admin(&state.db, tenant_id, project_id, auth.user_id).await
+    integration_access(state, auth.user_id, tenant_id, project_id).await
 }
 
-/// `project_ids` のうち、本人が連携を変えられるプロジェクト。再利用の根拠を絞るのに使う。
+/// `project_ids` のうち、本人がオーナーか入れるテナント `Admin` であるプロジェクト。
+/// テナントの信頼で再利用するときの、根拠にしてよい連携行を絞るのに使う。
 ///
-/// installation からは GitHub 側の組織のリポジトリがまとめて見えることがある。本人が
-/// 変えられないプロジェクトの連携行を根拠にすると、入れないプロジェクトが使う組織の
-/// リポジトリを自分のプロジェクトへ連携できてしまう。
-///
-/// テナントへ入れること（2FA を含む）は呼び出し元が確かめておく。
-async fn manageable_project_ids(
+/// プロジェクト `Admin` の ACE だけのプロジェクトは数えない。数えると、ACE を持つだけの人
+/// （テナントを外れたあとも残る個人プロジェクトの持ち主を含む）が、そのインストールが見える
+/// 全リポジトリを連携先に選べてしまう。
+async fn tenant_trusted_project_ids(
     state: &AppState,
     tenant_id: Uuid,
     user_id: Uuid,
     project_ids: Vec<Uuid>,
 ) -> Result<HashSet<Uuid>, AppError> {
     let candidates: HashSet<Uuid> = project_ids.into_iter().collect();
-    let mut manageable = HashSet::with_capacity(candidates.len());
+    let mut trusted = HashSet::with_capacity(candidates.len());
     for project_id in candidates {
-        match require_project_admin(&state.db, tenant_id, project_id, user_id).await {
-            Ok(()) => {
-                manageable.insert(project_id);
+        match integration_access(state, user_id, tenant_id, project_id).await {
+            Ok(IntegrationAccess::TenantTrusted) => {
+                trusted.insert(project_id);
             }
-            Err(AppError::Forbidden) => {}
+            Ok(IntegrationAccess::ProjectAdmin)
+            | Err(AppError::Forbidden | AppError::ForbiddenDetail(_)) => {}
             Err(error) => return Err(error),
         }
     }
-    Ok(manageable)
+    Ok(trusted)
+}
+
+/// `kind = Authorize` の state を保存し、そのトークンを返す。
+///
+/// インストール画面を通らないので、束縛する installation はここでは決めない。
+/// 候補は callback が GitHub に問い合わせて決める。
+async fn store_authorize_state(
+    state: &AppState,
+    auth: &AuthUser,
+    tenant_id: Uuid,
+    project_id: Uuid,
+) -> Result<String, AppError> {
+    let state_token = install_state::new_state_token();
+    install_state::store_state(
+        &state.redis_client,
+        &state_token,
+        &GithubOAuthStatePayload {
+            tenant_id,
+            project_id,
+            user_id: auth.user_id,
+            kind: GithubOAuthStateKind::Authorize,
+            installation_id: None,
+        },
+    )
+    .await
+    .map_err(AppError::Internal)?;
+    Ok(state_token)
 }
 
 fn install_redirect_url(github: &GithubAppSettings, state: &str) -> String {
@@ -222,23 +283,7 @@ pub async fn start_github_authorize(
     let github = state.settings.require_github_app()?;
     require_integration_manager(&state, &auth, tenant_id, project_id).await?;
 
-    // インストール画面を通らないので、束縛する installation はここでは決めない。
-    // 候補は callback が GitHub に問い合わせて決める。
-    let state_token = install_state::new_state_token();
-    install_state::store_state(
-        &state.redis_client,
-        &state_token,
-        &GithubOAuthStatePayload {
-            tenant_id,
-            project_id,
-            user_id: auth.user_id,
-            kind: GithubOAuthStateKind::Authorize,
-            installation_id: None,
-        },
-    )
-    .await
-    .map_err(AppError::Internal)?;
-
+    let state_token = store_authorize_state(&state, &auth, tenant_id, project_id).await?;
     let url = authorize_redirect_url(github, &state_token);
     Ok(Json(GithubInstallUrlResponse { url }))
 }
@@ -316,16 +361,21 @@ pub async fn github_callback(
     );
 
     // install の時点で通っていても、ここで見直す（その後にロールを外された人を通さない）。
-    if let Err(e) =
-        require_integration_manager(&state, &auth, payload.tenant_id, payload.project_id).await
-    {
-        tracing::warn!(
-            tenant_id = %payload.tenant_id,
-            project_id = %payload.project_id,
-            "github callback: not allowed to manage the integration"
-        );
-        return Err(e);
-    }
+    // 連携先を選ぶ根拠も、install の時点ではなく今の状態で決める。
+    let access =
+        match require_integration_manager(&state, &auth, payload.tenant_id, payload.project_id)
+            .await
+        {
+            Ok(access) => access,
+            Err(e) => {
+                tracing::warn!(
+                    tenant_id = %payload.tenant_id,
+                    project_id = %payload.project_id,
+                    "github callback: not allowed to manage the integration"
+                );
+                return Err(e);
+            }
+        };
 
     let app = github_app(&state.http_client, github);
     // GitHub からの着地点なので、以降の失敗は素のエラーではなく設定画面へ理由付きで戻す。
@@ -352,6 +402,24 @@ pub async fn github_callback(
             return authorize_callback(&state, github, &auth, &payload, &query, &redirect_to).await;
         }
         GithubOAuthStateKind::Install => {
+            // プロジェクト Admin の ACE だけで通る人は、インストール画面から戻っても
+            // クエリの installation_id と code を読まない。以降の経路は「束縛済み」「選択待ちの
+            // 控え」「同じテナントが使用中」で所有者確認を省き、通ればインストールが見える
+            // 全リポジトリを任せる。それはテナントの信頼がある人にだけ許す。
+            // 全リポジトリの admin であることを確かめるユーザー認可の経路へ回す。
+            if access == IntegrationAccess::ProjectAdmin {
+                tracing::info!(
+                    "github callback: project admin without tenant trust; redirecting to user authorization"
+                );
+                return redirect_to_github_authorize(
+                    &state,
+                    github,
+                    &auth,
+                    payload.tenant_id,
+                    payload.project_id,
+                )
+                .await;
+            }
             let Some(installation_id) = query.installation_id else {
                 tracing::warn!("github callback: install state without installation_id");
                 return Err(AppError::BadRequest);
@@ -381,8 +449,8 @@ pub async fn github_callback(
                 // 正規に入れたものだと分かっている。1 インストールに複数リポジトリが見える
                 // 構成では「同じ org の別リポジトリを別プロジェクトへ」が普通に起きるので、
                 // 鮮度チェックだけで弾くと 10 分を過ぎた時点で連携できなくなる。
-                // 数えるのは、本人が連携を変えられるプロジェクトのものだけ。入れないプロジェクトが
-                // 使っているインストールは、新規と同じ確認（鮮度と code）へ回す。
+                // 数えるのは、本人がオーナーか入れるテナント Admin であるプロジェクトのものだけ。
+                // それ以外のプロジェクトが使っているインストールは、新規と同じ確認（鮮度と code）へ回す。
                 None if installation_used_in_tenant(
                     &state,
                     payload.tenant_id,
@@ -415,8 +483,8 @@ pub async fn github_callback(
     //
     // 束縛先が既に決まっている（expected_installation_id が Some）ときは省く。
     // その束縛に入るのは「state に載せた連携済みの ID」「このプロジェクトの選択待ちの
-    // 控え」「同じテナントが使用中のインストール（本人が連携を変えられるプロジェクトの
-    // もの）」のいずれか。この所有者確認の導入後に
+    // 控え」「同じテナントが使用中のインストール（本人がオーナーか入れるテナント Admin で
+    // あるプロジェクトのもの）」のいずれか。この所有者確認の導入後に
     // 作られた束縛なら、どれも確認済みの callback からしか生まれない。導入前からある
     // github_integrations 行は鮮度チェックだけで作られており、この不変条件の対象外。
     // ここで code を要求すると、リポジトリを足して戻る・選び直すといった復旧の動線が、
@@ -532,6 +600,8 @@ pub async fn github_callback(
                 project_id: payload.project_id,
                 user_id: auth.user_id,
                 installation_id,
+                // ここへ来るのはオーナーか入れるテナント Admin だけ。
+                basis: SelectBasis::TenantTrust,
             },
         )
         .await
@@ -606,6 +676,22 @@ pub async fn github_callback(
     Ok(Redirect::temporary(&redirect_to).into_response())
 }
 
+/// インストールの callback から、GitHub のユーザー認可へ回す。
+///
+/// 新しい `kind = Authorize` の state を作るので、戻りは [`authorize_callback`] が受ける。
+/// そちらは再び飛ばさないので、行き来は 1 回で終わる。利用者が認可を拒否・放置すれば
+/// 何も残らない（state は TTL で切れる）。
+async fn redirect_to_github_authorize(
+    state: &AppState,
+    github: &GithubAppSettings,
+    auth: &AuthUser,
+    tenant_id: Uuid,
+    project_id: Uuid,
+) -> Result<Response, AppError> {
+    let state_token = store_authorize_state(state, auth, tenant_id, project_id).await?;
+    Ok(Redirect::temporary(&authorize_redirect_url(github, &state_token)).into_response())
+}
+
 /// ユーザー認可（`kind = Authorize`）の callback。
 ///
 /// インストール画面を通らないので、束縛する installation はクエリからは取らない。
@@ -642,13 +728,31 @@ async fn authorize_callback(
             return callback_error_redirect(redirect_to, "github_unavailable");
         }
     };
-    let installation_ids = match app.list_user_installation_ids(&user_token).await {
+    let mut installation_ids = match app.list_user_installation_ids(&user_token).await {
         Ok(ids) => ids,
         Err(e) => {
             tracing::warn!(error = %e, "github authorize callback: listing user installations failed");
             return callback_error_redirect(redirect_to, "github_unavailable");
         }
     };
+
+    // 連携済みのプロジェクトは、今のインストールに対する選択トークンしか確定できない
+    // （`connect_github_repository`）。選べない候補を出さないよう、今のインストールだけに絞る。
+    // それが利用者から見えなければ、この経路で連携先を替えることはできない。
+    if let Some(current) = github_integrations::Entity::find()
+        .filter(github_integrations::Column::ProjectId.eq(payload.project_id))
+        .one(&state.db)
+        .await?
+    {
+        installation_ids.retain(|id| *id == current.installation_id);
+        if installation_ids.is_empty() {
+            tracing::warn!(
+                installation_id = current.installation_id,
+                "github authorize callback: the connected installation is not visible to the user"
+            );
+            return callback_error_redirect(redirect_to, "installation_forbidden");
+        }
+    }
 
     let mut installations = Vec::with_capacity(installation_ids.len());
     for installation_id in installation_ids {
@@ -821,8 +925,8 @@ async fn upsert_integration(
     }
 }
 
-/// そのテナントのプロジェクトのうち、本人が連携を変えられるどれかが、既にこの
-/// インストールを使っているか。
+/// そのテナントのプロジェクトのうち、本人がオーナーか入れるテナント `Admin` であるどれかが、
+/// 既にこのインストールを使っているか。
 async fn installation_used_in_tenant(
     state: &AppState,
     tenant_id: Uuid,
@@ -838,8 +942,8 @@ async fn installation_used_in_tenant(
         .into_iter()
         .map(|row| row.project_id)
         .collect();
-    let manageable = manageable_project_ids(state, tenant_id, user_id, project_ids).await?;
-    Ok(!manageable.is_empty())
+    let trusted = tenant_trusted_project_ids(state, tenant_id, user_id, project_ids).await?;
+    Ok(!trusted.is_empty())
 }
 
 /// インストールが GitHub 側から消えているか。
@@ -863,9 +967,14 @@ fn is_installation_rejected(error: &anyhow::Error) -> bool {
 }
 
 /// 選択トークンを検証し、束縛された installation のリポジトリ一覧を取得する。
+///
+/// `access` は入口（[`require_integration_manager`]）が返した、今の根拠。テナントの信頼で
+/// 発行したトークンは、発行後にオーナーでも入れるテナント `Admin` でもなくなった人には
+/// 使わせない（403）。GitHub を呼ぶ前に止める。
 async fn resolve_select_token(
     state: &AppState,
     auth: &AuthUser,
+    access: IntegrationAccess,
     tenant_id: Uuid,
     project_id: Uuid,
     payload: Option<RepoSelectPayload>,
@@ -886,6 +995,9 @@ async fn resolve_select_token(
     }
     if payload.tenant_id != tenant_id || payload.project_id != project_id {
         return Err(AppError::BadRequest);
+    }
+    if payload.basis == SelectBasis::TenantTrust && access != IntegrationAccess::TenantTrusted {
+        return Err(AppError::Forbidden);
     }
 
     let app = github_app(&state.http_client, github);
@@ -949,7 +1061,7 @@ pub async fn list_github_repositories(
     headers: HeaderMap,
 ) -> Result<Json<GithubRepositoriesResponse>, AppError> {
     state.settings.require_github_app()?;
-    require_integration_manager(&state, &auth, tenant_id, project_id).await?;
+    let access = require_integration_manager(&state, &auth, tenant_id, project_id).await?;
 
     let select_token = select_token_from_headers(&headers)?;
     // 一覧は何度でも開けるようトークンを消費しない（確定は POST /connect 側）。
@@ -957,7 +1069,7 @@ pub async fn list_github_repositories(
         .await
         .map_err(AppError::Internal)?;
     let (_, repositories, _) =
-        resolve_select_token(&state, &auth, tenant_id, project_id, stored).await?;
+        resolve_select_token(&state, &auth, access, tenant_id, project_id, stored).await?;
 
     Ok(Json(GithubRepositoriesResponse {
         repositories: repositories
@@ -990,13 +1102,14 @@ pub async fn connect_github_repository(
     Json(body): Json<GithubConnectRequest>,
 ) -> Result<StatusCode, AppError> {
     let github = state.settings.require_github_app()?;
-    require_integration_manager(&state, &auth, tenant_id, project_id).await?;
+    let access = require_integration_manager(&state, &auth, tenant_id, project_id).await?;
 
+    // 根拠の見直しは peek の段階で行う。止まるときはトークンを消費しない。
     let stored = install_state::peek_select_token(&state.redis_client, &body.select_token)
         .await
         .map_err(AppError::Internal)?;
     let (payload, repositories, _) =
-        resolve_select_token(&state, &auth, tenant_id, project_id, stored).await?;
+        resolve_select_token(&state, &auth, access, tenant_id, project_id, stored).await?;
 
     // 別タブに残った古い選択トークンで、連携先が黙って巻き戻るのを防ぐ。
     // 連携済みなら、その installation に対するトークンでなければ受け付けない。
@@ -1091,7 +1204,14 @@ pub async fn list_reusable_github_installations(
     Path((tenant_id, project_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<GithubReusableInstallationsResponse>, AppError> {
     state.settings.require_github_app()?;
-    require_integration_manager(&state, &auth, tenant_id, project_id).await?;
+    let access = require_integration_manager(&state, &auth, tenant_id, project_id).await?;
+    // プロジェクト Admin の ACE だけで通る人には、テナントの信頼による再利用を出さない
+    // （GitHub のユーザー認可の経路から進む）。
+    if access == IntegrationAccess::ProjectAdmin {
+        return Ok(Json(GithubReusableInstallationsResponse {
+            installations: Vec::new(),
+        }));
+    }
 
     // 候補はこのテナントの連携行だけから作る（App 全体のインストール一覧は見せない）。
     // 同じ installation を複数プロジェクトが使っていても 1 件にまとめ、最初の連携行を代表にする。
@@ -1102,8 +1222,9 @@ pub async fn list_reusable_github_installations(
         .order_by_asc(github_integrations::Column::Id)
         .all(&state.db)
         .await?;
-    // 本人が連携を変えられるプロジェクトの行だけを候補にする（オーナーは全部）。
-    let manageable = manageable_project_ids(
+    // 本人がオーナーか入れるテナント Admin であるプロジェクトの行だけを候補にする
+    // （オーナーは全部）。ACE だけのプロジェクト（自分の Inbox など）の行は根拠にしない。
+    let trusted = tenant_trusted_project_ids(
         &state,
         tenant_id,
         auth.user_id,
@@ -1113,7 +1234,7 @@ pub async fn list_reusable_github_installations(
     let mut seen = HashSet::new();
     let installations = rows
         .into_iter()
-        .filter(|row| manageable.contains(&row.project_id))
+        .filter(|row| trusted.contains(&row.project_id))
         .filter(|row| seen.insert(row.installation_id))
         .map(|row| GithubReusableInstallationItem {
             source_integration_id: row.id,
@@ -1148,7 +1269,12 @@ pub async fn reuse_github_installation(
     Json(body): Json<GithubReuseRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let github = state.settings.require_github_app()?;
-    require_integration_manager(&state, &auth, tenant_id, project_id).await?;
+    let access = require_integration_manager(&state, &auth, tenant_id, project_id).await?;
+    // 再利用はテナントの信頼による経路。行き先のプロジェクトでも、本人がオーナーか入れる
+    // テナント Admin でなければ使えない（候補が空なのと同じく、存在しない応答にする）。
+    if access == IntegrationAccess::ProjectAdmin {
+        return Err(AppError::NotFound);
+    }
 
     // installation_id はリクエストで受け取らず、同じテナントの連携行から引く。
     // 信頼する範囲は callback の `installation_used_in_tenant` と同じ。
@@ -1158,8 +1284,9 @@ pub async fn reuse_github_installation(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
-    // 入れない・管理できないプロジェクトの連携行は、存在しないのと同じ応答にする。
-    if manageable_project_ids(&state, tenant_id, auth.user_id, vec![source.project_id])
+    // 本人がオーナーでも入れるテナント Admin でもないプロジェクトの連携行は、存在しないのと
+    // 同じ応答にする。
+    if tenant_trusted_project_ids(&state, tenant_id, auth.user_id, vec![source.project_id])
         .await?
         .is_empty()
     {
@@ -1194,6 +1321,7 @@ pub async fn reuse_github_installation(
             project_id,
             user_id: auth.user_id,
             installation_id: source.installation_id,
+            basis: SelectBasis::TenantTrust,
         },
     )
     .await
@@ -1415,6 +1543,8 @@ pub async fn select_authorized_github_installation(
             project_id,
             user_id: auth.user_id,
             installation_id,
+            // 全リポジトリの admin を上で確かめた。テナントのロールに関係なく使える。
+            basis: SelectBasis::GithubVerified,
         },
     )
     .await
