@@ -132,6 +132,12 @@ const importMutation = apiClient.useMutation('post', GITHUB_IMPORT_PATH);
 
 const integration = computed(() => integrationQuery.data.value);
 
+/**
+ * 連携を変えられるか。式は backend が持ち、ここでは答えだけを使う。
+ * 未取得の間は変えられない側に倒す（操作のボタンはその間は出ない）。
+ */
+const canManage = computed(() => integration.value?.can_manage === true);
+
 const importDisabled = computed(() => importMutation.isPending.value || importCoolingDown.value);
 
 const importLabel = computed(() => {
@@ -246,6 +252,7 @@ const filteredRepositories = computed(() => {
 });
 
 async function connectRepository(owner: string, name: string) {
+  if (!canManage.value) return;
   const token = selectToken.value;
   if (!token) return;
   selectError.value = null;
@@ -320,6 +327,7 @@ watch(
 );
 
 async function startInstall() {
+  if (!canManage.value) return;
   installError.value = null;
   installPending.value = true;
   try {
@@ -342,6 +350,15 @@ async function startInstall() {
  * 取得に失敗しても GitHub へは自動で転送しない。
  */
 async function loadCandidates() {
+  if (!canManage.value) return;
+  await fetchCandidates();
+}
+
+/**
+ * 候補を取る。認可トークンの期限切れ（`expireAuthorizeToken`）は連携状態の取得より先に
+ * 起きることがあるので、そこからはこちらを直に呼ぶ。変えられない人には API が 403 を返す。
+ */
+async function fetchCandidates() {
   candidatesError.value = null;
   candidatesPending.value = true;
   try {
@@ -358,6 +375,7 @@ async function loadCandidates() {
 }
 
 async function reuseInstallation(sourceIntegrationId: string) {
+  if (!canManage.value) return;
   candidatesError.value = null;
   selectError.value = null;
   reusePendingId.value = sourceIntegrationId;
@@ -400,6 +418,7 @@ async function reuseInstallation(sourceIntegrationId: string) {
  * 見えるインストールが候補に出る。
  */
 async function startAuthorize() {
+  if (!canManage.value) return;
   authorizeError.value = null;
   authorizePending.value = true;
   try {
@@ -428,7 +447,7 @@ function forgetAuthorizeToken() {
 function expireAuthorizeToken() {
   forgetAuthorizeToken();
   authorizedError.value = AUTHORIZE_EXPIRED_MESSAGE;
-  if (!candidates.value && !candidatesPending.value) void loadCandidates();
+  if (!candidates.value && !candidatesPending.value) void fetchCandidates();
 }
 
 /** GitHub で確認したアカウント・組織を、認可トークンで引く */
@@ -462,6 +481,7 @@ async function loadAuthorizedInstallations() {
 }
 
 async function selectAuthorizedInstallation(candidateId: string) {
+  if (!canManage.value) return;
   const token = authorizeToken.value;
   if (!token) return;
   authorizedError.value = null;
@@ -521,6 +541,7 @@ async function selectAuthorizedInstallation(candidateId: string) {
  * 戻りの callback には頼らず、この画面の「再読み込み」で続けられるよう別タブで開く。
  */
 async function openGithubAccessSettings() {
+  if (!canManage.value) return;
   addAccessError.value = null;
   // URL の取得を待ってから開くとポップアップブロックに掛かるので、先に空のタブを開いておく
   const tab = window.open('', '_blank');
@@ -538,6 +559,7 @@ async function openGithubAccessSettings() {
 }
 
 async function startImport() {
+  if (!canManage.value) return;
   importError.value = null;
   importStarted.value = false;
   try {
@@ -557,11 +579,14 @@ async function startImport() {
 function onDisconnectOpenChange(open: boolean) {
   // 解除リクエスト進行中はダイアログを閉じない（結果の見逃し防止）
   if (!open && disconnectMutation.isPending.value) return;
+  // 閉じる側は止めない（開いたままロールを外されても閉じられる）
+  if (open && !canManage.value) return;
   if (open) disconnectError.value = null;
   isDisconnectOpen.value = open;
 }
 
 async function confirmDisconnect() {
+  if (!canManage.value) return;
   disconnectError.value = null;
   try {
     await disconnectMutation.mutateAsync({
@@ -618,13 +643,14 @@ async function confirmDisconnect() {
           <Button
             type="button"
             variant="tertiary"
-            :disabled="importDisabled"
+            :disabled="!canManage || importDisabled"
             :label="importLabel"
             @click="startImport"
           />
           <Button
             type="button"
             variant="tertiary"
+            :disabled="!canManage"
             label="連携を解除"
             @click="onDisconnectOpenChange(true)"
           />
@@ -633,16 +659,19 @@ async function confirmDisconnect() {
           v-else
           type="button"
           class="shrink-0"
-          :disabled="candidatesPending"
+          :disabled="!canManage || candidatesPending"
           :label="candidatesPending ? '読み込み中…' : '連携する'"
           @click="loadCandidates"
         />
       </div>
+      <p v-if="!canManage" class="text-sm text-muted-foreground">
+        連携の設定を変えられるのは、テナントのオーナーと Admin、プロジェクトの Admin です。
+      </p>
       <p v-if="callbackError" role="alert" class="text-sm text-destructive">{{ callbackError }}</p>
 
       <!-- 同じテナントで利用中のアカウント・組織を選ばせる。無ければ新しくインストールする -->
       <div
-        v-if="!integration?.connected && (candidates || candidatesError)"
+        v-if="canManage && !integration?.connected && (candidates || candidatesError)"
         class="rounded-[10px] border p-4"
       >
         <p class="text-sm font-medium">GitHub アカウント・組織を選択</p>
@@ -711,7 +740,7 @@ async function confirmDisconnect() {
 
       <!-- GitHub のユーザー認可で確かめた、利用者が見えるアカウント・組織（他のテナントで連携済みのものを含む） -->
       <div
-        v-if="!integration?.connected && (authorizeToken || authorizedError)"
+        v-if="canManage && !integration?.connected && (authorizeToken || authorizedError)"
         class="rounded-[10px] border p-4"
       >
         <p class="text-sm font-medium">GitHub で確認したアカウント・組織</p>
@@ -761,7 +790,7 @@ async function confirmDisconnect() {
       </div>
 
       <!-- インストールに複数リポジトリが含まれるとき、連携先を 1 件選ばせる -->
-      <div v-if="selectToken || selectError" class="rounded-[10px] border p-4">
+      <div v-if="canManage && (selectToken || selectError)" class="rounded-[10px] border p-4">
         <p class="text-sm font-medium">連携するリポジトリを選択</p>
         <p class="mt-0.5 text-xs text-muted-foreground">
           このインストールから 1 つのリポジトリをプロジェクトに紐付けます。
@@ -886,7 +915,7 @@ async function confirmDisconnect() {
         <Button
           type="button"
           variant="danger"
-          :disabled="disconnectMutation.isPending.value"
+          :disabled="!canManage || disconnectMutation.isPending.value"
           :label="disconnectMutation.isPending.value ? '解除中…' : '解除する'"
           @click="confirmDisconnect"
         />

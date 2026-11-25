@@ -14,6 +14,7 @@ const connectedIntegration = {
   repo_owner: 'koyori-app',
   repo_name: 'koyori',
   connected_at: '2026-07-01T09:00:00Z',
+  can_manage: true,
 };
 
 const notConnectedIntegration = {
@@ -21,6 +22,7 @@ const notConnectedIntegration = {
   repo_owner: null,
   repo_name: null,
   connected_at: null,
+  can_manage: true,
 };
 
 const jsonResponse = (data: unknown, status = 200) =>
@@ -32,6 +34,8 @@ const jsonResponse = (data: unknown, status = 200) =>
 type MockOptions = {
   connected?: boolean;
   failIntegration?: boolean;
+  /** false にすると、連携を変えられない人（閲覧だけ）として返す */
+  canManage?: boolean;
   /** GitHub のユーザー認可から戻った状態にする（認可トークンをフラグメントで渡す） */
   authorized?: boolean;
   /** POST /github/authorized-installations/select を、この本文の 403 で失敗させる */
@@ -71,7 +75,10 @@ function mockFetch(options: MockOptions = {}) {
           return new Response(null, { status: 204 });
         }
         if (options.failIntegration) return jsonResponse({ message: 'error' }, 500);
-        return jsonResponse(connected ? connectedIntegration : notConnectedIntegration);
+        return jsonResponse({
+          ...(connected ? connectedIntegration : notConnectedIntegration),
+          can_manage: options.canManage ?? true,
+        });
       }
       if (method === 'GET' && pathname.endsWith('/github/installations')) {
         return jsonResponse({ installations: [] });
@@ -240,6 +247,31 @@ export const Connected: Story = {
     await expect(canvas.findByText('koyori-app/koyori')).resolves.toBeInTheDocument();
     await expect(canvas.findByRole('button', { name: '連携を解除' })).resolves.toBeInTheDocument();
     await expect(canvas.queryByRole('button', { name: '連携する' })).not.toBeInTheDocument();
+  },
+};
+
+const READ_ONLY_REASON =
+  '連携の設定を変えられるのは、テナントのオーナーと Admin、プロジェクトの Admin です。';
+
+export const ReadOnlyConnected: Story = {
+  name: '連携済み・変えられない人（ボタンは disabled、理由を表示）',
+  beforeEach: mockFetch({ connected: true, canManage: false }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByText('koyori-app/koyori')).resolves.toBeInTheDocument();
+    await expect(canvas.getByRole('button', { name: 'Issue を取り込む' })).toBeDisabled();
+    await expect(canvas.getByRole('button', { name: '連携を解除' })).toBeDisabled();
+    await expect(canvas.getByText(READ_ONLY_REASON)).toBeInTheDocument();
+  },
+};
+
+export const ReadOnlyNotConnected: Story = {
+  name: '未連携・変えられない人（「連携する」は disabled、理由を表示）',
+  beforeEach: mockFetch({ connected: false, canManage: false }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByRole('button', { name: '連携する' })).resolves.toBeDisabled();
+    await expect(canvas.getByText(READ_ONLY_REASON)).toBeInTheDocument();
   },
 };
 

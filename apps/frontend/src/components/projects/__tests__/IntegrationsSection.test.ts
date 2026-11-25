@@ -16,6 +16,8 @@ const INSTALL_URL = 'https://github.com/apps/test-app/installations/new?state=ab
 
 type MockState = {
   connected: boolean;
+  /** GET /github/integration の can_manage（省略時は true） */
+  canManage?: boolean;
   /** 400 以上を設定すると GET /github/integration が失敗する */
   integrationStatus?: number;
   /** 400 以上を設定すると GET /github/install が失敗する */
@@ -126,8 +128,15 @@ function stubFetch(state: MockState) {
               repo_owner: 'koyori-app',
               repo_name: state.repoName ?? 'koyori',
               connected_at: '2026-07-01T00:00:00Z',
+              can_manage: state.canManage ?? true,
             }
-          : { connected: false, repo_owner: null, repo_name: null, connected_at: null },
+          : {
+              connected: false,
+              repo_owner: null,
+              repo_name: null,
+              connected_at: null,
+              can_manage: state.canManage ?? true,
+            },
       );
     }
     if (method === 'GET' && pathname.endsWith('/github/repositories')) {
@@ -878,6 +887,111 @@ describe('IntegrationsSection', () => {
     // 消えている相手にはできない「アンインストールしてから」を促さない
     expect(document.body.textContent).not.toContain('一度アンインストール');
     expect(bodyButton('連携する')).toBeTruthy();
+  });
+
+  describe('連携を変えられない人（can_manage: false）', () => {
+    const REASON =
+      '連携の設定を変えられるのは、テナントのオーナーと Admin、プロジェクトの Admin です。';
+
+    /** disabled を外して押しても、関数の先頭で止まることまで確かめる */
+    function forceClick(label: string) {
+      const button = bodyButton(label);
+      if (!button) throw new Error(`button "${label}" not found`);
+      button.disabled = false;
+      button.click();
+    }
+
+    it('未連携: 「連携する」を押せず、理由を出し、候補も取りに行かない', async () => {
+      const fetchMock = stubFetch({ connected: false, canManage: false });
+      mountSection();
+      await flushPromises();
+
+      expect(bodyButton('連携する')?.disabled).toBe(true);
+      expect(document.body.textContent).toContain(REASON);
+
+      forceClick('連携する');
+      await flushPromises();
+      expect(requestsTo(fetchMock, '/github/installations')).toHaveLength(0);
+      expect(document.body.textContent).not.toContain('GitHub アカウント・組織を選択');
+    });
+
+    it('連携済み: 状態は見えるが、取り込みと解除は押せず、API も呼ばない', async () => {
+      const fetchMock = stubFetch({ connected: true, canManage: false });
+      mountSection();
+      await flushPromises();
+
+      expect(document.body.textContent).toContain('koyori-app/koyori');
+      expect(document.body.textContent).toContain(REASON);
+      expect(bodyButton('Issue を取り込む')?.disabled).toBe(true);
+      expect(bodyButton('連携を解除')?.disabled).toBe(true);
+
+      forceClick('Issue を取り込む');
+      forceClick('連携を解除');
+      await flushPromises();
+      expect(requestsTo(fetchMock, '/github/import')).toHaveLength(0);
+      expect(openDialog()).toBeNull();
+    });
+
+    it('変えられる人には理由を出さない', async () => {
+      stubFetch({ connected: true });
+      mountSection();
+      await flushPromises();
+
+      expect(document.body.textContent).not.toContain(REASON);
+      expect(bodyButton('Issue を取り込む')?.disabled).toBe(false);
+      expect(bodyButton('連携を解除')?.disabled).toBe(false);
+    });
+
+    it('選択トークン付きで戻っても、リポジトリ選択のパネルを出さない', async () => {
+      stubFetch({ connected: false, canManage: false });
+      mountSection({ selectToken: 'select-token-1' });
+      await flushPromises();
+
+      expect(document.body.textContent).not.toContain('連携するリポジトリを選択');
+      expect(bodyButton('選択')).toBeUndefined();
+      expect(bodyButton('連携する')?.disabled).toBe(true);
+    });
+
+    it('認可トークン付きで戻っても、GitHub で確認した候補のパネルを出さない', async () => {
+      stubFetch({ connected: false, canManage: false });
+      mountSection({ authorizeToken: 'authorize-token-1' });
+      await flushPromises();
+
+      expect(document.body.textContent).not.toContain('GitHub で確認したアカウント・組織');
+      expect(bodyButton('これを使う')).toBeUndefined();
+    });
+
+    it('取り直しで変えられなくなったら、開いていた操作を塞ぐ', async () => {
+      const state: MockState = { connected: true };
+      const fetchMock = stubFetch(state);
+      const { queryClient } = mountSection();
+      await flushPromises();
+
+      clickBodyButton('連携を解除');
+      await flushPromises();
+      expect(openDialog()).not.toBeNull();
+
+      state.canManage = false;
+      await queryClient.invalidateQueries();
+      await flushPromises();
+
+      expect(bodyButton('Issue を取り込む')?.disabled).toBe(true);
+      expect(bodyButton('連携を解除')?.disabled).toBe(true);
+      expect(bodyButton('解除する')?.disabled).toBe(true);
+      forceClick('解除する');
+      await flushPromises();
+      expect(
+        fetchMock.mock.calls
+          .map(([req]) => req)
+          .filter((req): req is Request => typeof req !== 'string')
+          .filter((req) => req.method === 'DELETE'),
+      ).toHaveLength(0);
+
+      // 閉じる側は止めない
+      clickBodyButton('キャンセル');
+      await flushPromises();
+      expect(openDialog()).toBeNull();
+    });
   });
 
   it('解除フロー: 確認ダイアログ → 解除する → DELETE 後に未連携表示へ戻る', async () => {
