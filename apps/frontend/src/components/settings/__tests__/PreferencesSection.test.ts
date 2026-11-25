@@ -151,9 +151,10 @@ describe('PreferencesSection（環境設定の画面）', () => {
     const html = await renderToString(app);
 
     expect(html).toContain('aria-checked="false"');
-    // 既定で点けの設定（ガントの依存の矢印）だけが点け。残った showExperiments は読まぬ
-    expect(html.match(/aria-checked="true"/g) ?? []).toHaveLength(1);
+    // 既定で点けの設定（ガントの依存の矢印、日付の行の自動送り）だけが点け。残った showExperiments は読まぬ
+    expect(html.match(/aria-checked="true"/g) ?? []).toHaveLength(2);
     expect(html).toMatch(/data-setting="ganttDependencies"[^]*?aria-checked="true"/);
+    expect(html).toMatch(/data-setting="advanceDateRowOnPick"[^]*?aria-checked="true"/);
     expect(html).toMatch(/<button[^>]*role="switch"[^>]*disabled/);
     // 有効のフラグの知らせも、残った値が要るので SSR では出ない
     expect(html).not.toContain('data-hidden-experiments-notice');
@@ -231,6 +232,7 @@ describe('PreferencesSection（環境設定の画面）', () => {
       expandSubtasksInList: false,
       ganttProgressLine: false,
       ganttDependencies: true,
+      advanceDateRowOnPick: true,
     });
     expect(wrapper.get<HTMLSelectElement>('[data-setting="emojiFont"] select').element.value).toBe(
       'os',

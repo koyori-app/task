@@ -14,6 +14,8 @@ import { formatShortDate } from '@/lib/task-date';
  * チップの button + AnchoredPanel + koyori の Calendar で組む。パネルの上に 3 行（値と消す ×）、
  * 下に選んでいる行のカレンダーを置く。日を選んでもパネルは閉じない（続けて他の行を設定できる）。
  * 値は YYYY-MM-DD、未設定は空文字。
+ * autoAdvance のときは、開始予定日の日を選ぶと期限の行へ、続けて期限の日を選ぶと最終期限の行へ進む。
+ * パネルを開いたときと行を手で選んだときは進めない（期限だけを入れる流れは変えない）。
  */
 type Key = 'plannedStartOn' | 'softDeadline' | 'hardDeadline';
 
@@ -26,13 +28,15 @@ const FIELDS = [
 const plannedStartOn = defineModel<string>('plannedStartOn', { required: true });
 const softDeadline = defineModel<string>('softDeadline', { required: true });
 const hardDeadline = defineModel<string>('hardDeadline', { required: true });
-defineProps<{
+const props = defineProps<{
   /** 引き金の id（ラベルの `for` などが指す）。複数の根を持つので、属性としては落ちてこない */
   id?: string;
   /** 日付の前後が矛盾している（開始予定が期限より後、期限が最終期限と同じか後） */
   invalid?: boolean;
   /** invalid のときパネルに出す文言。既定は開始予定と期限の矛盾 */
   invalidMessage?: string;
+  /** 開始予定日を選んだら期限→最終期限の行へ進める */
+  autoAdvance?: boolean;
 }>();
 
 const values = computed<Record<Key, string>>(() => ({
@@ -51,6 +55,8 @@ const open = ref(false);
 const active = ref<Key>('softDeadline');
 const anchor = ref<HTMLButtonElement | null>(null);
 const panel = ref<HTMLElement | null>(null);
+/** 開始予定日を選んで期限の行へ進めた後で、期限を選んだら最終期限の行へ進める */
+const chaining = ref(false);
 
 const activeField = computed(() => FIELDS.find((field) => field.key === active.value)!);
 const activeValue = computed(() => values.value[active.value]);
@@ -75,11 +81,45 @@ function toggle() {
     return;
   }
   // 開くたびに期限の行へ戻す
+  chaining.value = false;
   active.value = 'softDeadline';
   open.value = true;
   void nextTick(() => {
     panel.value?.querySelector<HTMLElement>(`[data-date-field="${active.value}"]`)?.focus();
   });
+}
+
+function selectRow(key: Key) {
+  chaining.value = false;
+  active.value = key;
+}
+
+/**
+ * 日を選んだ行に値を入れ、autoAdvance なら次の行へ進める。カレンダーは `:key="active"` で作り直すので、
+ * フォーカスしていた日のセルが DOM から外れ body へ落ちる（次の Esc が作成ダイアログの cancel になる）。
+ * 進めた後は新しいカレンダーのフォーカス日のセル（無ければ進めた先の行ボタン）へフォーカスを移す
+ */
+async function pickDay(value: string) {
+  const key = active.value;
+  setValue(key, value);
+  if (!props.autoAdvance) return;
+  let next: Key;
+  if (key === 'plannedStartOn') {
+    next = 'softDeadline';
+    chaining.value = true;
+  } else if (key === 'softDeadline' && chaining.value) {
+    next = 'hardDeadline';
+    chaining.value = false;
+  } else {
+    return;
+  }
+  active.value = next;
+  await nextTick();
+  if (!open.value || active.value !== next) return;
+  const target =
+    panel.value?.querySelector<HTMLElement>('[role="grid"] [tabindex="0"]') ??
+    panel.value?.querySelector<HTMLElement>(`[data-date-field="${next}"]`);
+  target?.focus();
 }
 
 function closeAndRefocus() {
@@ -175,7 +215,7 @@ function keepFocusOnPress(event: MouseEvent) {
           :data-date-field="field.key"
           :aria-pressed="active === field.key"
           class="flex h-[30px] flex-1 items-center gap-2 rounded-md px-2 text-left focus-visible:outline-2 focus-visible:outline-(--koyori-focus-color)"
-          @click="active = field.key"
+          @click="selectRow(field.key)"
         >
           <component :is="field.icon" class="size-3.5 shrink-0" aria-hidden="true" />
           <span>{{ field.short }}</span>
@@ -204,7 +244,7 @@ function keepFocusOnPress(event: MouseEvent) {
         :key="active"
         :label="activeField.label"
         :value="activeValue"
-        :on-value-change="(v: string) => setValue(active, v)"
+        :on-value-change="pickDay"
       />
     </div>
   </AnchoredPanel>

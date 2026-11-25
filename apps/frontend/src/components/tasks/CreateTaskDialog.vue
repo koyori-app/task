@@ -34,6 +34,7 @@ import SimilarTasksList from '@/components/tasks/SimilarTasksList.vue';
 import TaskDatesChip from '@/components/tasks/TaskDatesChip.vue';
 import TaskNumberChip from '@/components/tasks/TaskNumberChip.vue';
 import UserAvatar from '@/components/UserAvatar.vue';
+import { usePreference } from '@/composables/useLocalSettings';
 import { useProjectFileUpload } from '@/composables/useProjectFileUpload';
 import { useSimilarTasks } from '@/composables/useSimilarTasks';
 import type { components } from '@/generated/api';
@@ -41,6 +42,7 @@ import { apiClient, TASK_SEARCH_PATH } from '@/lib/api-vue-query';
 import { PRIORITY_CONFIG, taskDetailHref, taskSeqKey } from '@/lib/task-display';
 import { chipTrigger } from '@/lib/task-chip';
 import { isImeKeydown } from '@/lib/ime-keydown-guard';
+import { PREFERENCE_TABLE } from '@/lib/preferences';
 import { DEADLINE_ORDER_MESSAGE, softNotBeforeHard, toIsoDate } from '@/lib/task-date';
 import { useAuthStore } from '@/stores/auth';
 
@@ -228,6 +230,10 @@ const labelItems = computed<DropdownItem[]>(() =>
 // 候補で自分を先頭に置く。pinia の無い所（試験）でも組めるよう、在る時だけ引く。
 const authStore = getActivePinia() ? useAuthStore() : null;
 const currentUserId = computed(() => authStore?.user?.id ?? null);
+// 日付パネルで開始予定日を選んだら期限→最終期限の行へ進めるか。pinia の無い所（試験）では既定値
+const advanceDateRow = getActivePinia()
+  ? usePreference('advanceDateRowOnPick')
+  : computed(() => PREFERENCE_TABLE.advanceDateRowOnPick.default);
 
 const selectedAssignees = computed(() =>
   (props.members ?? []).filter((user) => selectedAssigneeIds.value.includes(user.id)),
@@ -862,6 +868,7 @@ async function submit(event: SubmitEvent) {
               v-model:soft-deadline="softDeadline"
               v-model:hard-deadline="hardDeadline"
               :invalid="plannedStartAfterSoft || softAfterHard"
+              :auto-advance="advanceDateRow"
               :invalid-message="
                 !plannedStartAfterSoft && softAfterHard ? DEADLINE_ORDER_MESSAGE : undefined
               "
