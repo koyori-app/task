@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite';
-import { userEvent, within } from 'storybook/test';
+import { expect, userEvent, within } from 'storybook/test';
 import TaskQueryField from '@/components/tasks/query/TaskQueryField.vue';
 const meta = {
   title: 'Components/TaskQueryField',
@@ -29,6 +29,19 @@ export const ValueSuggest: Story = {
     const input = within(canvasElement).getByRole('combobox');
     await userEvent.clear(input);
     await userEvent.type(input, 'label:b');
+  },
+};
+/** 値の候補を選ぶと、カンマを足して検索は確定せず、残りの候補（backend）を出したままにする。 */
+export const MultiValuePick: Story = {
+  ...WithChips,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const input = canvas.getByRole('combobox');
+    await userEvent.clear(input);
+    await userEvent.type(input, 'label:b');
+    await userEvent.keyboard('{ArrowDown}{Enter}');
+    await expect(input).toHaveValue('label:bug,');
+    await expect(await canvas.findByRole('option', { name: /backend/ })).toBeVisible();
   },
 };
 export const ManyChips: Story = {

@@ -2,6 +2,39 @@
 
 このファイルは git-cliff（cliff.toml）が生成する。手で編集しない。
 
+## [0.1.57](https://github.com/koyori-app/task/compare/v0.1.56...v0.1.57) - 2026-11-25
+
+レビュー画面を PR の一覧と詳細の 2 画面に作り直し、タスク作成ダイアログで続けて作成できテナント内のどのページからも T で作れるようにし、MCP に仕様書の検索と取得のツールを足し、検索欄で値の候補を続けて複数選べるようにした
+
+### 機能追加
+
+- **mcp**: 仕様書の検索と取得のツールを足す ([TASK-570](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-570)) ([#1238](https://github.com/koyori-app/task/pull/1238))
+- **frontend**: レビュー画面を PR の一覧と PR の詳細の 2 画面に作り直す ([TASK-585](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-585)) ([#1251](https://github.com/koyori-app/task/pull/1251))
+- **frontend**: タスク作成ダイアログで続けて作成でき、テナント内のどのページからも T で作れるようにする ([TASK-548](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-548))（[TASK-582](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-582) を解決） ([#1293](https://github.com/koyori-app/task/pull/1293))
+
+### 修正
+
+- **frontend**: 検索欄で値の候補を選んでも確定せず、続けて複数の値を選べるようにする ([TASK-584](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-584)) ([#1292](https://github.com/koyori-app/task/pull/1292))
+## [0.1.56](https://github.com/koyori-app/task/compare/v0.1.55...v0.1.56) - 2026-11-24
+
+ガントを横スクロールとスワイプで送れるようにし、Drive の Markdown 本文をプロジェクト内で検索できるようにし、MCP に CLI の残りの操作とレビュー系のツールを足して名前での指定を受けるようにし、コメントと新規タスクを Ctrl+Enter で送れるようにし、細かいデザインの不具合と OAuth の同意の応答を直した
+
+### 機能追加
+
+- **mcp**: ラベル・担当者などを名前で受ける ([TASK-562](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-562)) ([#1233](https://github.com/koyori-app/task/pull/1233))
+- **mcp**: レビュー系のツールを MCP に足す ([TASK-560](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-560)) ([#1234](https://github.com/koyori-app/task/pull/1234))
+- **frontend**: コメントと新規タスクを Ctrl+Enter で送信する ([TASK-154](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-154)) ([#1235](https://github.com/koyori-app/task/pull/1235))
+- **mcp**: CLI の残りの操作を MCP のツールに足す ([TASK-561](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-561)) ([#1236](https://github.com/koyori-app/task/pull/1236))
+- **drive**: Markdown の本文を節ごとに索引し、プロジェクト内で本文検索できるようにする ([TASK-569](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-569)) ([#1237](https://github.com/koyori-app/task/pull/1237))
+- **frontend**: ガントを横のスクロールとスワイプで 1 日ずつ送る ([TASK-567](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-567)) ([#1230](https://github.com/koyori-app/task/pull/1230))
+
+### 修正
+
+- **frontend**: ガントの頁の説明文を消す ([TASK-581](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-581)) ([#1246](https://github.com/koyori-app/task/pull/1246))
+- **backend**: OAuth の同意の応答の scopes を OrUnknown で包む ([TASK-563](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-563)) ([#1247](https://github.com/koyori-app/task/pull/1247))
+- **backend**: Cargo.lock の依存参照を実在する syn 3.0.10 と rand 0.10.4 に直す ([#1290](https://github.com/koyori-app/task/pull/1290))
+- **frontend**: タスク詳細の説明欄からクリアボタンを消す ([TASK-580](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-580)) ([#1239](https://github.com/koyori-app/task/pull/1239))
+- **frontend**: 細かいデザインの不具合をまとめて直す（説明文・列の揃い・優先度の色・期限の検証・スマホの当たり判定など）（[TASK-389](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-389)、[TASK-391](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-391)、[TASK-395](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-395)、[TASK-524](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-524)、[TASK-532](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-532)、[TASK-555](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-555)、[TASK-558](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-558)、[TASK-574](https://task.koyori.app/koyori/projects/TASK/tasks/TASK-574) を解決） ([#1242](https://github.com/koyori-app/task/pull/1242))
 ## [0.1.55](https://github.com/koyori-app/task/compare/v0.1.54...v0.1.55) - 2026-11-22
 
 MCP に OAuth を足して claude.ai などのコネクタから使えるようにし、PAT の発行をテナントの Member と Viewer にも許し、統合テストを試験ごとの DB で並列に回せるようにした

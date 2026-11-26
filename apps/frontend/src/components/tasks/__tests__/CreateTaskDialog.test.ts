@@ -62,6 +62,11 @@ import {
   pickerTrigger,
 } from '@/components/__tests__/picker';
 import { PRIORITY_CONFIG } from '@/lib/task-display';
+import { DEADLINE_ORDER_MESSAGE } from '@/lib/task-date';
+
+// 「続けて作成」はブラウザに覚えさせるので、テストの間で持ち越さない
+beforeEach(() => localStorage.clear());
+afterEach(() => localStorage.clear());
 
 const statuses = [
   {
@@ -268,6 +273,108 @@ describe('CreateTaskDialog double-submit guard', () => {
   });
 });
 
+describe('CreateTaskDialog の Ctrl+Enter で作成', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    isHydrated.value = true;
+    isPending.value = false;
+    mutateAsync.mockReset();
+    mutateAsync.mockImplementation(() => {
+      isPending.value = true;
+      return new Promise(() => {});
+    });
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined as never);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  function titleKeydown(init: KeyboardEventInit) {
+    const event = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      bubbles: true,
+      cancelable: true,
+      ...init,
+    });
+    getTitleInput().dispatchEvent(event);
+    return event;
+  }
+
+  it.each([
+    ['Ctrl', { ctrlKey: true }],
+    ['⌘', { metaKey: true }],
+  ])('タイトルで %s+Enter を押すと作成する', async (_, modifier) => {
+    mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('キーで作る');
+
+    const event = titleKeydown(modifier);
+    await flushPromises();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(mutateAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['変換中（isComposing）', { isComposing: true }],
+    ['変換中（keyCode 229）', { keyCode: 229 }],
+    ['押しっぱなし', { repeat: true }],
+    ['Shift を足した', { shiftKey: true }],
+    ['Alt を足した', { altKey: true }],
+  ])('%s の Ctrl+Enter では作成しない', async (_, init) => {
+    mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('キーで作る');
+
+    const event = titleKeydown({ ctrlKey: true, ...init });
+    await flushPromises();
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('修飾キー無しの Enter は止めない（form の暗黙の送信に任せる）', async () => {
+    mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('キーで作る');
+
+    expect(titleKeydown({}).defaultPrevented).toBe(false);
+  });
+
+  it('説明の submit（Ctrl+Enter）で作成する', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('説明から作る');
+
+    wrapper.getComponent({ name: 'MarkdownEditorStub' }).vm.$emit('submit');
+    await flushPromises();
+
+    expect(mutateAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('作成中はタイトルの Ctrl+Enter でも説明の submit でも 2 回目を送らない', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('一度だけ');
+
+    titleKeydown({ ctrlKey: true });
+    await flushPromises();
+    expect(isPending.value).toBe(true);
+
+    titleKeydown({ ctrlKey: true });
+    wrapper.getComponent({ name: 'MarkdownEditorStub' }).vm.$emit('submit');
+    await flushPromises();
+
+    expect(mutateAsync).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('CreateTaskDialog a11y and cache invalidation', () => {
   let queryClient: QueryClient;
   let invalidateSpy: ReturnType<typeof vi.spyOn>;
@@ -357,7 +464,7 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
         queryKey: ['get', '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/search'],
       });
     });
-    expect(wrapper.emitted('created')?.[0]).toEqual([createdTask]);
+    expect(wrapper.emitted('created')?.[0]).toEqual([createdTask, { keepOpen: false }]);
     wrapper.unmount();
   });
 
@@ -413,6 +520,127 @@ describe('CreateTaskDialog a11y and cache invalidation', () => {
     expect(getTitleInput().value).toBe('');
     expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
     wrapper.unmount();
+  });
+});
+
+describe('CreateTaskDialog 続けて作成', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    isHydrated.value = true;
+    isPending.value = false;
+    mutateAsync.mockReset();
+    mutateAsync.mockResolvedValue(createdTask);
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined as never);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  function keepOpenCheckbox() {
+    const input = [
+      ...document.body.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+    ].find((el) => el.closest('label')?.textContent?.includes('続けて作成'));
+    if (!input) throw new Error('keep-open checkbox not found');
+    return input;
+  }
+  const confirmOpen = () => !!findButton('破棄する')?.closest('dialog[open]');
+  const createdLink = () => document.body.querySelector<HTMLAnchorElement>('[role="status"] a');
+
+  async function create(title: string) {
+    await new DOMWrapper(getTitleInput()).setValue(title);
+    await new DOMWrapper(getForm()).trigger('submit');
+    await flushPromises();
+  }
+
+  it('入れて作成すると開いたまま入力を空に戻し、タイトルに戻って作ったタスクへのリンクを出す', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(keepOpenCheckbox()).setValue(true);
+    await wrapper
+      .getComponent({ name: 'MarkdownEditorStub' })
+      .vm.$emit('update:modelValue', '説明');
+    keepOpenCheckbox().focus();
+
+    await create('1 件目');
+
+    expect(wrapper.emitted('created')).toEqual([[createdTask, { keepOpen: true }]]);
+    expect(wrapper.emitted('update:open')).toBeUndefined();
+    expect(getTitleInput().value).toBe('');
+    expect(document.activeElement).toBe(getTitleInput());
+    expect(createdLink()?.closest('[role="status"]')?.textContent).toContain(
+      'タスクを作成しました',
+    );
+    expect(createdLink()?.textContent).toBe('PROJ-1');
+    expect(createdLink()?.getAttribute('href')).toBe('/acme/projects/PROJ/tasks/PROJ-1');
+    expect(createdLink()?.getAttribute('target')).toBe('_blank');
+    // 空に戻したので、閉じても破棄の確認は出ない
+    clickButton('取り消す');
+    await nextTick();
+    expect(confirmOpen()).toBe(false);
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+  });
+
+  it('入れずに作成すると keepOpen: false を上げる', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    expect(keepOpenCheckbox().checked).toBe(false);
+    await create('1 件目');
+    expect(wrapper.emitted('created')).toEqual([[createdTask, { keepOpen: false }]]);
+  });
+
+  it('続けて 2 件作ると created が 2 回上がり、表示のキーが 2 件目に替わる', async () => {
+    const second = { ...createdTask, id: 'task-2', seq_id: 2 };
+    mutateAsync.mockResolvedValueOnce(createdTask).mockResolvedValueOnce(second);
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(keepOpenCheckbox()).setValue(true);
+
+    await create('1 件目');
+    expect(createdLink()?.textContent).toBe('PROJ-1');
+    await create('2 件目');
+
+    expect(wrapper.emitted('created')).toEqual([
+      [createdTask, { keepOpen: true }],
+      [second, { keepOpen: true }],
+    ]);
+    expect(mutateAsync.mock.calls.map(([vars]) => vars.body.title)).toEqual(['1 件目', '2 件目']);
+    expect(createdLink()?.textContent).toBe('PROJ-2');
+  });
+
+  it('initialTitle で開いて続けて作成したあと、何も入れずに閉じても確認しない', async () => {
+    const wrapper = mountDialog(queryClient, { initialTitle: '選択範囲' });
+    await nextTick();
+    await new DOMWrapper(keepOpenCheckbox()).setValue(true);
+    await new DOMWrapper(getForm()).trigger('submit');
+    await flushPromises();
+    expect(mutateAsync.mock.calls[0]![0].body.title).toBe('選択範囲');
+    expect(getTitleInput().value).toBe('');
+
+    pressEscape();
+    await nextTick();
+    expect(confirmOpen()).toBe(false);
+    expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false]);
+  });
+
+  it('入り切りはブラウザに残り、開き直しても入っている', async () => {
+    const first = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(keepOpenCheckbox()).setValue(true);
+    expect(localStorage.getItem('create-task-keep-open')).toBe('true');
+    first.unmount();
+    document.body.innerHTML = '';
+
+    const second = mountDialog(queryClient);
+    await nextTick();
+    expect(keepOpenCheckbox().checked).toBe(true);
+    await create('覚えた設定で作る');
+    expect(second.emitted('created')?.[0]).toEqual([createdTask, { keepOpen: true }]);
   });
 });
 
@@ -1083,6 +1311,62 @@ describe('CreateTaskDialog dates', () => {
 
     expect(mutateAsync).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('開始予定日は期限以前の日付にしてください');
+    wrapper.unmount();
+  });
+
+  it.each([
+    ['と同じ日', '2026-10-23'],
+    ['より後の日', '2026-10-24'],
+  ])('期限が最終期限%sなら送らずに警告する', async (_, soft) => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('期限の矛盾');
+    await pickDate('softDeadline', soft);
+    await pickDate('hardDeadline', '2026-10-23');
+    expect(datesChip().getAttribute('aria-invalid')).toBe('true');
+    expect(document.body.querySelector(DATE_PANEL)?.textContent).toContain(DEADLINE_ORDER_MESSAGE);
+
+    await submitForm();
+
+    expect(mutateAsync).not.toHaveBeenCalled();
+    const alerts = [...document.body.querySelectorAll('[role="alert"]')].map((a) => a.textContent);
+    expect(alerts.some((text) => text?.includes(DEADLINE_ORDER_MESSAGE))).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('開始予定日と期限の矛盾が重なると、パネルと送信の警告は同じ開始予定日の文言を出す', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('二重の矛盾');
+    await pickDate('plannedStartOn', '2026-10-24');
+    await pickDate('softDeadline', '2026-10-23');
+    await pickDate('hardDeadline', '2026-10-23');
+    const panel = document.body.querySelector(DATE_PANEL)?.textContent ?? '';
+    expect(panel).toContain('開始予定日が期限より後になっています');
+    expect(panel).not.toContain(DEADLINE_ORDER_MESSAGE);
+
+    await submitForm();
+
+    expect(mutateAsync).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('開始予定日は期限以前の日付にしてください');
+    wrapper.unmount();
+  });
+
+  it('期限が最終期限の前日なら送る', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('期限の順');
+    await pickDate('softDeadline', '2026-10-22');
+    await pickDate('hardDeadline', '2026-10-23');
+    expect(datesChip().getAttribute('aria-invalid')).toBeNull();
+
+    await submitForm();
+
+    expect(mutateAsync.mock.calls[0][0].body).toMatchObject({
+      soft_deadline: '2026-10-22T00:00:00.000Z',
+      hard_deadline: '2026-10-23T00:00:00.000Z',
+    });
+    expect(document.body.textContent).not.toContain(DEADLINE_ORDER_MESSAGE);
     wrapper.unmount();
   });
 });
@@ -1756,7 +2040,7 @@ describe('CreateTaskDialog similar tasks', () => {
     await new DOMWrapper(getForm()).trigger('submit');
     await flushPromises();
     expect(mutateAsync).toHaveBeenCalledTimes(1);
-    expect(wrapper.emitted('created')?.[0]).toEqual([createdTask]);
+    expect(wrapper.emitted('created')?.[0]).toEqual([createdTask, { keepOpen: false }]);
     wrapper.unmount();
   });
 });

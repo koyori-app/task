@@ -152,7 +152,7 @@ export function buildTimeline(input: {
 export type ActivityLookups = {
   statuses?: readonly { name: string; color: string }[];
   members?: readonly { id: string; username: string }[];
-  labels?: readonly { id: string; name: string; color: string }[];
+  labels?: readonly { id: string; name: string; color: string; icon_emoji?: string | null }[];
 };
 
 export type ActivityValue = { text: string; color?: string | null; icon?: LucideIcon };
@@ -280,14 +280,15 @@ export function activityLine(item: ActivityItem, lookups: ActivityLookups = {}):
     case 'label_added':
     case 'label_removed': {
       if (typeof payload.name !== 'string') return textLine(item);
+      const label = lookups.labels?.find((l) => l.id === payload.label_id);
       return {
         kind: 'membership',
         label: 'ラベル',
         added: item.event_type === 'label_added',
-        value: {
-          text: payload.name,
-          color: lookups.labels?.find((l) => l.id === payload.label_id)?.color,
-        },
+        // 絵文字を持つラベルは色の丸を出さず、絵文字を名前の前に置く
+        value: label?.icon_emoji
+          ? { text: `${label.icon_emoji} ${payload.name}` }
+          : { text: payload.name, color: label?.color },
       };
     }
     default:

@@ -241,6 +241,8 @@ type MockOptions = {
   rejectCommentsList?: boolean;
   /** コメント投稿 POST を { message } 付きで拒否する */
   rejectCommentPost?: { status: number; message: string };
+  /** コメントを投稿した後の、コメント一覧と履歴の GET に応答しない（取り直しが止まった状態） */
+  stallRefetchAfterCommentPost?: boolean;
   attachments?: {
     id: string;
     drive_file_id: string;
@@ -252,6 +254,10 @@ type MockOptions = {
     /** 添付した人。解除を出すかの判定に使う */
     created_by?: string;
   }[];
+  /** `GET /tasks/{id}/relations` の blocked_by / blocks */
+  relations?: { blocked_by?: unknown[]; blocks?: unknown[] };
+  /** `GET /tasks/similar` の候補 */
+  similar?: unknown[];
   /** タスク本体のリアクション */
   taskReactions?: ReactionSummary[];
   /** リアクションの PUT / DELETE を { message } 付きで拒否する */
@@ -299,8 +305,14 @@ function applyPutBody(
   return next;
 }
 
+/** サムネイル用の 1x1 の PNG */
+const THUMBNAIL_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+
 let mutableTaskDetail = { ...sampleTaskDetail };
 let mutableComments: MockComment[] = [];
+/** 投稿された本文（POST の順）。モックが本文を読むので、Request からは読み直せない */
+let postedCommentBodies: string[] = [];
 
 function createMockFetch(overrides: MockOptions = {}) {
   mutableTaskDetail = { ...(overrides.task ?? sampleTaskDetail) };
@@ -311,6 +323,9 @@ function createMockFetch(overrides: MockOptions = {}) {
     replies: thread.replies.map((reply) => ({ ...reply })),
   }));
   const original = globalThis.fetch;
+  let commentPosted = false;
+  postedCommentBodies = [];
+  const stalled = () => !!overrides.stallRefetchAfterCommentPost && commentPosted;
   globalThis.fetch = fn().mockImplementation(async (req: Request) => {
     const url = typeof req === 'string' ? req : req?.url;
     // KFM の遅延 chunk 読み込みなど、API mock の対象でない呼び出しは元の fetch へ渡す。
@@ -354,6 +369,7 @@ function createMockFetch(overrides: MockOptions = {}) {
       return jsonResponse([mockUsers.alpha, mockUsers.beta]);
     }
     if (url.includes('/activities')) {
+      if (stalled()) return new Promise(() => {});
       const activities = overrides.activities ?? [];
       return jsonResponse({ activities, total: activities.length, next_cursor: null });
     }
@@ -361,9 +377,22 @@ function createMockFetch(overrides: MockOptions = {}) {
       return jsonResponse({
         parent: mutableTaskDetail.parent_task_id ? sampleTaskDetail : null,
         subtasks: mutableTaskDetail.id === sampleTaskDetail.id ? [sampleSubtask] : [],
-        blocks: [],
-        blocked_by: [],
+        blocks: overrides.relations?.blocks ?? [],
+        blocked_by: overrides.relations?.blocked_by ?? [],
       });
+    }
+    if (method === 'GET' && url.includes('/tasks/similar')) {
+      return jsonResponse({ tasks: overrides.similar ?? [] });
+    }
+    // 添付の中身。画像のタイルのサムネイルに使う（1x1 の PNG）
+    if (
+      method === 'GET' &&
+      /\/drive\/files\/[^/]+\/content$/.test(new URL(url, 'http://x').pathname)
+    ) {
+      return new Response(
+        Uint8Array.from(atob(THUMBNAIL_PNG_BASE64), (char) => char.charCodeAt(0)),
+        { headers: { 'Content-Type': 'image/png' } },
+      );
     }
     if (method === 'GET' && url.includes('/forge')) {
       return jsonResponse({ pull_requests: [], commits: [], branches: [], ...overrides.forge });
@@ -421,6 +450,7 @@ function createMockFetch(overrides: MockOptions = {}) {
         if (overrides.rejectCommentsList) {
           return jsonResponse({ message: 'server error' }, 500);
         }
+        if (stalled()) return new Promise(() => {});
         return jsonResponse({
           comments: mutableComments.map((thread) => ({
             ...thread,
@@ -441,6 +471,8 @@ function createMockFetch(overrides: MockOptions = {}) {
           );
         }
         const body = (await req.json()) as { body: string; parent_comment_id?: string | null };
+        commentPosted = true;
+        postedCommentBodies.push(body.body);
         const posted = {
           id: `comment-new-${mutableComments.length + 1}`,
           body: body.body,
@@ -671,6 +703,34 @@ export const WithAttachments: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.findByText('仕様書.pdf')).resolves.toBeInTheDocument();
+    // 「添付ファイル」の節は無い。入口は説明の見出しの 📎（✏ の左）
+    await expect(canvas.queryByRole('heading', { name: '添付ファイル' })).toBeNull();
+    const attach = canvas.getByRole('button', { name: 'ファイルを添付' });
+    const heading = canvas.getByRole('heading', { name: '説明' });
+    const attachRect = attach.getBoundingClientRect();
+    const headingRect = heading.getBoundingClientRect();
+    await expect(attachRect.left).toBeGreaterThan(headingRect.right);
+    await expect(attachRect.top).toBeLessThan(headingRect.bottom);
+    await expect(attachRect.bottom).toBeGreaterThan(headingRect.top);
+    // タイルは 164×152 で、説明の本文の下に並ぶ
+    const tiles = [...canvasElement.querySelectorAll<HTMLElement>('[data-task-attachment-tile]')];
+    await expect(tiles).toHaveLength(2);
+    for (const tile of tiles) {
+      const rect = tile.getBoundingClientRect();
+      await expect([rect.width, rect.height]).toEqual([164, 152]);
+    }
+    const description = canvasElement.querySelector('[data-task-description-html]');
+    if (description) {
+      await expect(tiles[0].getBoundingClientRect().top).toBeGreaterThanOrEqual(
+        description.getBoundingClientRect().bottom,
+      );
+    }
+    // 画像はサムネイル、それ以外は種類のアイコンと拡張子。サイズは出さない
+    await waitFor(() =>
+      expect(tiles[1].querySelector('[data-task-attachment-thumbnail]')).not.toBeNull(),
+    );
+    await expect(within(tiles[0]).getByText('pdf')).toBeVisible();
+    await expect(canvas.queryByText(/KB/)).toBeNull();
     // 解除を出すのは自分が付けた添付だけ（見ている人は alpha・オーナーでない）
     await expect(
       canvas.findByRole('button', { name: '仕様書.pdf の添付を解除' }),
@@ -722,76 +782,128 @@ export const AttachmentDetachConfirm: Story = {
   },
 };
 
+const forgePullRequest = (number: number, overrides: Record<string, unknown> = {}) => ({
+  id: `pr-${number}`,
+  project_id: 'project-1',
+  host: 'github',
+  host_url: 'https://github.com',
+  repo_owner: 'acme',
+  repo_name: 'backend',
+  number,
+  title: 'feat: OAuth 対応',
+  author_handle: 'yupix',
+  state: 'open',
+  html_url: `https://github.com/acme/backend/pull/${number}`,
+  merged_at: null,
+  merge_effects_processed_at: null,
+  commits_complete: true,
+  sources: ['title'],
+  closes: false,
+  role: 'mention',
+  head_branch: 'feat/oauth',
+  unresolved: null,
+  ...overrides,
+});
+
+const forgeCommit = (overrides: Record<string, unknown> = {}) => ({
+  id: 'commit-1',
+  host: 'github',
+  host_url: 'https://github.com',
+  repo_owner: 'acme',
+  repo_name: 'backend',
+  sha: 'a3f92c1e7b81d4000000000000000000000000aa',
+  message: 'fix: トークン期限切れを修正',
+  body: '期限の比較が逆だった。\n更新トークンも同じ判定に寄せる。',
+  author_handle: 'yupix',
+  author_name: 'Yupix',
+  committed_at: '2026-10-01T00:00:00Z',
+  html_url: 'https://github.com/acme/backend/commit/a3f92c1',
+  pull_requests: [
+    { number: 231, state: 'open', html_url: 'https://github.com/acme/backend/pull/231' },
+  ],
+  ...overrides,
+});
+
+const forgeBranch = {
+  id: 'branch-1',
+  host: 'github',
+  host_url: 'https://github.com',
+  repo_owner: 'acme',
+  repo_name: 'backend',
+  branch: 'feat/TASK-1-oauth',
+  html_url: 'https://github.com/acme/backend/tree/feat/TASK-1-oauth',
+  created_at: '2026-10-01T00:00:00Z',
+  pull_requests: [
+    { number: 231, state: 'open', html_url: 'https://github.com/acme/backend/pull/231' },
+  ],
+};
+
+/**
+ * 実装の PR は題の上のピルに、触れているだけの PR はリポジトリ欄の一覧に出る（TASK-525）。
+ * 題の末尾が `(KEY-N)` の #231 が実装、本文で触れているだけの #91 が言及。
+ */
 export const WithForge: Story = {
-  name: 'PR とコミットあり',
+  name: '実装の PR（題の上のピル）と言及の PR（リポジトリ欄）',
   beforeEach: () =>
     createMockFetch({
       forge: {
         pull_requests: [
-          {
-            id: 'pr-1',
-            project_id: 'project-1',
-            host: 'github',
-            host_url: 'https://github.com',
-            repo_owner: 'acme',
-            repo_name: 'backend',
-            number: 87,
-            title: 'feat: OAuth 対応',
-            author_handle: 'yupix',
-            state: 'merged',
-            html_url: 'https://github.com/acme/backend/pull/87',
-            merged_at: '2026-10-01T00:00:00Z',
-            merge_effects_processed_at: null,
-            commits_complete: false,
-            sources: ['body', 'title'],
-            closes: true,
+          forgePullRequest(231, {
+            title: 'feat: OAuth 対応 (ENG-1)',
+            role: 'implementation',
             unresolved: 0,
-          },
-          {
-            id: 'pr-2',
-            project_id: 'project-1',
-            host: 'github',
-            host_url: 'https://github.com',
-            repo_owner: 'acme',
-            repo_name: 'backend',
-            number: 91,
+          }),
+          forgePullRequest(91, {
             title: 'fix: エラーハンドリング',
             author_handle: 'beta',
-            state: 'open',
-            html_url: 'https://github.com/acme/backend/pull/91',
-            merged_at: null,
-            merge_effects_processed_at: null,
-            commits_complete: false,
-            sources: ['title'],
-            closes: false,
+            sources: ['body'],
             unresolved: 2,
-          },
+          }),
         ],
-        commits: [
-          {
-            id: 'commit-1',
-            host: 'github',
-            host_url: 'https://github.com',
-            repo_owner: 'acme',
-            repo_name: 'backend',
-            sha: 'a3f92c1e7b81d4000000000000000000000000aa',
-            message: 'fix: トークン期限切れを修正',
-            author_handle: 'yupix',
-            author_name: 'Yupix',
-            committed_at: '2026-10-01T00:00:00Z',
-            html_url: 'https://github.com/acme/backend/commit/a3f92c1',
-          },
-        ],
+        commits: [forgeCommit()],
+        branches: [forgeBranch],
       },
     }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(
-      canvas.findByText('feat: OAuth 対応', { exact: false }),
-    ).resolves.toBeInTheDocument();
-    await expect(canvas.findByText('a3f92c1')).resolves.toBeInTheDocument();
-    await expect(canvas.findByText('2 件が未解決')).resolves.toBeInTheDocument();
-    await expect(canvas.findByText('未解決なし')).resolves.toBeInTheDocument();
+    const page = within(canvasElement.ownerDocument.body);
+    // 実装の PR は題の上の行に、状態のアイコンと番号だけのピルで出る
+    const pill = await canvas.findByRole('button', { name: '#231 の操作' });
+    const title = canvas.getByRole('heading', { level: 1 });
+    await expect(pill.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+      title.getBoundingClientRect().top,
+    );
+    await expect(within(pill).getByText('Open')).toHaveClass('sr-only');
+    // リポジトリ欄の一覧には出ない。言及の PR だけが並ぶ
+    const section = canvasElement.querySelector<HTMLElement>('[data-task-forge-section]')!;
+    const forge = within(section);
+    await expect(forge.getByRole('tab', { name: 'Pull Requests 1' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(forge.getByRole('link', { name: 'fix: エラーハンドリング' })).toBeVisible();
+    await expect(forge.queryByRole('link', { name: 'feat: OAuth 対応 (ENG-1)' })).toBeNull();
+    // 参照元の札（本文・タイトル）は出さない
+    await expect(forge.queryByText('本文')).toBeNull();
+    await expect(forge.getByRole('tab', { name: 'コミット 1' })).toBeVisible();
+    await expect(forge.getByRole('tab', { name: 'ブランチ 1' })).toBeVisible();
+
+    // ピルのホバーで PR のカード（未解決のレビューはここに出る）
+    await userEvent.hover(pill);
+    const card = await page.findByRole('dialog', { name: '#231 の PR' });
+    await waitFor(() => expect(within(card).getByText('feat: OAuth 対応 (ENG-1)')).toBeVisible());
+    await expect(within(card).getByRole('link', { name: '未解決なし' })).toBeVisible();
+    await userEvent.unhover(pill);
+    await waitFor(() => expect(page.queryByRole('dialog', { name: '#231 の PR' })).toBeNull());
+
+    // 押すとメニュー（ホストで開く・言及に戻す・リンクを外す）
+    await userEvent.click(pill);
+    for (const name of ['GitHub で開く', '言及に戻す', 'リンクを外す']) {
+      const item = await page.findByRole('menuitem', { name });
+      // メニューは現れきるまで見えない
+      await waitFor(() => expect(item).toBeVisible());
+    }
+    await userEvent.keyboard('{Escape}');
   },
 };
 
@@ -817,55 +929,149 @@ export const WithIssueSource: Story = {
     const canvas = within(canvasElement);
     const link = await canvas.findByRole('link', { name: 'acme/backend#42' });
     await expect(link).toHaveAttribute('href', 'https://github.com/acme/backend/issues/42');
-    await expect(canvas.findByText('GitHub への反映待ち')).resolves.toBeInTheDocument();
+    // 取り込み元はタブの行にあり、反映待ちはホバーしなくても見える（カードの中にもある）
+    const source = canvasElement.querySelector<HTMLElement>('[data-forge-issue-source]')!;
+    const tabs = canvas.getByRole('tablist').getBoundingClientRect();
+    const rect = source.getBoundingClientRect();
+    await expect(rect.top).toBeLessThan(tabs.bottom);
+    await expect(rect.bottom).toBeGreaterThan(tabs.top);
+    // 行の中の文言（ホバーカードの中のものを除く）
+    const inRow = (text: string) =>
+      within(source)
+        .getAllByText(text)
+        .filter((el) => !el.closest('[data-forge-issue-card]'));
+    await expect(inRow('GitHub への反映待ち')).toHaveLength(1);
+    await expect(inRow('GitHub への反映待ち')[0]).toBeVisible();
+    // 状態は色とアイコンで出し、文字は読み上げ専用
+    await expect(inRow('Closed')[0]).toHaveClass('sr-only');
   },
 };
 
 export const WithForgeBranches: Story = {
-  name: 'ブランチとコミット一覧が一部のみの PR',
+  name: 'ブランチ名で結ばれた PR（言及）とブランチのタブ',
+  beforeEach: () =>
+    createMockFetch({
+      forge: {
+        pull_requests: [forgePullRequest(87, { sources: ['branch'] })],
+        branches: [forgeBranch],
+      },
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    // ブランチ名だけで結ばれた PR は言及。題の上のピルにはならない
+    await expect(canvas.findByRole('link', { name: 'feat: OAuth 対応' })).resolves.toBeVisible();
+    await expect(canvasElement.querySelector('[data-implementation-pull-request]')).toBeNull();
+    await user.click(canvas.getByRole('tab', { name: 'ブランチ 1' }));
+    await expect(canvas.findByRole('link', { name: 'feat/TASK-1-oauth' })).resolves.toBeVisible();
+    await expect(canvas.queryByText('コミット一覧は一部のみ', { exact: false })).toBeNull();
+  },
+};
+
+/** マージ済みなのに自動完了を行っていない実装の PR。ピルに点が付き、メニューから確認を開ける */
+export const ImplementationMergeEffectsPending: Story = {
+  name: '実装の PR の自動完了が未適用（ピルの点とメニュー）',
   beforeEach: () =>
     createMockFetch({
       forge: {
         pull_requests: [
-          {
-            id: 'pr-1',
-            host: 'github',
-            host_url: 'https://github.com',
-            repo_owner: 'acme',
-            repo_name: 'backend',
-            number: 87,
-            title: 'feat: OAuth 対応',
-            author_handle: 'yupix',
-            state: 'open',
-            html_url: 'https://github.com/acme/backend/pull/87',
-            merged_at: null,
-            merge_effects_processed_at: null,
-            commits_complete: false,
-            sources: ['branch'],
-            closes: false,
-            unresolved: null,
-          },
-        ],
-        branches: [
-          {
-            id: 'branch-1',
-            host: 'github',
-            host_url: 'https://github.com',
-            repo_owner: 'acme',
-            repo_name: 'backend',
-            branch: 'feat/TASK-1-oauth',
-            html_url: 'https://github.com/acme/backend/tree/feat/TASK-1-oauth',
-            created_at: '2026-10-01T00:00:00Z',
-          },
+          forgePullRequest(231, {
+            role: 'implementation',
+            state: 'merged',
+            merged_at: '2026-10-01T00:00:00Z',
+          }),
         ],
       },
     }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.findByText('feat/TASK-1-oauth')).resolves.toBeInTheDocument();
+    const page = within(canvasElement.ownerDocument.body);
+    const pill = await canvas.findByRole('button', { name: '#231 の操作' });
+    await expect(canvasElement.querySelector('[data-merge-effects-dot]')).not.toBeNull();
+    await userEvent.click(pill);
+    await userEvent.click(await page.findByRole('menuitem', { name: '自動完了の未適用を確認' }));
+    const heading = await page.findByRole('heading', { name: '#231 の自動完了は未適用です' });
+    await waitFor(() => expect(heading).toBeVisible());
+  },
+};
+
+/** ブロック関係の小さなガントと、サブタスク・似ているタスクの行（ホバーでタスクのカード） */
+export const WithRelationsAndSimilar: Story = {
+  name: 'ブロック関係の図・似ているタスクの行',
+  beforeEach: () =>
+    createMockFetch({
+      relations: {
+        blocked_by: [
+          {
+            ...sampleSubtask,
+            id: 'task-30',
+            seq_id: 30,
+            title: 'OAuth のクライアント登録を済ませる',
+            parent_task_id: null,
+            relation_id: 'relation-30',
+            planned_start_on: '2026-07-13',
+            hard_deadline: '2026-07-21T00:00:00.000Z',
+          },
+        ],
+        blocks: [
+          {
+            ...sampleSubtask,
+            id: 'task-31',
+            seq_id: 31,
+            title: 'ログイン画面を差し替える',
+            parent_task_id: null,
+            relation_id: 'relation-31',
+          },
+        ],
+      },
+      similar: [
+        {
+          ...sampleSubtask,
+          id: 'task-40',
+          seq_id: 40,
+          title: 'OAuth 対応の検証',
+          parent_task_id: null,
+          description: '検証の手順をまとめる。\n環境ごとの差も書く。',
+          score: 0.6,
+        },
+      ],
+    }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const page = within(canvasElement.ownerDocument.body);
+    // ブロック関係: 待たせている相手 → このタスク → 待っている相手
+    // タスクを読み込むまで節は無い
+    await canvas.findByText('OAuth のクライアント登録を済ませる');
+    const blocking = canvasElement.querySelector<HTMLElement>('[data-task-blocking]')!;
     await expect(
-      canvas.findByText('コミット一覧は一部のみ', { exact: false }),
-    ).resolves.toBeInTheDocument();
+      [...blocking.querySelectorAll('[data-blocking-role]')].map((row) =>
+        row.getAttribute('data-blocking-role'),
+      ),
+    ).toEqual(['blocked_by', 'self', 'blocks']);
+    await waitFor(() => expect(blocking.querySelector('svg')).not.toBeNull());
+
+    // 似ているタスクは一覧の行。題と ID のブロックにホバーするとタスクのカード
+    const link = await canvas.findByRole('link', { name: 'OAuth 対応の検証' });
+    const similar = canvasElement.querySelector<HTMLElement>('[data-similar-tasks]')!;
+    await expect(similar.contains(link)).toBe(true);
+    await userEvent.hover(link);
+    const card = await page.findByRole('dialog', { name: 'ENG-40 のタスク' });
+    await waitFor(() => expect(within(card).getByText(/検証の手順をまとめる/)).toBeVisible());
+    await userEvent.unhover(link);
+
+    // サブタスクも同じ行の形（ステータスのアイコンのメニューと、行のホバーカード）
+    const subtasks = canvasElement.querySelector<HTMLElement>('[data-task-subtasks]')!;
+    await expect(
+      within(subtasks).getByRole('button', { name: /^ENG-2 のステータス/ }),
+    ).toBeVisible();
+    // 並びは サブタスク → ブロック関係 → 似ているタスク → リポジトリ
+    const order = [
+      '[data-task-subtasks]',
+      '[data-task-blocking]',
+      '[data-similar-tasks]',
+      '[data-task-forge-section]',
+    ].map((selector) => canvasElement.querySelector(selector)!.getBoundingClientRect().top);
+    await expect(order).toEqual([...order].sort((a, b) => a - b));
   },
 };
 
@@ -1133,18 +1339,29 @@ export const RequireAllPending: Story = {
       canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
     ).resolves.toBeInTheDocument();
 
-    await expect(canvas.findByText('1 / 2 人が完了')).resolves.toBeInTheDocument();
-    // 未完了の担当者が残る間は、✓ ボタンも完了への直接移動も使えない
-    await expect(
-      canvas.queryByRole('button', { name: 'Done にする（完了）' }),
-    ).not.toBeInTheDocument();
+    // 担当者は 1 人 1 行。自分の行が先頭で、件数（1 / 2 人が完了）は出さない
+    const rule = await waitFor(() => {
+      const found = canvasElement.querySelector<HTMLElement>('[data-completion-assignees]');
+      if (!found) throw new Error('担当者の一覧がまだ無い');
+      return found;
+    });
+    await expect(rule.firstElementChild).toHaveAttribute('data-completion-mine');
+    await expect(canvas.queryByText(/\d\s*\/\s*\d\s*人が完了/)).toBeNull();
+    await expect(canvas.queryByText('完了条件')).toBeNull();
+    await expect(canvas.getByRole('switch', { name: '全員の完了が必要' })).toBeChecked();
+    // 未完了の担当者が残る間は、✓ は薄くして押せず、理由を出す
+    const done = canvas.getByRole('button', { name: 'Done にする（完了）' });
+    await expect(done).toHaveAttribute('aria-disabled', 'true');
+    await expect(canvas.getByText('担当者があと 1 人残っています')).toBeInTheDocument();
 
     await user.click(await canvas.findByRole('button', { name: '自分の分を完了にする' }));
 
-    // 最後の 1 人が完了にすると、タスクが Done へ移る。完了済みの間は取り消しを出さない
+    // 最後の 1 人が完了にすると、タスクが Done へ移る。完了済みの間は取り消しも ✓ も出さない
     const trigger = await canvas.findByRole('button', { name: 'ステータス' });
     await waitFor(() => expect(trigger).toHaveTextContent('Done'));
-    await expect(canvas.findByText('2 / 2 人が完了')).resolves.toBeInTheDocument();
+    await waitFor(() =>
+      expect(canvas.queryByRole('button', { name: 'Done にする（完了）' })).toBeNull(),
+    );
     await expect(
       canvas.queryByRole('button', { name: '自分の完了を取り消す' }),
     ).not.toBeInTheDocument();
@@ -1165,10 +1382,12 @@ export const RequireAllBlocked: Story = {
       canvas.findByRole('heading', { name: 'OAuth 対応を実装する' }),
     ).resolves.toBeInTheDocument();
 
-    await expect(canvas.findByText('0 / 2 人が完了')).resolves.toBeInTheDocument();
-    await expect(
-      canvas.queryByRole('button', { name: 'Done にする（完了）' }),
-    ).not.toBeInTheDocument();
+    // 誰も済んでいない。✓ は押せず、残りの人数を理由に出す
+    const done = await canvas.findByRole('button', { name: 'Done にする（完了）' });
+    await expect(done).toHaveAttribute('aria-disabled', 'true');
+    await expect(canvas.getByText('担当者があと 2 人残っています')).toBeInTheDocument();
+    await user.click(done);
+    await expect(canvas.getByRole('button', { name: 'ステータス' })).not.toHaveTextContent('Done');
 
     // ステータスのメニューでも Done は選べない
     await user.click(await canvas.findByRole('button', { name: 'ステータス' }));
@@ -1480,14 +1699,14 @@ export const DescriptionEditEscape: Story = {
   },
 };
 
-export const DescriptionClear: Story = {
-  name: '説明クリア',
+export const DescriptionEmptySave: Story = {
+  name: '説明を空にして保存',
   beforeEach: () => {
     const puts: unknown[] = [];
     const restore = createMockFetch({
       onPut: (body) => puts.push(body),
     });
-    (DescriptionClear as { puts?: unknown[] }).puts = puts;
+    (DescriptionEmptySave as { puts?: unknown[] }).puts = puts;
     return restore;
   },
   play: async ({ canvasElement }) => {
@@ -1498,12 +1717,18 @@ export const DescriptionClear: Story = {
     ).resolves.toBeInTheDocument();
 
     await user.click(canvas.getByText('OIDC フローとセッション管理を実装する。'));
-    await user.click(await canvas.findByRole('button', { name: 'クリア' }));
-    // クリアは確認を挟む。確認で「消す」を押して実行する
-    await user.click(await screen.findByRole('button', { name: '消す' }));
+    // 説明を消す専用のボタンは無い。本文を全部消して「保存」すると説明が空になる
+    const editor = await canvas.findByRole('textbox', { name: '説明' });
+    await expect(editor).toHaveAttribute('contenteditable', 'true');
+    await user.click(editor);
+    await user.keyboard('{Control>}a{/Control}');
+    await user.keyboard('{Backspace}');
+    // 空の文書では CodeMirror が本文の中に placeholder を描く（textContent は空にならない）
+    await expect(editor.querySelector('.cm-placeholder')).not.toBeNull();
+    await user.click(canvas.getByRole('button', { name: '保存' }));
 
     await expect(canvas.findByText('説明を追加')).resolves.toBeInTheDocument();
-    const puts = (DescriptionClear as { puts?: unknown[] }).puts ?? [];
+    const puts = (DescriptionEmptySave as { puts?: unknown[] }).puts ?? [];
     await expect(puts).toContainEqual({ clear_description: true });
   },
 };
@@ -1582,10 +1807,10 @@ export const SoftDeadlineClear: Story = {
     await user.clear(input);
     await user.tab();
 
-    // 未設定のソフト期限は「期限」のプレースホルダに戻る
+    // 未設定のソフト期限は「—」に戻る
     await expect(
       canvas.findByRole('button', { name: 'ソフト期限を編集' }),
-    ).resolves.toHaveTextContent('期限');
+    ).resolves.toHaveTextContent('—');
     const puts = (SoftDeadlineClear as { puts?: unknown[] }).puts ?? [];
     await expect(puts).toContainEqual({ clear_soft_deadline: true });
   },
@@ -2100,7 +2325,8 @@ export const CommentPost: Story = {
     await user.type(textarea, '新しく投稿するコメント');
     await user.click(await canvas.findByRole('button', { name: 'コメントする' }));
 
-    // submitComment は POST → invalidate/refetch 完了後に true。submitDraft はその後に下書きを消す。
+    // submitComment は POST の応答で true（取り直しは待たない）。submitDraft はその時に下書きを消し、
+    // 新しいコメントは取り直しが届いた時に一覧へ出る。
     // canvas 全体の findByText だと入力欄の文字に先に当たり、再取得を待たず assert してしまう。
     // storybook/test の expect 自体は再試行しないため、下書きの消去を waitFor で待つ。
     // 入力欄は CodeMirror（contenteditable）なので、value ではなく中の文字で見る
@@ -2114,6 +2340,58 @@ export const CommentPost: Story = {
     await expect(
       within(commentList).findByText('新しく投稿するコメント'),
     ).resolves.toBeInTheDocument();
+  },
+};
+
+export const CommentPostWithCtrlEnter: Story = {
+  name: 'コメント投稿（Ctrl+Enter）',
+  beforeEach: () => createMockFetch({ comments: sampleComments }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    const textarea = await canvas.findByRole('textbox', { name: 'コメントを入力' });
+    await user.type(textarea, 'キーで投稿するコメント');
+    await user.keyboard('{Control>}{Enter}{/Control}');
+
+    // 下書きの消去を待つ（CommentPost と同じ理由で waitFor）
+    await waitFor(() => expect(textarea.textContent).not.toContain('キーで投稿するコメント'));
+    const commentList = await waitFor(() => {
+      const list = canvasElement.querySelector('[data-activity-feed]');
+      if (!list) throw new Error('comment list not ready');
+      return list as HTMLElement;
+    });
+    await expect(
+      within(commentList).findByText('キーで投稿するコメント'),
+    ).resolves.toBeInTheDocument();
+    // 送信中もフォーカスは入力欄に残り、続けて打てる
+    await waitFor(() =>
+      expect(textarea.closest('.cm-editor')!.contains(document.activeElement)).toBe(true),
+    );
+  },
+};
+
+/** POST が通ったら、一覧の取り直しが止まっていても入力欄は空で打てる。次の投稿に前の本文が混ざらない */
+export const CommentPostWhileRefetchStalls: Story = {
+  name: 'コメント投稿（取り直しが止まっている間）',
+  beforeEach: () =>
+    createMockFetch({ comments: sampleComments, stallRefetchAfterCommentPost: true }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    const textarea = await canvas.findByRole('textbox', { name: 'コメントを入力' });
+    await user.type(textarea, 'キーで投稿するコメント');
+    await user.keyboard('{Control>}{Enter}{/Control}');
+
+    // 取り直しを待たずに、下書きが消えて読み取り専用が解ける。フォーカスは入力欄のまま
+    await waitFor(() => expect(textarea.textContent).not.toContain('キーで投稿するコメント'));
+    await waitFor(() => expect(textarea.getAttribute('aria-readonly')).toBeNull());
+    await expect(textarea.closest('.cm-editor')!.contains(document.activeElement)).toBe(true);
+
+    await user.keyboard('次');
+    await waitFor(() => expect(textarea.textContent).toBe('次'));
+    await user.keyboard('{Control>}{Enter}{/Control}');
+
+    await waitFor(() => expect(postedCommentBodies).toEqual(['キーで投稿するコメント', '次']));
   },
 };
 

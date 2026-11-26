@@ -111,6 +111,35 @@ export const ShortHistory: Story = {
   },
 };
 
+/**
+ * コメントと履歴でアバターの大きさ（20px）と本文までの間をそろえ、本文の開始位置を 1 本にする。
+ * 既定の書体のまま測る。
+ */
+export const AlignedAvatars: Story = {
+  name: 'コメントと履歴のアバターと本文の開始位置がそろう',
+  args: {
+    activities: [status('activity-1', '2026-10-22T03:00:00Z', 'In Progress')],
+    threads: [comment('comment-1', '2026-10-22T04:00:00Z', '確認しました。')],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await canvas.findByText('確認しました。');
+    const history = canvasElement.querySelector<HTMLElement>('[data-activity-history]')!;
+    const commentEl = canvasElement.querySelector<HTMLElement>('[data-task-comment]')!;
+    const avatarOf = (root: HTMLElement) => root.querySelector<HTMLElement>(':scope > span')!;
+    const historyAvatar = avatarOf(history).getBoundingClientRect();
+    const commentAvatar = avatarOf(commentEl).getBoundingClientRect();
+    // アバターの幅は 20px で、左端も同じ
+    await expect(historyAvatar.width).toBe(20);
+    await expect(commentAvatar.width).toBe(20);
+    await expect(commentAvatar.left).toBe(historyAvatar.left);
+    // 本文（アバターの隣の箱）の開始位置がそろう
+    const bodyLeft = (root: HTMLElement) =>
+      avatarOf(root).nextElementSibling!.getBoundingClientRect().left;
+    await expect(bodyLeft(commentEl)).toBe(bodyLeft(history));
+  },
+};
+
 export const WorstCase: Story = {
   name: '長い文字列でも列からはみ出さない',
   args: {

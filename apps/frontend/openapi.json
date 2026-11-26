@@ -5285,7 +5285,8 @@
           {
             "name": "installation_id",
             "in": "query",
-            "required": true,
+            "description": "インストール画面からの戻りで GitHub が付ける。ユーザー認可だけの戻りには付かない。",
+            "required": false,
             "schema": {
               "type": "integer",
               "format": "int64"
@@ -5295,6 +5296,15 @@
             "name": "state",
             "in": "query",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "description": "ユーザー認可を拒否したときに GitHub が付ける理由（`access_denied` など）。",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -12178,6 +12188,148 @@
         }
       }
     },
+    "/v1/tenants/{tenant_id}/projects/{project_id}/documents/search": {
+      "get": {
+        "tags": ["Drive Files"],
+        "summary": "プロジェクトのドキュメント本文検索",
+        "operationId": "search_documents",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "プロジェクトID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "検索語。空白で語に分け、全部の語を含む節に当たる（大文字小文字を無視した部分一致）",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "検索結果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentSearchResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tenants/{tenant_id}/projects/{project_id}/events": {
       "get": {
         "tags": ["Tasks"],
@@ -12389,6 +12541,369 @@
           },
           "409": {
             "description": "マージ済みでない、または処理済み・確認済み",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tenants/{tenant_id}/projects/{project_id}/github/authorize": {
+      "get": {
+        "tags": ["GitHub"],
+        "summary": "GitHub のユーザー認可 URL 取得（インストール済みのアカウント・組織の確認）",
+        "operationId": "start_github_authorize",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "プロジェクトID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GitHub のユーザー認可 URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GithubInstallUrlResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tenants/{tenant_id}/projects/{project_id}/github/authorized-installations": {
+      "get": {
+        "tags": ["GitHub"],
+        "summary": "GitHub のユーザー認可で確かめたインストール一覧（連携の候補）",
+        "operationId": "list_authorized_github_installations",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Github-Authorize-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "利用者が見えるインストール一覧",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GithubAuthorizedInstallationsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tenants/{tenant_id}/projects/{project_id}/github/authorized-installations/select": {
+      "post": {
+        "tags": ["GitHub"],
+        "summary": "GitHub のユーザー認可で確かめたインストールからリポジトリ選択を開始",
+        "operationId": "select_authorized_github_installation",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GithubAuthorizedSelectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "選択トークン",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GithubReuseResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "インストールが GitHub 側で削除済み",
             "content": {
               "application/json": {
                 "schema": {
@@ -23455,6 +23970,149 @@
         }
       }
     },
+    "/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/forge/pull-requests/{pull_request_id}/role": {
+      "put": {
+        "tags": ["Tasks"],
+        "summary": "PR の役割（実装 / 言及）を手で決める",
+        "description": "題やリンクから決まる役割を上書きする。上書きは PR イベントでは戻らず、リンクを外すと一緒に消える。マージ時の自動完了（`closes`）は変えない。その PR がこのタスクにリンクされていなければ 404",
+        "operationId": "set_task_pull_request_role",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "プロジェクトID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "タスクID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pull_request_id",
+            "in": "path",
+            "description": "PR の ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTaskPullRequestRoleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "役割を変えた PR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskForgePullRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/reactions/{emoji}": {
       "put": {
         "tags": ["Tasks"],
@@ -28713,7 +29371,12 @@
           "scopes": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Scope"
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Scope"
+                }
+              ],
+              "x-or-unknown": true
             },
             "description": "要求された scope のうち、渡せるもの"
           }
@@ -29203,6 +29866,9 @@
           },
           "description": {
             "type": "string"
+          },
+          "icon_emoji": {
+            "type": ["string", "null"]
           },
           "icon_url": {
             "type": ["string", "null"]
@@ -29923,6 +30589,70 @@
           }
         }
       },
+      "DocumentSearchHit": {
+        "type": "object",
+        "description": "当たった節 1 つ。1 ファイルから複数の節が返る",
+        "required": [
+          "file_id",
+          "file_name",
+          "folder_id",
+          "heading_path",
+          "position",
+          "excerpt",
+          "updated_at"
+        ],
+        "properties": {
+          "excerpt": {
+            "type": "string",
+            "description": "語の前後を切り出した素の文字列（HTML ではない）。切った側に `…` が付く"
+          },
+          "file_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "file_name": {
+            "type": "string"
+          },
+          "folder_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "heading_path": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "祖先から自分までの見出し。最初の見出しより前の節は空"
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32",
+            "description": "ファイルの中の節の順（0 始まり）"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DocumentSearchResponse": {
+        "type": "object",
+        "required": ["hits", "total"],
+        "properties": {
+          "hits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DocumentSearchHit"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "当たった節の数（`limit` / `offset` を掛ける前）",
+            "minimum": 0
+          }
+        }
+      },
       "DriveFileResponse": {
         "type": "object",
         "required": [
@@ -30322,6 +31052,47 @@
           }
         }
       },
+      "GithubAuthorizedInstallationItem": {
+        "type": "object",
+        "description": "GitHub のユーザー認可で確かめた、利用者が見えるインストール（連携の候補）。",
+        "required": ["candidate_id", "account_login"],
+        "properties": {
+          "account_login": {
+            "type": "string",
+            "description": "表示名（インストール先のアカウント・組織）。"
+          },
+          "candidate_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "候補の ID。`POST /github/authorized-installations/select` に渡す。"
+          }
+        }
+      },
+      "GithubAuthorizedInstallationsResponse": {
+        "type": "object",
+        "required": ["installations"],
+        "properties": {
+          "installations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GithubAuthorizedInstallationItem"
+            }
+          }
+        }
+      },
+      "GithubAuthorizedSelectRequest": {
+        "type": "object",
+        "required": ["authorize_token", "candidate_id"],
+        "properties": {
+          "authorize_token": {
+            "type": "string"
+          },
+          "candidate_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "GithubConnectRequest": {
         "type": "object",
         "required": ["select_token", "repo_owner", "repo_name"],
@@ -30348,8 +31119,12 @@
       },
       "GithubIntegrationResponse": {
         "type": "object",
-        "required": ["connected"],
+        "required": ["connected", "can_manage"],
         "properties": {
+          "can_manage": {
+            "type": "boolean",
+            "description": "見ている本人が連携を変えられるか（連携・解除・Issue の取り込み）。"
+          },
           "connected": {
             "type": "boolean"
           },
@@ -30586,6 +31361,10 @@
           "description": {
             "type": "string"
           },
+          "icon_emoji": {
+            "type": ["string", "null"],
+            "description": "欄が無ければ（絵文字を足す前に書き出したファイル）、`overwrite` でも今の絵文字を残す。\n`null` なら絵文字を外す"
+          },
           "name": {
             "type": "string"
           }
@@ -30600,6 +31379,10 @@
           },
           "description": {
             "type": "string"
+          },
+          "icon_emoji": {
+            "type": ["string", "null"],
+            "description": "色の丸の代わりに出す絵文字。無ければ画面は色の丸を出す"
           },
           "icon_url": {
             "type": ["string", "null"]
@@ -31164,7 +31947,15 @@
             "format": "date-time"
           },
           "scopes": {
-            "$ref": "#/components/schemas/ScopeList"
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Scope"
+                }
+              ],
+              "x-or-unknown": true
+            }
           },
           "tenant_ids": {
             "type": "array",
@@ -32115,12 +32906,20 @@
       "ReviewedPullRequest": {
         "type": "object",
         "description": "レビューのある PR の一覧行。画面の PR 一覧が使う。",
-        "required": ["pr_number", "rounds", "unresolved", "blocking", "blocking_fixed", "state"],
+        "required": [
+          "pr_number",
+          "rounds",
+          "unresolved",
+          "blocking",
+          "blocking_fixed",
+          "unresolved_fixed",
+          "state"
+        ],
         "properties": {
           "blocking": {
             "type": "integer",
             "format": "int64",
-            "description": "マージを塞いでいる件数（High / Medium かつ open / fixing / fixed）\n\n**可否の断定はここからは出せない。** 可否には鮮度と連携の有無も要り\n（`ReviewSummary` + `mergeVerdict` の片道降格）、この一覧はその材料を\n持たない。一覧に `mergeable` を置いていた頃、詳細パネルが「リポジトリ\n未確定」と言う横で一覧だけ「マージ可」と出る矛盾が実際に起きた",
+            "description": "マージを塞いでいる件数（High / Medium かつ open / fixing / fixed）\n\n**可否の断定はここからは出せない。** 可否には鮮度と連携の有無も要り\n（`ReviewSummary` + `mergeGateView` の片道降格）、この一覧はその材料を\n持たない。一覧に `mergeable` を置いていた頃、詳細パネルが「リポジトリ\n未確定」と言う横で一覧だけ「マージ可」と出る矛盾が実際に起きた",
             "minimum": 0
           },
           "blocking_fixed": {
@@ -32128,6 +32927,14 @@
             "format": "int64",
             "description": "`blocking` のうち fixed の件数（`blocking` の内数）。修正済みでレビュー側の\n確認（verified）を待っている分で、`blocking - blocking_fixed` が open / fixing の残り",
             "minimum": 0
+          },
+          "host": {
+            "type": ["string", "null"],
+            "description": "PR 行のホスト（`github` など）。PR 行が無ければ `null`"
+          },
+          "html_url": {
+            "type": ["string", "null"],
+            "description": "ホスト上の PR の URL。PR 行が無い、または webhook をまだ受けていなければ `null`"
           },
           "last_reviewed_at": {
             "type": ["string", "null"],
@@ -32158,6 +32965,10 @@
             "format": "uuid",
             "description": "自然キー（プロジェクト・リポジトリ・番号）で結んだ PR 行。無ければ null"
           },
+          "repository": {
+            "type": ["string", "null"],
+            "description": "集計対象のリポジトリ（`owner/name`）。GitHub 連携が無ければ `null`"
+          },
           "rounds": {
             "type": "integer",
             "format": "int32",
@@ -32171,6 +32982,12 @@
             "type": "integer",
             "format": "int64",
             "description": "未解決（open / fixing / fixed）の指摘数。重大度は問わない",
+            "minimum": 0
+          },
+          "unresolved_fixed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "未解決のうち fixed の件数（`unresolved` の内数。重大度は問わない）",
             "minimum": 0
           }
         }
@@ -32462,6 +33279,17 @@
           }
         }
       },
+      "SetTaskPullRequestRoleRequest": {
+        "type": "object",
+        "description": "`PUT /tasks/{id}/forge/pull-requests/{pull_request_id}/role`",
+        "required": ["role"],
+        "properties": {
+          "role": {
+            "type": "string",
+            "description": "`implementation` / `mention`"
+          }
+        }
+      },
       "SeverityStateCount": {
         "type": "object",
         "required": ["severity", "state", "count"],
@@ -32494,26 +33322,23 @@
         "enum": ["Viewer"]
       },
       "SimilarTaskHit": {
-        "type": "object",
-        "required": ["id", "seq_id", "title", "score"],
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/TaskResponse",
+            "description": "一覧の行にそのまま出せるよう、タスクの応答（ステータス・担当・期限・優先度・ラベル）を平らに持つ"
           },
-          "score": {
-            "type": "number",
-            "format": "float",
-            "description": "trigram 類似度（0〜1）"
-          },
-          "seq_id": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "title": {
-            "type": "string"
+          {
+            "type": "object",
+            "required": ["score"],
+            "properties": {
+              "score": {
+                "type": "number",
+                "format": "float",
+                "description": "trigram 類似度（0〜1）"
+              }
+            }
           }
-        }
+        ]
       },
       "SimilarTasksResponse": {
         "type": "object",
@@ -32942,7 +33767,8 @@
           "repo_name",
           "branch",
           "html_url",
-          "created_at"
+          "created_at",
+          "pull_requests"
         ],
         "properties": {
           "branch": {
@@ -32966,6 +33792,13 @@
             "type": "string",
             "format": "uuid"
           },
+          "pull_requests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskForgePullRequestRef"
+            },
+            "description": "同じリポジトリでこのブランチを head にしている PR。番号の昇順"
+          },
           "repo_name": {
             "type": "string"
           },
@@ -32984,10 +33817,12 @@
           "repo_name",
           "sha",
           "message",
+          "body",
           "author_handle",
           "author_name",
           "committed_at",
-          "html_url"
+          "html_url",
+          "pull_requests"
         ],
         "properties": {
           "author_handle": {
@@ -32997,6 +33832,10 @@
           "author_name": {
             "type": "string",
             "description": "git の author 名"
+          },
+          "body": {
+            "type": "string",
+            "description": "メッセージの 2 行目以降（前後の空白を除く）。無ければ空文字列"
           },
           "committed_at": {
             "type": "string",
@@ -33018,6 +33857,13 @@
           "message": {
             "type": "string",
             "description": "メッセージの先頭行"
+          },
+          "pull_requests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskForgePullRequestRef"
+            },
+            "description": "このコミットを含む PR。番号の昇順"
           },
           "repo_name": {
             "type": "string"
@@ -33092,7 +33938,8 @@
           "html_url",
           "commits_complete",
           "sources",
-          "closes"
+          "closes",
+          "role"
         ],
         "properties": {
           "author_handle": {
@@ -33105,6 +33952,10 @@
           "commits_complete": {
             "type": "boolean",
             "description": "PR のコミット一覧を読み切れているか"
+          },
+          "head_branch": {
+            "type": ["string", "null"],
+            "description": "head のブランチ名。この列を足す前に受けた PR は、次の PR イベントまで null"
           },
           "host": {
             "type": "string",
@@ -33145,6 +33996,10 @@
           "repo_owner": {
             "type": "string"
           },
+          "role": {
+            "type": "string",
+            "description": "このタスクに対する役割。`implementation`（このタスクを実装する PR）/ `mention`（触れているだけ）。\n手で入れ替えていればその値、無ければ題とリンクから決めた値"
+          },
           "sources": {
             "type": "array",
             "items": {
@@ -33163,6 +34018,24 @@
             "type": ["integer", "null"],
             "format": "int64",
             "description": "マージを塞いでいるレビュー指摘（High / Medium の open / fixing / fixed）の件数。\nレビューの無い PR、タスクと別プロジェクトの PR 行、`read:review` を持たない PAT では null"
+          }
+        }
+      },
+      "TaskForgePullRequestRef": {
+        "type": "object",
+        "description": "コミットやブランチの側から見た PR（行の中に出すだけの最小の項目）",
+        "required": ["number", "state", "html_url"],
+        "properties": {
+          "html_url": {
+            "type": "string"
+          },
+          "number": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "state": {
+            "type": "string",
+            "description": "`open` / `closed` / `merged` / `unknown`"
           }
         }
       },
@@ -34007,6 +34880,10 @@
       "UpdateLabelRequest": {
         "type": "object",
         "properties": {
+          "clear_icon_emoji": {
+            "type": "boolean",
+            "description": "絵文字を外して色の丸に戻す。`icon_emoji` より優先する"
+          },
           "clear_icon_url": {
             "type": "boolean"
           },
@@ -34014,6 +34891,9 @@
             "type": ["string", "null"]
           },
           "description": {
+            "type": ["string", "null"]
+          },
+          "icon_emoji": {
             "type": ["string", "null"]
           },
           "icon_url": {

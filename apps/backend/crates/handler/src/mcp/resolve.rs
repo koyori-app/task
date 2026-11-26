@@ -1,8 +1,11 @@
 //! キー・名前・参照から、API が要る ID を引く。
 //!
 //! 規則は CLI（`crates/cli/src/api.rs` の `resolve_tenant` / `pick_tenant` と
-//! `crates/cli/src/resolve.rs`）と同じ。`handler` から `cli` は参照できないので、要る分を写している。
-//! 片方を変えたら、もう片方も合わせる。
+//! `crates/cli/src/resolve.rs` の `pick_named_id` / `resolve_user_id` と、
+//! `crates/cli/src/commands/tasks.rs` の `FieldResolver`）と同じ。`handler` から `cli` は
+//! 参照できないので、要る分を写している。片方を変えたら、もう片方も合わせる。
+
+use std::collections::HashMap;
 
 use serde_json::Value;
 use uuid::Uuid;
@@ -228,78 +231,307 @@ pub(super) async fn list_statuses(
     tenant_id: &str,
     project_id: &str,
 ) -> Result<Vec<Value>, ToolFailure> {
-    let statuses = api
+    list_collection(api, tenant_id, project_id, "statuses", &[], || {
+        "could not list the statuses to resolve the status: the token may lack the read:task scope, or it is not allowed in this project; if the scope is missing, pass the status UUID instead"
+            .to_string()
+    })
+    .await
+}
+
+/// `GET /v1/tenants/{tenant}/projects/{project}/{collection}` の一覧。403 には `hint` を添える
+async fn list_collection(
+    api: &InnerApi,
+    tenant_id: &str,
+    project_id: &str,
+    collection: &str,
+    query: &[(&str, String)],
+    hint: impl FnOnce() -> String,
+) -> Result<Vec<Value>, ToolFailure> {
+    let items = api
         .get(
             &[
-                "v1", "tenants", tenant_id, "projects", project_id, "statuses",
+                "v1", "tenants", tenant_id, "projects", project_id, collection,
             ],
-            &[],
+            query,
         )
         .await
-        .map_err(|failure| {
-            failure.explain_forbidden(|| {
-                "could not list the statuses to resolve the status: the token may lack the read:task scope, or it is not allowed in this project; if the scope is missing, pass the status UUID instead"
-                    .to_string()
-            })
-        })?;
-    Ok(list(&statuses).to_vec())
+        .map_err(|failure| failure.explain_forbidden(hint))?;
+    Ok(list(&items).to_vec())
 }
 
 fn position(status: &Value) -> i64 {
     status.get("position").and_then(Value::as_i64).unwrap_or(0)
 }
 
-/// 状態を名前か UUID で指す（`crates/cli/src/resolve.rs` の `pick_status_by_name` / `pick_named_id`）。
+/// 名前で引けなかったときのエラー（`crates/cli/src/resolve.rs` の `not_found_with_candidates`）。
+///
+/// 綴りを外したときに何が使えるか分からないと詰まるので、そのプロジェクトの候補を添える
+fn not_found_with_candidates(kind: &str, name: &str, candidates: &[&str]) -> ToolFailure {
+    let listed = if candidates.is_empty() {
+        "none".to_string()
+    } else {
+        candidates.join(", ")
+    };
+    ToolFailure::new(format!(
+        "{kind} not found: {name} (this project has {listed})"
+    ))
+}
+
+/// 候補（`(id, 名前)` の組）から名前で 1 件を選ぶ（`crates/cli/src/resolve.rs` の `pick_named_id`）。
 ///
 /// 完全一致を優先し、無ければ大文字小文字を無視する。同名の候補が残れば UUID を求める。
+/// UUID の形の判定は呼ぶ側がする
+fn pick_named<'a>(
+    kind: &str,
+    name: &str,
+    candidates: &[(&'a str, &'a str)],
+) -> Result<&'a str, ToolFailure> {
+    let exact: Vec<&(&str, &str)> = candidates
+        .iter()
+        .filter(|(_, value)| *value == name)
+        .collect();
+    let matches = if exact.is_empty() {
+        candidates
+            .iter()
+            .filter(|(_, value)| value.eq_ignore_ascii_case(name))
+            .collect()
+    } else {
+        exact
+    };
+    match matches.as_slice() {
+        [(id, _)] => Ok(*id),
+        [] => Err(not_found_with_candidates(
+            kind,
+            name,
+            &candidates
+                .iter()
+                .map(|(_, value)| *value)
+                .collect::<Vec<_>>(),
+        )),
+        _ => Err(ToolFailure::new(format!(
+            "Ambiguous {kind}: {name} (candidates: {}); specify a UUID",
+            matches
+                .iter()
+                .map(|(id, value)| format!("{value} ({id})"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+    }
+}
+
+/// `(id, 名前)` の組。名前の欄は種類で違う（担当者は `username`）
+fn pairs<'a>(items: &'a [Value], name_field: &str) -> Vec<(&'a str, &'a str)> {
+    items
+        .iter()
+        .map(|item| (str_field(item, "id"), str_field(item, name_field)))
+        .collect()
+}
+
+/// 一覧から読んだ ID。UUID でないのは API の応答が壊れたときだけ
+fn listed_uuid(kind: &str, id: &str) -> Result<Uuid, ToolFailure> {
+    Uuid::parse_str(id).map_err(|_| ToolFailure::new(format!("{kind} id is not a UUID")))
+}
+
+/// 状態を名前か UUID で指す（`crates/cli/src/resolve.rs` の `pick_status_by_name`）。
+///
+/// 候補は位置の順に並べてから選ぶ（見つからないときの候補もこの順）。
 pub(super) fn pick_status(statuses: &[Value], name: &str) -> Result<String, ToolFailure> {
     if is_uuid(name) {
         return Ok(name.to_string());
     }
     let mut statuses: Vec<&Value> = statuses.iter().collect();
     statuses.sort_by_key(|status| position(status));
-    let exact: Vec<&Value> = statuses
+    let candidates: Vec<(&str, &str)> = statuses
         .iter()
-        .copied()
-        .filter(|status| str_field(status, "name") == name)
+        .map(|status| (str_field(status, "id"), str_field(status, "name")))
         .collect();
-    let matches = if exact.is_empty() {
-        statuses
-            .iter()
-            .copied()
-            .filter(|status| str_field(status, "name").eq_ignore_ascii_case(name))
-            .collect()
-    } else {
-        exact
-    };
-    match matches.as_slice() {
-        [only] => Ok(str_field(only, "id").to_string()),
-        [] => {
-            let listed = if statuses.is_empty() {
-                "none".to_string()
-            } else {
-                statuses
-                    .iter()
-                    .map(|status| str_field(status, "name"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            };
-            Err(ToolFailure::new(format!(
-                "Status not found: {name} (this project has {listed})"
-            )))
+    pick_named("Status", name, &candidates).map(str::to_string)
+}
+
+/// 名前で引ける、プロジェクトの下の一覧の種類
+#[derive(Clone, Copy)]
+enum Named {
+    Label,
+    TaskType,
+    Milestone,
+    Sprint,
+}
+
+impl Named {
+    /// エラーの見出し（CLI と同じ綴り）
+    fn kind(self) -> &'static str {
+        match self {
+            Self::Label => "Label",
+            Self::TaskType => "Type",
+            Self::Milestone => "Milestone",
+            Self::Sprint => "Sprint",
         }
-        _ => Err(ToolFailure::new(format!(
-            "Ambiguous Status: {name} (candidates: {}); specify a UUID",
-            matches
+    }
+
+    fn collection(self) -> &'static str {
+        match self {
+            Self::Label => "labels",
+            Self::TaskType => "task-types",
+            Self::Milestone => "milestones",
+            Self::Sprint => "sprints",
+        }
+    }
+
+    /// 一覧を読む scope。403 の補足に使う
+    fn scope(self) -> &'static str {
+        match self {
+            Self::Label | Self::TaskType => "read:task",
+            Self::Milestone => "read:milestone",
+            Self::Sprint => "read:sprint",
+        }
+    }
+
+    /// 補足の文面に入れる単数と複数の語
+    fn words(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Label => ("label", "labels"),
+            Self::TaskType => ("task type", "task types"),
+            Self::Milestone => ("milestone", "milestones"),
+            Self::Sprint => ("sprint", "sprints"),
+        }
+    }
+}
+
+/// プロジェクトのラベル・種別・マイルストーン・スプリント・担当者を名前か UUID で引く
+/// （`crates/cli/src/commands/tasks.rs` の `FieldResolver`）。
+///
+/// 一覧は種類ごとに、名前で引くときに初めて 1 回だけ取って使い回す。担当者は引けた名前ごとに
+/// 結果を取っておく（一括作成で同じ名前を要素の数だけ引き直さない）。UUID は確かめずにそのまま返す
+pub(super) struct ProjectNames<'a> {
+    api: &'a InnerApi,
+    tenant_id: &'a str,
+    project_id: &'a str,
+    labels: Option<Vec<Value>>,
+    task_types: Option<Vec<Value>>,
+    milestones: Option<Vec<Value>>,
+    sprints: Option<Vec<Value>>,
+    users: HashMap<String, Uuid>,
+}
+
+impl<'a> ProjectNames<'a> {
+    pub(super) fn new(api: &'a InnerApi, tenant_id: &'a str, project_id: &'a str) -> Self {
+        Self {
+            api,
+            tenant_id,
+            project_id,
+            labels: None,
+            task_types: None,
+            milestones: None,
+            sprints: None,
+            users: HashMap::new(),
+        }
+    }
+
+    pub(super) async fn label(&mut self, value: &str) -> Result<Uuid, ToolFailure> {
+        self.named(Named::Label, value).await
+    }
+
+    /// 順に引く。重複は除かない（CLI と同じ）
+    pub(super) async fn labels(&mut self, values: &[String]) -> Result<Vec<Uuid>, ToolFailure> {
+        let mut ids = Vec::with_capacity(values.len());
+        for value in values {
+            ids.push(self.label(value).await?);
+        }
+        Ok(ids)
+    }
+
+    pub(super) async fn task_type(&mut self, value: &str) -> Result<Uuid, ToolFailure> {
+        self.named(Named::TaskType, value).await
+    }
+
+    pub(super) async fn milestone(&mut self, value: &str) -> Result<Uuid, ToolFailure> {
+        self.named(Named::Milestone, value).await
+    }
+
+    pub(super) async fn sprint(&mut self, value: &str) -> Result<Uuid, ToolFailure> {
+        self.named(Named::Sprint, value).await
+    }
+
+    async fn named(&mut self, named: Named, value: &str) -> Result<Uuid, ToolFailure> {
+        if let Ok(uuid) = Uuid::parse_str(value) {
+            return Ok(uuid);
+        }
+        let (api, tenant_id, project_id) = (self.api, self.tenant_id, self.project_id);
+        let slot = match named {
+            Named::Label => &mut self.labels,
+            Named::TaskType => &mut self.task_types,
+            Named::Milestone => &mut self.milestones,
+            Named::Sprint => &mut self.sprints,
+        };
+        if slot.is_none() {
+            let (singular, plural) = named.words();
+            let items = list_collection(api, tenant_id, project_id, named.collection(), &[], || {
+                format!(
+                    "could not list the {plural} to resolve the {singular}: the token may lack the {} scope, or it is not allowed in this project; if the scope is missing, pass the {singular} UUID instead",
+                    named.scope()
+                )
+            })
+            .await?;
+            *slot = Some(items);
+        }
+        let items = slot.as_deref().unwrap_or_default();
+        let id = pick_named(named.kind(), value, &pairs(items, "name"))?;
+        listed_uuid(named.kind(), id)
+    }
+
+    /// 担当者はユーザー名で指す（`crates/cli/src/resolve.rs` の `resolve_user_id`）。
+    ///
+    /// 名前を 1 つ引くだけの `?username=` は `read:task` でも通る。一致が無ければ候補を
+    /// 添えるために全件を引き直す。
+    pub(super) async fn user(&mut self, value: &str) -> Result<Uuid, ToolFailure> {
+        const KIND: &str = "Assignable user";
+        if let Ok(uuid) = Uuid::parse_str(value) {
+            return Ok(uuid);
+        }
+        if let Some(&id) = self.users.get(value) {
+            return Ok(id);
+        }
+        let matched = list_collection(
+            self.api,
+            self.tenant_id,
+            self.project_id,
+            "assignable-users",
+            &[("username", value.to_string())],
+            || {
+                format!(
+                    "could not look up the assignee \"{value}\": the token may lack the read:task or write:task scope, or it is not allowed in this project; if the scope is missing, pass the user UUID instead"
+                )
+            },
+        )
+        .await?;
+        if matched
+            .iter()
+            .any(|user| str_field(user, "username").eq_ignore_ascii_case(value))
+        {
+            let id = listed_uuid(KIND, pick_named(KIND, value, &pairs(&matched, "username"))?)?;
+            self.users.insert(value.to_string(), id);
+            return Ok(id);
+        }
+        // 候補の列挙は `write:task` が要り、読むだけのトークンでは読めない。読めなくても
+        // 「見つからない」ことは確かなので、CLI と同じく候補なし（none）で返す
+        let candidates = list_collection(
+            self.api,
+            self.tenant_id,
+            self.project_id,
+            "assignable-users",
+            &[],
+            String::new,
+        )
+        .await
+        .unwrap_or_default();
+        Err(not_found_with_candidates(
+            KIND,
+            value,
+            &candidates
                 .iter()
-                .map(|status| format!(
-                    "{} ({})",
-                    str_field(status, "name"),
-                    str_field(status, "id")
-                ))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ))),
+                .map(|user| str_field(user, "username"))
+                .collect::<Vec<_>>(),
+        ))
     }
 }
 
@@ -407,6 +639,163 @@ mod tests {
         assert_eq!(
             pick_status(std::slice::from_ref(&upper), "BUG").unwrap(),
             id_of(&upper)
+        );
+    }
+
+    /// CLI の `named_resources_prefer_exact_matches_and_reject_ambiguity` と同じ表
+    #[test]
+    fn named_resources_prefer_exact_matches_and_reject_ambiguity() {
+        let first = Uuid::from_u128(1).to_string();
+        let second = Uuid::from_u128(2).to_string();
+        let kind = "Label";
+        for candidates in [
+            [(first.as_str(), "Bug"), (second.as_str(), "bug")],
+            [(second.as_str(), "bug"), (first.as_str(), "Bug")],
+        ] {
+            assert_eq!(pick_named(kind, "Bug", &candidates).unwrap(), first);
+            assert_eq!(pick_named(kind, "bug", &candidates).unwrap(), second);
+            let failure = pick_named(kind, "BUG", &candidates).unwrap_err();
+            assert_eq!(failure.status, None);
+            for expected in [first.as_str(), second.as_str(), "UUID"] {
+                assert!(failure.message.contains(expected), "{}", failure.message);
+            }
+        }
+        // 同じ綴りが複数あれば、完全一致でも任意の一件を選ばない
+        assert!(pick_named(kind, "Bug", &[(&first, "Bug"), (&second, "Bug")]).is_err());
+        assert_eq!(pick_named(kind, "BUG", &[(&first, "Bug")]).unwrap(), first);
+    }
+
+    #[test]
+    fn named_failures_use_the_cli_wording() {
+        let first = Uuid::from_u128(1).to_string();
+        let second = Uuid::from_u128(2).to_string();
+        assert_eq!(
+            pick_named(
+                "Label",
+                "buf",
+                &[(first.as_str(), "bug"), (second.as_str(), "enhancement")]
+            )
+            .unwrap_err()
+            .message,
+            "Label not found: buf (this project has bug, enhancement)"
+        );
+        assert_eq!(
+            pick_named("Sprint", "week-1", &[]).unwrap_err().message,
+            "Sprint not found: week-1 (this project has none)"
+        );
+        assert_eq!(
+            pick_named(
+                "Label",
+                "BUG",
+                &[(first.as_str(), "Bug"), (second.as_str(), "bug")]
+            )
+            .unwrap_err()
+            .message,
+            format!(
+                "Ambiguous Label: BUG (candidates: Bug ({first}), bug ({second})); specify a UUID"
+            )
+        );
+    }
+
+    /// `?username=` には一致なしを、候補の全件には 403 を返すルーター。
+    /// 読むだけのトークンで綴りを外したときに当たる
+    fn assignable_users_without_listing() -> axum::Router {
+        use axum::{
+            body::Body,
+            http::{Request, StatusCode},
+            response::IntoResponse,
+        };
+        axum::Router::new().fallback(|request: Request<Body>| async move {
+            if request
+                .uri()
+                .query()
+                .is_some_and(|query| query.contains("username="))
+            {
+                axum::Json(json!([])).into_response()
+            } else {
+                (
+                    StatusCode::FORBIDDEN,
+                    axum::Json(json!({ "message": "forbidden" })),
+                )
+                    .into_response()
+            }
+        })
+    }
+
+    /// 候補の列挙が読めなくても、見つからないことは候補なしで返す（CLI と同じ）
+    #[tokio::test]
+    async fn unknown_assignee_without_listing_scope_has_no_candidates() {
+        let (parts, ()) = axum::http::Request::builder()
+            .uri("/mcp")
+            .header(axum::http::header::AUTHORIZATION, "Bearer pat-1")
+            .body(())
+            .unwrap()
+            .into_parts();
+        let api = InnerApi::from_parts(&assignable_users_without_listing(), &parts).unwrap();
+        let mut names = ProjectNames::new(&api, "t", "p");
+        assert_eq!(
+            names.user("nobody").await.unwrap_err().message,
+            "Assignable user not found: nobody (this project has none)"
+        );
+        // UUID は一覧を引かずにそのまま返す
+        let id = Uuid::from_u128(7);
+        assert_eq!(names.user(&id.to_string()).await.unwrap(), id);
+    }
+
+    /// 引けた担当者は取っておき、同じ名前を引き直さない（一括作成で要素の数だけ問い合わせない）
+    #[tokio::test]
+    async fn assignee_found_once_is_not_looked_up_again() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let id = Uuid::from_u128(9);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counted = calls.clone();
+        let router = axum::Router::new().fallback(move || {
+            let counted = counted.clone();
+            async move {
+                counted.fetch_add(1, Ordering::SeqCst);
+                axum::Json(json!([{ "id": id.to_string(), "username": "alice" }]))
+            }
+        });
+        let (parts, ()) = axum::http::Request::builder()
+            .uri("/mcp")
+            .header(axum::http::header::AUTHORIZATION, "Bearer pat-1")
+            .body(())
+            .unwrap()
+            .into_parts();
+        let api = InnerApi::from_parts(&router, &parts).unwrap();
+        let mut names = ProjectNames::new(&api, "t", "p");
+        for _ in 0..3 {
+            assert_eq!(names.user("alice").await.unwrap(), id);
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// `?username=` は read:task と write:task のどちらでも通るので、403 の補足は両方を挙げる
+    #[tokio::test]
+    async fn forbidden_assignee_lookup_names_both_scopes() {
+        let (parts, ()) = axum::http::Request::builder()
+            .uri("/mcp")
+            .header(axum::http::header::AUTHORIZATION, "Bearer pat-1")
+            .body(())
+            .unwrap()
+            .into_parts();
+        let forbidden = axum::Router::new().fallback(|| async {
+            (
+                axum::http::StatusCode::FORBIDDEN,
+                axum::Json(json!({ "message": "forbidden" })),
+            )
+        });
+        let api = InnerApi::from_parts(&forbidden, &parts).unwrap();
+        let failure = ProjectNames::new(&api, "t", "p")
+            .user("alice")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            failure.text(),
+            "403 forbidden (could not look up the assignee \"alice\": the token may lack the read:task or write:task scope, or it is not allowed in this project; if the scope is missing, pass the user UUID instead)"
         );
     }
 

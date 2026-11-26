@@ -154,6 +154,10 @@ describe('テナントのガント', () => {
     const wrapper = mountPage();
     await flushPromises();
 
+    expect(wrapper.get('h1').text()).toBe('ガント');
+    expect(wrapper.text()).not.toContain(
+      'すべてのプロジェクトのタスクを、予定開始から目安の期限までの棒と、厳守の期限の菱形で見る',
+    );
     expect(GET).toHaveBeenCalled();
     for (const [, { params }] of GET.mock.calls) {
       expect(params.query.project_id).toBeUndefined();

@@ -5,6 +5,7 @@ use serde_json::Value;
 use utoipa::ToSchema;
 use validator::Validate;
 
+use crate::tasks::TaskResponse;
 use entity::project_task_views;
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -92,10 +93,9 @@ fn default_similar_limit() -> u64 {
 
 #[derive(Serialize, Deserialize, ToSchema)]
 pub struct SimilarTaskHit {
-    #[schema(value_type = String, format = "uuid")]
-    pub id: Uuid,
-    pub seq_id: i32,
-    pub title: String,
+    /// 一覧の行にそのまま出せるよう、タスクの応答（ステータス・担当・期限・優先度・ラベル）を平らに持つ
+    #[serde(flatten)]
+    pub task: TaskResponse,
     /// trigram 類似度（0〜1）
     pub score: f32,
 }

@@ -4,6 +4,7 @@ import { provide } from 'vue';
 import { QueryClient, VUE_QUERY_CLIENT } from '@tanstack/vue-query';
 
 import IntegrationsSection from '@/components/projects/IntegrationsSection.vue';
+import { forgetAuthorizeToken, forgetSelectToken } from '@/lib/github-select-token';
 
 const TENANT_UUID = '11111111-1111-1111-1111-111111111111';
 const PROJECT_UUID = '00000000-0000-4000-8000-000000000010';
@@ -13,6 +14,7 @@ const connectedIntegration = {
   repo_owner: 'koyori-app',
   repo_name: 'koyori',
   connected_at: '2026-07-01T09:00:00Z',
+  can_manage: true,
 };
 
 const notConnectedIntegration = {
@@ -20,6 +22,7 @@ const notConnectedIntegration = {
   repo_owner: null,
   repo_name: null,
   connected_at: null,
+  can_manage: true,
 };
 
 const jsonResponse = (data: unknown, status = 200) =>
@@ -28,7 +31,22 @@ const jsonResponse = (data: unknown, status = 200) =>
     headers: { 'Content-Type': 'application/json' },
   });
 
-type MockOptions = { connected?: boolean; failIntegration?: boolean };
+type MockOptions = {
+  connected?: boolean;
+  failIntegration?: boolean;
+  /** false にすると、連携を変えられない人（閲覧だけ）として返す */
+  canManage?: boolean;
+  /** GitHub のユーザー認可から戻った状態にする（認可トークンをフラグメントで渡す） */
+  authorized?: boolean;
+  /** POST /github/authorized-installations/select を、この本文の 403 で失敗させる */
+  authorizedSelectForbidden?: string;
+};
+
+const AUTHORIZE_TOKEN = 'story-authorize-token';
+const authorizedInstallations = [
+  { candidate_id: '00000000-0000-4000-8000-0000000000b1', account_login: 'koyori-app' },
+  { candidate_id: '00000000-0000-4000-8000-0000000000b2', account_login: 'acme-org' },
+];
 
 let fetchSpy: ReturnType<typeof fn> | null = null;
 
@@ -36,6 +54,14 @@ function mockFetch(options: MockOptions = {}) {
   return () => {
     const original = globalThis.fetch;
     let connected = options.connected ?? false;
+    if (options.authorized) {
+      // callback はトークンをフラグメントで返す。セクションがマウント時に退避して URL から落とす。
+      window.history.replaceState(
+        window.history.state,
+        '',
+        `#github_installations=${AUTHORIZE_TOKEN}`,
+      );
+    }
     fetchSpy = fn().mockImplementation(async (req: Request | string) => {
       const url = typeof req === 'string' ? req : req.url;
       const method = typeof req === 'string' ? 'GET' : req.method;
@@ -49,7 +75,29 @@ function mockFetch(options: MockOptions = {}) {
           return new Response(null, { status: 204 });
         }
         if (options.failIntegration) return jsonResponse({ message: 'error' }, 500);
-        return jsonResponse(connected ? connectedIntegration : notConnectedIntegration);
+        return jsonResponse({
+          ...(connected ? connectedIntegration : notConnectedIntegration),
+          can_manage: options.canManage ?? true,
+        });
+      }
+      if (method === 'GET' && pathname.endsWith('/github/installations')) {
+        return jsonResponse({ installations: [] });
+      }
+      if (method === 'GET' && pathname.endsWith('/github/authorized-installations')) {
+        return jsonResponse({ installations: authorizedInstallations });
+      }
+      if (method === 'POST' && pathname.endsWith('/github/authorized-installations/select')) {
+        if (options.authorizedSelectForbidden)
+          return jsonResponse({ message: options.authorizedSelectForbidden }, 403);
+        return jsonResponse({ select_token: 'story-select-token' });
+      }
+      if (method === 'GET' && pathname.endsWith('/github/repositories')) {
+        return jsonResponse({
+          repositories: [
+            { owner: 'acme-org', name: 'backend' },
+            { owner: 'acme-org', name: 'frontend' },
+          ],
+        });
       }
       return jsonResponse({ message: 'not-found' }, 404);
     });
@@ -57,6 +105,9 @@ function mockFetch(options: MockOptions = {}) {
     return () => {
       globalThis.fetch = original;
       fetchSpy = null;
+      // トークンはタブ内に退避されるので、次のストーリーへ持ち越さない
+      forgetAuthorizeToken(PROJECT_UUID);
+      forgetSelectToken(PROJECT_UUID);
     };
   };
 }
@@ -86,7 +137,7 @@ const meta = {
       description: {
         component:
           'プロジェクト設定の連携セクション。GitHub 連携の状態表示・解除・Issue の取り込み開始を fetch モックで検証。' +
-          '「連携する」クリックは外部 URL へ実遷移するため story では扱わず、ユニットテストで担保。' +
+          'GitHub へ進むボタン（インストール・ユーザー認可）は外部 URL へ実遷移するため story では押さず、ユニットテストで担保。' +
           'Slack / Figma カードは API 実装後に追加予定。',
       },
     },
@@ -116,6 +167,78 @@ export const NotConnected: Story = {
   },
 };
 
+export const AccountCandidates: Story = {
+  name: '候補のパネル（追加と、インストール済みの確認の 2 つの入口）',
+  beforeEach: mockFetch(),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+
+    await user.click(await canvas.findByRole('button', { name: '連携する' }));
+
+    await expect(
+      canvas.findByText('利用中の GitHub アカウント・組織はありません。'),
+    ).resolves.toBeInTheDocument();
+    await expect(
+      canvas.findByText(/他のテナントで連携済みのアカウント・組織は、GitHub/),
+    ).resolves.toBeInTheDocument();
+    await expect(
+      canvas.findByRole('button', { name: '別の GitHub アカウント・組織を追加' }),
+    ).resolves.toBeInTheDocument();
+    await expect(
+      canvas.findByRole('button', { name: 'インストール済みのアカウント・組織を GitHub で確認' }),
+    ).resolves.toBeInTheDocument();
+  },
+};
+
+export const AuthorizedInstallations: Story = {
+  name: 'GitHub で確認したアカウント・組織（認可から戻った直後）',
+  beforeEach: mockFetch({ authorized: true }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+
+    await expect(
+      canvas.findByText('GitHub で確認したアカウント・組織'),
+    ).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('koyori-app')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('acme-org')).resolves.toBeInTheDocument();
+    // トークンはヘッダーで送り、URL からは落とす
+    const list = (fetchSpy!.mock.calls as [Request | string][])
+      .map(([req]) => req)
+      .filter((req): req is Request => typeof req !== 'string')
+      .find((req) => req.url.endsWith('/github/authorized-installations'));
+    await expect(list!.headers.get('X-Github-Authorize-Token')).toBe(AUTHORIZE_TOKEN);
+    await expect(window.location.hash).toBe('');
+
+    // 選ぶと、既存のリポジトリ選択へ進む
+    await user.click(canvas.getAllByRole('button', { name: 'これを使う' })[1]!);
+    await expect(canvas.findByText('連携するリポジトリを選択')).resolves.toBeInTheDocument();
+    await expect(canvas.findByText('acme-org/backend')).resolves.toBeInTheDocument();
+  },
+};
+
+export const AuthorizedAdminRequired: Story = {
+  name: 'GitHub で確認したアカウント・組織（管理者権限が足りない）',
+  beforeEach: mockFetch({
+    authorized: true,
+    authorizedSelectForbidden: 'github-installation-admin-required',
+  }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+
+    await user.click((await canvas.findAllByRole('button', { name: 'これを使う' }))[0]!);
+
+    await expect(
+      canvas.findByText(/GitHub App が見えるすべてのリポジトリの管理者権限が必要です/),
+    ).resolves.toBeInTheDocument();
+    // 候補は残り、別のものを選べる
+    await expect(canvas.getAllByRole('button', { name: 'これを使う' })).toHaveLength(2);
+    await expect(canvas.queryByText('連携するリポジトリを選択')).not.toBeInTheDocument();
+  },
+};
+
 export const Connected: Story = {
   name: '連携済み（リポジトリ名と解除ボタン表示）',
   beforeEach: mockFetch({ connected: true }),
@@ -124,6 +247,49 @@ export const Connected: Story = {
     await expect(canvas.findByText('koyori-app/koyori')).resolves.toBeInTheDocument();
     await expect(canvas.findByRole('button', { name: '連携を解除' })).resolves.toBeInTheDocument();
     await expect(canvas.queryByRole('button', { name: '連携する' })).not.toBeInTheDocument();
+  },
+};
+
+export const ConnectedAuthorizedInstallations: Story = {
+  name: '連携済み・GitHub で確認したアカウント・組織（認可から戻った直後）',
+  beforeEach: mockFetch({ connected: true, authorized: true }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+
+    await expect(canvas.findByText('koyori-app/koyori')).resolves.toBeInTheDocument();
+    await expect(
+      canvas.findByText('GitHub で確認したアカウント・組織'),
+    ).resolves.toBeInTheDocument();
+
+    // 選ぶと、連携先を選び直すリポジトリ選択へ進む
+    await user.click((await canvas.findAllByRole('button', { name: 'これを使う' }))[0]!);
+    await expect(canvas.findByText('acme-org/backend')).resolves.toBeInTheDocument();
+  },
+};
+
+const READ_ONLY_REASON =
+  '連携の設定を変えられるのは、テナントのオーナーと Admin、プロジェクトの Admin です。';
+
+export const ReadOnlyConnected: Story = {
+  name: '連携済み・変えられない人（ボタンは disabled、理由を表示）',
+  beforeEach: mockFetch({ connected: true, canManage: false }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByText('koyori-app/koyori')).resolves.toBeInTheDocument();
+    await expect(canvas.getByRole('button', { name: 'Issue を取り込む' })).toBeDisabled();
+    await expect(canvas.getByRole('button', { name: '連携を解除' })).toBeDisabled();
+    await expect(canvas.getByText(READ_ONLY_REASON)).toBeInTheDocument();
+  },
+};
+
+export const ReadOnlyNotConnected: Story = {
+  name: '未連携・変えられない人（「連携する」は disabled、理由を表示）',
+  beforeEach: mockFetch({ connected: false, canManage: false }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.findByRole('button', { name: '連携する' })).resolves.toBeDisabled();
+    await expect(canvas.getByText(READ_ONLY_REASON)).toBeInTheDocument();
   },
 };
 

@@ -1438,6 +1438,9 @@ pub async fn reviewed_pull_requests<C: ConnectionTrait>(
     let pr_of_review: std::collections::HashMap<Uuid, i32> =
         rounds.iter().map(|r| (r.id, r.pr_number)).collect();
 
+    let repository = repo
+        .is_linked()
+        .then(|| format!("{}/{}", repo.owner, repo.name));
     let mut by_pr: std::collections::BTreeMap<i32, ReviewedPullRequest> =
         std::collections::BTreeMap::new();
     for round in &rounds {
@@ -1451,6 +1454,10 @@ pub async fn reviewed_pull_requests<C: ConnectionTrait>(
                 unresolved: 0,
                 blocking: 0,
                 blocking_fixed: 0,
+                unresolved_fixed: 0,
+                repository: repository.clone(),
+                host: None,
+                html_url: None,
                 last_reviewed_at: None,
                 state: "unknown".into(),
                 merged_at: None,
@@ -1479,6 +1486,9 @@ pub async fn reviewed_pull_requests<C: ConnectionTrait>(
         };
         if state.counts_as_unresolved() {
             entry.unresolved += 1;
+            if state == FindingState::Fixed {
+                entry.unresolved_fixed += 1;
+            }
             if severity.blocks_merge() {
                 entry.blocking += 1;
                 if state == FindingState::Fixed {
@@ -1499,6 +1509,9 @@ pub async fn reviewed_pull_requests<C: ConnectionTrait>(
     for row in pull_requests {
         if let Some(entry) = by_pr.get_mut(&row.number) {
             entry.state = row.state;
+            entry.host = Some(row.host);
+            // レビューの起票で作った行は、webhook が届くまで URL が空
+            entry.html_url = Some(row.html_url).filter(|url| !url.is_empty());
             entry.merged_at = row.merged_at.map(|at| at.with_timezone(&chrono::Utc));
             entry.merge_effects_processed_at = row
                 .merge_effects_processed_at

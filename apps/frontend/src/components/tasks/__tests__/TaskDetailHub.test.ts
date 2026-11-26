@@ -20,6 +20,7 @@ vi.mock('@/components/markdown/MarkdownEditor.vue', async () => ({
 import { ConfirmDialog } from '@koyori-app/ui-vue';
 import TaskDetailHub from '../TaskDetailHub.vue';
 import { PRIORITY_CONFIG } from '@/lib/task-display';
+import { DEADLINE_ORDER_MESSAGE } from '@/lib/task-date';
 import { renderDescription } from '@/lib/markup-renderer';
 
 enableAutoUnmount(afterEach);
@@ -271,7 +272,7 @@ describe('TaskDetailHub', () => {
 
     expect(wrapper.html()).not.toContain('--priority-color');
     const flag = wrapper.get('button[aria-label="優先度"] svg');
-    expect(flag.attributes('style')).toContain('color: #eab308');
+    expect(flag.attributes('style')).toContain('color: var(--priority-medium)');
   });
 
   it('本文のスクロール領域で切れないよう、メニューはどれもトップレイヤーに出す', () => {
@@ -535,6 +536,74 @@ describe('TaskDetailHub', () => {
     await input.setValue('2026-08-20');
     await input.trigger('blur');
     expect(wrapper.emitted('save:planned_start_on')).toEqual([['2026-08-20']]);
+  });
+
+  function mountDeadlines(soft: string | null, hard: string | null) {
+    return mount(TaskDetailHub, {
+      props: {
+        task: { ...task, soft_deadline: soft, hard_deadline: hard },
+        projectKey: 'TEST',
+        statuses: [],
+        statusId: task.status_id,
+      },
+    });
+  }
+
+  it('期限が最終期限と同じ日か後なら送らずに警告し、編集を開いたままにする', async () => {
+    const wrapper = mountDeadlines(null, '2026-08-20T00:00:00.000Z');
+
+    await wrapper.get('button[aria-label="ソフト期限を編集"]').trigger('click');
+    const input = wrapper.get('input[aria-label="ソフト期限"]');
+    for (const value of ['2026-08-20', '2026-08-21']) {
+      await input.setValue(value);
+      await input.trigger('blur');
+      expect(wrapper.emitted('save:soft_deadline'), value).toBeUndefined();
+      expect(wrapper.get('[role="alert"]').text()).toBe(DEADLINE_ORDER_MESSAGE);
+      expect(wrapper.find('input[aria-label="ソフト期限"]').exists()).toBe(true);
+    }
+
+    // 前の日なら送る
+    await input.setValue('2026-08-19');
+    await input.trigger('blur');
+    expect(wrapper.emitted('save:soft_deadline')).toEqual([['2026-08-19']]);
+  });
+
+  it('最終期限が期限と同じ日か前なら送らずに警告する', async () => {
+    const wrapper = mountDeadlines('2026-08-20T00:00:00.000Z', null);
+
+    await wrapper.get('button[aria-label="ハード期限を編集"]').trigger('click');
+    const input = wrapper.get('input[aria-label="ハード期限"]');
+    for (const value of ['2026-08-20', '2026-08-19']) {
+      await input.setValue(value);
+      await input.trigger('blur');
+      expect(wrapper.emitted('save:hard_deadline'), value).toBeUndefined();
+      expect(wrapper.text()).toContain(DEADLINE_ORDER_MESSAGE);
+    }
+
+    await input.setValue('2026-08-21');
+    await input.trigger('blur');
+    expect(wrapper.emitted('save:hard_deadline')).toEqual([['2026-08-21']]);
+  });
+
+  it('保存済みの最終期限が同じ日の 12 時なら、その日の期限は止めずに送る', async () => {
+    const wrapper = mountDeadlines(null, '2026-08-20T12:00:00Z');
+
+    await wrapper.get('button[aria-label="ソフト期限を編集"]').trigger('click');
+    const input = wrapper.get('input[aria-label="ソフト期限"]');
+    await input.setValue('2026-08-20');
+    await input.trigger('blur');
+
+    expect(wrapper.emitted('save:soft_deadline')).toEqual([['2026-08-20']]);
+    expect(wrapper.text()).not.toContain(DEADLINE_ORDER_MESSAGE);
+  });
+
+  it('時刻付きの期限の組は、編集を開いただけでは警告しない', async () => {
+    // 期限は画面から入れた 0 時、最終期限は CLI で入れた同じ日の 12 時（サーバーが通す組）
+    const wrapper = mountDeadlines('2026-08-20T00:00:00.000Z', '2026-08-20T12:00:00Z');
+
+    await wrapper.get('button[aria-label="ハード期限を編集"]').trigger('click');
+    expect(wrapper.find('input[aria-label="ハード期限"]').exists()).toBe(true);
+    expect(wrapper.text()).not.toContain(DEADLINE_ORDER_MESSAGE);
   });
 
   it('does not save an empty progress value as zero percent', async () => {
@@ -846,39 +915,6 @@ describe('TaskDetailHub の保存に失敗した下書き', () => {
     expect((titleInput(wrapper).element as HTMLInputElement).value).toBe(task.title);
   });
 
-  // 「クリア」は失う入力が無いので再開ボタンを出さない。前に成功した下書きで出してもいけない
-  it('説明の保存に成功したあと「クリア」で失敗しても、前の値で編集を再開させない', async () => {
-    const wrapper = mountHub();
-    await wrapper
-      .findAll('button')
-      .find((button) => button.text() === '説明を追加')!
-      .trigger('click');
-    const textarea = wrapper.get('textarea[aria-label="説明"]');
-    await textarea.setValue('成功した説明');
-    await wrapper
-      .findAll('button')
-      .find((button) => button.text() === '保存')!
-      .trigger('click');
-    await wrapper.setProps({ fieldErrors: {}, task: { ...task, description: '成功した説明' } });
-
-    await wrapper
-      .findAll('button')
-      .find((button) => button.text() === '成功した説明')!
-      .trigger('click');
-    await wrapper
-      .findAll('button')
-      .find((button) => button.text() === 'クリア')!
-      .trigger('click');
-    // クリアは確認を挟む
-    (wrapper.findAllComponents(ConfirmDialog)[1]!.props('onConfirm') as () => void)();
-    await nextTick();
-    expect(wrapper.emitted('save:description')).toEqual([['成功した説明'], [null]]);
-
-    await wrapper.setProps({ fieldErrors: { description: FAILED } });
-    expect(wrapper.text()).toContain(FAILED);
-    expect(resumeButton(wrapper)).toBeUndefined();
-  });
-
   // 分割ビューのペインは別のタスクへ移っても同じインスタンスで、失敗表示も残りうる
   it('別のタスクへ移ったら、前のタスクの下書きを出さない', async () => {
     const wrapper = mountHub();
@@ -1062,20 +1098,28 @@ describe('TaskDetailHub ステータスの操作', () => {
     });
   }
 
-  it('右矢印はワークフロー順の次のステータスへ進める', async () => {
+  it('「次のステータスへ」のボタンは無い（ステータスはメニューと ✓ だけで変える）', () => {
     const wrapper = mountWithStatuses('status-id');
 
-    await wrapper.get('button[aria-label="In Progress にする"]').trigger('click');
-
-    expect(wrapper.emitted('update:statusId')).toEqual([['status-progress']]);
+    expect(wrapper.find('button[aria-label="In Progress にする"]').exists()).toBe(false);
+    expect(wrapper.html()).not.toContain('次へ');
   });
 
-  it('最後のステータスでは右矢印を出さない', () => {
+  it('完了済みなら ✓ を出さない', () => {
     const wrapper = mountWithStatuses('status-done');
 
     expect(
-      wrapper.findAll('button').some((b) => b.attributes('aria-label')?.endsWith('にする')),
+      wrapper.findAll('button').some((b) => b.attributes('aria-label')?.endsWith('（完了）')),
     ).toBe(false);
+  });
+
+  it('ステータスはアイコン（円の埋まり方）と名前で出す。分数は出さない', () => {
+    const wrapper = mountWithStatuses('status-progress');
+    const button = wrapper.get('[data-task-status-button]');
+
+    expect(button.get('[data-task-status-name]').text()).toBe('In Progress');
+    expect(button.get('[data-task-status-icon]').attributes('data-fill')).toBe('partial');
+    expect(button.text()).not.toMatch(/\d\s*\/\s*\d/);
   });
 
   it('チェックは完了扱いのステータスへ移す', async () => {
@@ -1124,10 +1168,16 @@ describe('TaskDetailHub の完了条件', () => {
       .find((item) => item.text().includes('Done'))!;
   }
 
-  it('未完了の担当者が残るなら、✓ ボタンを出さず、メニューの完了を無効にする', () => {
+  it('未完了の担当者が残るなら、✓ を押せなくして理由を出し、メニューの完了を無効にする', async () => {
     const wrapper = mountRule(pending);
 
-    expect(wrapper.find('button[aria-label="Done にする（完了）"]').exists()).toBe(false);
+    // 隠さない。押せない理由（残りの人数）を出す
+    const done = wrapper.get('button[aria-label="Done にする（完了）"]');
+    expect(done.attributes('aria-disabled')).toBe('true');
+    expect(wrapper.text()).toContain('担当者があと 1 人残っています');
+    await done.trigger('click');
+    expect(wrapper.emitted('update:statusId')).toBeUndefined();
+
     expect(doneItem(wrapper).attributes('aria-disabled')).toBe('true');
     // 完了でない項目は選べる
     const todo = wrapper
@@ -1135,12 +1185,6 @@ describe('TaskDetailHub の完了条件', () => {
       .findAll('[role="menuitemradio"]')
       .find((item) => item.text().includes('In Progress'))!;
     expect(todo.attributes('aria-disabled')).not.toBe('true');
-  });
-
-  it('「次へ」が完了ステータスなら無効にする', () => {
-    const wrapper = mountRule(pending, {}, 'status-progress');
-
-    expect(wrapper.get('button[aria-label="Done にする"]').attributes('disabled')).toBeDefined();
   });
 
   it('設定が off なら従来どおり ✓ ボタンも完了の項目も使える', async () => {
@@ -1163,12 +1207,23 @@ describe('TaskDetailHub の完了条件', () => {
   it('完了条件の操作を emit する', async () => {
     const wrapper = mountRule(pending);
 
-    await wrapper.get('input[name="require-all-assignees-done"]').setValue(false);
+    await wrapper.get('[data-completion-rule] [role="switch"]').trigger('click');
     expect(wrapper.emitted('update:require-all')).toEqual([[false]]);
 
-    const complete = wrapper.findAll('button').find((b) => b.text() === '自分の分を完了にする')!;
-    await complete.trigger('click');
+    await wrapper.get('button[aria-label="自分の分を完了にする"]').trigger('click');
     expect(wrapper.emitted('complete:mine')).toHaveLength(1);
+  });
+
+  it('「完了条件」の行は無く、担当者の行にまとまっている', () => {
+    const wrapper = mountRule(pending);
+
+    expect(wrapper.text()).not.toContain('完了条件');
+    // スイッチと担当者ごとの状態は、担当者の行（TaskPropertyRow）の中にある
+    const rule = wrapper.get('[data-completion-rule]');
+    expect(rule.element.parentElement!.previousElementSibling!.textContent).toContain('担当者');
+    expect(rule.find('[data-completion-mine]').exists()).toBe(true);
+    // 分数（1 / 2 人が完了）は出さない
+    expect(rule.text()).not.toMatch(/\d\s*\/\s*\d/);
   });
 });
 
@@ -1237,48 +1292,210 @@ describe('TaskDetailHub の期限の表示', () => {
     });
   }
 
-  function buttonByText(wrapper: ReturnType<typeof mountWithStatus>, label: string) {
-    const button = wrapper.findAll('button').find((b) => b.text() === label);
-    expect(button, `期限の button「${label}」が無い`).toBeDefined();
-    return button!;
-  }
+  const row = (wrapper: ReturnType<typeof mountWithStatus>, field: string) =>
+    wrapper.get(`[data-task-date-row="${field}"]`);
 
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it('完了の状態では、過ぎた期限（ソフトとハード）を赤くせず、日付だけを出す', () => {
+  it('日付は縦に 3 行（開始 / 目標 / 締切）で、月日と曜日を出す。未設定は —', () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-07-14T12:00:00'));
-    const wrapper = mountWithStatus('status-done');
-    expect(buttonByText(wrapper, '7月10日').classes()).not.toContain('text-destructive');
-    expect(buttonByText(wrapper, '7月11日').classes()).not.toContain('text-destructive');
-    expect(wrapper.text()).not.toContain('超過');
+    vi.setSystemTime(new Date('2026-07-01T12:00:00'));
+    const wrapper = mountWithStatus('status-progress');
+
+    const rows = wrapper.findAll('[data-task-date-row]');
+    expect(rows.map((r) => r.attributes('data-task-date-row'))).toEqual([
+      'planned_start_on',
+      'soft_deadline',
+      'hard_deadline',
+    ]);
+    expect(rows.map((r) => r.get('span').text())).toEqual(['開始', '目標', '締切']);
+    expect(rows.map((r) => r.get('button').text())).toEqual(['—', '7/10（金）', '7/11（土）']);
+    // 編集の入口の読み上げ名は今までどおり
+    expect(rows.map((r) => r.get('button').attributes('aria-label'))).toEqual([
+      '開始予定日を編集',
+      'ソフト期限を編集',
+      'ハード期限を編集',
+    ]);
+    // 縦に積む（横に並べる矢印は無い）
+    expect(rows[0].element.parentElement!.classList.contains('flex-col')).toBe(true);
   });
 
-  it('期限より後の日に完了した物は、ソフトとハードの両方に遅れた日数を中立で添える', () => {
+  it('今年でない日付だけ年を付ける', () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-07-20T12:00:00'));
-    const wrapper = mountWithStatus('status-done', '2026-07-14T09:00:00');
-    expect(buttonByText(wrapper, '7月10日（4日超過）').classes()).not.toContain('text-destructive');
-    expect(buttonByText(wrapper, '7月11日（3日超過）').classes()).not.toContain('text-destructive');
+    vi.setSystemTime(new Date('2025-12-20T12:00:00'));
+    const wrapper = mountWithStatus('status-progress');
+    expect(row(wrapper, 'soft_deadline').get('button').text()).toBe('2026/7/10（金）');
   });
 
-  it('期限の前に完了した物は、ソフトとハードの両方で日付だけを出す', () => {
+  it('残りの日数は 30 日以内のときだけ出し、開始の行には出さない', () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-07-20T12:00:00'));
-    const wrapper = mountWithStatus('status-done', '2026-07-06T09:00:00');
-    buttonByText(wrapper, '7月10日');
-    buttonByText(wrapper, '7月11日');
-    expect(wrapper.text()).not.toContain('超過');
+    // 目標まで 30 日、締切まで 31 日
+    vi.setSystemTime(new Date('2026-06-10T12:00:00'));
+    const wrapper = mount(TaskDetailHub, {
+      props: {
+        task: { ...pastDeadlines, planned_start_on: '2026-06-12' },
+        projectKey: 'TEST',
+        statuses,
+        statusId: 'status-progress',
+      },
+    });
+
+    expect(row(wrapper, 'soft_deadline').get('[data-task-date-remaining]').text()).toBe(
+      'あと 30 日',
+    );
+    expect(row(wrapper, 'hard_deadline').find('[data-task-date-remaining]').exists()).toBe(false);
+    expect(row(wrapper, 'planned_start_on').get('button').text()).toBe('6/12（金）');
+    expect(row(wrapper, 'planned_start_on').find('[data-task-date-remaining]').exists()).toBe(
+      false,
+    );
   });
 
-  it('完了していない状態では、今までどおり過ぎた期限を赤く超過と出す', () => {
+  it('完了していない状態では、過ぎた期限の日付と「N 日過ぎ」を赤く出す', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-14T12:00:00'));
     const wrapper = mountWithStatus('status-progress');
-    expect(buttonByText(wrapper, '4日超過').classes()).toContain('text-destructive');
-    expect(buttonByText(wrapper, '3日超過').classes()).toContain('text-destructive');
+
+    for (const [field, text] of [
+      ['soft_deadline', '4 日過ぎ'],
+      ['hard_deadline', '3 日過ぎ'],
+    ]) {
+      expect(row(wrapper, field).get('button').classes()).toContain('text-destructive');
+      const remaining = row(wrapper, field).get('[data-task-date-remaining]');
+      expect(remaining.text()).toBe(text);
+      expect(remaining.classes()).toContain('text-destructive');
+    }
+  });
+
+  it('完了の状態では、過ぎた期限（目標と締切）を赤くせず、日付だけを出す', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T12:00:00'));
+    // 期限より後の日に完了していても、遅れた日数は添えない（残りの表示は進行中のタスクだけ）
+    const wrapper = mountWithStatus('status-done', '2026-07-14T09:00:00');
+
+    for (const [field, text] of [
+      ['soft_deadline', '7/10（金）'],
+      ['hard_deadline', '7/11（土）'],
+    ]) {
+      const button = row(wrapper, field).get('button');
+      expect(button.text()).toBe(text);
+      expect(button.classes()).not.toContain('text-destructive');
+      expect(row(wrapper, field).find('[data-task-date-remaining]').exists()).toBe(false);
+    }
+    expect(wrapper.text()).not.toContain('過ぎ');
+    expect(wrapper.text()).not.toContain('超過');
+  });
+});
+
+describe('TaskDetailHub の上部バーとスロット', () => {
+  function mountHub(extra: Record<string, unknown> = {}, slots: Record<string, string> = {}) {
+    return mount(TaskDetailHub, {
+      props: { task, projectKey: 'TEST', statuses, statusId: 'status-id', ...extra },
+      slots,
+    });
+  }
+
+  it('前後のタスクへ移る矢印と ★ は無く、ID のコピー・共有・⋮ が残る', () => {
+    const topbar = mountHub().get('[data-task-detail-topbar]');
+
+    for (const label of ['前のタスク', '次のタスク', 'スター']) {
+      expect(topbar.find(`button[aria-label="${label}"]`).exists()).toBe(false);
+    }
+    expect(topbar.text()).toContain('TEST-1');
+    expect(topbar.text()).toContain('共有');
+    expect(topbar.find('button[aria-label="タスク操作"]').exists()).toBe(true);
+  });
+
+  it.each([
+    // 器が閉じるボタンを重ねる: 1 列の幅ではその分を空け、2 列では本文の右端にそろえる
+    [{}, ['pr-12', 'lg:pr-6'], ['pr-12']],
+    [{ reserveClose: true, layout: 'pane' }, ['pr-12'], []],
+    // フルページ: 閉じるボタンは無い。どちらも空けない
+    [{ reserveClose: false }, [], []],
+  ] as const)('reserveClose と layout（%o）で右端の余白を決める', (extra, topbar, heading) => {
+    const wrapper = mountHub(extra);
+
+    const topbarClasses = wrapper.get('[data-task-detail-topbar]').classes();
+    for (const name of ['pr-12', 'lg:pr-6']) {
+      expect(topbarClasses.includes(name), `上部バーの ${name}`).toBe(
+        (topbar as readonly string[]).includes(name),
+      );
+    }
+    expect(wrapper.get('[data-task-activity-heading]').classes().includes('pr-12')).toBe(
+      (heading as readonly string[]).includes('pr-12'),
+    );
+  });
+
+  it('meta のスロットは種別のチップと同じ行（題の上）に並ぶ', () => {
+    const wrapper = mountHub(
+      { task: { ...task, task_type: taskTypes[1] } },
+      { meta: '<span data-slot-meta>#231</span>' },
+    );
+
+    const meta = wrapper.get('[data-slot-meta]');
+    const line = meta.element.parentElement!;
+    expect(line.classList.contains('flex-wrap')).toBe(true);
+    expect(line.textContent).toContain('バグ');
+    // 題より前にある
+    const title = wrapper.get('h1').element;
+    expect(
+      meta.element.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('種別が無くても meta のスロットは出る', () => {
+    const wrapper = mountHub({}, { meta: '<span data-slot-meta>#231</span>' });
+    expect(wrapper.find('[data-slot-meta]').exists()).toBe(true);
+  });
+
+  it('description-actions のスロットは説明の見出しの右、✏ の左に並ぶ', () => {
+    const source = '本文';
+    const wrapper = mountHub(
+      {
+        task: { ...task, description: source },
+        descriptionHtml: '<p>本文</p>',
+        descriptionSource: source,
+      },
+      { 'description-actions': '<button data-slot-attach aria-label="ファイルを添付"></button>' },
+    );
+
+    const attach = wrapper.get('[data-slot-attach]').element;
+    const edit = wrapper.get('button[aria-label="説明を編集"]').element;
+    expect(attach.parentElement).toBe(edit.parentElement);
+    expect(attach.compareDocumentPosition(edit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(attach.parentElement!.parentElement!.textContent).toContain('説明');
+  });
+
+  it('attachments のスロットは説明の本文の下、リアクションの上に並ぶ', () => {
+    const source = '本文';
+    const reactionController = {
+      isBusy: () => false,
+      errorFor: () => null,
+      fetchUsers: async () => [],
+      toggle: () => {},
+    };
+    const wrapper = mountHub(
+      {
+        task: { ...task, description: source },
+        descriptionHtml: '<p>本文</p>',
+        descriptionSource: source,
+        reactionController,
+      },
+      { attachments: '<div data-slot-attachments></div>' },
+    );
+
+    const attachments = wrapper.get('[data-slot-attachments]').element;
+    const body = wrapper.get('[data-task-description-html]').element;
+    const reactions = wrapper.getComponent({ name: 'ReactionBar' }).element;
+    expect(
+      body.compareDocumentPosition(attachments) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      attachments.compareDocumentPosition(reactions) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // 説明の節の中にある（独立した「添付ファイル」の節ではない）
+    expect(attachments.parentElement).toBe(body.parentElement);
   });
 });
 
@@ -1385,14 +1602,17 @@ describe('TaskDetailHub 説明の編集', () => {
     expect(wrapper.find('textarea[aria-label="説明"]').exists()).toBe(false);
   });
 
-  it('クリアは確認後にだけ空にして保存する', async () => {
+  // 「クリア」を編集の取り消しと取り違えて、保存済みの説明を全部消す事故があった（TASK-580）
+  it('説明の編集中に「クリア」ボタンを出さない', async () => {
     const wrapper = await startEdit();
-    await button(wrapper, 'クリア')!.trigger('click');
-    expect(wrapper.emitted('save:description')).toBeUndefined();
-    const confirm = dialogs(wrapper)[1]!;
-    expect(confirm.props('open')).toBe(true);
-    (confirm.props('onConfirm') as () => void)();
-    await nextTick();
+    expect(button(wrapper, 'クリア')).toBeUndefined();
+    expect(dialogs(wrapper).some((d) => d.props('title') === '説明を消しますか？')).toBe(false);
+  });
+
+  it('本文を空にして保存すると、説明を消して保存する', async () => {
+    const wrapper = await startEdit();
+    await wrapper.get('textarea[aria-label="説明"]').setValue('');
+    await button(wrapper, '保存')!.trigger('click');
     expect(wrapper.emitted('save:description')).toEqual([[null]]);
   });
 });

@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ArrowUpLeft, GitBranch, Loader2, Plus, RotateCcw } from '@lucide/vue';
-import { computed, ref, watch } from 'vue';
+import { ArrowUpLeft, Loader2, Plus, RotateCcw } from '@lucide/vue';
+import { computed, ref, useTemplateRef, watch } from 'vue';
 
 import TaskParentPicker from '@/components/tasks/TaskParentPicker.vue';
+import TaskRow from '@/components/tasks/TaskRow.vue';
+import TaskRowHoverCard from '@/components/tasks/TaskRowHoverCard.vue';
 import TaskSubtaskComposer from '@/components/tasks/TaskSubtaskComposer.vue';
 import { Button } from '@koyori-app/ui-vue';
 import { useTaskSubtasks } from '@/composables/useTaskSubtasks';
@@ -27,13 +29,24 @@ const props = defineProps<{
   parentSaved?: boolean;
   statuses: StatusResponse[];
   projectKey: string;
+  /** 行の題のリンクとホバーカードの道のテナント（表示用 id） */
+  tenantDisplayId: string;
+  /** 行の更新の飛行中（タスク ID ごと）。その行のステータスのメニューを止める */
+  rowPending?: Record<string, unknown>;
+  /** 行の更新の直近の失敗（タスク ID ごと）。行の下に出す */
+  rowErrors?: Record<string, string | undefined>;
 }>();
 
 const emit = defineEmits<{
   open: [task: TaskResponse];
   /** `null` で親を外す */
   'change-parent': [parentTaskId: string | null];
+  /** 行のアイコンのメニューでステータスを選んだ。書き込みは消費側（行と同じ口）が行う */
+  'update:status': [task: TaskResponse, statusId: string];
 }>();
+
+/** 行のホバーカードの委譲先 */
+const listEl = useTemplateRef<HTMLElement>('list');
 
 const adding = ref(false);
 const pickingParent = ref(false);
@@ -44,8 +57,6 @@ const subtasks = useTaskSubtasks({
   taskUuid: () => props.taskUuid,
   parentTaskId: () => props.parentTaskId,
 });
-
-const statusesById = computed(() => new Map(props.statuses.map((status) => [status.id, status])));
 
 // 楽観更新中や取り直し中の古い relations を、今の親として描かない
 const parentTask = computed(() => {
@@ -150,15 +161,18 @@ function createSubtask(title: string) {
       @cancel="pickingParent = false"
     />
 
-    <div class="mb-2 flex items-center gap-2">
-      <GitBranch class="size-4 text-muted-foreground" aria-hidden="true" />
+    <div class="mb-1 flex min-h-8 items-center justify-between gap-2">
       <h2 class="text-sm font-medium text-muted-foreground">サブタスク</h2>
-      <span
-        v-if="!subtasks.loading.value && !subtasks.error.value"
-        class="text-xs tabular-nums text-muted-foreground"
+      <Button
+        v-if="!parentTaskId && !adding && !subtasks.loading.value && !subtasks.error.value"
+        type="button"
+        variant="tertiary"
+        :disabled="composerBlocked"
+        label="サブタスクを追加"
+        @click="openComposer"
       >
-        {{ subtasks.subtasks.value.length }}
-      </span>
+        <template #icon><Plus class="size-4" aria-hidden="true" /></template>
+      </Button>
     </div>
 
     <div
@@ -177,37 +191,34 @@ function createSubtask(title: string) {
     </div>
 
     <template v-else>
-      <ul v-if="subtasks.subtasks.value.length" class="mb-2 border-y border-border/60">
-        <li
-          v-for="subtask in subtasks.subtasks.value"
-          :key="subtask.id"
-          class="border-b border-border/60 last:border-b-0"
-        >
-          <button
-            type="button"
-            class="flex w-full min-w-0 items-center gap-2 px-1 py-2 text-left transition-colors hover:bg-muted/40"
-            @click="emit('open', subtask)"
-          >
-            <span
-              class="size-2.5 shrink-0 rounded-full border"
-              :style="
-                statusesById.get(subtask.status_id)?.color
-                  ? { backgroundColor: statusesById.get(subtask.status_id)?.color }
-                  : undefined
-              "
-              aria-hidden="true"
-            />
-            <span class="shrink-0 font-mono text-xs text-muted-foreground">
-              {{ taskSeqKey(projectKey, subtask.seq_id) }}
-            </span>
-            <span class="truncate text-sm">{{ subtask.title }}</span>
-            <span class="ml-auto shrink-0 text-xs text-muted-foreground">
-              {{ statusesById.get(subtask.status_id)?.name ?? '—' }}
-            </span>
-          </button>
+      <!-- 行の区切りは行の間だけ。最後の行の下に引くと、次の節の区切りと二重になる -->
+      <ul
+        v-if="subtasks.subtasks.value.length"
+        ref="list"
+        class="@container divide-y divide-border/60"
+        data-task-subtask-list
+      >
+        <li v-for="subtask in subtasks.subtasks.value" :key="subtask.id">
+          <TaskRow
+            :task="subtask"
+            :project-key="projectKey"
+            :tenant-display-id="tenantDisplayId"
+            :statuses="statuses"
+            :pending="!!rowPending?.[subtask.id]"
+            :error="rowErrors?.[subtask.id]"
+            @open="emit('open', $event)"
+            @update:status="(task, statusId) => emit('update:status', task, statusId)"
+          />
         </li>
       </ul>
       <p v-else-if="!adding" class="py-1 text-sm text-muted-foreground">サブタスクはありません</p>
+      <TaskRowHoverCard
+        :container="listEl"
+        :tasks="subtasks.subtasks.value"
+        :statuses="statuses"
+        :project-key="projectKey"
+        :tenant-display-id="tenantDisplayId"
+      />
 
       <TaskSubtaskComposer
         v-if="adding"
@@ -217,16 +228,6 @@ function createSubtask(title: string) {
         :on-create="createSubtask"
         @cancel="cancelComposer"
       />
-      <Button
-        v-else-if="!parentTaskId"
-        type="button"
-        variant="ghost"
-        :disabled="composerBlocked"
-        label="サブタスクを追加"
-        @click="openComposer"
-      >
-        <template #icon><Plus class="size-4" aria-hidden="true" /></template>
-      </Button>
     </template>
   </div>
 </template>

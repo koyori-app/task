@@ -2,7 +2,7 @@
 title: ドキュメント
 description: プロジェクトのルートフォルダ直下の Markdown ファイルを読み書きする画面
 status: implemented
-updated: 2026-11-04
+updated: 2026-11-21
 slug: dev/features/drive/documents
 sidebar:
   order: 4
@@ -55,4 +55,4 @@ sidebar:
 | 項目 | 値 |
 |---|---|
 | URL | `/{tenant}/projects/{key}/docs`。詳細は [URL 仕様](/dev/frontend/url-spec)に書く |
-| 検索 | `?q=` でタイトルを検索する |
+| 検索 | `?q=` でタイトルを検索する。[本文の検索](/dev/features/drive/files#本文の検索)の API は、この画面からはまだ使っていない |

@@ -129,7 +129,8 @@ function closeDeleteConfirm() {
 }
 
 async function commitEditing() {
-  if (editUploading.value) return;
+  // キー（Ctrl+Enter）の経路は「保存」ボタンの disabled を通らないので、ここでも止める
+  if (props.updating || editUploading.value) return;
   const next = editDraft.value.trim();
   if (!next || next === (props.comment.body ?? '')) {
     cancelEditing();
@@ -153,7 +154,10 @@ async function confirmDelete() {
     :data-comment-id="comment.id"
   >
     <!-- 投稿者のアイコン。avatar_url が無いユーザーは頭文字で描く。名前は隣に字で出す -->
-    <UserAvatar :user="comment.user" size="md" decorative />
+    <!-- 履歴の行（TaskActivityEntry）と同じ 20px + 同じ gap にして、本文の開始位置を 1 本にそろえる -->
+    <span class="flex h-6 w-5 shrink-0 items-center justify-center">
+      <UserAvatar :user="comment.user" size="sm" decorative />
+    </span>
 
     <div class="flex min-w-0 flex-1 flex-col gap-0.5">
       <!-- 時刻はホバーの面にも載るので、4.5:1 を保てる text-secondary にする -->
@@ -219,6 +223,7 @@ async function confirmDelete() {
           :upload-file="uploadFile"
           :upload-scope="comment.id"
           @update:uploading="editUploading = $event"
+          @submit="commitEditing"
         />
         <div class="flex justify-end gap-2">
           <Button

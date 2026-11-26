@@ -31,6 +31,8 @@ const pullRequest = {
   commits_complete: false,
   sources: ['body'],
   closes: true,
+  role: 'implementation',
+  head_branch: null,
   unresolved: null,
 };
 
@@ -113,5 +115,24 @@ describe('TaskForgeMergeEffectsBadge', () => {
     expect(document.body.querySelector('[role="alert"]')?.textContent).toBe(
       '確認済みにできませんでした',
     );
+  });
+});
+
+describe('TaskForgeMergeEffectsBadge の trigger="none"', () => {
+  it('札を描かず、外から openDialog で同じ確認を開ける', async () => {
+    vi.stubGlobal('fetch', async () => new Response(null, { status: 200 }));
+    const wrapper = mount(TaskForgeMergeEffectsBadge, {
+      props: { tenantId: 'tenant-1', pullRequest, trigger: 'none' },
+      global: { plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]] },
+      attachTo: document.body,
+    });
+
+    expect(wrapper.find('[data-merge-effects-badge]').exists()).toBe(false);
+    expect(openDialog()).toBeNull();
+
+    (wrapper.vm as unknown as { openDialog: () => void }).openDialog();
+    await wrapper.vm.$nextTick();
+    expect(openDialog()?.textContent).toContain('#87 の自動完了は未適用です');
+    wrapper.unmount();
   });
 });

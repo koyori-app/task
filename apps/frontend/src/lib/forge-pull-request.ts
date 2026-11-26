@@ -8,6 +8,7 @@ import {
 
 export interface PullRequestStateDisplay {
   icon: LucideIcon;
+  /** 状態の名前。状態は色とアイコンで出すので、画面には並べず読み上げ（sr-only / aria-label）に渡す */
   label: string;
   class: string;
 }

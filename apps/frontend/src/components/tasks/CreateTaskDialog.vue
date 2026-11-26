@@ -11,14 +11,16 @@ import {
   User,
   X,
 } from '@lucide/vue';
-import { computed, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 import { useQueryClient } from '@tanstack/vue-query';
+import { useLocalStorage } from '@vueuse/core';
 import { getActivePinia } from 'pinia';
 import { usePageContext } from 'vike-vue/usePageContext';
 
 import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
 import {
   Button,
+  Checkbox,
   ConfirmDialog,
   Dialog,
   Dropdown,
@@ -27,6 +29,7 @@ import {
   type DropdownItem,
 } from '@koyori-app/ui-vue';
 import UserSelector from '@/components/users/UserSelector.vue';
+import LabelMark from '@/components/tasks/LabelMark.vue';
 import MarkdownEditor from '@/components/markdown/MarkdownEditor.vue';
 import SimilarTasksList from '@/components/tasks/SimilarTasksList.vue';
 import TaskDatesChip from '@/components/tasks/TaskDatesChip.vue';
@@ -36,9 +39,10 @@ import { useProjectFileUpload } from '@/composables/useProjectFileUpload';
 import { useSimilarTasks } from '@/composables/useSimilarTasks';
 import type { components } from '@/generated/api';
 import { apiClient, TASK_SEARCH_PATH } from '@/lib/api-vue-query';
-import { PRIORITY_CONFIG, taskDetailHref } from '@/lib/task-display';
+import { PRIORITY_CONFIG, taskDetailHref, taskSeqKey } from '@/lib/task-display';
 import { chipTrigger } from '@/lib/task-chip';
-import { toIsoDate } from '@/lib/task-date';
+import { isImeKeydown } from '@/lib/ime-keydown-guard';
+import { DEADLINE_ORDER_MESSAGE, softNotBeforeHard, toIsoDate } from '@/lib/task-date';
 import { useAuthStore } from '@/stores/auth';
 
 const CREATE_TASK_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks' as const;
@@ -116,7 +120,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:open': [value: boolean];
-  created: [task: CreatedTask];
+  /** keepOpen は「続けて作成」が入っていたか。真なら親は閉じない（ダイアログは入力を空に戻して開いたまま） */
+  created: [task: CreatedTask, options: { keepOpen: boolean }];
   retryLabels: [];
   retryTaskTypes: [];
   retryMembers: [];
@@ -171,8 +176,20 @@ const validationMessage = ref<string | null>(null);
 const plannedStartAfterSoft = computed(
   () => !!plannedStartOn.value && !!softDeadline.value && plannedStartOn.value > softDeadline.value,
 );
+// 期限が最終期限と同じか後ならサーバーが 400 で弾く。送る値と同じ変換で比べる
+const softAfterHard = computed(() =>
+  softNotBeforeHard(toIsoDate(softDeadline.value), toIsoDate(hardDeadline.value)),
+);
 const requestError = ref<string | null>(null);
-const successMessage = ref<string | null>(null);
+/** 直前に作ったタスク。成功表示のリンクに使う */
+const createdTask = ref<{ key: string; href: string } | null>(null);
+/** 作成後も閉じずに次を作るか。ブラウザに覚えさせ、次に開いたときも同じ状態にする */
+const keepOpenSetting = useLocalStorage('create-task-keep-open', false);
+/**
+ * dirty でのタイトルの基準。開いたときは initialTitle、開いたまま作成したあとは空。
+ * initialTitle と比べ続けると、続けて作成で空に戻したタイトルが入力ありと見なされる
+ */
+const titleBaseline = ref('');
 
 const defaultStatusId = computed(
   () => props.statuses.find((status) => status.is_default)?.id ?? props.statuses[0]?.id ?? '',
@@ -273,6 +290,7 @@ watch(
   (open) => {
     if (open && props.initialTitle) title.value = props.initialTitle;
     if (open) {
+      titleBaseline.value = props.initialTitle ?? '';
       selectedAssigneeIds.value = [];
       appliedAssigneeIds.value = [];
       applyInitialAssignees();
@@ -332,12 +350,12 @@ watch(
 );
 
 /**
- * 入力があるか。フォームの全項目を、開いた直後の値（title は initialTitle、他は resetForm が入れる値）と
+ * 入力があるか。フォームの全項目を、開いた直後の値（title は titleBaseline、他は resetForm が入れる値）と
  * 比べる（担当者は候補と照合して入れた初期値との差）。項目を足したら resetForm とここを揃えること。あれば閉じる前に確認する
  */
 const dirty = computed(
   () =>
-    title.value !== (props.initialTitle ?? '') ||
+    title.value !== titleBaseline.value ||
     description.value !== '' ||
     statusId.value !== defaultStatusId.value ||
     plannedStartOn.value !== '' ||
@@ -379,6 +397,21 @@ function onKeydown(event: KeyboardEvent) {
   }
 }
 
+/** キーからの作成。submit() は form の SubmitEvent を読むので、form の送信として起こす */
+function requestCreate() {
+  titleInputRef.value?.form?.requestSubmit();
+}
+
+// input の暗黙の送信は Enter だけで、Ctrl / ⌘ 付きでは起きない
+function onTitleKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey)) return;
+  // 説明の欄（CodeMirror の Mod-Enter）と同じく、Shift / Alt を足した組み合わせでは作らない
+  if (event.shiftKey || event.altKey) return;
+  if (isImeKeydown(event) || event.repeat) return;
+  event.preventDefault();
+  requestCreate();
+}
+
 function closeDialog() {
   // 親が open を握っていない場合でも捨てられるよう、ここでも呼ぶ。
   // resetForm は冪等なので watch と二重に走っても問題ない
@@ -394,6 +427,7 @@ function toggleLabel(labelId: string) {
 
 function resetForm() {
   title.value = '';
+  titleBaseline.value = '';
   statusId.value = defaultStatusId.value;
   description.value = '';
   plannedStartOn.value = '';
@@ -409,7 +443,7 @@ function resetForm() {
   applyInitialAssignees();
   validationMessage.value = null;
   requestError.value = null;
-  successMessage.value = null;
+  createdTask.value = null;
 }
 
 async function submit(event: SubmitEvent) {
@@ -418,7 +452,7 @@ async function submit(event: SubmitEvent) {
   const normalizedTitle = title.value.trim();
   validationMessage.value = null;
   requestError.value = null;
-  successMessage.value = null;
+  createdTask.value = null;
 
   if (!normalizedTitle) {
     validationMessage.value = 'タイトルを入力してください';
@@ -430,6 +464,10 @@ async function submit(event: SubmitEvent) {
   }
   if (plannedStartAfterSoft.value) {
     validationMessage.value = '開始予定日は期限以前の日付にしてください';
+    return;
+  }
+  if (softAfterHard.value) {
+    validationMessage.value = DEADLINE_ORDER_MESSAGE;
     return;
   }
   const normalizedEstimate = estimate.value.trim();
@@ -482,6 +520,8 @@ async function submit(event: SubmitEvent) {
     }));
   }
 
+  // 待つ間に切り替えても、押した時点の値で決める
+  const keepOpen = keepOpenSetting.value;
   try {
     const created = await createMutation.mutateAsync({
       params: { path: { tenant_id: props.tenantId, project_id: props.projectId } },
@@ -491,9 +531,16 @@ async function submit(event: SubmitEvent) {
       queryClient.invalidateQueries({ queryKey: ['get', CREATE_TASK_PATH] }),
       queryClient.invalidateQueries({ queryKey: ['get', TASK_SEARCH_PATH] }),
     ]);
-    emit('created', created);
+    emit('created', created, { keepOpen });
     resetForm();
-    successMessage.value = 'タスクを作成しました';
+    createdTask.value = {
+      key: taskSeqKey(props.projectKey, created.seq_id),
+      href: taskDetailHref(tenantDisplayId.value, props.projectKey, created.seq_id),
+    };
+    if (keepOpen) {
+      await nextTick();
+      titleInputRef.value?.focus();
+    }
   } catch {
     requestError.value = 'タスクの作成に失敗しました。もう一度お試しください';
   }
@@ -557,6 +604,7 @@ async function submit(event: SubmitEvent) {
             autocomplete="off"
             aria-label="タイトル（必須）"
             placeholder="タスクのタイトル"
+            @keydown="onTitleKeydown"
             class="-mx-1 w-[calc(100%+0.5rem)] rounded bg-transparent px-1 py-0.5 text-xl font-semibold tracking-tight outline-none placeholder:text-muted-foreground/60 hover:bg-muted/40 focus-visible:bg-muted/40 md:text-2xl"
           />
           <SimilarTasksList
@@ -578,6 +626,7 @@ async function submit(event: SubmitEvent) {
             :upload-file="uploadFile"
             :upload-scope="projectId"
             @update:uploading="descriptionUploading = $event"
+            @submit="requestCreate"
           />
         </div>
 
@@ -786,11 +835,7 @@ async function submit(event: SubmitEvent) {
                         :key="label.id"
                         class="inline-flex items-center gap-1"
                       >
-                        <span
-                          class="inline-block size-2 rounded-full"
-                          :style="{ backgroundColor: label.color }"
-                          aria-hidden="true"
-                        />
+                        <LabelMark :label="label" />
                         {{ label.name }}
                       </span>
                       <span v-if="selectedLabels.length > 3">+{{ selectedLabels.length - 3 }}</span>
@@ -813,7 +858,10 @@ async function submit(event: SubmitEvent) {
               v-model:planned-start-on="plannedStartOn"
               v-model:soft-deadline="softDeadline"
               v-model:hard-deadline="hardDeadline"
-              :invalid="plannedStartAfterSoft"
+              :invalid="plannedStartAfterSoft || softAfterHard"
+              :invalid-message="
+                !plannedStartAfterSoft && softAfterHard ? DEADLINE_ORDER_MESSAGE : undefined
+              "
             />
 
             <TaskNumberChip
@@ -840,7 +888,7 @@ async function submit(event: SubmitEvent) {
         </div>
 
         <div
-          v-if="validationMessage || requestError || successMessage"
+          v-if="validationMessage || requestError || createdTask"
           class="shrink-0 px-4 pb-3 md:px-6"
         >
           <p v-if="validationMessage" role="alert" class="text-sm text-destructive">
@@ -849,18 +897,31 @@ async function submit(event: SubmitEvent) {
           <p v-if="requestError" role="alert" class="text-sm text-destructive">
             {{ requestError }}
           </p>
+          <!-- ダイアログと入力を残したまま確かめられるよう、似ているタスクと同じく別タブで開く -->
           <p
-            v-if="successMessage"
+            v-if="createdTask"
             role="status"
             class="text-sm text-emerald-700 dark:text-emerald-400"
           >
-            {{ successMessage }}
+            タスクを作成しました（<a
+              :href="createdTask.href"
+              target="_blank"
+              rel="noopener"
+              class="font-medium underline underline-offset-2"
+              >{{ createdTask.key }}</a
+            >）
           </p>
         </div>
 
         <div class="flex shrink-0 items-center gap-2 border-t px-4 py-2.5 md:px-5 md:py-3">
           <span class="hidden text-xs text-muted-foreground md:inline">Esc で閉じる</span>
           <div class="ml-auto flex items-center gap-2">
+            <Checkbox
+              label="続けて作成"
+              :checked="keepOpenSetting"
+              :disabled="createMutation.isPending.value"
+              :on-checked-change="(checked: boolean) => (keepOpenSetting = checked)"
+            />
             <Button
               type="button"
               variant="tertiary"

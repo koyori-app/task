@@ -341,11 +341,25 @@ describe('TaskDetailPane', () => {
       expect(wrapper.find('[data-similar-tasks]').exists()).toBe(false);
     });
 
-    it('候補の左クリックは遷移させず open-task-ref を emit する', async () => {
-      const wrapper = mountWithSimilar([
-        { id: 'task-7', seq_id: 7, title: '似ているペイン用タスク', score: 0.6 },
-      ]);
+    it('候補は一覧の行で出し、左クリックは遷移させずペインの中で開く（open-task）', async () => {
+      // 応答はタスクの応答を平らに持つ（行に出すステータス・担当・ラベルなど）
+      const hit = {
+        id: 'task-7',
+        seq_id: 7,
+        title: '似ているペイン用タスク',
+        status_id: 'status-id',
+        priority: 'High',
+        assignees: [],
+        labels: [],
+        is_archived: false,
+        score: 0.6,
+      };
+      const wrapper = mountWithSimilar([hit]);
       await vi.waitFor(() => expect(wrapper.find('[data-similar-tasks] a').exists()).toBe(true));
+
+      const row = wrapper.get('[data-similar-tasks] [data-task-row]');
+      expect(row.attributes('data-task-seq-key')).toBe('ENG-7');
+      expect(row.get('[data-task-row-card]').attributes('data-task-id')).toBe('task-7');
 
       const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
       const reachedDocument = vi.fn();
@@ -356,9 +370,7 @@ describe('TaskDetailPane', () => {
       expect(event.defaultPrevented).toBe(true);
       // vike のリンク横取り（document の click）まで届くと詳細ページへ遷移してしまう
       expect(reachedDocument).not.toHaveBeenCalled();
-      expect(wrapper.emitted('open-task-ref')).toEqual([
-        [{ projectKey: 'ENG', seqKey: 'ENG-7', href: '/acme/projects/ENG/tasks/ENG-7' }],
-      ]);
+      expect(wrapper.emitted('open-task')).toEqual([[hit]]);
     });
   });
 

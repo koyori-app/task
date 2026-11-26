@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { Download, Paperclip, X } from '@lucide/vue';
+import { Download, File as FileIcon, FileImage, FileText, X } from '@lucide/vue';
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
 import { Button, Dialog } from '@koyori-app/ui-vue';
+import UserAvatar from '@/components/UserAvatar.vue';
 import type { components } from '@/generated/api';
 import { fetchClient } from '@/lib/api-vue-query';
 
@@ -29,6 +30,8 @@ const props = defineProps<{
   currentUserId?: string | null;
   /** 見ている人がテナントオーナーか。他人が付けた添付の解除を出すかに使う */
   isTenantOwner?: boolean;
+  /** 投稿者のアバターを引く相手（プロジェクトのメンバー）。見つからない投稿者は出さない */
+  members?: { id: string; username: string; avatar_url?: string | null }[];
 }>();
 
 const queryClient = useQueryClient();
@@ -124,6 +127,41 @@ function closePreview() {
   clearPreview();
 }
 
+/**
+ * プレビューに出すファイルの中身。大きさと PDF の先頭を確かめてから返す。
+ * プレビューのダイアログとタイルのサムネイルが同じ取得を使う。
+ */
+async function fetchPreviewBlob(
+  file: Attachment,
+  mode: PreviewMode,
+  signal: AbortSignal,
+): Promise<Blob> {
+  const response = await fetch(`${apiBase}${file.url}`, { credentials: 'include', signal });
+  if (!response.ok) {
+    throw new Error(
+      response.status === 403
+        ? 'このファイルを表示する権限がありません'
+        : response.status === 404
+          ? 'ファイルが見つかりません'
+          : 'プレビューを読み込めませんでした',
+    );
+  }
+  const blob = await response.blob();
+  if (blob.size > MAX_PREVIEW_BYTES || (mode === 'text' && blob.size > MAX_TEXT_PREVIEW_BYTES)) {
+    throw new Error('ファイルがプレビューのサイズ上限を超えています');
+  }
+  if (mode === 'pdf' && (await blob.slice(0, 5).text()) !== '%PDF-') {
+    throw new Error('PDF ファイルとして表示できません');
+  }
+  return blob;
+}
+
+function imageBlobUrl(file: Attachment, blob: Blob): string {
+  return URL.createObjectURL(
+    new Blob([blob], { type: file.mime_type.toLowerCase().split(';')[0]?.trim() }),
+  );
+}
+
 async function openPreview(file: Attachment) {
   const mode = previewType(file);
   if (!mode) return;
@@ -135,39 +173,17 @@ async function openPreview(file: Attachment) {
   const controller = new AbortController();
   previewController = controller;
   try {
-    const response = await fetch(`${apiBase}${file.url}`, {
-      credentials: 'include',
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      throw new Error(
-        response.status === 403
-          ? 'このファイルを表示する権限がありません'
-          : response.status === 404
-            ? 'ファイルが見つかりません'
-            : 'プレビューを読み込めませんでした',
-      );
-    }
-    const blob = await response.blob();
-    if (controller.signal.aborted) return;
-    if (blob.size > MAX_PREVIEW_BYTES || (mode === 'text' && blob.size > MAX_TEXT_PREVIEW_BYTES)) {
-      throw new Error('ファイルがプレビューのサイズ上限を超えています');
-    }
-    if (mode === 'pdf' && (await blob.slice(0, 5).text()) !== '%PDF-') {
-      throw new Error('PDF ファイルとして表示できません');
-    }
+    const blob = await fetchPreviewBlob(file, mode, controller.signal);
     if (controller.signal.aborted) return;
     if (mode === 'text') {
       const content = await blob.text();
       if (controller.signal.aborted) return;
       previewText.value = content;
     } else {
-      previewUrl.value = URL.createObjectURL(
-        new Blob([blob], {
-          type:
-            mode === 'pdf' ? 'application/pdf' : file.mime_type.toLowerCase().split(';')[0]?.trim(),
-        }),
-      );
+      previewUrl.value =
+        mode === 'pdf'
+          ? URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }))
+          : imageBlobUrl(file, blob);
     }
   } catch (error) {
     if (!controller.signal.aborted) {
@@ -207,6 +223,87 @@ watch(currentKey, () => {
   closePreview();
   detachTarget.value = null;
 });
+
+// ---- タイルのサムネイル ----
+// object URL の持ち主はここ。添付 id ごとに 1 つ作り、一覧から消えた・タスクが変わった・unmount の
+// どれでも revoke する。取得は添付 id ごとに 1 本で、失敗しても取り直さない（種類のアイコンに倒す）。
+const thumbnails = ref(new Map<string, string>());
+/** 取得中・取得済み・失敗の添付 id。一覧の再取得で同じ id を取り直さない */
+const thumbnailRequests = new Map<string, AbortController | null>();
+
+function dropThumbnail(id: string) {
+  thumbnailRequests.get(id)?.abort();
+  thumbnailRequests.delete(id);
+  const url = thumbnails.value.get(id);
+  if (url) URL.revokeObjectURL(url);
+  thumbnails.value.delete(id);
+}
+
+function clearThumbnails() {
+  // Map は走査中に消しても安全
+  for (const id of thumbnailRequests.keys()) dropThumbnail(id);
+}
+
+async function loadThumbnail(file: Attachment) {
+  const controller = new AbortController();
+  thumbnailRequests.set(file.id, controller);
+  // 取得を始めたタスク。応答が届くまでに別のタスクへ移っていたら捨てる
+  const owner = currentKey.value;
+  try {
+    const blob = await fetchPreviewBlob(file, 'image', controller.signal);
+    if (controller.signal.aborted || owner !== currentKey.value) return;
+    thumbnails.value.set(file.id, imageBlobUrl(file, blob));
+  } catch {
+    // 失敗は種類のアイコンのまま。id は残して取り直さない
+  } finally {
+    if (thumbnailRequests.get(file.id) === controller) thumbnailRequests.set(file.id, null);
+  }
+}
+
+watch(
+  [currentKey, () => attachmentsQuery.data.value],
+  ([key, attachments], [previousKey]) => {
+    if (key !== previousKey) clearThumbnails();
+    const listed = new Set((attachments ?? []).map((attachment) => attachment.id));
+    for (const id of thumbnailRequests.keys()) {
+      if (!listed.has(id)) dropThumbnail(id);
+    }
+    for (const attachment of attachments ?? []) {
+      if (previewType(attachment) === 'image' && !thumbnailRequests.has(attachment.id)) {
+        void loadThumbnail(attachment);
+      }
+    }
+  },
+  { immediate: true },
+);
+onBeforeUnmount(clearThumbnails);
+
+const membersById = computed(() => new Map((props.members ?? []).map((m) => [m.id, m])));
+function uploader(attachment: Attachment) {
+  return attachment.created_by ? (membersById.value.get(attachment.created_by) ?? null) : null;
+}
+
+/** 種類のアイコンの下に出す拡張子（無ければ出さない） */
+function extension(name: string): string {
+  const dot = name.lastIndexOf('.');
+  return dot > 0 && dot < name.length - 1 ? name.slice(dot + 1).toLowerCase() : '';
+}
+
+function tileIcon(file: Attachment) {
+  const mime = file.mime_type.toLowerCase();
+  if (mime.startsWith('image/')) return FileImage;
+  if (mime.startsWith('text/') || mime === 'application/pdf' || mime === 'application/json') {
+    return FileText;
+  }
+  return FileIcon;
+}
+
+/** 説明の見出しの 📎 から呼ぶ。アップロード中と紐付け待ちの間は開かない */
+function openPicker() {
+  if (uploading.value || pendingForTask.value) return;
+  input.value?.click();
+}
+defineExpose({ openPicker, uploading });
 
 async function attach(file: PendingFile) {
   const path = { tenant_id: file.tenantId, project_id: file.projectId, id: file.taskId };
@@ -336,29 +433,23 @@ async function removeAttachment(attachmentId: string) {
 </script>
 
 <template>
-  <section class="space-y-2" aria-label="添付ファイル">
-    <div class="flex items-center justify-between gap-2">
-      <h2 class="text-sm font-semibold">添付ファイル</h2>
-      <Button
-        type="button"
-        variant="tertiary"
-        :disabled="uploading || !!pendingForTask"
-        :label="uploading ? 'アップロード中…' : 'ファイルを添付'"
-        @click="input?.click()"
-      >
-        <template #icon><Paperclip class="size-4" aria-hidden="true" /></template>
-      </Button>
-      <input
-        ref="input"
-        type="file"
-        class="sr-only"
-        aria-label="添付するファイルを選択"
-        @change="onFileSelected"
-      />
-    </div>
+  <section aria-label="添付ファイル" data-task-attachments>
+    <!--
+      見出しとボタンの節は持たない。ファイルを選ぶ入口は説明の見出しの 📎（消費側）で、ここは
+      添付があるときだけタイルを並べる。0 件と読み込み中は何も描かない。
+    -->
+    <input
+      ref="input"
+      type="file"
+      class="sr-only"
+      aria-label="添付するファイルを選択"
+      @change="onFileSelected"
+    />
 
-    <p v-if="errorMessage" role="alert" class="text-sm text-destructive">{{ errorMessage }}</p>
-    <div v-if="pendingForTask" class="flex items-center gap-2 text-sm">
+    <p v-if="errorMessage" role="alert" class="mt-3 text-sm text-destructive">
+      {{ errorMessage }}
+    </p>
+    <div v-if="pendingForTask" class="mt-3 flex items-center gap-2 text-sm">
       <span>{{ pendingForTask.name }} はアップロード済みです</span>
       <Button
         type="button"
@@ -369,60 +460,87 @@ async function removeAttachment(attachmentId: string) {
       />
     </div>
 
-    <p v-if="attachmentsQuery.isLoading.value" class="text-sm text-muted-foreground">読み込み中…</p>
     <div
-      v-else-if="attachmentsQuery.isError.value"
-      class="flex items-center gap-2 text-sm text-destructive"
+      v-if="attachmentsQuery.isError.value"
+      class="mt-3 flex items-center gap-2 text-sm text-destructive"
     >
       添付ファイルを読み込めませんでした
       <Button type="button" variant="tertiary" label="再試行" @click="attachmentsQuery.refetch()" />
     </div>
-    <ul v-else-if="attachmentsQuery.data.value?.length" class="space-y-1">
+    <ul
+      v-else-if="attachmentsQuery.data.value?.length"
+      class="mt-3 flex flex-wrap gap-3"
+      data-task-attachment-tiles
+    >
       <li
         v-for="attachment in attachmentsQuery.data.value"
         :key="attachment.id"
-        class="flex items-center gap-2 text-sm"
+        class="group relative h-[152px] w-[164px] shrink-0 rounded-md bg-[var(--koyori-color-surface-hover)] p-2"
+        data-task-attachment-tile
       >
-        <button
-          v-if="previewType(attachment)"
-          type="button"
-          class="min-w-0 flex-1 truncate text-left text-link underline"
-          :title="`${attachment.name} をプレビュー`"
-          @click="openPreview(attachment)"
+        <!-- 押すとプレビュー。プレビューできない種類はダウンロードになる -->
+        <component
+          :is="previewType(attachment) ? 'button' : 'a'"
+          :type="previewType(attachment) ? 'button' : undefined"
+          :href="previewType(attachment) ? undefined : `${apiBase}${attachment.url}`"
+          class="flex h-[104px] w-full flex-col items-center justify-center gap-1 overflow-hidden rounded text-muted-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+          :title="previewType(attachment) ? `${attachment.name} をプレビュー` : attachment.name"
+          :aria-label="
+            previewType(attachment) ? `${attachment.name} をプレビュー` : attachment.name
+          "
+          data-task-attachment-open
+          @click="previewType(attachment) && openPreview(attachment)"
         >
-          {{ attachment.name }}
-        </button>
-        <a
-          v-else
-          :href="`${apiBase}${attachment.url}`"
-          class="min-w-0 flex-1 truncate text-link underline"
-          :title="attachment.name"
-          >{{ attachment.name }}</a
+          <img
+            v-if="thumbnails.get(attachment.id)"
+            :src="thumbnails.get(attachment.id)"
+            alt=""
+            class="max-h-full max-w-full rounded-sm object-contain shadow"
+            data-task-attachment-thumbnail
+          />
+          <template v-else>
+            <component :is="tileIcon(attachment)" class="size-8" aria-hidden="true" />
+            <span v-if="extension(attachment.name)" class="text-xs uppercase">
+              {{ extension(attachment.name) }}
+            </span>
+          </template>
+        </component>
+        <div class="mt-2 flex h-6 items-center gap-2">
+          <span class="min-w-0 flex-1 truncate text-xs" :title="attachment.name">
+            {{ attachment.name }}
+          </span>
+          <UserAvatar
+            v-if="uploader(attachment)"
+            :user="uploader(attachment)!"
+            size="sm"
+            class="shrink-0 border bg-white"
+          />
+        </div>
+        <!-- ダウンロードと解除は、タイルへのホバーとフォーカスで出す。隠す間もフォーカスは届くよう opacity で消す -->
+        <div
+          class="absolute top-1 right-1 flex gap-1 rounded-md bg-background/90 opacity-0 shadow-sm transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
         >
-        <span class="shrink-0 text-xs text-muted-foreground"
-          >{{ Math.ceil(attachment.size / 1024) }} KB</span
-        >
-        <a
-          :href="`${apiBase}${attachment.url}`"
-          class="inline-flex size-7 shrink-0 items-center justify-center rounded hover:bg-muted"
-          :aria-label="`${attachment.name} をダウンロード`"
-        >
-          <Download class="size-4" aria-hidden="true" />
-        </a>
-        <Button
-          v-if="canDetach(attachment)"
-          type="button"
-          variant="ghost"
-          class="shrink-0"
-          :ariaLabel="`${attachment.name} の添付を解除`"
-          :disabled="removingId === attachment.id"
-          @click="detachTarget = attachment"
-        >
-          <template #icon><X class="size-4" aria-hidden="true" /></template>
-        </Button>
+          <a
+            :href="`${apiBase}${attachment.url}`"
+            class="inline-flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-muted"
+            :aria-label="`${attachment.name} をダウンロード`"
+          >
+            <Download class="size-4" aria-hidden="true" />
+          </a>
+          <Button
+            v-if="canDetach(attachment)"
+            type="button"
+            variant="ghost"
+            class="shrink-0"
+            :ariaLabel="`${attachment.name} の添付を解除`"
+            :disabled="removingId === attachment.id"
+            @click="detachTarget = attachment"
+          >
+            <template #icon><X class="size-4" aria-hidden="true" /></template>
+          </Button>
+        </div>
       </li>
     </ul>
-    <p v-else class="text-sm text-muted-foreground">添付ファイルはありません</p>
 
     <dialog
       ref="previewDialog"

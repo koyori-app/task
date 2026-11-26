@@ -16,6 +16,9 @@ pub struct LabelResponse {
     pub icon_url: Option<String>,
     #[schema(value_type = Option<String>, format = "uuid", nullable)]
     pub project_id: Option<Uuid>,
+    /// 色の丸の代わりに出す絵文字。無ければ画面は色の丸を出す
+    #[schema(nullable)]
+    pub icon_emoji: Option<String>,
 }
 
 impl From<labels::Model> for LabelResponse {
@@ -27,6 +30,7 @@ impl From<labels::Model> for LabelResponse {
             color: model.color,
             icon_url: model.icon_url,
             project_id: model.project_id,
+            icon_emoji: model.icon_emoji,
         }
     }
 }
@@ -40,6 +44,8 @@ pub struct CreateLabelRequest {
     #[validate(regex(path = "common::validation::COLOR_REGEX"))]
     pub color: String,
     pub icon_url: Option<String>,
+    #[validate(custom(function = "crate::reactions::validate_emoji"))]
+    pub icon_emoji: Option<String>,
 }
 
 #[derive(Validate, Deserialize, ToSchema)]
@@ -52,6 +58,11 @@ pub struct UpdateLabelRequest {
     pub icon_url: Option<String>,
     #[serde(default)]
     pub clear_icon_url: bool,
+    #[validate(custom(function = "crate::reactions::validate_emoji"))]
+    pub icon_emoji: Option<String>,
+    /// 絵文字を外して色の丸に戻す。`icon_emoji` より優先する
+    #[serde(default)]
+    pub clear_icon_emoji: bool,
 }
 
 #[derive(Serialize, Deserialize, ToSchema)]
@@ -67,6 +78,12 @@ pub struct LabelExportItem {
     #[validate(regex(path = "common::validation::COLOR_REGEX"))]
     pub color: String,
     pub description: String,
+    /// 欄が無ければ（絵文字を足す前に書き出したファイル）、`overwrite` でも今の絵文字を残す。
+    /// `null` なら絵文字を外す
+    #[serde(default, deserialize_with = "crate::nullable::deserialize_some")]
+    #[schema(value_type = Option<String>, nullable)]
+    #[validate(custom(function = "crate::reactions::validate_emoji"))]
+    pub icon_emoji: Option<Option<String>>,
 }
 
 #[derive(Validate, Deserialize, ToSchema)]

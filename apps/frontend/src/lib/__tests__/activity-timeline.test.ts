@@ -244,8 +244,8 @@ describe('activityLine', () => {
   it('優先度は内部の値を出さず、日本語の名前と色にする', () => {
     expect(line('priority_changed', { from: 'critical_fire', to: 'high' })).toMatchObject({
       label: '優先度',
-      from: { text: '緊急', color: '#dc2626' },
-      to: { text: '高', color: '#f97316' },
+      from: { text: '緊急', color: 'var(--priority-critical-fire)' },
+      to: { text: '高', color: 'var(--priority-high)' },
     });
   });
 
@@ -327,6 +327,30 @@ describe('activityLine', () => {
       label: 'ラベル',
       added: false,
       value: { text: 'bug', color: '#e11d48' },
+    });
+  });
+
+  it('絵文字を持つラベルは色を出さず、絵文字を名前の前に置く', () => {
+    const lookups = {
+      labels: [
+        { id: 'l1', name: 'デザイン', color: '#e11d48', icon_emoji: '🫟' },
+        { id: 'l2', name: 'bug', color: '#3b82f6', icon_emoji: null },
+      ],
+    };
+    const added = line('label_added', { label_id: 'l1', name: 'デザイン' }, lookups);
+    expect(added).toEqual({
+      kind: 'membership',
+      label: 'ラベル',
+      added: true,
+      value: { text: '🫟 デザイン' },
+    });
+    expect(added.kind === 'membership' && 'color' in added.value).toBe(false);
+    // 対照: 絵文字を持たないラベルは今までどおり名前と色
+    expect(line('label_added', { label_id: 'l2', name: 'bug' }, lookups)).toEqual({
+      kind: 'membership',
+      label: 'ラベル',
+      added: true,
+      value: { text: 'bug', color: '#3b82f6' },
     });
   });
 

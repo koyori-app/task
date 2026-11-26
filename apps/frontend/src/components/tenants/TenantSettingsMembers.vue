@@ -429,11 +429,7 @@ async function confirmRemove() {
   <div class="min-h-0 flex-1 overflow-auto">
     <div class="mx-auto max-w-[760px] px-6 pb-14 pt-8">
       <div class="mb-6">
-        <h1 class="m-0 mb-1 text-2xl font-bold tracking-tight">メンバー</h1>
-        <p class="m-0 text-sm text-muted-foreground">
-          <strong class="font-medium text-foreground">{{ tenant.name }}</strong>
-          に入れる人を管理します。メンバーはこのテナントのすべてのプロジェクトを見られます。
-        </p>
+        <h1 class="m-0 text-2xl font-bold tracking-tight">メンバー</h1>
       </div>
 
       <!-- 招待 -->
@@ -577,7 +573,12 @@ async function confirmRemove() {
               class="flex items-center gap-3 border-b px-3.5 py-2.5 last:border-b-0"
             >
               <UserAvatar
-                :user="{ name: member.user.username, account_kind: member.user.account_kind }"
+                :user="{
+                  id: member.user.id,
+                  username: member.user.username,
+                  avatar_url: member.user.avatar_url,
+                  account_kind: member.user.account_kind,
+                }"
                 shape="lg"
                 class="text-white"
                 :style="{ background: avatarColor(member) }"

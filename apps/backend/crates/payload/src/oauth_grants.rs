@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
-use entity::scopes::{Scope, ScopeList};
+use entity::scopes::Scope;
+
+use crate::or_unknown::OrUnknown;
 
 /// クライアントが認可エンドポイントへ付けてきた要求（query の中身）。
 ///
@@ -75,7 +77,8 @@ pub struct AuthorizationPreviewResponse {
     /// 戻る先が利用者の端末（loopback の http）か
     pub redirect_is_loopback: bool,
     /// 要求された scope のうち、渡せるもの
-    pub scopes: Vec<Scope>,
+    #[schema(inline)]
+    pub scopes: Vec<OrUnknown<Scope>>,
 }
 
 /// 画面が遷移する先（クライアントのコールバック）。
@@ -94,7 +97,8 @@ pub struct OAuthGrantResponse {
     /// 接続を使えるテナント（昇順）
     #[schema(value_type = Vec<String>, format = "uuid")]
     pub tenant_ids: Vec<Uuid>,
-    pub scopes: ScopeList,
+    #[schema(inline)]
+    pub scopes: Vec<OrUnknown<Scope>>,
     /// この時刻まで使わなければ切れる。使うたびに延びる
     #[schema(value_type = String, format = "date-time")]
     pub expires_at: DateTime<Utc>,

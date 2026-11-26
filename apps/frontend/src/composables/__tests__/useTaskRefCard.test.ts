@@ -66,9 +66,14 @@ it.each([
   const { card } = setup(code);
   await vi.waitFor(() => expect(card.state.value).toBe(state));
   if (code === 200) {
-    expect(card.projectName.value).toBe('開発');
     await vi.waitFor(() =>
-      expect(card.status.value).toEqual({ name: '完了', color: '#123456', done: true }),
+      expect(card.status.value).toEqual({
+        name: '完了',
+        color: '#123456',
+        done: true,
+        // アイコン（円の埋まり方）は並び順から出す。完了扱いは塗りの円
+        fill: { kind: 'done', fraction: 1 },
+      }),
     );
   }
 });

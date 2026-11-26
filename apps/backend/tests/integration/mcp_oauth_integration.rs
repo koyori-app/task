@@ -13,8 +13,8 @@
 //! 外へは取りに行かない。
 
 use crate::common::{
-    TEST_OAUTH_CLIENT, TestApp, TestTenantProject, TestUser, create_status, insert_extra_project,
-    insert_tenant, json_body,
+    TEST_OAUTH_CLIENT, TestApp, TestTenantProject, TestUser, create_status, file_id_of,
+    insert_extra_project, insert_tenant, json_body, upload_drive_file,
 };
 use axum::http::StatusCode;
 use backend::utils::desktop_auth::s256_challenge;
@@ -38,13 +38,16 @@ use uuid::Uuid;
 const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
 const REDIRECT_URI: &str = "https://client.test/callback";
 const STATE: &str = "state-xyz";
-const ALL_SCOPES: [&str; 6] = [
+const ALL_SCOPES: [&str; 9] = [
     "read:tenant",
     "read:project",
     "read:task",
     "write:task",
     "read:milestone",
     "read:sprint",
+    "read:review",
+    "write:review",
+    "read:drive",
 ];
 
 // ---- 道具 ----
@@ -541,7 +544,7 @@ async fn authorization_server_metadata_advertises_cimd_and_public_clients_only()
     assert_eq!(body["authorization_response_iss_parameter_supported"], true);
     let scopes = body["scopes_supported"].as_array().expect("scopes");
     assert!(scopes.contains(&json!("offline_access")), "{scopes:?}");
-    assert_eq!(scopes.len(), 7);
+    assert_eq!(scopes.len(), ALL_SCOPES.len() + 1);
     // クライアントの登録は CIMD だけ
     assert!(body.get("registration_endpoint").is_none());
 }
@@ -591,6 +594,35 @@ async fn full_flow_connects_and_calls_tools() {
         .await
         .json();
     assert_eq!(created["title"], "OAuth で作る");
+}
+
+/// OAuth で渡せる scope に `write:sprint` は無いので、スプリントの開始は全 scope の接続でも
+/// 403。読み取りは通る
+#[tokio::test]
+async fn oauth_connection_cannot_start_a_sprint() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let res = app
+        .post_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{}/sprints",
+                fx.tp.tenant_id, fx.tp.project_id
+            ),
+            json!({ "name": "week-1", "start_date": "2026-12-01", "end_date": "2026-12-14" }),
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::CREATED, "スプリントを作れる");
+    let sprint = json_body(res).await["id"]
+        .as_str()
+        .expect("sprint id")
+        .to_string();
+    let tokens = connect(&app, &[fx.tp.tenant_id], &ALL_SCOPES).await;
+    let args = json!({ "project": fx.tp.project_id.to_string(), "sprint_id": sprint });
+
+    let outcome = call(&app, &tokens.access, "start_sprint", args.clone()).await;
+    assert_eq!(outcome.error(), "403 forbidden");
+    let shown = call(&app, &tokens.access, "get_sprint", args).await.json();
+    assert_eq!(shown["status"], "planning");
 }
 
 #[tokio::test]
@@ -655,6 +687,71 @@ async fn consent_narrows_the_scope() {
         .await
         .json();
     assert_eq!(listed["total"], 0, "{listed}");
+}
+
+/// ドライブの本文は、`read:drive` を許可した接続でだけ読める。
+/// Drive の行を作るので、他の Drive の試験と同じ鍵で直列化する。
+#[tokio::test]
+#[serial_test::serial(drive)]
+async fn get_document_needs_the_read_drive_scope() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    const BODY: &str = "# 仕様\n\n本文 oauthdocword\n";
+    let file = upload_drive_file(
+        &app,
+        fx.tp.tenant_id,
+        None,
+        "spec.md",
+        "text/markdown",
+        BODY.as_bytes(),
+    )
+    .await;
+    let arguments = json!({ "document": file_id_of(&file).to_string() });
+
+    let tokens = connect(&app, &[fx.tp.tenant_id], &["read:task"]).await;
+    let denied = call(&app, &tokens.access, "get_document", arguments.clone()).await;
+    assert_eq!(denied.error(), "403 forbidden");
+
+    // 対照: `read:drive` を許可した接続では本文が返る
+    let tokens = connect(&app, &[fx.tp.tenant_id], &["read:task", "read:drive"]).await;
+    assert_eq!(tokens.scope, "read:task read:drive");
+    let document = call(&app, &tokens.access, "get_document", arguments).await;
+    assert!(!document.is_error, "{}", document.text);
+    assert_eq!(document.text, BODY);
+}
+
+#[tokio::test]
+async fn oauth_grant_with_read_review_can_list_findings() {
+    let mut app = TestApp::new().await;
+    let fx = fixture(&mut app).await;
+    let project = fx.tp.project_id.to_string();
+    let list = json!({ "project": project, "pr": 5 });
+    let submit = json!({
+        "project": project,
+        "pr": 5,
+        "head_sha": "60cdd77a1b2c3d4e5f60718293a4b5c6d7e8f901",
+    });
+
+    let reader = connect(&app, &[fx.tp.tenant_id], &["read:project", "read:review"]).await;
+    assert_eq!(reader.scope, "read:project read:review");
+    let listed = call(&app, &reader.access, "list_review_findings", list.clone())
+        .await
+        .json();
+    assert_eq!(listed, json!([]));
+    let denied = call(&app, &reader.access, "submit_review", submit.clone()).await;
+    assert_eq!(denied.error(), "403 forbidden");
+
+    // レビューの scope を持たない許可では読めない
+    let tasks_only = connect(&app, &[fx.tp.tenant_id], &["read:task"]).await;
+    let denied = call(&app, &tasks_only.access, "list_review_findings", list).await;
+    assert_eq!(denied.error(), "403 forbidden");
+
+    // 対照: `write:review` の許可は起票できる
+    let writer = connect(&app, &[fx.tp.tenant_id], &["write:review"]).await;
+    let created = call(&app, &writer.access, "submit_review", submit)
+        .await
+        .json();
+    assert_eq!(created["round"], 1, "{created}");
 }
 
 #[tokio::test]

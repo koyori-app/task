@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
 use crate::forge::events::{ForgeCommit, ForgeEvent, ForgeRepo, PrAction};
-use crate::forge::pull_requests::PullRequestSnapshot;
+use crate::forge::pull_requests::{HeadRepo, PullRequestSnapshot};
 
 pub const HOST: &str = "github";
 /// GitHub App の連携先は github.com だけなので固定する
@@ -137,6 +137,15 @@ struct GithubPullRequestHead {
     sha: String,
     #[serde(rename = "ref")]
     ref_name: String,
+    /// フォークが消えていると `null`
+    #[serde(default)]
+    repo: Option<GithubHeadRepository>,
+}
+
+#[derive(Deserialize)]
+struct GithubHeadRepository {
+    name: String,
+    owner: PushOwner,
 }
 
 impl GithubPullRequest {
@@ -149,6 +158,10 @@ impl GithubPullRequest {
             merged_at: self.merged_at,
             head_sha: self.head.sha.to_ascii_lowercase(),
             head_branch: self.head.ref_name,
+            head_repo: self.head.repo.map(|repo| HeadRepo {
+                owner: repo.owner.login,
+                name: repo.name,
+            }),
             html_url: self.html_url,
             updated_at: self.updated_at,
         }
@@ -202,6 +215,7 @@ pub fn pull_request_event(
         merged_at: pr.merged_at,
         head_sha: pr.head_sha,
         head_branch: pr.head_branch,
+        head_repo: pr.head_repo,
         html_url: pr.html_url,
         updated_at: pr.updated_at,
     }))
@@ -437,7 +451,8 @@ mod tests {
                 "closed_at": null,
                 "merged_at": null,
                 "merged": false,
-                "head": { "label": "acme:feat/TASK-42-oauth", "ref": "feat/TASK-42-oauth", "sha": "A3F92C1E7B81D4000000000000000000000000AA" },
+                "head": { "label": "acme:feat/TASK-42-oauth", "ref": "feat/TASK-42-oauth", "sha": "A3F92C1E7B81D4000000000000000000000000AA",
+                          "repo": { "id": 2, "name": "backend-fork", "full_name": "someone/backend-fork", "owner": { "login": "someone", "id": 11 } } },
                 "base": { "label": "acme:main", "ref": "main", "sha": "b17cd9000000000000000000000000000000000a" }
             },
             "repository": {
@@ -468,6 +483,11 @@ mod tests {
             merged_at: merged_at.map(|at| at.parse().unwrap()),
             head_sha: "a3f92c1e7b81d4000000000000000000000000aa".into(),
             head_branch: "feat/TASK-42-oauth".into(),
+            // フォークからの PR では送り先（repo）と違うリポジトリになる
+            head_repo: Some(HeadRepo {
+                owner: "someone".into(),
+                name: "backend-fork".into(),
+            }),
             html_url: "https://github.com/acme/backend/pull/87".into(),
             // オフセット付きの時刻は UTC に揃える
             updated_at: "2026-09-10T03:00:00Z".parse().unwrap(),
@@ -528,6 +548,19 @@ mod tests {
             panic!("pull request event");
         };
         assert_eq!(body, "");
+    }
+
+    /// フォークが消えた PR は `head.repo: null` で届く
+    #[test]
+    fn pull_request_from_deleted_fork_has_no_head_repo() {
+        let mut payload = pull_request_fixture("opened");
+        payload["pull_request"]["head"]["repo"] = serde_json::Value::Null;
+        let Some(ForgeEvent::PullRequest { head_repo, .. }) =
+            pull_request_event(&payload).expect("convert")
+        else {
+            panic!("pull request event");
+        };
+        assert_eq!(head_repo, None);
     }
 
     /// 処理しない action は形を問わず捨てる（400 にしない）

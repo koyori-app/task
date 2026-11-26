@@ -1,6 +1,7 @@
 pub mod _generated;
 pub mod audit_logs;
 pub mod device_tokens;
+pub mod drive_file_sections;
 pub mod drive_files;
 pub mod drive_folder_shares;
 pub mod drive_folders;
@@ -9,6 +10,7 @@ pub mod forge_commit_links;
 pub mod forge_commits;
 pub mod forge_pull_request_commits;
 pub mod forge_pull_request_links;
+pub mod forge_pull_request_roles;
 pub mod forge_pull_requests;
 pub mod forge_webhook_deliveries;
 pub mod github_integrations;

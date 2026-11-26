@@ -104,14 +104,16 @@ flowchart TD
 
 DB には snake_case で保存し、API の JSON には enum 名（PascalCase）で出し入れする。例外は `GET /tasks` の `priority` クエリで、こちらは DB 値（`high` など）を受け取る。アクティビティの `payload` も DB 値である。
 
-| DB 値 | JSON の値 | 画面の表示 | 色 |
-|---|---|---|---|
-| `critical_fire` | `CriticalFire` | 緊急 | `#dc2626` |
-| `critical` | `Critical` | 重大 | `#ef4444` |
-| `high` | `High` | 高 | `#f97316` |
-| `medium` | `Medium` | 中 | `#eab308` |
-| `low` | `Low` | 低 | `#6b7280` |
-| `trivial` | `Trivial` | 些細 | `#9ca3af` |
+| DB 値 | JSON の値 | 画面の表示 | 色（暗い配色） | 色（明るい配色） |
+|---|---|---|---|---|
+| `critical_fire` | `CriticalFire` | 緊急 | `#dc2626` | `#dc2626` |
+| `critical` | `Critical` | 重大 | `#ef4444` | `#ef4444` |
+| `high` | `High` | 高 | `#f97316` | `#ea580c` |
+| `medium` | `Medium` | 中 | `#eab308` | `#a16207` |
+| `low` | `Low` | 低 | `#6b7280` | `#6b7280` |
+| `trivial` | `Trivial` | 些細 | `#9ca3af` | `#858b98` |
+
+色は `apps/frontend/src/assets/css/tailwind.css` の `--priority-*` に置く。明るい配色の値は、白地でアイコンに要る 3:1 に届くように濃くしてある。
 
 ### タスク連番 ID
 

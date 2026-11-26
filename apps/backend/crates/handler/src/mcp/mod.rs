@@ -24,9 +24,11 @@ use crate::AppState;
 use crate::extractors::{AuthMethod, AuthUser, McpAudience, bearer_token_from_parts};
 use crate::middlewares::logging::logging_middleware;
 
+mod documents;
 mod inner;
 mod oauth;
 mod resolve;
+mod reviews;
 mod tools;
 
 /// `/mcp` を足したルーターを返す。
@@ -160,7 +162,7 @@ mod tests {
     fn challenge_points_at_the_protected_resource_metadata() {
         assert_eq!(
             bearer_challenge(&settings("https://app.example.com/"), false),
-            "Bearer resource_metadata=\"https://app.example.com/.well-known/oauth-protected-resource/api/mcp\", scope=\"read:tenant read:project read:task write:task read:milestone read:sprint\""
+            "Bearer resource_metadata=\"https://app.example.com/.well-known/oauth-protected-resource/api/mcp\", scope=\"read:tenant read:project read:task write:task read:milestone read:sprint read:review write:review read:drive\""
         );
     }
 
@@ -168,7 +170,7 @@ mod tests {
     fn challenge_for_a_rejected_bearer_names_the_error() {
         assert_eq!(
             bearer_challenge(&settings("https://app.example.com"), true),
-            "Bearer error=\"invalid_token\", resource_metadata=\"https://app.example.com/.well-known/oauth-protected-resource/api/mcp\", scope=\"read:tenant read:project read:task write:task read:milestone read:sprint\""
+            "Bearer error=\"invalid_token\", resource_metadata=\"https://app.example.com/.well-known/oauth-protected-resource/api/mcp\", scope=\"read:tenant read:project read:task write:task read:milestone read:sprint read:review write:review read:drive\""
         );
     }
 

@@ -44,6 +44,8 @@ pub struct Model {
     pub forge_branch_links: HasMany<super::forge_branch_links::Entity>,
     #[sea_orm(has_many)]
     pub forge_pull_request_links: HasMany<super::forge_pull_request_links::Entity>,
+    #[sea_orm(has_many)]
+    pub forge_pull_request_roles: HasMany<super::forge_pull_request_roles::Entity>,
     #[sea_orm(
         belongs_to,
         from = "milestone_id",

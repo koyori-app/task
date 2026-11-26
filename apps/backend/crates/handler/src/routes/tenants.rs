@@ -135,6 +135,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::forge::get_task_forge))
                         .routes(routes!(crate::handlers::forge::link_task_pull_request))
                         .routes(routes!(crate::handlers::forge::unlink_task_pull_request))
+                        .routes(routes!(crate::handlers::forge::set_task_pull_request_role))
                         .routes(routes!(crate::handlers::forge::delete_task_forge_branch))
                         .routes(routes!(crate::handlers::time_tracking::get_time_summary))
                         .routes(routes!(crate::handlers::time_tracking::list_time_logs))
@@ -218,6 +219,11 @@ pub fn routes() -> OpenApiRouter<AppState> {
                         .routes(routes!(crate::handlers::labels::delete_label))
                         .routes(routes!(crate::handlers::labels::export_labels))
                         .routes(routes!(crate::handlers::labels::import_labels)),
+                )
+                .nest(
+                    "/{project_id}/documents",
+                    OpenApiRouter::<AppState>::new()
+                        .routes(routes!(crate::handlers::documents::search_documents)),
                 )
                 .nest(
                     "/{project_id}/task-types",

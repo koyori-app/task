@@ -18,10 +18,18 @@ const FORGE_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/for
 const ACKNOWLEDGE_PATH =
   '/v1/tenants/{tenant_id}/projects/{project_id}/forge/pull-requests/{pull_request_id}/merge-effects/acknowledge' as const;
 
-const props = defineProps<{
-  tenantId: string;
-  pullRequest: components['schemas']['TaskForgePullRequest'];
-}>();
+const props = withDefaults(
+  defineProps<{
+    tenantId: string;
+    pullRequest: components['schemas']['TaskForgePullRequest'];
+    /**
+     * `badge`（既定）は札を描き、押すと確認のダイアログを開く。`none` は札を描かず、
+     * 外（実装 PR のピルのメニュー）から `openDialog` で開く。ダイアログの持ち主はどちらもここ。
+     */
+    trigger?: 'badge' | 'none';
+  }>(),
+  { trigger: 'badge' },
+);
 
 const pending = computed(
   () => props.pullRequest.state === 'merged' && !props.pullRequest.merge_effects_processed_at,
@@ -38,6 +46,8 @@ function openDialog() {
   error.value = null;
   open.value = true;
 }
+
+defineExpose({ openDialog });
 
 function onClose() {
   // 送信中に閉じると結果を見逃す
@@ -72,8 +82,9 @@ async function acknowledge() {
 <template>
   <template v-if="pending">
     <button
+      v-if="trigger === 'badge'"
       type="button"
-      class="shrink-0 rounded border border-amber-500/50 px-1 text-xs text-amber-700 hover:bg-amber-500/10 dark:text-amber-400"
+      class="shrink-0 rounded-md border border-amber-500/50 px-1 text-xs text-amber-700 hover:bg-amber-500/10 dark:text-amber-400"
       data-merge-effects-badge
       @click="openDialog"
     >

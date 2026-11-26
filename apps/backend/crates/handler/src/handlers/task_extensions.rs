@@ -17,6 +17,7 @@ use entity::{
     task_attachments, task_labels, tasks,
 };
 use payload::task_extensions::*;
+use payload::tasks::TaskResponse;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, ConnectionTrait, EntityTrait,
@@ -27,7 +28,7 @@ use service::db::is_postgres_unique_violation;
 use service::task_activities::{
     record_activity, record_label_diff, status_name, task_label_entries,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 const BULK_MAX_TASKS: usize = 100;
 
@@ -120,22 +121,35 @@ pub async fn similar_tasks(
 
     let title = normalize_similar_title(&q.title)?;
 
-    let tasks = service::tasks::find_similar(
+    let hits = service::tasks::find_similar(
         &state.db,
         project_id,
         title,
         q.exclude_task_id,
         q.limit.min(20),
     )
-    .await?
-    .into_iter()
-    .map(|t| SimilarTaskHit {
-        id: t.id,
-        seq_id: t.seq_id,
-        title: t.title,
-        score: t.score,
-    })
-    .collect();
+    .await?;
+    let models = tasks::Entity::find()
+        .filter(tasks::Column::Id.is_in(hits.iter().map(|hit| hit.id)))
+        .filter(tasks::Column::DeletedAt.is_null())
+        .all(&state.db)
+        .await?;
+    let mut by_id: HashMap<Uuid, TaskResponse> =
+        service::task_responses::build_task_responses(&state.db, models)
+            .await?
+            .into_iter()
+            .map(|task| (task.id, task))
+            .collect();
+    // 類似度の順（find_similar の順）を保つ。2 本のクエリの間に消えたタスクは落とす
+    let tasks = hits
+        .into_iter()
+        .filter_map(|hit| {
+            by_id.remove(&hit.id).map(|task| SimilarTaskHit {
+                task,
+                score: hit.score,
+            })
+        })
+        .collect();
 
     Ok(Json(SimilarTasksResponse { tasks }))
 }

@@ -109,7 +109,17 @@ export function normalizeQueryValue(key: TaskQueryKey | string, value: string): 
   if ((key !== 'assignee' && key !== 'author') || lower === '@me') return lower;
   return lower.replace(/^@/, '');
 }
-export function valueCandidates(key: TaskQueryKey, prefix: string, data: SuggestData): Candidate[] {
+/**
+ * 値をちょうど 1 つしか取らないキー。backend の `task_query/parse.rs` の規則（no / is / sort は値が 1 つ）と揃える。
+ * 候補を選んだ時点で検索を確定し、続けて値を選ばせない。
+ */
+const SINGLE_VALUE_KEYS: readonly TaskQueryKey[] = ['no', 'is', 'sort'];
+export function valueCandidates(
+  key: TaskQueryKey,
+  prefix: string,
+  data: SuggestData,
+  chosen: string[] = [],
+): Candidate[] {
   let choices: Candidate[] = [];
   const facet =
     key === 'status'
@@ -158,14 +168,17 @@ export function valueCandidates(key: TaskQueryKey, prefix: string, data: Suggest
     key === 'assignee' || key === 'author' ? v.toLowerCase().replace(/^@/, '') : normalize(v);
   const p = normalize(prefix);
   const lp = loose(prefix);
+  const picked = new Set(chosen.map(normalize));
   choices = choices
+    .filter((c) => !picked.has(normalize(c.value)))
     .filter((c) => loose(c.value).includes(lp))
     .sort(
       (a, b) =>
         Number(normalize(a.value) !== p) - Number(normalize(b.value) !== p) ||
         Number(!loose(a.value).startsWith(lp)) - Number(!loose(b.value).startsWith(lp)),
     );
-  if (key === 'label' || key === 'assignee')
+  // 「なし」の行は選んだ値を捨てて no: に置き換えるので、値を選んだあとは出さない
+  if ((key === 'label' || key === 'assignee') && chosen.length === 0)
     choices.push({
       value: key,
       label: key === 'label' ? 'ラベルなし' : '担当者なし',
@@ -178,13 +191,24 @@ export function applySuggestion(
   draft: string,
   context: SuggestContext,
   candidate: Candidate,
-): { draft: string; commit: boolean } {
-  const text =
-    context.kind === 'keys'
-      ? `${context.negated ? '-' : ''}${candidate.value}:`
-      : `${context.negated ? '-' : ''}${candidate.key ?? context.key}:${[...(candidate.key ? [] : context.chosen), candidate.value].map(quoteValue).join(',')}`;
+): { draft: string; caret: number; commit: boolean } {
+  let text: string;
+  let commit = false;
+  if (context.kind === 'keys') text = `${context.negated ? '-' : ''}${candidate.value}:`;
+  else {
+    const body = `${context.negated ? '-' : ''}${candidate.key ?? context.key}:${[...(candidate.key ? [] : context.chosen), candidate.value].map(quoteValue).join(',')}`;
+    // 入力と完全に一致する候補・値が 1 つのキー・「なし」の行は選んだ時点で確定する。
+    // ほかは値のあとにカンマを足して確定せず、続けて残りの値を選ばせる
+    const exact =
+      !candidate.key &&
+      normalizeQueryValue(context.key, candidate.value) ===
+        normalizeQueryValue(context.key, context.prefix);
+    commit = !!candidate.key || SINGLE_VALUE_KEYS.includes(context.key) || exact;
+    text = commit ? body : `${body},`;
+  }
   return {
     draft: draft.slice(0, context.range[0]) + text + draft.slice(context.range[1]),
-    commit: context.kind === 'values',
+    caret: context.range[0] + text.length,
+    commit,
   };
 }

@@ -1039,6 +1039,47 @@ export const ListView: Story = {
   },
 };
 
+/** 点の位置にある要素（elementFromPoint）。要素の中心を指す */
+function hitAtCenter(el: Element): Element | null {
+  // 画面の外では elementFromPoint が null を返すので、画面幅に依らないよう先に寄せる
+  el.scrollIntoView({ block: 'center', inline: 'center' });
+  const rect = el.getBoundingClientRect();
+  return document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+}
+
+/**
+ * スマホの幅の List 表示の当たり判定（TASK-524）。タイトルと 2 段目の全体で詳細を開き、
+ * ID の中心はコピーのボタンに当たる。列の切り替えは一覧の幅の container query なので、
+ * test-runner の画面幅によらず幅 390px の枠で狭い表示にする。
+ */
+export const ListViewNarrowHitArea: Story = {
+  name: 'List 表示の狭い幅の当たり判定',
+  decorators: [
+    storyDecorator(listContext),
+    () => ({ template: '<div style="width: 390px"><story /></div>' }),
+  ],
+  beforeEach: mockFetch,
+  play: async ({ canvasElement }) => {
+    const summary = await waitFor(() => {
+      const el = canvasElement.querySelector<HTMLElement>('[data-row-summary]');
+      if (!el || el.getBoundingClientRect().width === 0) throw new Error('2 段目がまだ出ていない');
+      return el;
+    });
+    const row = summary.closest<HTMLElement>('[data-dnd-task]')!;
+    const title = row.querySelector('[data-task-title-open]')!;
+    // 2 段目の期限・優先度の文字は、タイトルのボタン（after の的）に当たる
+    for (const text of summary.querySelectorAll(':scope > span')) {
+      await expect(hitAtCenter(text)?.closest('[data-task-title-open]')).toBe(title);
+    }
+    // ID の中心はコピーのボタン
+    const copy = summary.querySelector('[data-task-id-copy]')!;
+    await expect(hitAtCenter(copy)?.closest('[data-task-id-copy]')).toBe(copy);
+    // 未選択でもサブタスクの矢印が見えて押せる
+    const toggle = row.querySelector('button[aria-label="サブタスクを展開"]')!;
+    await expect(hitAtCenter(toggle)?.closest('button')).toBe(toggle);
+  },
+};
+
 // 共有の sampleTasks は書き換えない（既存の List 表示のストーリーの見た目が変わるため）
 export const ListViewChecklistProgress: Story = {
   name: 'List 表示のチェックリスト達成率',
@@ -1483,7 +1524,8 @@ export const ListViewSubtasks: Story = {
     const user = userEvent.setup();
     const row = await canvas.findByLabelText('タスク「OAuth 対応を実装する」を選択');
     const toggle = within(row).getByRole('button', { name: 'サブタスクを展開' });
-    await expect(toggle).toHaveClass('opacity-0');
+    // 広い幅では、選択するまで矢印を隠す（狭い幅は常に出す）
+    await expect(toggle).toHaveClass('@3xl:opacity-0');
 
     await user.click(row);
     await expect(toggle).toHaveClass('opacity-100');
@@ -1612,7 +1654,8 @@ export const ListViewOverlaySubtaskBack: Story = {
 
     await user.click(await canvas.findByRole('button', { name: 'OAuth 対応を実装する' }));
     const dialog = await screen.findByRole('dialog');
-    await user.click(await within(dialog).findByRole('button', { name: /PKCE の検証を追加する/ }));
+    // サブタスクは一覧の行で、題のリンクを押すと開く
+    await user.click(await within(dialog).findByRole('link', { name: 'PKCE の検証を追加する' }));
     await expectOverlayHeading('PKCE の検証を追加する');
 
     // 子で Esc → 閉じずに親へ戻る

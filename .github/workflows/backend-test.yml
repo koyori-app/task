@@ -97,3 +97,122 @@ jobs:
       - name: Run tests
         run: cargo nextest run
         working-directory: apps/backend
+
+  # 上の test は既定の package（backend）だけを撃つ。ほかの crate の試験は下の三つの job で撃ち、
+  # 壁時計を延ばさぬよう並べる（task-cli は CLI Unit Test が撃つ）
+  workspace-crates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      ARGON2_TEST_MODE: "true"
+      SQLX_OFFLINE: "true"
+      CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        run: rustup toolchain install
+
+      - name: Install mold
+        run: sudo apt-get install -y mold
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: apps/backend -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-nextest
+
+      - name: Run tests
+        run: cargo nextest run --workspace --exclude backend --exclude task-cli
+        working-directory: apps/backend
+
+  # nextest は doc の試験を撃たぬ
+  doc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      SQLX_OFFLINE: "true"
+      CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        run: rustup toolchain install
+
+      - name: Install mold
+        run: sudo apt-get install -y mold
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: apps/backend -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Run doc tests
+        run: cargo test --workspace --doc
+        working-directory: apps/backend
+
+  # migration は workspace の外の crate（自分の Cargo.lock と target を持つ）
+  migration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres@sha256:2203e6282d9e7de7c24d7da234e2a744fb325df366a3fd8ed940e8abbee39527 # 17.10-trixie
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # 試験は使い捨ての DB をこの server に作る（tests/*.rs）
+      TEST_DATABASE_URL: postgresql://test:test@localhost:5432/test
+      CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        run: rustup toolchain install
+
+      - name: Install mold
+        run: sudo apt-get install -y mold
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: apps/backend/migration -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Run tests
+        run: cargo test
+        working-directory: apps/backend/migration

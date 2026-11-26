@@ -3,14 +3,15 @@ import { GitBranch, X } from '@lucide/vue';
 import { useQueryClient } from '@tanstack/vue-query';
 import { ref } from 'vue';
 
-import { Button } from '@koyori-app/ui-vue';
+import { Button, HoverCard } from '@koyori-app/ui-vue';
+import ForgeBranchCard from '@/components/tasks/ForgeBranchCard.vue';
 import type { components } from '@/generated/api';
 import { fetchClient } from '@/lib/api-vue-query';
 import { httpUrl } from '@/lib/task-activity';
 
 /**
- * リポジトリセクションの Branches 一覧（docs/dev/features/tasks/github-tasks/index.md の「画面」）。
- * ブランチ名の `KEY-N` で結ばれたブランチを並べ、リンクを外せる。
+ * リポジトリ欄の「ブランチ」タブの中身（docs/dev/features/tasks/github-tasks/index.md の「画面」）。
+ * ブランチ名の `KEY-N` で結ばれたブランチを並べ、リンクを外せる。見出しはタブが持つ。
  */
 const FORGE_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/tasks/{id}/forge' as const;
 const BRANCH_PATH =
@@ -60,32 +61,35 @@ async function unlink(linkId: string) {
 </script>
 
 <template>
-  <div class="space-y-1">
-    <h3 class="text-xs font-medium text-muted-foreground">Branches</h3>
-    <ul class="space-y-1">
+  <div>
+    <ul class="divide-y divide-border/60">
       <li
         v-for="branch in branches"
         :key="branch.id"
-        class="flex items-center gap-2 text-sm"
+        class="flex min-h-12 items-center gap-2 py-1.5 text-sm"
         data-forge-branch
       >
         <GitBranch class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <a
-          v-if="httpUrl(branch.html_url)"
-          :href="httpUrl(branch.html_url)!"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="min-w-0 flex-1 truncate font-mono text-xs hover:underline"
-          :title="branch.branch"
-          >{{ branch.branch }}</a
-        >
-        <span v-else class="min-w-0 flex-1 truncate font-mono text-xs" :title="branch.branch">{{
-          branch.branch
-        }}</span>
+        <HoverCard :label="`${branch.branch} のブランチ`">
+          <span class="min-w-0 flex-1">
+            <a
+              v-if="httpUrl(branch.html_url)"
+              :href="httpUrl(branch.html_url)!"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="block truncate font-mono text-xs font-medium hover:underline"
+              >{{ branch.branch }}</a
+            >
+            <span v-else class="block truncate font-mono text-xs font-medium">{{
+              branch.branch
+            }}</span>
+          </span>
+          <template #content><ForgeBranchCard :branch="branch" /></template>
+        </HoverCard>
         <Button
           type="button"
           variant="ghost"
-          class="shrink-0"
+          class="ml-auto shrink-0"
           :ariaLabel="`${branch.branch} のリンクを外す`"
           :disabled="removingId === branch.id"
           @click="unlink(branch.id)"
@@ -94,6 +98,6 @@ async function unlink(linkId: string) {
         </Button>
       </li>
     </ul>
-    <p v-if="errorMessage" class="text-sm text-destructive" role="alert">{{ errorMessage }}</p>
+    <p v-if="errorMessage" class="mt-1 text-sm text-destructive" role="alert">{{ errorMessage }}</p>
   </div>
 </template>

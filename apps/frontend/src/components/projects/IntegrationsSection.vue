@@ -6,9 +6,11 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Button, Dialog, Input } from '@koyori-app/ui-vue';
 import { apiClient, fetchClient } from '@/lib/api-vue-query';
 import {
+  forgetAuthorizeToken as discardAuthorizeToken,
   forgetSelectToken as discardSelectToken,
   keepSelectToken,
   stashSelectTokenFromUrl,
+  takeAuthorizeToken,
   takeSelectToken,
 } from '@/lib/github-select-token';
 
@@ -22,6 +24,16 @@ const GITHUB_IMPORT_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/github
 const GITHUB_INSTALLATIONS_PATH =
   '/v1/tenants/{tenant_id}/projects/{project_id}/github/installations' as const;
 const GITHUB_REUSE_PATH = '/v1/tenants/{tenant_id}/projects/{project_id}/github/reuse' as const;
+const GITHUB_AUTHORIZE_PATH =
+  '/v1/tenants/{tenant_id}/projects/{project_id}/github/authorize' as const;
+const GITHUB_AUTHORIZED_INSTALLATIONS_PATH =
+  '/v1/tenants/{tenant_id}/projects/{project_id}/github/authorized-installations' as const;
+const GITHUB_AUTHORIZED_SELECT_PATH =
+  '/v1/tenants/{tenant_id}/projects/{project_id}/github/authorized-installations/select' as const;
+
+/** 認可トークンが切れた（または使えなくなった）ときの案内 */
+const AUTHORIZE_EXPIRED_MESSAGE =
+  '確認の有効期限が切れました。もう一度「インストール済みのアカウント・組織を GitHub で確認」を押してください。';
 
 /** 取り込み開始が成功したあと、再度押せるようになるまでの待ち時間（ミリ秒） */
 const IMPORT_COOLDOWN_MS = 60_000;
@@ -46,6 +58,9 @@ const CALLBACK_ERRORS: Record<string, string> = {
   installation_authorization_required:
     'GitHub App の設定でユーザー認可が有効になっていないため、連携できませんでした。管理者に設定の確認を依頼してください。',
   github_unavailable: 'GitHub と通信できませんでした。時間をおいて、もう一度お試しください。',
+  authorization_denied: 'GitHub での確認を完了できませんでした。もう一度お試しください。',
+  no_installations:
+    'あなたの GitHub アカウントから使えるインストールがありません。「別の GitHub アカウント・組織を追加」からインストールしてください。',
 };
 
 // callback が付けた値は、読んだらすぐ URL から落とす（下の clearCallbackQuery）。
@@ -76,8 +91,26 @@ const connectPending = ref(false);
  * もう一方の選択状態を消してしまう。
  */
 const selectionBusy = computed(
-  () => selectPending.value || connectPending.value || reusePendingId.value !== null,
+  () =>
+    selectPending.value ||
+    connectPending.value ||
+    reusePendingId.value !== null ||
+    authorizedSelectPendingId.value !== null,
 );
+/**
+ * 認可トークン。GitHub のユーザー認可から戻ったときに callback がフラグメントで渡す。
+ * 他のテナントで連携済みのアカウント・組織は「利用中」の候補に出ないので、GitHub に
+ * 利用者が見えるインストールを答えさせ、その候補をこのトークンで引く。
+ */
+const authorizeToken = ref<string | null>(null);
+/** GitHub で確認したアカウント・組織（null は未取得） */
+const authorizedInstallations = ref<{ candidate_id: string; account_login: string }[] | null>(null);
+const authorizedPending = ref(false);
+const authorizedError = ref<string | null>(null);
+/** 選択を確かめている候補（二重押し防止と表示用） */
+const authorizedSelectPendingId = ref<string | null>(null);
+const authorizeError = ref<string | null>(null);
+const authorizePending = ref(false);
 const addAccessError = ref<string | null>(null);
 const importError = ref<string | null>(null);
 const importStarted = ref(false);
@@ -98,6 +131,12 @@ const disconnectMutation = apiClient.useMutation('delete', GITHUB_INTEGRATION_PA
 const importMutation = apiClient.useMutation('post', GITHUB_IMPORT_PATH);
 
 const integration = computed(() => integrationQuery.data.value);
+
+/**
+ * 連携を変えられるか。式は backend が持ち、ここでは答えだけを使う。
+ * 未取得の間は変えられない側に倒す（操作のボタンはその間は出ない）。
+ */
+const canManage = computed(() => integration.value?.can_manage === true);
 
 const importDisabled = computed(() => importMutation.isPending.value || importCoolingDown.value);
 
@@ -196,9 +235,11 @@ onMounted(() => {
   // このセクションだけが立ち上がる経路（テスト・将来のマウント順の変更）の保険。
   stashSelectTokenFromUrl();
   selectToken.value = takeSelectToken(props.projectId);
+  authorizeToken.value = takeAuthorizeToken(props.projectId);
   callbackError.value = CALLBACK_ERRORS[search.get('github_error') ?? ''] ?? null;
   clearCallbackQuery();
   void loadRepositories();
+  void loadAuthorizedInstallations();
 });
 
 /** 数百リポジトリの org でも目的のものへ辿り着けるよう、owner/name の部分一致で絞る。 */
@@ -211,6 +252,7 @@ const filteredRepositories = computed(() => {
 });
 
 async function connectRepository(owner: string, name: string) {
+  if (!canManage.value) return;
   const token = selectToken.value;
   if (!token) return;
   selectError.value = null;
@@ -233,6 +275,8 @@ async function connectRepository(owner: string, name: string) {
       throw new Error('connect-failed');
     }
     forgetSelectToken();
+    forgetAuthorizeToken();
+    authorizedError.value = null;
     candidates.value = null;
     candidatesError.value = null;
     addAccessError.value = null;
@@ -283,6 +327,7 @@ watch(
 );
 
 async function startInstall() {
+  if (!canManage.value) return;
   installError.value = null;
   installPending.value = true;
   try {
@@ -305,6 +350,15 @@ async function startInstall() {
  * 取得に失敗しても GitHub へは自動で転送しない。
  */
 async function loadCandidates() {
+  if (!canManage.value) return;
+  await fetchCandidates();
+}
+
+/**
+ * 候補を取る。認可トークンの期限切れ（`expireAuthorizeToken`）は連携状態の取得より先に
+ * 起きることがあるので、そこからはこちらを直に呼ぶ。変えられない人には API が 403 を返す。
+ */
+async function fetchCandidates() {
   candidatesError.value = null;
   candidatesPending.value = true;
   try {
@@ -321,6 +375,7 @@ async function loadCandidates() {
 }
 
 async function reuseInstallation(sourceIntegrationId: string) {
+  if (!canManage.value) return;
   candidatesError.value = null;
   selectError.value = null;
   reusePendingId.value = sourceIntegrationId;
@@ -357,10 +412,136 @@ async function reuseInstallation(sourceIntegrationId: string) {
 }
 
 /**
+ * 「インストール済みのアカウント・組織を GitHub で確認」: GitHub のユーザー認可へ進む。
+ * インストール済みのアカウント・組織でインストール画面へ進むと、GitHub は既存の
+ * インストールの設定画面を出すだけで連携を完了できない。認可から戻ると、利用者が
+ * 見えるインストールが候補に出る。
+ */
+async function startAuthorize() {
+  if (!canManage.value) return;
+  authorizeError.value = null;
+  authorizePending.value = true;
+  try {
+    const { data, error } = await fetchClient.GET(GITHUB_AUTHORIZE_PATH, {
+      params: { path: { tenant_id: props.tenantId, project_id: props.projectId } },
+    });
+    if (error || !data) throw new Error('authorize-url-unavailable');
+    // GitHub のユーザー認可の画面（外部 URL）へ遷移する
+    window.location.assign(data.url);
+  } catch {
+    authorizeError.value = 'GitHub の確認画面の URL を取得できませんでした';
+    authorizePending.value = false;
+  }
+}
+
+function forgetAuthorizeToken() {
+  authorizeToken.value = null;
+  authorizedInstallations.value = null;
+  discardAuthorizeToken(props.projectId);
+}
+
+/**
+ * 認可トークンが使えなくなった。捨てて、やり直しの入口を出す。
+ * 案内するボタンは候補のパネルにあるので、まだ開いていなければ開く。
+ */
+function expireAuthorizeToken() {
+  forgetAuthorizeToken();
+  authorizedError.value = AUTHORIZE_EXPIRED_MESSAGE;
+  if (!candidates.value && !candidatesPending.value) void fetchCandidates();
+}
+
+/** GitHub で確認したアカウント・組織を、認可トークンで引く */
+async function loadAuthorizedInstallations() {
+  const token = authorizeToken.value;
+  if (!token) return;
+  authorizedError.value = null;
+  authorizedPending.value = true;
+  try {
+    // 選択トークンと同じく、クエリではなくヘッダーに載せる（アクセスログに残さない）。
+    const { data, error, response } = await fetchClient.GET(GITHUB_AUTHORIZED_INSTALLATIONS_PATH, {
+      params: {
+        path: { tenant_id: props.tenantId, project_id: props.projectId },
+        header: { 'X-Github-Authorize-Token': token },
+      },
+    });
+    if (error || !data) {
+      // トークンが無効なのは 400 / 403 のときだけ。401 や 5xx では捨てずに再試行させる。
+      if (response.status === 400 || response.status === 403) {
+        expireAuthorizeToken();
+        return;
+      }
+      throw new Error('authorized-installations-unavailable');
+    }
+    authorizedInstallations.value = data.installations;
+  } catch {
+    authorizedError.value = 'GitHub で確認したアカウント・組織を取得できませんでした';
+  } finally {
+    authorizedPending.value = false;
+  }
+}
+
+async function selectAuthorizedInstallation(candidateId: string) {
+  if (!canManage.value) return;
+  const token = authorizeToken.value;
+  if (!token) return;
+  authorizedError.value = null;
+  selectError.value = null;
+  authorizedSelectPendingId.value = candidateId;
+  try {
+    const { data, error, response } = await fetchClient.POST(GITHUB_AUTHORIZED_SELECT_PATH, {
+      params: { path: { tenant_id: props.tenantId, project_id: props.projectId } },
+      body: { authorize_token: token, candidate_id: candidateId },
+    });
+    if (error || !data) {
+      const reason = (error as { message?: unknown } | undefined)?.message;
+      if (response.status === 403 && reason === 'github-installation-admin-required') {
+        // 利用者の権限が足りないだけで、トークンは生きている（別の候補は選べる）
+        authorizedError.value =
+          'このアカウント・組織を連携するには、GitHub App が見えるすべてのリポジトリの管理者権限が必要です。Organization のオーナーに連携を依頼してください。';
+        return;
+      }
+      if (response.status === 400 || response.status === 403) {
+        expireAuthorizeToken();
+        return;
+      }
+      if (response.status === 409 && reason === 'github-installation-repositories-incomplete') {
+        // リポジトリが多すぎて全件の権限を確かめられない。トークンは生きている
+        authorizedError.value =
+          'このインストールのリポジトリを全件確認できませんでした。リポジトリが 10,000 件を超える場合は、この方法では連携できません。';
+        return;
+      }
+      if (response.status === 409) {
+        authorizedError.value =
+          'このインストールにはリポジトリが 1 件も含まれていません。GitHub 側でリポジトリを追加してから、もう一度お試しください。';
+        return;
+      }
+      if (response.status === 410) {
+        authorizedError.value =
+          'このアカウント・組織では GitHub App が削除されています。「別の GitHub アカウント・組織を追加」から連携してください。';
+        return;
+      }
+      throw new Error('authorized-select-failed');
+    }
+    // 以降は再利用と同じ（選択トークンでリポジトリを選ぶ）
+    keepSelectToken(props.projectId, data.select_token);
+    selectToken.value = data.select_token;
+    repositories.value = [];
+    repositoryFilter.value = '';
+    await loadRepositories();
+  } catch {
+    // 一時障害。トークンは捨てず、同じ候補を選び直せるようにする
+    authorizedError.value = 'このアカウント・組織を選べませんでした。もう一度お試しください。';
+  } finally {
+    authorizedSelectPendingId.value = null;
+  }
+}
+
+/**
  * 目的のリポジトリが無いとき、GitHub 側でアクセス対象を足してもらう。
  * 戻りの callback には頼らず、この画面の「再読み込み」で続けられるよう別タブで開く。
  */
 async function openGithubAccessSettings() {
+  if (!canManage.value) return;
   addAccessError.value = null;
   // URL の取得を待ってから開くとポップアップブロックに掛かるので、先に空のタブを開いておく
   const tab = window.open('', '_blank');
@@ -378,6 +559,7 @@ async function openGithubAccessSettings() {
 }
 
 async function startImport() {
+  if (!canManage.value) return;
   importError.value = null;
   importStarted.value = false;
   try {
@@ -397,11 +579,14 @@ async function startImport() {
 function onDisconnectOpenChange(open: boolean) {
   // 解除リクエスト進行中はダイアログを閉じない（結果の見逃し防止）
   if (!open && disconnectMutation.isPending.value) return;
+  // 閉じる側は止めない（開いたままロールを外されても閉じられる）
+  if (open && !canManage.value) return;
   if (open) disconnectError.value = null;
   isDisconnectOpen.value = open;
 }
 
 async function confirmDisconnect() {
+  if (!canManage.value) return;
   disconnectError.value = null;
   try {
     await disconnectMutation.mutateAsync({
@@ -458,13 +643,14 @@ async function confirmDisconnect() {
           <Button
             type="button"
             variant="tertiary"
-            :disabled="importDisabled"
+            :disabled="!canManage || importDisabled"
             :label="importLabel"
             @click="startImport"
           />
           <Button
             type="button"
             variant="tertiary"
+            :disabled="!canManage"
             label="連携を解除"
             @click="onDisconnectOpenChange(true)"
           />
@@ -473,21 +659,25 @@ async function confirmDisconnect() {
           v-else
           type="button"
           class="shrink-0"
-          :disabled="candidatesPending"
+          :disabled="!canManage || candidatesPending"
           :label="candidatesPending ? '読み込み中…' : '連携する'"
           @click="loadCandidates"
         />
       </div>
+      <p v-if="!canManage" class="text-sm text-muted-foreground">
+        連携の設定を変えられるのは、テナントのオーナーと Admin、プロジェクトの Admin です。
+      </p>
       <p v-if="callbackError" role="alert" class="text-sm text-destructive">{{ callbackError }}</p>
 
       <!-- 同じテナントで利用中のアカウント・組織を選ばせる。無ければ新しくインストールする -->
       <div
-        v-if="!integration?.connected && (candidates || candidatesError)"
+        v-if="canManage && !integration?.connected && (candidates || candidatesError)"
         class="rounded-[10px] border p-4"
       >
         <p class="text-sm font-medium">GitHub アカウント・組織を選択</p>
         <p class="mt-0.5 text-xs text-muted-foreground">
-          このテナントの他のプロジェクトで連携中のアカウント・組織を使えます。
+          このテナントの他のプロジェクトで連携中のアカウント・組織を使えます。他のテナントで連携済みのアカウント・組織は、GitHub
+          で確認すると選べます。
         </p>
         <p v-if="candidates && !candidates.length" class="mt-3 text-sm text-muted-foreground">
           利用中の GitHub アカウント・組織はありません。
@@ -522,21 +712,85 @@ async function confirmDisconnect() {
             @click="loadCandidates"
           />
         </div>
-        <Button
-          type="button"
-          variant="tertiary"
-          class="mt-3"
-          :disabled="installPending"
-          :label="installPending ? '接続中…' : '別の GitHub アカウント・組織を追加'"
-          @click="startInstall"
-        />
+        <div class="mt-3 flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="tertiary"
+            :disabled="installPending"
+            :label="installPending ? '接続中…' : '別の GitHub アカウント・組織を追加'"
+            @click="startInstall"
+          />
+          <Button
+            type="button"
+            variant="tertiary"
+            :disabled="authorizePending"
+            :label="
+              authorizePending ? '接続中…' : 'インストール済みのアカウント・組織を GitHub で確認'
+            "
+            @click="startAuthorize"
+          />
+        </div>
         <p v-if="installError" role="alert" class="mt-3 text-sm text-destructive">
           {{ installError }}
         </p>
+        <p v-if="authorizeError" role="alert" class="mt-3 text-sm text-destructive">
+          {{ authorizeError }}
+        </p>
+      </div>
+
+      <!-- GitHub のユーザー認可で確かめた、利用者が見えるアカウント・組織（他のテナントで連携済みのものを含む） -->
+      <div
+        v-if="canManage && (authorizeToken || authorizedError)"
+        class="rounded-[10px] border p-4"
+      >
+        <p class="text-sm font-medium">GitHub で確認したアカウント・組織</p>
+        <p class="mt-0.5 text-xs text-muted-foreground">
+          あなたの GitHub アカウントから使える、GitHub App
+          をインストール済みのアカウント・組織です。
+        </p>
+        <p
+          v-if="authorizeToken && authorizedPending && !authorizedInstallations"
+          role="status"
+          class="mt-3 text-sm text-muted-foreground"
+        >
+          アカウント・組織を読み込み中…
+        </p>
+        <ul v-else-if="authorizedInstallations" class="mt-3 flex flex-col gap-1.5">
+          <li
+            v-for="installation in authorizedInstallations"
+            :key="installation.candidate_id"
+            class="flex items-center gap-3 rounded-md border p-2.5"
+          >
+            <span class="min-w-0 flex-1 truncate font-mono text-sm">{{
+              installation.account_login
+            }}</span>
+            <Button
+              type="button"
+              variant="tertiary"
+              class="shrink-0"
+              :disabled="selectionBusy"
+              :label="
+                authorizedSelectPendingId === installation.candidate_id ? '確認中…' : 'これを使う'
+              "
+              @click="selectAuthorizedInstallation(installation.candidate_id)"
+            />
+          </li>
+        </ul>
+        <div v-if="authorizedError" class="mt-3 flex items-center gap-3">
+          <p role="alert" class="text-sm text-destructive">{{ authorizedError }}</p>
+          <Button
+            v-if="authorizeToken && !authorizedInstallations"
+            type="button"
+            variant="tertiary"
+            :disabled="authorizedPending"
+            label="再試行"
+            @click="loadAuthorizedInstallations"
+          />
+        </div>
       </div>
 
       <!-- インストールに複数リポジトリが含まれるとき、連携先を 1 件選ばせる -->
-      <div v-if="selectToken || selectError" class="rounded-[10px] border p-4">
+      <div v-if="canManage && (selectToken || selectError)" class="rounded-[10px] border p-4">
         <p class="text-sm font-medium">連携するリポジトリを選択</p>
         <p class="mt-0.5 text-xs text-muted-foreground">
           このインストールから 1 つのリポジトリをプロジェクトに紐付けます。
@@ -661,7 +915,7 @@ async function confirmDisconnect() {
         <Button
           type="button"
           variant="danger"
-          :disabled="disconnectMutation.isPending.value"
+          :disabled="!canManage || disconnectMutation.isPending.value"
           :label="disconnectMutation.isPending.value ? '解除中…' : '解除する'"
           @click="confirmDisconnect"
         />

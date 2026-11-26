@@ -90,7 +90,11 @@ pub(crate) fn pr_payload(
             "updated_at": updated_at,
             "merged_at": null,
             "merged": false,
-            "head": { "ref": "feat/oauth", "sha": "a3f92c1e7b81d4000000000000000000000000aa" },
+            "head": {
+                "ref": "feat/oauth",
+                "sha": "a3f92c1e7b81d4000000000000000000000000aa",
+                "repo": { "name": REPO_NAME, "owner": { "login": REPO_OWNER } }
+            },
             "base": { "ref": "main", "sha": "b17cd9000000000000000000000000000000000a" }
         },
         "repository": { "name": REPO_NAME, "owner": { "login": REPO_OWNER } },

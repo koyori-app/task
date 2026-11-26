@@ -3,6 +3,7 @@ import { computed, ref, toValue, type MaybeRefOrGetter } from 'vue';
 
 import { fetchClient } from '@/lib/api-vue-query';
 import type { components } from '@/generated/api';
+import { SIMILAR_TASKS_PATH } from '@/composables/useSimilarTasks';
 import { ACTIVITIES_PATH } from '@/composables/useTaskActivities';
 import { TASK_RELATIONS_PATH } from '@/composables/useTaskSubtasks';
 import { UNSCHEDULED_PATH } from '@/lib/gantt/unscheduled';
@@ -84,6 +85,8 @@ export function useTaskRowMutations(params: TaskRowMutationsParams) {
       queryClient.invalidateQueries({ queryKey: ['get', TASK_SEARCH_PATH] }),
       queryClient.invalidateQueries({ queryKey: ['get', GET_TASK_PATH] }),
       queryClient.invalidateQueries({ queryKey: ['get', TASK_RELATIONS_PATH] }),
+      // 詳細の「似ているタスク」の行もステータスを持つ
+      queryClient.invalidateQueries({ queryKey: ['get', SIMILAR_TASKS_PATH] }),
       // 履歴も backend が積むので落とす（詳細のアクティビティ欄が古いまま残る）
       queryClient.invalidateQueries({ queryKey: ['get', ACTIVITIES_PATH] }),
       queryClient.invalidateQueries({ queryKey: ['get', SCHEDULE_PATH] }),

@@ -1,6 +1,12 @@
-use crate::common::{TestApp, TestTenantProject, unique_installation_id};
+use crate::common::{
+    TestApp, TestTenantProject, TestUser, execute_sql, stop_inheriting, unique_installation_id,
+};
 use axum::http::StatusCode;
-use backend::utils::github::install_state::{self as github_oauth_state, GithubOAuthStatePayload};
+use backend::utils::github::install_state::{
+    self as github_oauth_state, GithubOAuthStateKind, GithubOAuthStatePayload,
+};
+use entity::project_members::{self, ProjectRole};
+use entity::tenant_members::{self, TenantRole};
 use entity::{github_integrations, projects, scopes::Scope, tenants};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
@@ -16,7 +22,9 @@ async fn mount_github_api_mocks(server: &MockServer) {
         .and(path_regex(r"^/app/installations/\d+/access_tokens$"))
         .respond_with(|req: &wiremock::Request| {
             let id = installation_id_from_url(&req.url);
-            let token = if id >= OLD_ID_BASE {
+            let token = if id >= HUGE_ID_BASE {
+                "ghs_huge_repo_token"
+            } else if id >= OLD_ID_BASE {
                 "ghs_multi_repo_token"
             } else if id >= NO_REPO_ID_BASE {
                 "ghs_no_repo_token"
@@ -77,36 +85,12 @@ async fn mount_github_api_mocks(server: &MockServer) {
         .mount(server)
         .await;
 
-    Mock::given(method("GET"))
-        .and(path("/installation/repositories"))
-        .and(header("authorization", "Bearer ghs_multi_repo_token"))
-        // 1 ページ（100 件）に収まらない件数を返し、ページングを踏ませる
-        .respond_with(|req: &wiremock::Request| {
-            let number = |key: &str, fallback: usize| -> usize {
-                req.url
-                    .query_pairs()
-                    .find(|(name, _)| name == key)
-                    .and_then(|(_, value)| value.parse().ok())
-                    .unwrap_or(fallback)
-            };
-            let per_page = number("per_page", 30);
-            let start = (number("page", 1) - 1) * per_page;
-            let repositories: Vec<serde_json::Value> = (start
-                ..MULTI_REPO_COUNT.min(start + per_page))
-                .map(|i| {
-                    serde_json::json!({
-                        "full_name": format!("acme/repo-{i}"),
-                        "owner": { "login": "acme" }
-                    })
-                })
-                .collect();
-            ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "total_count": MULTI_REPO_COUNT,
-                "repositories": repositories,
-            }))
-        })
-        .mount(server)
-        .await;
+    for (token, count) in [
+        ("Bearer ghs_multi_repo_token", MULTI_REPO_COUNT),
+        ("Bearer ghs_huge_repo_token", HUGE_REPO_COUNT),
+    ] {
+        mount_paged_installation_repositories(server, token, count).await;
+    }
 
     Mock::given(method("DELETE"))
         .and(path_regex(r"^/app/installations/\d+$"))
@@ -129,9 +113,9 @@ async fn mount_github_api_mocks(server: &MockServer) {
                 // 拒否ではなく GitHub 側の不調。呼び出し側が両者を分けているかを見る。
                 return ResponseTemplate::new(500).set_body_string("upstream error");
             }
-            match user_code_installation_id(&code) {
-                Some(id) => ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                    "access_token": format!("ghu_{id}"),
+            match user_token_for_code(&code) {
+                Some(token) => ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "access_token": token,
                     "token_type": "bearer",
                     "scope": ""
                 })),
@@ -148,18 +132,117 @@ async fn mount_github_api_mocks(server: &MockServer) {
     Mock::given(method("GET"))
         .and(path("/user/installations"))
         .respond_with(|req: &wiremock::Request| {
+            // トークンは `ghu_` の後ろに、見えるインストールの ID を `_` 区切りで持つ
+            // （`ghu_member_<id>` の `member` や `ghu_none` のように、数でない部分は読み飛ばす）。
             let installations: Vec<serde_json::Value> = req
                 .headers
                 .get("authorization")
                 .and_then(|value| value.to_str().ok())
                 .and_then(|value| value.strip_prefix("Bearer ghu_"))
-                .and_then(|id| id.parse::<i64>().ok())
-                .map(|id| serde_json::json!({ "id": id }))
                 .into_iter()
+                .flat_map(|ids| ids.split('_'))
+                .filter_map(|id| id.parse::<i64>().ok())
+                .map(|id| serde_json::json!({ "id": id }))
                 .collect();
             ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "total_count": installations.len(),
                 "installations": installations,
+            }))
+        })
+        .mount(server)
+        .await;
+
+    // 利用者から見た、インストール配下のリポジトリ。中身は installation id の帯で決め、
+    // インストール側の一覧（`/installation/repositories`）と揃える。admin 権限は
+    // ユーザートークンで出し分ける（`ghu_member_…` は最後の 1 件だけ admin でない）。
+    Mock::given(method("GET"))
+        .and(path_regex(r"^/user/installations/\d+/repositories$"))
+        .respond_with(|req: &wiremock::Request| {
+            let id = installation_id_from_url(&req.url);
+            let names: Vec<String> = if id >= HUGE_ID_BASE {
+                // 一覧の取得上限（10,000 件）ちょうどまでが見え、その全部の admin。
+                // インストール側の最後の 1 件だけが、利用者からは見えない。
+                (0..HUGE_REPO_COUNT - 1)
+                    .map(|i| format!("repo-{i}"))
+                    .collect()
+            } else if id >= OLD_ID_BASE {
+                (0..MULTI_REPO_COUNT).map(|i| format!("repo-{i}")).collect()
+            } else if id >= NO_REPO_ID_BASE {
+                Vec::new()
+            } else if id >= MULTI_REPO_ID_BASE {
+                (0..MULTI_REPO_COUNT).map(|i| format!("repo-{i}")).collect()
+            } else {
+                vec!["backend".to_owned()]
+            };
+            let member = req
+                .headers
+                .get("authorization")
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|value| value.starts_with("Bearer ghu_member_"));
+            let number = |key: &str, fallback: usize| -> usize {
+                req.url
+                    .query_pairs()
+                    .find(|(name, _)| name == key)
+                    .and_then(|(_, value)| value.parse().ok())
+                    .unwrap_or(fallback)
+            };
+            let per_page = number("per_page", 30);
+            let start = (number("page", 1) - 1) * per_page;
+            let last = names.len().saturating_sub(1);
+            let repositories: Vec<serde_json::Value> = names
+                .iter()
+                .enumerate()
+                .skip(start)
+                .take(per_page)
+                .map(|(i, name)| {
+                    serde_json::json!({
+                        "name": name,
+                        "full_name": format!("acme/{name}"),
+                        "owner": { "login": "acme" },
+                        "permissions": { "admin": !(member && i == last), "push": true, "pull": true }
+                    })
+                })
+                .collect();
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "total_count": names.len(),
+                "repositories": repositories,
+            }))
+        })
+        .mount(server)
+        .await;
+}
+
+/// このトークンのインストールが見えるリポジトリを、`count` 件ぶんページングして返す。
+/// 1 ページ（100 件）に収まらない件数を渡して、ページングを踏ませる。
+async fn mount_paged_installation_repositories(
+    server: &MockServer,
+    authorization: &'static str,
+    count: usize,
+) {
+    Mock::given(method("GET"))
+        .and(path("/installation/repositories"))
+        .and(header("authorization", authorization))
+        .respond_with(move |req: &wiremock::Request| {
+            let number = |key: &str, fallback: usize| -> usize {
+                req.url
+                    .query_pairs()
+                    .find(|(name, _)| name == key)
+                    .and_then(|(_, value)| value.parse().ok())
+                    .unwrap_or(fallback)
+            };
+            let per_page = number("per_page", 30);
+            let start = (number("page", 1) - 1) * per_page;
+            let repositories: Vec<serde_json::Value> = (start..count.min(start + per_page))
+                .map(|i| {
+                    serde_json::json!({
+                        "full_name": format!("acme/repo-{i}"),
+                        "owner": { "login": "acme" }
+                    })
+                })
+                .collect();
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "total_count": count,
+                "repositories": repositories,
             }))
         })
         .mount(server)
@@ -185,6 +268,43 @@ const FLAKY_CODE: &str = "flaky-code";
 /// テスト用の認可コードが表すインストール（`user-<installation_id>`）。
 fn user_code_installation_id(code: &str) -> Option<i64> {
     code.strip_prefix("user-").and_then(|id| id.parse().ok())
+}
+
+/// 見えるインストールが 1 件も無い利用者の認可コード。
+const NO_INSTALLATIONS_CODE: &str = "nobody";
+
+/// テスト用の認可コードを交換して得られるユーザーアクセストークン。
+///
+/// - `user-<id>`: そのインストールが見え、配下の全リポジトリの admin
+/// - `member-<id>`: そのインストールが見えるが、配下の最後の 1 件だけ admin でない
+/// - `multi-<a>-<b>`: 2 つのインストールが見え、どちらも全リポジトリの admin
+/// - `nobody`（[`NO_INSTALLATIONS_CODE`]）は、見えるインストールが無い
+fn user_token_for_code(code: &str) -> Option<String> {
+    if code == NO_INSTALLATIONS_CODE {
+        return Some("ghu_none".to_owned());
+    }
+    if let Some(id) = user_code_installation_id(code) {
+        return Some(format!("ghu_{id}"));
+    }
+    if let Some(id) = code
+        .strip_prefix("member-")
+        .and_then(|id| id.parse::<i64>().ok())
+    {
+        return Some(format!("ghu_member_{id}"));
+    }
+    let ids: Vec<i64> = code
+        .strip_prefix("multi-")?
+        .split('-')
+        .map(|id| id.parse::<i64>())
+        .collect::<Result<_, _>>()
+        .ok()?;
+    Some(format!(
+        "ghu_{}",
+        ids.iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join("_")
+    ))
 }
 
 /// そのインストールを入れた本人であることを示す認可コード。
@@ -215,6 +335,15 @@ fn unique_multi_repo_installation_id() -> i64 {
 
 fn unique_no_repo_installation_id() -> i64 {
     NO_REPO_ID_BASE + (Uuid::new_v4().as_u128() % 900_000_000_000) as i64
+}
+
+/// この値以上は「一覧の取得上限（100 件 × 100 ページ）を 1 件だけ超えるインストール」。
+const HUGE_ID_BASE: i64 = 4_500_000_000_000;
+/// 取得上限の 10,000 件を越える件数。上限ちょうどでは、打ち切りを全件として扱う不具合が隠れる。
+const HUGE_REPO_COUNT: usize = 10_001;
+
+fn unique_huge_installation_id() -> i64 {
+    HUGE_ID_BASE + (Uuid::new_v4().as_u128() % 900_000_000_000) as i64
 }
 
 fn unique_old_installation_id() -> i64 {
@@ -453,6 +582,756 @@ async fn override_access_token(
     }
 }
 
+fn authorize_path(tp: &TestTenantProject) -> String {
+    format!(
+        "/v1/tenants/{}/projects/{}/github/authorize",
+        tp.tenant_id, tp.project_id
+    )
+}
+
+fn authorized_installations_path(tp: &TestTenantProject) -> String {
+    format!(
+        "/v1/tenants/{}/projects/{}/github/authorized-installations",
+        tp.tenant_id, tp.project_id
+    )
+}
+
+fn authorized_select_path(tp: &TestTenantProject) -> String {
+    format!(
+        "/v1/tenants/{}/projects/{}/github/authorized-installations/select",
+        tp.tenant_id, tp.project_id
+    )
+}
+
+/// ユーザー認可からの戻り。インストール画面を通らないので `installation_id` は付かない。
+fn authorize_callback_path(state: &str, code: &str) -> String {
+    format!("/v1/github/callback?state={state}&code={code}")
+}
+
+/// GET /authorize を呼び、GitHub のユーザー認可の URL から state を取り出す。
+async fn get_authorize_state(app: &TestApp, tp: &TestTenantProject) -> String {
+    let response = app.get_with_session(&authorize_path(tp)).await;
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "authorize should return 200"
+    );
+    let body: serde_json::Value = response.json().await.expect("authorize json body");
+    let url = body["url"].as_str().expect("authorize url field");
+    assert!(
+        url.starts_with("https://github.com/login/oauth/authorize?client_id="),
+        "unexpected authorize url: {url}"
+    );
+    assert!(
+        !url.contains("redirect_uri"),
+        "redirect_uri は付けない（App に登録した Callback URL の 1 件目へ戻す）: {url}"
+    );
+    state_from_install_url(url)
+}
+
+/// callback を叩いて、リダイレクト先を返す（リダイレクトであることを前提にする）。
+async fn redirect_location(app: &TestApp, path: &str) -> String {
+    let response = app.get_with_session(path).await;
+    let status = response.status();
+    assert!(
+        status == StatusCode::FOUND || status == StatusCode::TEMPORARY_REDIRECT,
+        "expected a redirect, got {status}"
+    );
+    response
+        .headers()
+        .get("location")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string)
+        .expect("location header")
+}
+
+/// 認可トークンはクエリではなくフラグメントで返る（選択トークンと同じ扱い）。
+fn authorize_token_from_location(location: &str) -> String {
+    let parsed = url::Url::parse(location).expect("redirect location");
+    assert!(
+        !parsed.query_pairs().any(|(key, _)| key == "github_error"),
+        "unexpected redirect location: {location}"
+    );
+    let fragment = parsed
+        .fragment()
+        .unwrap_or_else(|| panic!("redirect fragment missing: {location}"))
+        .to_owned();
+    url::form_urlencoded::parse(fragment.as_bytes())
+        .find(|(key, _)| key == "github_installations")
+        .map(|(_, value)| value.into_owned())
+        .expect("github_installations fragment param")
+}
+
+/// GET /authorize → callback（`code` と `state` だけ）を通して、認可トークンを受け取る。
+async fn authorize_token(app: &TestApp, tp: &TestTenantProject, code: &str) -> String {
+    let state = get_authorize_state(app, tp).await;
+    let location = redirect_location(app, &authorize_callback_path(&state, code)).await;
+    authorize_token_from_location(&location)
+}
+
+/// 認可トークンはクエリではなくヘッダーで送る。
+async fn get_authorized_installations(
+    app: &TestApp,
+    tp: &TestTenantProject,
+    authorize_token: &str,
+) -> reqwest::Response {
+    app.session_client()
+        .get(format!(
+            "{}{}",
+            app.base_url(),
+            authorized_installations_path(tp)
+        ))
+        .header("X-Github-Authorize-Token", authorize_token)
+        .send()
+        .await
+        .expect("authorized installations request")
+}
+
+/// 候補の一覧を取得する（200 を前提に配列を返す）。
+async fn authorized_candidates(
+    app: &TestApp,
+    tp: &TestTenantProject,
+    authorize_token: &str,
+) -> Vec<serde_json::Value> {
+    let response = get_authorized_installations(app, tp, authorize_token).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .expect("authorized installations json");
+    body["installations"]
+        .as_array()
+        .expect("installations array")
+        .clone()
+}
+
+/// 候補が 1 件であることを前提に、その `candidate_id` を返す。
+async fn only_candidate(app: &TestApp, tp: &TestTenantProject, authorize_token: &str) -> Uuid {
+    let candidates = authorized_candidates(app, tp, authorize_token).await;
+    assert_eq!(candidates.len(), 1, "candidates: {candidates:?}");
+    candidates[0]["candidate_id"]
+        .as_str()
+        .expect("candidate_id")
+        .parse()
+        .expect("candidate_id uuid")
+}
+
+async fn post_authorized_select(
+    app: &TestApp,
+    tp: &TestTenantProject,
+    authorize_token: &str,
+    candidate_id: Uuid,
+) -> reqwest::Response {
+    app.post_json_with_session(
+        &authorized_select_path(tp),
+        serde_json::json!({
+            "authorize_token": authorize_token,
+            "candidate_id": candidate_id
+        }),
+    )
+    .await
+}
+
+/// ステータスと、エラー本文の `message` を確かめる。選択トークンが返っていないことも見る。
+async fn assert_select_rejected(response: reqwest::Response, status: StatusCode, message: &str) {
+    assert_eq!(response.status(), status);
+    let body: serde_json::Value = response.json().await.expect("error json");
+    assert_eq!(body["message"], message, "unexpected body: {body}");
+    assert!(
+        body.get("select_token").is_none(),
+        "unexpected body: {body}"
+    );
+}
+
+/// この installation の「利用者から見たリポジトリ一覧」だけ、指定の応答に差し替える。
+async fn override_user_repositories(
+    server: &MockServer,
+    installation_id: i64,
+    response: ResponseTemplate,
+    times: Option<u64>,
+) {
+    let mock = Mock::given(method("GET"))
+        .and(path(format!(
+            "/user/installations/{installation_id}/repositories"
+        )))
+        .respond_with(response)
+        .with_priority(1);
+    match times {
+        Some(n) => mock.up_to_n_times(n).mount(server).await,
+        None => mock.mount(server).await,
+    }
+}
+
+/// 16. 他のテナントで連携済みのインストールを、別のテナントから連携できる（TASK-593）。
+///
+/// インストール済みのアカウント・組織へ GitHub のインストール画面から進むと、既存の
+/// インストールの設定画面になり、callback に戻っても鮮度チェックで弾かれる。GitHub の
+/// ユーザー認可で利用者を確かめ、その利用者が見えるインストールから選ぶ経路で連携する。
+async fn authorize_flow_scenarios(app: &mut TestApp, mock_server: &MockServer) {
+    // テナント A が、作成から 600 秒を超えたインストールを連携済み。
+    let owner_a = app.insert_user(false, false).await;
+    let tp_a = app.insert_tenant_project(owner_a.id).await;
+    let shared_id = unique_old_installation_id();
+    insert_integration(app, &tp_a, owner_a.id, shared_id, "repo-0").await;
+
+    let owner_b = app.insert_user(false, false).await;
+    let tp_b = app.insert_tenant_project(owner_b.id).await;
+    app.login_session(&owner_b.email, &owner_b.password).await;
+
+    // 対照: 同じインストールをインストール画面の経路（`kind = Install`）で通すと、
+    // 今までどおり鮮度チェックで弾かれる（経路は state の種別で決まる）。
+    {
+        let state = get_install_state(app, &tp_b).await;
+        let location = redirect_location(app, &callback_path(&state, shared_id)).await;
+        assert!(
+            location.contains("github_error=installation_rejected"),
+            "unexpected redirect location: {location}"
+        );
+        assert!(find_integration(app, &tp_b).await.is_none());
+    }
+
+    // 回帰: テナント B のオーナーが、ユーザー認可の経路で同じインストールを連携できる。
+    {
+        let state = get_authorize_state(app, &tp_b).await;
+        let callback = authorize_callback_path(&state, &owner_code(shared_id));
+        let location = redirect_location(app, &callback).await;
+        let token = authorize_token_from_location(&location);
+        assert!(
+            !location.contains("ghu_"),
+            "ユーザーアクセストークンを URL に出さない: {location}"
+        );
+        // state は 1 回で消費される
+        assert_eq!(
+            app.get_with_session(&callback).await.status(),
+            StatusCode::BAD_REQUEST
+        );
+
+        // 認可トークンの中身: ユーザーアクセストークンは平文で置かない
+        let stored =
+            github_oauth_state::peek_authorized_installations(&app.state.redis_client, &token)
+                .await
+                .expect("peek authorized installations")
+                .expect("authorized installations payload");
+        let stored_json = serde_json::to_string(&stored).expect("serialize payload");
+        assert!(
+            !stored_json.contains("ghu_"),
+            "ユーザーアクセストークンの平文を Redis に置かない: {stored_json}"
+        );
+        assert_eq!(stored.user_id, owner_b.id);
+        assert_eq!(
+            stored
+                .installations
+                .iter()
+                .map(|i| i.installation_id)
+                .collect::<Vec<_>>(),
+            vec![shared_id]
+        );
+
+        let listed = get_authorized_installations(app, &tp_b, &token).await;
+        assert_eq!(listed.status(), StatusCode::OK);
+        assert_eq!(
+            listed
+                .headers()
+                .get("cache-control")
+                .and_then(|v| v.to_str().ok()),
+            Some("no-store")
+        );
+        let listed_body = listed.text().await.expect("authorized installations body");
+        assert!(
+            !listed_body.contains(&shared_id.to_string()),
+            "installation_id は返さない: {listed_body}"
+        );
+        let listed_json: serde_json::Value =
+            serde_json::from_str(&listed_body).expect("authorized installations json");
+        assert_eq!(listed_json["installations"][0]["account_login"], "acme");
+
+        // 一覧はトークンを消さない
+        let candidate = only_candidate(app, &tp_b, &token).await;
+
+        let selected = post_authorized_select(app, &tp_b, &token, candidate).await;
+        assert_eq!(selected.status(), StatusCode::OK);
+        assert_eq!(
+            selected
+                .headers()
+                .get("cache-control")
+                .and_then(|v| v.to_str().ok()),
+            Some("no-store")
+        );
+        let selected_body: serde_json::Value = selected.json().await.expect("select json");
+        let select_token = selected_body["select_token"]
+            .as_str()
+            .expect("select_token")
+            .to_owned();
+
+        // 以降は既存の経路（一覧 → 確定）。インストール側もユーザー側も 1 ページ
+        // （100 件）を超えるので、2 ページ目を落とすと上の選択が 403 になる。
+        let repositories = get_repositories(app, &tp_b, &select_token).await;
+        assert_eq!(repositories.status(), StatusCode::OK);
+        let repositories: serde_json::Value = repositories.json().await.expect("repos json");
+        assert_eq!(
+            repositories["repositories"]
+                .as_array()
+                .expect("repositories array")
+                .len(),
+            MULTI_REPO_COUNT
+        );
+        assert_eq!(
+            connect(app, &tp_b, &select_token, "repo-129")
+                .await
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+        let row = find_integration(app, &tp_b)
+            .await
+            .expect("tenant B integration row");
+        assert_eq!(row.installation_id, shared_id);
+        assert_eq!(row.repo_owner, "acme");
+        assert_eq!(row.repo_name, "repo-129");
+        assert_eq!(row.created_by, owner_b.id);
+        // テナント A の連携はそのまま
+        let row_a = find_integration(app, &tp_a)
+            .await
+            .expect("tenant A integration row");
+        assert_eq!(row_a.installation_id, shared_id);
+        assert_eq!(row_a.repo_name, "repo-0");
+
+        // 選択のあとも認可トークンは残る（別の候補を選び直せる）
+        assert_eq!(
+            post_authorized_select(app, &tp_b, &token, candidate)
+                .await
+                .status(),
+            StatusCode::OK
+        );
+    }
+
+    // 以降の拒否系は、同じテナント B の未連携のプロジェクトで見る。
+    let tp_b2 = insert_project_in_tenant(app, tp_b.tenant_id).await;
+
+    // 1 件でも admin でないリポジトリがあれば連携させない。admin でない 1 件は 2 ページ目に
+    // ある（130 件の最後）ので、ユーザー側の 2 ページ目を読んでいないと見落とす。
+    {
+        let installation_id = unique_old_installation_id();
+        let token = authorize_token(app, &tp_b2, &format!("member-{installation_id}")).await;
+        let candidate = only_candidate(app, &tp_b2, &token).await;
+        assert_select_rejected(
+            post_authorized_select(app, &tp_b2, &token, candidate).await,
+            StatusCode::FORBIDDEN,
+            "github-installation-admin-required",
+        )
+        .await;
+
+        // 対照: 同じインストールでも、全リポジトリの admin なら通る
+        let token = authorize_token(app, &tp_b2, &owner_code(installation_id)).await;
+        let candidate = only_candidate(app, &tp_b2, &token).await;
+        assert_eq!(
+            post_authorized_select(app, &tp_b2, &token, candidate)
+                .await
+                .status(),
+            StatusCode::OK
+        );
+    }
+
+    // リポジトリが 1 件も見えないインストールは、任せる範囲を確かめられない → 409
+    {
+        let installation_id = unique_no_repo_installation_id();
+        let token = authorize_token(app, &tp_b2, &owner_code(installation_id)).await;
+        let candidate = only_candidate(app, &tp_b2, &token).await;
+        assert_select_rejected(
+            post_authorized_select(app, &tp_b2, &token, candidate).await,
+            StatusCode::CONFLICT,
+            "github-installation-no-repositories",
+        )
+        .await;
+    }
+
+    // 一覧の取得上限（100 件 × 100 ページ）を超えるインストールは、全件を確かめられない → 409。
+    // インストール側は 10,001 件、利用者は先頭の 10,000 件の全部の admin で、最後の 1 件は
+    // 見えない。打ち切られた 10,000 件どうしを比べると一致してしまうので、GitHub の総数と
+    // 合わない一覧では選択トークンを発行しない。
+    {
+        let installation_id = unique_huge_installation_id();
+        let token = authorize_token(app, &tp_b2, &owner_code(installation_id)).await;
+        let candidate = only_candidate(app, &tp_b2, &token).await;
+        assert_select_rejected(
+            post_authorized_select(app, &tp_b2, &token, candidate).await,
+            StatusCode::CONFLICT,
+            "github-installation-repositories-incomplete",
+        )
+        .await;
+    }
+
+    // ユーザー側の一覧が総数に届かないまま終わったときも、部分的な一覧では認可しない → 409。
+    // 対照: 同じインストールで一覧が揃えば通る。
+    {
+        let installation_id = unique_installation_id();
+        let token = authorize_token(app, &tp_b2, &owner_code(installation_id)).await;
+        let candidate = only_candidate(app, &tp_b2, &token).await;
+        override_user_repositories(
+            mock_server,
+            installation_id,
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "total_count": 2,
+                "repositories": [{
+                    "name": "backend",
+                    "owner": { "login": "acme" },
+                    "permissions": { "admin": true }
+                }]
+            })),
+            Some(1),
+        )
+        .await;
+        assert_select_rejected(
+            post_authorized_select(app, &tp_b2, &token, candidate).await,
+            StatusCode::CONFLICT,
+            "github-installation-repositories-incomplete",
+        )
+        .await;
+        assert_eq!(
+            post_authorized_select(app, &tp_b2, &token, candidate)
+                .await
+                .status(),
+            StatusCode::OK
+        );
+    }
+
+    // 候補に無い candidate_id / でたらめなトークン / トークン無し → 400
+    {
+        let installation_id = unique_installation_id();
+        let token = authorize_token(app, &tp_b2, &owner_code(installation_id)).await;
+        assert_eq!(
+            post_authorized_select(app, &tp_b2, &token, Uuid::new_v4())
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+        let candidate = only_candidate(app, &tp_b2, &token).await;
+        assert_eq!(
+            post_authorized_select(app, &tp_b2, "bogus-token", candidate)
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            get_authorized_installations(app, &tp_b2, "bogus-token")
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            app.get_with_session(&authorized_installations_path(&tp_b2))
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST,
+            "ヘッダーが無ければ 400"
+        );
+
+        // 同じ利用者でも、トークンに束縛されていない別プロジェクトのパスでは使えない（400）
+        assert_eq!(
+            get_authorized_installations(app, &tp_b, &token)
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            post_authorized_select(app, &tp_b, &token, candidate)
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+
+        // 別の利用者に束縛されたトークンは、オーナー本人のセッションでも使えない（403）。
+        // 実際の他人はオーナーでないので `require_tenant_owner` で先に落ちる。トークン側の
+        // 利用者の照合を見るため、「user_id だけ別人のトークン」を本人のセッションで使う。
+        let stranger = app.insert_user(false, false).await;
+        let stranger_token = github_oauth_state::new_state_token();
+        let stranger_candidate = Uuid::new_v4();
+        github_oauth_state::store_authorized_installations(
+            &app.state.redis_client,
+            &stranger_token,
+            &github_oauth_state::AuthorizedInstallationsPayload {
+                tenant_id: tp_b2.tenant_id,
+                project_id: tp_b2.project_id,
+                user_id: stranger.id,
+                user_token_enc: "unused".into(),
+                installations: vec![github_oauth_state::AuthorizedInstallation {
+                    candidate_id: stranger_candidate,
+                    installation_id,
+                    account_login: "acme".into(),
+                }],
+            },
+        )
+        .await
+        .expect("store authorized installations");
+        assert_eq!(
+            get_authorized_installations(app, &tp_b2, &stranger_token)
+                .await
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            post_authorized_select(app, &tp_b2, &stranger_token, stranger_candidate)
+                .await
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        app.cleanup_user(stranger.id).await;
+
+        // 対照: 正しいトークンとパスなら通る（上の拒否が過剰でないこと）
+        assert_eq!(
+            post_authorized_select(app, &tp_b2, &token, candidate)
+                .await
+                .status(),
+            StatusCode::OK
+        );
+    }
+
+    // インストールが GitHub 側で消えている → 410
+    {
+        let installation_id = unique_installation_id();
+        let token = authorize_token(app, &tp_b2, &owner_code(installation_id)).await;
+        let candidate = only_candidate(app, &tp_b2, &token).await;
+        override_access_token(
+            mock_server,
+            installation_id,
+            ResponseTemplate::new(404).set_body_string("Not Found"),
+            None,
+        )
+        .await;
+        assert_eq!(
+            post_authorized_select(app, &tp_b2, &token, candidate)
+                .await
+                .status(),
+            StatusCode::GONE
+        );
+    }
+
+    // ユーザーアクセストークンが無効（GitHub が 401）→ 400（認可からやり直す）。
+    // 利用者からインストールが見えなくなった（404）→ 403。
+    {
+        let installation_id = unique_installation_id();
+        let token = authorize_token(app, &tp_b2, &owner_code(installation_id)).await;
+        let candidate = only_candidate(app, &tp_b2, &token).await;
+        override_user_repositories(
+            mock_server,
+            installation_id,
+            ResponseTemplate::new(401).set_body_string("Bad credentials"),
+            Some(1),
+        )
+        .await;
+        assert_eq!(
+            post_authorized_select(app, &tp_b2, &token, candidate)
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+        override_user_repositories(
+            mock_server,
+            installation_id,
+            ResponseTemplate::new(404).set_body_string("Not Found"),
+            Some(1),
+        )
+        .await;
+        assert_select_rejected(
+            post_authorized_select(app, &tp_b2, &token, candidate).await,
+            StatusCode::FORBIDDEN,
+            "github-installation-admin-required",
+        )
+        .await;
+    }
+
+    // GitHub の一時障害は 5xx。認可トークンは残り、同じトークンで再試行すると通る。
+    {
+        let installation_id = unique_installation_id();
+        let token = authorize_token(app, &tp_b2, &owner_code(installation_id)).await;
+        let candidate = only_candidate(app, &tp_b2, &token).await;
+        override_user_repositories(
+            mock_server,
+            installation_id,
+            ResponseTemplate::new(500).set_body_string("upstream error"),
+            Some(1),
+        )
+        .await;
+        let failed = post_authorized_select(app, &tp_b2, &token, candidate).await;
+        assert!(
+            failed.status().is_server_error(),
+            "一時障害を 4xx にしない: {}",
+            failed.status()
+        );
+        assert_eq!(
+            post_authorized_select(app, &tp_b2, &token, candidate)
+                .await
+                .status(),
+            StatusCode::OK
+        );
+    }
+
+    // 複数のインストールが見える利用者には、その全部が候補に出る。
+    // クエリに他人の installation_id を足しても、候補は GitHub が答えたものだけ。
+    {
+        let first = unique_installation_id();
+        let second = unique_multi_repo_installation_id();
+        let token = authorize_token(app, &tp_b2, &format!("multi-{first}-{second}")).await;
+        let candidates = authorized_candidates(app, &tp_b2, &token).await;
+        assert_eq!(candidates.len(), 2, "candidates: {candidates:?}");
+
+        let injected = unique_installation_id();
+        let state = get_authorize_state(app, &tp_b2).await;
+        let location = redirect_location(
+            app,
+            &format!(
+                "{}&installation_id={injected}",
+                authorize_callback_path(&state, &owner_code(first))
+            ),
+        )
+        .await;
+        let token = authorize_token_from_location(&location);
+        let stored =
+            github_oauth_state::peek_authorized_installations(&app.state.redis_client, &token)
+                .await
+                .expect("peek authorized installations")
+                .expect("authorized installations payload");
+        assert_eq!(
+            stored
+                .installations
+                .iter()
+                .map(|i| i.installation_id)
+                .collect::<Vec<_>>(),
+            vec![first]
+        );
+    }
+
+    // callback の失敗は、設定画面へ理由付きで戻す。
+    {
+        let app: &TestApp = app;
+        let reason_for = async |query: &str| -> String {
+            let state = get_authorize_state(app, &tp_b2).await;
+            redirect_location(app, &format!("/v1/github/callback?state={state}&{query}")).await
+        };
+        // 利用者が GitHub の画面で拒否した（code が無く error が付く）
+        let location = reason_for("error=access_denied").await;
+        assert!(
+            location.contains("github_error=authorization_denied"),
+            "unexpected redirect location: {location}"
+        );
+        // code も error も無い
+        let location = reason_for("setup_action=install").await;
+        assert!(
+            location.contains("github_error=authorization_denied"),
+            "unexpected redirect location: {location}"
+        );
+        // 無効な code
+        let location = reason_for("code=invalid-code").await;
+        assert!(
+            location.contains("github_error=authorization_denied"),
+            "unexpected redirect location: {location}"
+        );
+        // 拒否ではなく GitHub 側の不調
+        let location = reason_for(&format!("code={FLAKY_CODE}")).await;
+        assert!(
+            location.contains("github_error=github_unavailable"),
+            "unexpected redirect location: {location}"
+        );
+        // 見えるインストールが 1 件も無い
+        let location = reason_for(&format!("code={NO_INSTALLATIONS_CODE}")).await;
+        assert!(
+            location.contains("github_error=no_installations"),
+            "unexpected redirect location: {location}"
+        );
+        assert!(
+            !location.contains("github_installations="),
+            "失敗では認可トークンを発行しない: {location}"
+        );
+
+        // インストールの経路の state は、installation_id が無ければ 400（経路は state で決まる）
+        let install_state = get_install_state(app, &tp_b2).await;
+        assert_eq!(
+            app.get_with_session(&authorize_callback_path(
+                &install_state,
+                &owner_code(unique_installation_id())
+            ))
+            .await
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    // 別テナントのプロジェクトは 404
+    assert_eq!(
+        app.get_with_session(&format!(
+            "/v1/tenants/{}/projects/{}/github/authorize",
+            tp_b.tenant_id, tp_a.project_id
+        ))
+        .await
+        .status(),
+        StatusCode::NOT_FOUND
+    );
+
+    // 拒否系: 未ログイン・非オーナー・state を始めた利用者と別の利用者
+    // （対照の成功系は上の回帰）。
+    {
+        let installation_id = unique_installation_id();
+        let token = authorize_token(app, &tp_b2, &owner_code(installation_id)).await;
+        let candidate = only_candidate(app, &tp_b2, &token).await;
+        let pending_state = get_authorize_state(app, &tp_b2).await;
+        let select_body = serde_json::json!({
+            "authorize_token": token,
+            "candidate_id": candidate
+        });
+
+        app.reset_session_client();
+        assert_eq!(
+            app.get(&authorize_path(&tp_b2)).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            app.get(&authorized_installations_path(&tp_b2))
+                .await
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            app.post_json(&authorized_select_path(&tp_b2), select_body.clone())
+                .await
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+
+        let outsider = app.insert_user(false, false).await;
+        app.login_session(&outsider.email, &outsider.password).await;
+        assert_eq!(
+            app.get_with_session(&authorize_path(&tp_b2)).await.status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            get_authorized_installations(app, &tp_b2, &token)
+                .await
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            app.post_json_with_session(&authorized_select_path(&tp_b2), select_body)
+                .await
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        // state を始めた利用者と別の利用者が callback に着地した → 403
+        assert_eq!(
+            app.get_with_session(&authorize_callback_path(
+                &pending_state,
+                &owner_code(installation_id)
+            ))
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+        app.cleanup_user(outsider.id).await;
+    }
+
+    app.cleanup_user(owner_b.id).await;
+    app.cleanup_user(owner_a.id).await;
+    app.reset_session_client();
+}
+
 // serial: GITHUB_API_BASE_URL を OnceLock でキャッシュするため、
 // 並列実行すると別テストが先にキャッシュした URL が使われる競合が起きる。
 #[serial_test::serial]
@@ -572,6 +1451,7 @@ async fn github_http_integration_suite() {
                 tenant_id: tp.tenant_id,
                 project_id: tp.project_id,
                 user_id: user.id,
+                kind: GithubOAuthStateKind::Install,
                 installation_id: Some(bound_id),
             },
         )
@@ -748,6 +1628,7 @@ async fn github_http_integration_suite() {
                 project_id: tp.project_id,
                 user_id: outsider.id,
                 installation_id,
+                basis: Default::default(),
             },
         )
         .await
@@ -858,6 +1739,7 @@ async fn github_http_integration_suite() {
                 project_id: tp.project_id,
                 user_id: user.id,
                 installation_id: unique_multi_repo_installation_id(),
+                basis: Default::default(),
             },
         )
         .await
@@ -1423,6 +2305,7 @@ async fn github_http_integration_suite() {
             project_id: tp.project_id,
             user_id: user.id,
             installation_id: unique_multi_repo_installation_id(),
+            basis: Default::default(),
         };
         github_oauth_state::store_select_token(&app.state.redis_client, &token, &payload)
             .await
@@ -1541,6 +2424,7 @@ async fn github_http_integration_suite() {
                 project_id: tp.project_id,
                 user_id: user.id,
                 installation_id,
+                basis: Default::default(),
             },
         )
         .await
@@ -1576,6 +2460,7 @@ async fn github_http_integration_suite() {
                 project_id: tp.project_id,
                 user_id: user.id,
                 installation_id,
+                basis: Default::default(),
             },
         )
         .await
@@ -2086,4 +2971,591 @@ async fn github_http_integration_suite() {
         app.cleanup_user(user.id).await;
         app.reset_session_client();
     }
+
+    // 16. 他のテナントで連携済みのインストールを、別のテナントから連携できる（TASK-593）
+    authorize_flow_scenarios(&mut app, &mock_server).await;
+
+    // 17. 連携を変えられる人と、状態を読める人（TASK-595）
+    integration_manager_scenarios(&mut app).await;
+
+    // 18. プロジェクト Admin の解除は、GitHub 側の App を外さない（TASK-595）
+    project_admin_disconnect_scenarios(&mut app, &mock_server).await;
+}
+
+fn import_path(tp: &TestTenantProject) -> String {
+    format!(
+        "/v1/tenants/{}/projects/{}/github/import",
+        tp.tenant_id, tp.project_id
+    )
+}
+
+async fn insert_tenant_member(app: &TestApp, tenant_id: Uuid, user_id: Uuid, role: TenantRole) {
+    tenant_members::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        tenant_id: Set(tenant_id),
+        user_id: Set(user_id),
+        role: Set(role),
+        department: Set(None),
+        position: Set(None),
+        team: Set(None),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert tenant member");
+}
+
+async fn insert_project_member(app: &TestApp, project_id: Uuid, user_id: Uuid, role: ProjectRole) {
+    project_members::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        project_id: Set(project_id),
+        user_id: Set(user_id),
+        role: Set(role),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert project member");
+}
+
+async fn remove_tenant_member(app: &TestApp, tenant_id: Uuid, user_id: Uuid) {
+    tenant_members::Entity::delete_many()
+        .filter(tenant_members::Column::TenantId.eq(tenant_id))
+        .filter(tenant_members::Column::UserId.eq(user_id))
+        .exec(&app.state.db)
+        .await
+        .expect("delete tenant member");
+}
+
+/// 個人プロジェクト（Inbox）を作る。持ち主はプロジェクト Admin の ACE を持つ。
+async fn insert_personal_project(
+    app: &TestApp,
+    tenant_id: Uuid,
+    owner_id: Uuid,
+) -> TestTenantProject {
+    let project_id = Uuid::new_v4();
+    projects::ActiveModel {
+        id: Set(project_id),
+        name: Set("inbox".into()),
+        description: Set(String::new()),
+        tenant_id: Set(tenant_id),
+        icon_emoji: Set(None),
+        icon_url: Set(None),
+        key: Set(format!("ME{}", &project_id.to_string()[..8].to_uppercase())),
+        is_personal: Set(true),
+        personal_owner_id: Set(Some(owner_id)),
+        inherit_tenant_members: Set(true),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert personal project");
+    insert_project_member(app, project_id, owner_id, ProjectRole::Admin).await;
+    TestTenantProject {
+        tenant_id,
+        project_id,
+    }
+}
+
+/// インストールの callback が、GitHub のユーザー認可へ回したことを確かめて、その state を返す。
+/// 選択トークンも連携行も出さずに回すので、フラグメントは付かない。
+fn authorize_state_from_redirect(location: &str) -> String {
+    assert!(
+        location.starts_with("https://github.com/login/oauth/authorize?client_id="),
+        "unexpected redirect location: {location}"
+    );
+    assert!(
+        !location.contains("github_select"),
+        "unexpected redirect location: {location}"
+    );
+    state_from_install_url(location)
+}
+
+/// セッションを別の利用者に切り替える。
+async fn login_as(app: &mut TestApp, user: &TestUser) {
+    app.reset_session_client();
+    app.login_session(&user.email, &user.password).await;
+}
+
+async fn install_status(app: &TestApp, tp: &TestTenantProject) -> StatusCode {
+    app.get_with_session(&install_path(tp)).await.status()
+}
+
+async fn integration_body(app: &TestApp, tp: &TestTenantProject) -> serde_json::Value {
+    let response = app.get_with_session(&integration_path(tp)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    response.json().await.expect("integration json")
+}
+
+/// シナリオ 17: 連携を変えられるのは Webhook 管理と同じ人（オーナー、プロジェクト Admin、その
+/// プロジェクトに入れるテナント Admin）。状態はプロジェクトに入れる人が読める（TASK-595）。
+///
+/// 修正前はテナントのオーナーしか通らず、テナント Admin もプロジェクト Admin も、状態の
+/// 取得を含む全部の口で 403 になっていた。
+///
+/// 連携先を選ぶ根拠は別に決まる。オーナーと入れるテナント Admin はテナントが使っている
+/// インストールを再利用できる。プロジェクト Admin の ACE だけで通る人は、インストールが見える
+/// 全リポジトリの admin であることを GitHub に確かめる経路でしか選べない。
+async fn integration_manager_scenarios(app: &mut TestApp) {
+    let owner = app.insert_user(false, false).await;
+    let tenant_admin = app.insert_user(false, false).await;
+    let project_admin = app.insert_user(false, false).await;
+    let member = app.insert_user(false, false).await;
+    let outsider = app.insert_user(false, false).await;
+    let demoted = app.insert_user(false, false).await;
+    let removed = app.insert_user(false, false).await;
+    let former = app.insert_user(false, false).await;
+
+    // P: 継承ありの共有プロジェクト。
+    let p = app.insert_tenant_project(owner.id).await;
+    insert_tenant_member(app, p.tenant_id, tenant_admin.id, TenantRole::Admin).await;
+    insert_tenant_member(app, p.tenant_id, project_admin.id, TenantRole::Member).await;
+    insert_tenant_member(app, p.tenant_id, member.id, TenantRole::Member).await;
+    insert_project_member(app, p.project_id, project_admin.id, ProjectRole::Admin).await;
+
+    // Q: 継承を切った共有プロジェクト。オーナー以外は誰も入れない。installation X を使う。
+    let q = insert_project_in_tenant(app, p.tenant_id).await;
+    stop_inheriting(&app.state.db, q.project_id).await;
+    let x_id = unique_old_installation_id();
+    let x_row = insert_integration(app, &q, owner.id, x_id, "repo-1").await;
+
+    // R: 継承ありの共有プロジェクト。テナント Admin が入れる。installation Y を使う。
+    let r = insert_project_in_tenant(app, p.tenant_id).await;
+    let y_id = unique_old_installation_id();
+    let y_row = insert_integration(app, &r, owner.id, y_id, "repo-2").await;
+
+    // テナント Admin の Inbox。installation Z を使う。Inbox ではテナント Admin も ACE だけの人。
+    let admin_inbox = insert_personal_project(app, p.tenant_id, tenant_admin.id).await;
+    let z_id = unique_old_installation_id();
+    let z_row = insert_integration(app, &admin_inbox, tenant_admin.id, z_id, "repo-5").await;
+
+    // --- テナント Admin ---
+    login_as(app, &tenant_admin).await;
+    assert_eq!(install_status(app, &p).await, StatusCode::OK);
+    assert_eq!(
+        app.get_with_session(&authorize_path(&p)).await.status(),
+        StatusCode::OK
+    );
+    let body = integration_body(app, &p).await;
+    assert_eq!(body["connected"], false);
+    assert_eq!(body["can_manage"], true);
+
+    // 再利用の候補は、本人がオーナーか入れるテナント Admin であるプロジェクトのものだけ。
+    // 入れない Q の X も、ACE だけで管理する自分の Inbox の Z も出ない。
+    let candidates = reusable_installations(app, &p).await;
+    assert_eq!(candidates.len(), 1, "candidates: {candidates:?}");
+    assert_eq!(candidates[0]["source_integration_id"], y_row.id.to_string());
+
+    // 自分の Inbox の連携行は、共有プロジェクトへの再利用元にならない。
+    assert_eq!(
+        post_reuse(app, &p, z_row.id).await.status(),
+        StatusCode::NOT_FOUND
+    );
+    // callback に Z を差し込んでも「使用中」として扱わない。
+    let state_token = get_install_state(app, &p).await;
+    let location = redirect_location(app, &callback_path_without_code(&state_token, z_id)).await;
+    assert!(
+        location.contains("github_error=installation_authorization_required"),
+        "unexpected redirect location: {location}"
+    );
+    // Inbox の中では ACE だけの人なので、テナントの信頼による再利用は出ない。
+    assert!(reusable_installations(app, &admin_inbox).await.is_empty());
+
+    // 入れないプロジェクト Q は、変えることも状態を読むこともできない。
+    assert_eq!(install_status(app, &q).await, StatusCode::FORBIDDEN);
+    assert_eq!(
+        app.get_with_session(&integration_path(&q)).await.status(),
+        StatusCode::FORBIDDEN
+    );
+
+    // Q の連携行は再利用元にできない。行の有無を漏らさないよう、存在しないのと同じ応答。
+    let response = post_reuse(app, &p, x_row.id).await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let body: serde_json::Value = response.json().await.expect("reuse error json");
+    assert!(body.get("select_token").is_none());
+
+    // callback に X を差し込んでも、本人が変えられるプロジェクトが使っていないので
+    // 「使用中」として扱わず、新規と同じ所有者確認（code）を求める。
+    let state_token = get_install_state(app, &p).await;
+    let location = redirect_location(app, &callback_path_without_code(&state_token, x_id)).await;
+    assert!(
+        location.contains("github_error=installation_authorization_required"),
+        "unexpected redirect location: {location}"
+    );
+    assert!(find_integration(app, &p).await.is_none());
+
+    // Y は本人が変えられる R が使っているので、オーナーと同じく code なしで先へ進む。
+    let state_token = get_install_state(app, &p).await;
+    let location = redirect_location(app, &callback_path_without_code(&state_token, y_id)).await;
+    assert!(
+        location.contains("github_select="),
+        "unexpected redirect location: {location}"
+    );
+
+    // Y を再利用して P を連携する。
+    let select_token = reuse_token(app, &p, y_row.id).await;
+    assert_eq!(
+        get_repositories(app, &p, &select_token).await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        connect(app, &p, &select_token, "repo-3").await.status(),
+        StatusCode::NO_CONTENT
+    );
+    let p_row = find_integration(app, &p).await.expect("integration row");
+    assert_eq!(p_row.installation_id, y_id);
+    assert_eq!(p_row.created_by, tenant_admin.id);
+
+    // GitHub のユーザー認可の経路も、選択トークンの発行まで通る。
+    let authorize = authorize_token(app, &p, &owner_code(y_id)).await;
+    let candidate_id = only_candidate(app, &p, &authorize).await;
+    assert_eq!(
+        post_authorized_select(app, &p, &authorize, candidate_id)
+            .await
+            .status(),
+        StatusCode::OK
+    );
+
+    // PAT では使えない（セッション専用のまま）。
+    let pat = app
+        .insert_pat(tenant_admin.id, p.tenant_id, vec![Scope::Api], None)
+        .await;
+    assert_eq!(
+        app.get_with_bearer(&integration_path(&p), &pat)
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        app.get_with_bearer(&install_path(&p), &pat).await.status(),
+        StatusCode::FORBIDDEN
+    );
+
+    // --- テナント Member（P に入れるが、変えられない）---
+    login_as(app, &member).await;
+    let body = integration_body(app, &p).await;
+    assert_eq!(body["connected"], true);
+    assert_eq!(body["repo_owner"], "acme");
+    assert_eq!(body["repo_name"], "repo-3");
+    assert_eq!(body["can_manage"], false);
+    assert!(body.get("installation_id").is_none());
+
+    assert_eq!(install_status(app, &p).await, StatusCode::FORBIDDEN);
+    for path in [
+        authorize_path(&p),
+        installations_path(&p),
+        authorized_installations_path(&p),
+    ] {
+        assert_eq!(
+            app.get_with_session(&path).await.status(),
+            StatusCode::FORBIDDEN,
+            "GET {path}"
+        );
+    }
+    assert_eq!(
+        post_reuse(app, &p, y_row.id).await.status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        get_repositories(app, &p, "any-token").await.status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        connect(app, &p, "any-token", "repo-4").await.status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        app.post_json_with_session(
+            &authorized_select_path(&p),
+            serde_json::json!({ "authorize_token": "any-token", "candidate_id": Uuid::new_v4() }),
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        app.post_json_with_session(&import_path(&p), serde_json::json!({}))
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        app.delete_with_session(&integration_path(&p))
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    let unchanged = find_integration(app, &p).await.expect("integration row");
+    assert_eq!(unchanged.repo_name, "repo-3");
+
+    // 個人プロジェクト: 持ち主（プロジェクト Admin）は変えられる。
+    let inbox = insert_personal_project(app, p.tenant_id, member.id).await;
+    insert_project_member(app, inbox.project_id, tenant_admin.id, ProjectRole::Member).await;
+    assert_eq!(install_status(app, &inbox).await, StatusCode::OK);
+
+    // --- プロジェクト Admin（テナントロールは Member）---
+    // P は、複数のリポジトリが見える Y に連携済み。
+    login_as(app, &project_admin).await;
+    assert_eq!(install_status(app, &p).await, StatusCode::OK);
+    assert_eq!(integration_body(app, &p).await["can_manage"], true);
+
+    // ACE だけでは、テナントの信頼による再利用を使えない。自分が管理する P 自身の行でも、
+    // そのインストールが見える全リポジトリを任せる根拠にならない。
+    assert!(reusable_installations(app, &p).await.is_empty());
+    for source in [p_row.id, y_row.id] {
+        assert_eq!(
+            post_reuse(app, &p, source).await.status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+
+    // インストール画面から戻っても、クエリの installation_id では先へ進まない。state に
+    // 束縛済みの Y でも選択トークンは出ず、GitHub のユーザー認可へ回る。
+    let state_token = get_install_state(app, &p).await;
+    let location = redirect_location(app, &callback_path_without_code(&state_token, y_id)).await;
+    let authorize_state = authorize_state_from_redirect(&location);
+
+    // admin でないリポジトリがある利用者は、連携先を選べない。
+    let location = redirect_location(
+        app,
+        &authorize_callback_path(&authorize_state, &format!("member-{y_id}")),
+    )
+    .await;
+    let authorize = authorize_token_from_location(&location);
+    let candidate_id = only_candidate(app, &p, &authorize).await;
+    assert_select_rejected(
+        post_authorized_select(app, &p, &authorize, candidate_id).await,
+        StatusCode::FORBIDDEN,
+        "github-installation-admin-required",
+    )
+    .await;
+    let unchanged = find_integration(app, &p).await.expect("integration row");
+    assert_eq!(unchanged.repo_name, "repo-3");
+
+    // 連携済みのプロジェクトでは、候補は今のインストールだけ。別のインストールが見えても
+    // 出さない（確定できないため）。今のインストールが見えない利用者は先へ進めない。
+    let other_id = unique_old_installation_id();
+    let authorize = authorize_token(app, &p, &format!("multi-{other_id}-{y_id}")).await;
+    let candidate_id = only_candidate(app, &p, &authorize).await;
+    let state_token = get_authorize_state(app, &p).await;
+    let location = redirect_location(
+        app,
+        &authorize_callback_path(&state_token, &owner_code(other_id)),
+    )
+    .await;
+    assert!(
+        location.contains("github_error=installation_forbidden"),
+        "unexpected redirect location: {location}"
+    );
+
+    // 全リポジトリの admin なら、GitHub の確認を根拠に連携先を替えられる。
+    let response = post_authorized_select(app, &p, &authorize, candidate_id).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value = response.json().await.expect("select json");
+    let select_token = body["select_token"].as_str().expect("select_token");
+    assert_eq!(
+        get_repositories(app, &p, select_token).await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        connect(app, &p, select_token, "repo-4").await.status(),
+        StatusCode::NO_CONTENT
+    );
+    let changed = find_integration(app, &p).await.expect("integration row");
+    assert_eq!(changed.installation_id, y_id);
+    assert_eq!(changed.repo_name, "repo-4");
+
+    // --- テナントを外れたあとも ACE が残る人 ---
+    // 自分の Inbox を installation W に連携し、共有プロジェクト S の Admin の ACE を持つ。
+    insert_tenant_member(app, p.tenant_id, former.id, TenantRole::Member).await;
+    let former_inbox = insert_personal_project(app, p.tenant_id, former.id).await;
+    let w_id = unique_old_installation_id();
+    let w_row = insert_integration(app, &former_inbox, former.id, w_id, "repo-6").await;
+    let s = insert_project_in_tenant(app, p.tenant_id).await;
+    insert_project_member(app, s.project_id, former.id, ProjectRole::Admin).await;
+    remove_tenant_member(app, p.tenant_id, former.id).await;
+
+    login_as(app, &former).await;
+    assert_eq!(install_status(app, &s).await, StatusCode::OK);
+    // 残った Inbox の ACE は、W を S へ持ち込む根拠にならない。
+    assert!(reusable_installations(app, &s).await.is_empty());
+    assert_eq!(
+        post_reuse(app, &s, w_row.id).await.status(),
+        StatusCode::NOT_FOUND
+    );
+    let state_token = get_install_state(app, &s).await;
+    let location = redirect_location(app, &callback_path_without_code(&state_token, w_id)).await;
+    authorize_state_from_redirect(&location);
+    assert!(find_integration(app, &s).await.is_none());
+
+    // --- 選択トークンを得たあとで、テナント Admin から外れた人 ---
+    insert_tenant_member(app, p.tenant_id, demoted.id, TenantRole::Admin).await;
+    login_as(app, &demoted).await;
+    let select_token = reuse_token(app, &p, y_row.id).await;
+    assert_eq!(
+        get_repositories(app, &p, &select_token).await.status(),
+        StatusCode::OK
+    );
+    // テナント Member へ下がり、P の Admin の ACE だけが残る。連携は変えられるが、テナントの
+    // 信頼で発行したトークンはもう使えない。
+    remove_tenant_member(app, p.tenant_id, demoted.id).await;
+    insert_tenant_member(app, p.tenant_id, demoted.id, TenantRole::Member).await;
+    insert_project_member(app, p.project_id, demoted.id, ProjectRole::Admin).await;
+    assert_eq!(install_status(app, &p).await, StatusCode::OK);
+    assert_eq!(
+        get_repositories(app, &p, &select_token).await.status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        connect(app, &p, &select_token, "repo-7").await.status(),
+        StatusCode::FORBIDDEN
+    );
+    let unchanged = find_integration(app, &p).await.expect("integration row");
+    assert_eq!(unchanged.repo_name, "repo-4");
+
+    // --- state と選択トークンを得たあとで、テナントから外された人 ---
+    insert_tenant_member(app, p.tenant_id, removed.id, TenantRole::Admin).await;
+    login_as(app, &removed).await;
+    let state_token = get_install_state(app, &p).await;
+    let select_token = reuse_token(app, &p, y_row.id).await;
+    remove_tenant_member(app, p.tenant_id, removed.id).await;
+    assert_eq!(
+        app.get_with_session(&callback_path_without_code(&state_token, y_id))
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        get_repositories(app, &p, &select_token).await.status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        connect(app, &p, &select_token, "repo-7").await.status(),
+        StatusCode::FORBIDDEN
+    );
+    let unchanged = find_integration(app, &p).await.expect("integration row");
+    assert_eq!(unchanged.repo_name, "repo-4");
+
+    // --- テナントに居ない人 ---
+    login_as(app, &outsider).await;
+    assert_eq!(install_status(app, &p).await, StatusCode::FORBIDDEN);
+    assert_eq!(
+        app.get_with_session(&integration_path(&p)).await.status(),
+        StatusCode::FORBIDDEN
+    );
+
+    // --- オーナー: 今までどおり全部の連携行を使える（絞り込みが掛からない）---
+    login_as(app, &owner).await;
+    assert_eq!(integration_body(app, &p).await["can_manage"], true);
+    // X（Q）、Y（R と P）、Z と W（個人プロジェクト）の 4 件。
+    let candidates = reusable_installations(app, &p).await;
+    assert_eq!(candidates.len(), 4, "candidates: {candidates:?}");
+    assert_eq!(post_reuse(app, &p, x_row.id).await.status(), StatusCode::OK);
+
+    // --- テナント Admin: 個人プロジェクトはテナントロールでは変えられない ---
+    login_as(app, &tenant_admin).await;
+    assert_eq!(integration_body(app, &inbox).await["can_manage"], false);
+    assert_eq!(install_status(app, &inbox).await, StatusCode::FORBIDDEN);
+
+    // 取り込みと解除。
+    assert_eq!(
+        app.post_json_with_session(&import_path(&p), serde_json::json!({}))
+            .await
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(
+        app.delete_with_session(&integration_path(&p))
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert!(find_integration(app, &p).await.is_none());
+
+    // 2FA の強制は落とさない。2FA の無いテナント Admin はここで止まる。
+    execute_sql(
+        &app.state.db,
+        "UPDATE tenants SET require_2fa = true WHERE id = $1",
+        vec![p.tenant_id.into()],
+    )
+    .await;
+    let response = app.get_with_session(&install_path(&p)).await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body: serde_json::Value = response.json().await.expect("2fa error json");
+    assert_eq!(body["message"], "2fa-setup-required");
+
+    // 未ログインは、状態の取得も 401。
+    app.reset_session_client();
+    assert_eq!(
+        app.get(&integration_path(&p)).await.status(),
+        StatusCode::UNAUTHORIZED
+    );
+
+    for user in [
+        &tenant_admin,
+        &project_admin,
+        &member,
+        &outsider,
+        &demoted,
+        &removed,
+        &former,
+        &owner,
+    ] {
+        app.cleanup_user(user.id).await;
+    }
+    app.reset_session_client();
+}
+
+/// シナリオ 18: 最後の連携行を解除しても、GitHub 側のアンインストールはテナントの信頼で
+/// 任せられる人（オーナーと入れるテナント Admin）に限る（TASK-595）。
+///
+/// アンインストールは GitHub 側の組織の全対象リポジトリから App を外す。修正前は
+/// プロジェクト Admin の ACE だけの人が最後の連携を解除すると、App ごと消えていた。
+async fn project_admin_disconnect_scenarios(app: &mut TestApp, mock_server: &MockServer) {
+    let owner = app.insert_user(false, false).await;
+    let tenant_admin = app.insert_user(false, false).await;
+    let project_admin = app.insert_user(false, false).await;
+
+    let p = app.insert_tenant_project(owner.id).await;
+    insert_tenant_member(app, p.tenant_id, tenant_admin.id, TenantRole::Admin).await;
+    insert_tenant_member(app, p.tenant_id, project_admin.id, TenantRole::Member).await;
+    insert_project_member(app, p.project_id, project_admin.id, ProjectRole::Admin).await;
+
+    // プロジェクト Admin: 連携行は消えるが、他に使う行が無くても App は残す。
+    let p_id = unique_old_installation_id();
+    insert_integration(app, &p, owner.id, p_id, "repo-1").await;
+    login_as(app, &project_admin).await;
+    assert_eq!(
+        app.delete_with_session(&integration_path(&p))
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert!(find_integration(app, &p).await.is_none());
+    assert_eq!(
+        delete_installation_count(mock_server, p_id).await,
+        0,
+        "プロジェクト Admin の解除で GitHub App をアンインストールしない"
+    );
+
+    // 対照: テナント Admin とオーナーの解除は、最後の連携なら今までどおり App も外す。
+    for user in [&tenant_admin, &owner] {
+        let installation_id = unique_old_installation_id();
+        insert_integration(app, &p, owner.id, installation_id, "repo-2").await;
+        login_as(app, user).await;
+        assert_eq!(
+            app.delete_with_session(&integration_path(&p))
+                .await
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+        assert!(find_integration(app, &p).await.is_none());
+        assert_eq!(
+            delete_installation_count(mock_server, installation_id).await,
+            1,
+            "テナントの信頼で任せられる人の解除は GitHub App もアンインストールする"
+        );
+    }
+
+    for user in [&tenant_admin, &project_admin, &owner] {
+        app.cleanup_user(user.id).await;
+    }
+    app.reset_session_client();
 }

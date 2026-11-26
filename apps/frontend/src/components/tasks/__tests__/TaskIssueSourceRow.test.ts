@@ -48,6 +48,35 @@ describe('TaskIssueSourceRow', () => {
     expect(mountWith({ pending_push: true }).text()).toContain('GitHub への反映待ち');
   });
 
+  it('状態と「取り込み元」は読み上げ専用で、見える文字にしない', () => {
+    const wrapper = mountWith();
+    expect(wrapper.findAll('.sr-only').map((el) => el.text())).toEqual(
+      expect.arrayContaining(['取り込み元', 'Open']),
+    );
+    // 行の見える所（カードを除く）は owner/repo#N と最終同期だけ
+    const row = wrapper.element.cloneNode(true) as HTMLElement;
+    for (const el of row.querySelectorAll('.sr-only, [data-forge-issue-card]')) el.remove();
+    expect(row.textContent).not.toContain('Open');
+    expect(row.textContent).not.toContain('取り込み元');
+  });
+
+  it('ホバーカードに owner/repo#N・題・最終同期を出す', () => {
+    const wrapper = mount(TaskIssueSourceRow, { props: { issue, title: 'ログインできない' } });
+    const card = wrapper.get('[data-forge-issue-card]');
+    expect(card.text()).toContain('acme/backend#42');
+    expect(card.text()).toContain('ログインできない');
+    expect(card.text()).toContain('最終同期');
+  });
+
+  it('反映待ちの間は、最終同期の所に警告色で出す（カードにも出す）', () => {
+    const wrapper = mountWith({ pending_push: true });
+    const row = wrapper.element.cloneNode(true) as HTMLElement;
+    for (const el of row.querySelectorAll('[data-forge-issue-card]')) el.remove();
+    expect(row.textContent).toContain('GitHub への反映待ち');
+    expect(row.textContent).not.toContain('最終同期');
+    expect(wrapper.get('[data-forge-issue-card]').text()).toContain('GitHub への反映待ち');
+  });
+
   it('http(s) 以外の URL はリンクにしない', () => {
     const wrapper = mountWith({ html_url: 'javascript:alert(1)' });
     expect(wrapper.find('a').exists()).toBe(false);

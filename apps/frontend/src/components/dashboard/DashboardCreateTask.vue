@@ -19,10 +19,16 @@ const props = defineProps<{
   projects: components['schemas']['ProjectResponse'][];
   /** 担当者の初期値にする利用者（ホームでは自分） */
   currentUserId?: string | null;
+  /** 開いたときに選んでおくプロジェクト。一覧に無ければ先頭を選ぶ */
+  initialProjectId?: string;
 }>();
 const emit = defineEmits<{
   'update:open': [open: boolean];
-  created: [task: CreatedTask, project: components['schemas']['ProjectResponse']];
+  created: [
+    task: CreatedTask,
+    project: components['schemas']['ProjectResponse'],
+    options: { keepOpen: boolean },
+  ];
 }>();
 const selectedId = ref('');
 const editing = ref(false);
@@ -69,8 +75,10 @@ const members = useAssignableUsersQuery(
 watch(
   () => props.open,
   (open) => {
-    if (open) selectedId.value = props.projects[0]?.id ?? '';
-    else {
+    if (open) {
+      const initial = props.projects.find((p) => p.id === props.initialProjectId);
+      selectedId.value = (initial ?? props.projects[0])?.id ?? '';
+    } else {
       editing.value = false;
       selectedId.value = '';
     }
@@ -80,11 +88,12 @@ watch(
 function close() {
   emit('update:open', false);
 }
-// close() で selectedId が空になるので、先にプロジェクトを捕まえる
-function onCreated(task: CreatedTask) {
+// close() で selectedId が空になるので、先にプロジェクトを捕まえる。
+// 続けて作成するときは閉じない（created は毎回上げる）
+function onCreated(task: CreatedTask, options: { keepOpen: boolean }) {
   const created = project.value;
-  close();
-  if (created) emit('created', task, created);
+  if (!options.keepOpen) close();
+  if (created) emit('created', task, created, options);
 }
 </script>
 

@@ -11,3 +11,13 @@ export function scrollParentOf(el: Element | null): HTMLElement | Window {
   }
   return window;
 }
+
+/**
+ * 図の箱の中で、図を横に巻ける要素。arc の内側の域（`.koyori-gantt-scroll`）か箱そのもので、
+ * どちらも図が収まって巻けなければ null。
+ */
+export function horizontalScrollerIn(box: HTMLElement | null): HTMLElement | null {
+  if (!box) return null;
+  const candidates = [box.querySelector<HTMLElement>('.koyori-gantt-scroll'), box];
+  return candidates.find((el) => !!el && el.scrollWidth - el.clientWidth > 1) ?? null;
+}

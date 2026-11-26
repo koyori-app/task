@@ -2,7 +2,7 @@
 title: Git ホスティング連携
 description: PR・コミット・ブランチとタスクの自動リンクと、マージ時のタスクの自動完了（GitHub / GitLab / Forgejo）
 status: partial
-updated: 2026-11-04
+updated: 2026-11-22
 slug: dev/features/tasks/github-tasks
 sidebar:
   order: 9
@@ -19,6 +19,7 @@ sidebar:
 | ホスト | GitHub / GitLab / Forgejo のいずれか。`host` と `host_url` の組で識別する |
 | `KEY-N` | プロジェクトキーとタスクの連番（`seq_id`）を繋いだ表記 |
 | 参照元 | リンクの由来。`forge_pull_request_links.source` の `title` / `body` / `branch` / `manual` |
+| 役割 | PR がタスクに対して持つ位置づけ。そのタスクを実装する PR は `implementation`（実装）、触れているだけの PR は `mention`（言及）である。表示の分け方だけに使う |
 | 自然キー | PR を指す列の組。`project_id` / `host` / `host_url` / `repo_owner` / `repo_name` / `number` |
 
 ## 振る舞い
@@ -71,6 +72,29 @@ PR タイトル・PR 本文・コミットメッセージ・ブランチ名か�
 | クローズキーワード + `KEY-N` | `Closes ENG-42` / `Fixes ENG-42` / `Resolves ENG-42` | `closes = true` でリンク。PR マージ時にタスク ENG-42 を自動クローズ |
 
 クローズキーワードは `Close` / `Closes` / `Closed` / `Fix` / `Fixes` / `Fixed` / `Resolve` / `Resolves` / `Resolved` / `Implement` / `Implements` / `Implemented` である。大小文字を問わない。GitHub と GitLab の集合の和である。キーワードと `KEY-N` の間には空白が必要で、`Closes: ENG-42` のようにコロンを挟んでもよい。PR タイトルと PR 本文の両方が対象である。ホスト自身の `Closes #N`（Issue クローズ）とは構文が異なるので衝突しない。
+
+### PR の役割
+
+リンクされた PR は、タスクごとに実装か言及のどちらかの役割を持つ。画面は実装の PR を題の上に、言及の PR をリポジトリセクションに分けて出す（TASK-525）。本文でタスクに触れただけの PR が、そのタスクの PR と見分けられなかったためである。
+
+役割は保存せず、応答を作るたびに PR のタイトルとリンクの行から決める。次のどれかに当たれば実装、どれにも当たらなければ言及である。
+
+| 条件 | 例 |
+|---|---|
+| タイトルの末尾の括弧に `KEY-N` だけが並び、そこにそのタスクがある | `feat: OAuth 対応 (ENG-42)` / `feat: OAuth 対応 (ENG-42, ENG-43)` |
+| どれかの参照元がクローズキーワード付きである（`closes` が真） | 本文の `Closes ENG-42` |
+| 手動リンクで「マージしたらこのタスクを完了にする」を選んだ | `manual` の行の `closes` が真 |
+
+- タイトルの途中の `KEY-N`、本文の `KEY-N`、ブランチ名だけの参照は言及である
+- 末尾の括弧は、中身が `KEY-N` をカンマ・読点・空白で区切った並びだけのときに数える。`(see ENG-42)` は数えない
+- 判定は `service::forge::pull_requests::pull_request_role` の 1 か所にある
+
+利用者は役割を手で入れ替えられる。入れ替えた結果は `forge_pull_request_roles` に PR とタスクの組ごとに 1 行で持ち、行があれば自動の判定より優先する。
+
+- PR イベント（タイトルや本文の編集、マージ）と手動リンクは、この行を読まず書かない。入れ替えた役割は PR が更新されても戻らない
+- リンクを外す操作は、同じトランザクションでこの行も消す。その後に自動リンクが戻ったときの役割は自動の判定になる
+- タイトルや本文から `KEY-N` が消えて PR イベントの処理がリンクを消したときは、この行を残す。同じ PR とタスクのリンクが戻ると、前に入れ替えた役割で出る
+- 役割はマージ時の自動完了に使わない。言及の PR を実装に入れ替えても、クローズキーワードが無ければマージでタスクは完了しない
 
 ### KEY-N の解決
 
@@ -145,6 +169,8 @@ PR / MR の実体である。`UNIQUE (project_id, host, host_url, repo_owner, re
 | `host_updated_at` | TIMESTAMPTZ | NULLABLE | ホスト側で PR が最後に更新された時刻。ホスト側の更新時刻（GitHub / Forgejo の `pull_request.updated_at`、GitLab の `object_attributes.updated_at`）をそのまま入れる世代で、[PR イベント共通の前処理](/dev/features/tasks/github-tasks/webhook#pr-イベント共通の前処理)で比較する |
 | `merge_effects_processed_at` | TIMESTAMPTZ | NULLABLE | `Closed { merged: true }` のマージ時副作用を完了した時刻。現在状態の世代とは独立に、NULL の間だけ処理する |
 | `merge_effects_acknowledged_by` | UUID | NULLABLE, FK→users SET NULL | 副作用を実行しないまま「確認済み」にした操作者。実際に副作用を処理した場合は NULL |
+| `head_branch` | VARCHAR | NULLABLE | head のブランチ名。PR イベントの共通処理が入れる。この列を足す前に受けた PR は、次の PR イベントまで NULL である |
+| `head_repo_owner` / `head_repo_name` | VARCHAR | NULLABLE | head のブランチがあるリポジトリ。フォークからの PR では `repo_owner` / `repo_name`（送り先）と違う。PR イベントの共通処理が入れ、フォークが消えた PR と、この列を足す前に受けた PR（次の PR イベントまで）は NULL である |
 | `commits_complete` | BOOLEAN | NOT NULL DEFAULT false | PR のコミット一覧を読み切れたか。false のあいだ[コミット集合の同期](/dev/features/tasks/github-tasks/webhook#pr-のコミット集合の同期)の削除を行わず、画面の表示にも使う。同期が一度も走っていない行（`Opened` / `Synchronize` を受けていない PR）も既定の false のままである |
 | `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
 
@@ -172,6 +198,20 @@ PR とタスクのリンクである。`PRIMARY KEY (pull_request_id, task_id, s
 - 表示する現在のリンク集合は、残存行を `task_id` ごとにまとめたものである
 
 マージ時の自動完了はこの表の現在集合をそのまま集計しない。[マージ時副作用](/dev/features/tasks/github-tasks/webhook#マージ時副作用)に書くマージ時点の集合を使う。
+
+### forge_pull_request_roles
+
+PR の役割を手で入れ替えた結果である。`PRIMARY KEY (pull_request_id, task_id)` で、PR とタスクの組ごとに 1 行である。行が無い組は[自動の判定](#pr-の役割)に従う。
+
+| 列 | 型 | 制約 | 説明 |
+|---|---|---|---|
+| `pull_request_id` | UUID | NOT NULL, FK→forge_pull_requests CASCADE | |
+| `task_id` | UUID | NOT NULL, FK→tasks CASCADE | |
+| `role` | VARCHAR | NOT NULL | `implementation` / `mention` |
+| `set_by` | UUID | NULLABLE, FK→users SET NULL | 入れ替えた操作者 |
+| `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
+
+書くのは `PUT .../forge/pull-requests/{pull_request_id}/role` だけである。消すのはリンクを外す操作と、PR・タスクの削除に伴う CASCADE だけである。
 
 ### forge_commits
 
@@ -295,6 +335,7 @@ webhook の受信記録である。`UNIQUE (host, host_url, delivery_id)` を張
 | GET | `/tasks/{id}/forge` | タスクに紐付いた PR / コミット / ブランチ。`TaskForgeResponse` を返す |
 | POST | `/tasks/{id}/forge/pull-requests` | 手動で PR をリンクする（`source = manual`） |
 | DELETE | `/tasks/{id}/forge/pull-requests/{pull_request_id}` | PR のリンクを外す。PR 行自体は消さない |
+| PUT | `/tasks/{id}/forge/pull-requests/{pull_request_id}/role` | PR の役割を手で入れ替える |
 | DELETE | `/tasks/{id}/forge/branches/{link_id}` | ブランチのリンクを外す（204） |
 | POST | `/forge/pull-requests/{pull_request_id}/merge-effects/acknowledge` | マージ時副作用を実行しないまま「確認済み」にする |
 
@@ -309,6 +350,8 @@ webhook の受信記録である。`UNIQUE (host, host_url, delivery_id)` を張
 - PR ごとに 1 件で、PR 行の作成が新しい順である
 - `project_id` は PR 行のプロジェクトで、確認済み操作のパスに使う。タスクのプロジェクトとは限らないが、タスクに結ばれた行だけを返すのでタスクの閲覧権限で足りる
 - `sources` はこのタスクを参照している `forge_pull_request_links.source` の昇順、`closes` はその `bool_or` である
+- `role` はこのタスクに対する[役割](#pr-の役割)で、`implementation` か `mention` である。手で入れ替えていればその値、無ければ自動の判定を返す
+- `head_branch` は[データ](#forge_pull_requests)の同名の列で、NULL のこともある
 - `merge_effects_processed_at` を含み、`state = merged` かつ NULL の状態を通常のマージ済みと区別できる。レビュー画面の PR 一覧が使う `ReviewedPullRequest` も同じである
 - `commits_complete` は[データ](#forge_pull_requests)の同名の列である
 
@@ -322,7 +365,10 @@ webhook の受信記録である。`UNIQUE (host, host_url, delivery_id)` を張
 
 `commits[]` は `forge_commit_links` で結ばれたコミットで、`committed_at` の新しい順、`message` は先頭行である。PR のコミット集合の同期で結ばれたものも含むが、`forge_pull_request_commits` にしか無い行は返さない。
 
-`branches[]` は `forge_branch_links` の `id` / `host` / `host_url` / `repo_owner` / `repo_name` / `branch` / `html_url` / `created_at` で、新しい順である。`id` は `DELETE .../forge/branches/{link_id}` に使い、他タスクの `link_id` は 404 を返す。
+- `body` はメッセージの 2 行目以降で、前後の空白を除く。無ければ空文字列である
+- `pull_requests` はそのコミットを含む PR（`forge_pull_request_commits`）で、`number` / `state` / `html_url` を番号の昇順で返す。含む PR が無ければ空の配列である
+
+`branches[]` は `forge_branch_links` の `id` / `host` / `host_url` / `repo_owner` / `repo_name` / `branch` / `html_url` / `created_at` で、新しい順である。`id` は `DELETE .../forge/branches/{link_id}` に使い、他タスクの `link_id` は 404 を返す。`pull_requests` は、同じ連携のプロジェクトの同じリポジトリで、そのブランチを `head_branch` に持ち、head のリポジトリ（`head_repo_owner` / `head_repo_name`）もブランチと同じ PR である。フォークの同名ブランチからの PR は入らない。形と並びはコミットのものと同じである。
 
 `repository` はタスクのプロジェクトの現在の連携先で、連携が無ければ `null` である。手動リンクの可否と対象リポジトリの表示に使う。連携の管理 API（`GET .../github/integration`）はテナントオーナー専用なので、タスクを読める人なら誰でも読めるここに出す。
 
@@ -349,6 +395,14 @@ webhook の受信記録である。`UNIQUE (host, host_url, delivery_id)` を張
 
 204 を返し、その PR ↔ タスクの全 `source` の行を消す。リンクが無ければ 404 を返す。
 
+### PUT /tasks/{id}/forge/pull-requests/{pull_request_id}/role
+
+リクエストは `{ "role": "implementation" }` の形である。`role` は `implementation` か `mention` で、それ以外は 400 を返す。
+
+- 成功すると 200 で、`GET /tasks/{id}/forge` の `pull_requests[]` と同じ形の PR を 1 件返す
+- その PR とタスクのリンクが 1 行も無ければ 404 を返し、何も書かない。リンクの行をロックしてから書くので、リンクを外す操作とは直列になる
+- 同じ組へ続けて送ると後の値が残る。`closes` とマージ時の自動完了は変えない
+
 ### POST .../merge-effects/acknowledge
 
 リクエストボディは無い。PR 行をロックし、`state = merged` かつ `merge_effects_processed_at IS NULL` のときだけ、`merge_effects_processed_at` を現在時刻、`merge_effects_acknowledged_by` を呼び出し元にして 200 を返す。タスクは完了させない。
@@ -373,24 +427,39 @@ webhook 経由のリンクはシステムが行うので権限検査を経ない
 
 ## 画面
 
+### 実装の PR
+
+役割が実装の PR は、タスク詳細の題の上の行に、種別と並べてピルで出す。ピルは状態のアイコンと番号だけで、状態の名前は読み上げにだけ渡す。実装の PR が複数あれば並べる。リポジトリセクションの一覧には出さない。
+
+- ピルにホバーまたはフォーカスすると PR のカードを出す。状態のアイコン、番号、タイトル、作者、ブランチを並べる。`unresolved` が `null` でなければ、区切りの下にレビューの未解決件数をレビュー画面へのリンクで出す
+- ピルを押すとメニューが開く。ホストで開く、「言及に戻す」、「リンクを外す」を並べる
+- 「言及に戻す」は `PUT .../role` を送り、応答が返ってから forge とアクティビティを取り直す。失敗したらピルを残して「PR の役割を変えられませんでした」と出す
+
 ### リポジトリセクション
 
-タスク詳細のセクションで、上から取り込み元 Issue、Pull Requests、Commits、Branches の順に並べる。PR の行には状態のアイコン、番号とタイトル、参照元（タイトル・本文・ブランチ・手動）、作者、未解決の件数を出す。リンクが 1 件も無いときは「まだ PR もコミットもありません」と出す。
+タスク詳細のセクションで、見出しの右に「PR をリンク」を置き、その下に Pull Requests、コミット、ブランチの 3 つのタブを並べる。タブには件数を添える。Pull Requests の件数と一覧は言及の PR だけである。
 
-![タスク詳細のリポジトリセクションの画面。取り込み元、Pull Requests、Commits、Branches を上から順に並べる](/diagrams/github-tasks-repository-section.svg)
-
-- 「取り込み元」行は `issue` があるときだけ先頭に出す。`owner/repo#N` を `html_url` へのリンクにし、状態（Open / Closed / 状態不明）と最終同期（`last_synced_at` が `null` なら出さない）、`pending_push` なら「GitHub への反映待ち」を並べる
-- 見出しの「Pull Requests」は、並ぶ PR がすべて `host = gitlab` なら「Merge Requests」になる
+- 開いたときのタブは、Pull Requests、コミット、ブランチの順で最初に 1 件以上あるものである。3 つとも 0 件なら Pull Requests を開く。利用者が選んだ後は件数が変わっても動かさない
+- 見出しの「Pull Requests」は、リンクされた PR がすべて `host = gitlab` なら「Merge Requests」になる
+- タブの行の右端に取り込み元を置く。`issue` があるときだけ出し、状態のアイコン、`html_url` へリンクした `owner/repo#N`、最終同期（`last_synced_at` が `null` なら出さない）を並べる。`pending_push` の間は最終同期の代わりに「GitHub への反映待ち」を警告色で出す。狭い幅ではタブの下へ回す。横に並べるかは画面の幅ではなく欄の幅で決める
+- PR の行は 2 段である。1 段目に状態のアイコンとタイトル、2 段目に番号と作者を出す。参照元と状態の名前、未解決の件数は行に出さない。タイトルにホバーすると実装の PR と同じカードを出す
+- PR の行のメニューには「実装 PR にする」と「リンクを外す」を置く。「実装 PR にする」は `PUT .../role` を送り、取り直した後はその PR が題の上のピルへ移る
+- 「リンクを外す」は確認ダイアログを挟み、タイトル・本文に `KEY-N` が残っていれば次の PR イベントで戻ることを添える
 - 「PR をリンク」はダイアログで PR 番号と「マージしたらこのタスクを完了にする」（`closes`）を受け取る。リポジトリはプロジェクトの連携先を表示するだけで選ばせない。連携先は `repository` で読み、`null` ならボタンを無効にして理由を出す
-- PR 行のメニューの「リンクを外す」は確認ダイアログを挟み、タイトル・本文に `KEY-N` が残っていれば次の PR イベントで戻ることを添える
-- PR 行の「N 件が未解決」「未解決なし」は `reviews/summary` と同じ集計で、`unresolved` が `null` なら出さない。クリックでレビュー画面のその PR（`reviews?pr=N`）へ遷移する
-- コミットはタスク詳細のアクティビティにも時系列で並ぶ
-- Branches の各行はブランチ名と `html_url` へのリンクで、リンクを外すボタンを置く
-- `commits_complete = false` の PR の行には「コミット一覧は一部のみ」と添える。ホストの上限に当たった・一覧を読み切れなかった・同期がまだ走っていない状態である。空表示にはしない
+- コミットの行は 1 段目にメッセージの先頭行、2 段目に短縮した SHA のリンク、作者、時刻を出す。ホバーのカードには本文の先頭 2 行と、そのコミットを含む PR を出す。コミットはタスク詳細のアクティビティにも時系列で並ぶ
+- ブランチの行はブランチ名と `html_url` へのリンクで、リンクを外すボタンを置く。ホバーのカードにはリンクした時刻と、そのブランチを使っている PR を出す
+- 取り込み元のカードには `owner/repo#N`、タスクの題、最終同期を出す
+
+Pull Requests のタブが空のときは、リンクが 1 件も無ければ「まだ PR もコミットもありません」、実装の PR やコミットがあれば「触れているだけの PR はありません」と出す。
 
 ### 自動完了の未適用表示
 
-`state = merged` かつ `merge_effects_processed_at = NULL` の PR は、タスク詳細の PR 行に「マージ済み（自動完了は未適用）」のバッジを出す。クリックで開くダイアログでは次を案内する。
+`state = merged` かつ `merge_effects_processed_at = NULL` の PR は、利用者の操作を待つ状態として、ホバーしなくても見える所に出す。
+
+- 言及の PR は、リポジトリセクションの行の 2 段目に「マージ済み（自動完了は未適用）」のバッジを出す
+- 実装の PR は、ピルに警告色の点を付け、ピルのメニューに「自動完了の未適用を確認」を足す。PR のカードにも同じ文言を出す
+
+バッジまたはメニューから開くダイアログでは次を案内する。
 
 - 完了すべきタスクを各タスクの通常操作で手動完了すること
 - 連携の管理者へ元の `Closed { merged: true }` webhook の再配送を依頼できること
@@ -406,9 +475,13 @@ webhook 経由のリンクはシステムが行うので権限検査を経ない
 
 | コンポーネント | ファイル |
 |---|---|
+| 実装の PR のピル | `components/tasks/TaskImplementationPullRequests.vue` |
 | リポジトリセクション | `components/tasks/TaskForgeSection.vue` |
-| 取り込み元の行 | `components/tasks/TaskIssueSourceRow.vue` |
-| Branches の一覧 | `components/tasks/TaskForgeBranches.vue` |
+| 取り込み元 | `components/tasks/TaskIssueSourceRow.vue` |
+| ブランチのタブの中身 | `components/tasks/TaskForgeBranches.vue` |
+| PR・コミット・ブランチ・Issue のカード | `components/tasks/ForgePullRequestCard.vue` / `ForgeCommitCard.vue` / `ForgeBranchCard.vue` / `ForgeIssueCard.vue` |
+| リンクを外す確認 | `components/tasks/TaskForgeUnlinkDialog.vue` |
+| forge の取得と、役割の入れ替え・リンクを外す操作 | `composables/useTaskForge.ts` |
 | PR の手動リンク | `components/tasks/TaskForgePullRequestLinkDialog.vue` |
 | 自動完了の未適用バッジと確認済み操作 | `components/tasks/TaskForgeMergeEffectsBadge.vue` |
 
@@ -586,3 +659,7 @@ PR 詳細 API の設計は次のとおりである。
 | 2026-10-20 | Issue 取り込みのタスクをマージで完了にしたときも Issue へ書き戻す | GitHub は `Closes KEY-N` を Issue 番号として読まないので、書き戻さないと Issue が開いたまま残る |
 | 2026-11-04 | `\b` は ASCII の語境界にする | Unicode の語境界だと `修正TASK-1` のように日本語の直後を語の途中とみなして取りこぼす（日付は不明） |
 | 2026-11-04 | 実装は 1 関心 = 1 PR で次の順に入れた。TASK-140（`forge_commits` / `forge_commit_links` / `forge_webhook_deliveries` / `task_activities.dedupe_key`、`service::forge::{events, task_refs}`、`push` 変換と受信記録の冪等化、`Push` の処理とアクティビティ）、TASK-220（`forge_pull_requests` / `forge_pull_request_links`、`pull_request` 変換、共通処理、`forge_pull_request_linked`、`GET /tasks/{id}/forge`、リポジトリセクション）、TASK-288（手動リンク・解除）、TASK-290（取り込み元 Issue のパネル）、TASK-289（マージ時の自動完了と未適用表示、確認済み操作）、TASK-264（`reviews` との結線。PR の状態、未解決件数、`pr_merged` 通知）、TASK-291（ブランチのリンクと PR のコミット集合の同期）、TASK-314（CLI の `task tasks pr`） | コミットのリンク（TASK-140）は PR 行に依存しないので先行させた（日付は不明） |
+| 2026-11-24 | PR に役割（実装 / 言及）を持たせ、実装の PR を題の上に、言及の PR をリポジトリセクションに分けて出す（TASK-525） | 本文でタスクに触れただけの PR が、そのタスクの PR と同じ一覧に並び、見分けられなかった |
+| 2026-11-24 | 役割の自動の判定は保存せず、応答のたびにタイトルとリンクの行から決める。実装はタイトルの末尾の `(KEY-N)`、クローズキーワード、手動リンクの「マージしたら完了」のどれかである | 保存すると、既存の行の書き換えと、PR の編集のたびの追従が要る。タイトルの末尾の `(KEY-N)` はこのリポジトリの PR の題の決まりである |
+| 2026-11-24 | 役割の手の入れ替えは `forge_pull_request_roles` に持ち、PR イベントでは戻さず、リンクを外す操作で一緒に消す | 自動の判定で戻ると、利用者が直した分類が PR の更新のたびに消える。手で外した後まで残すと、自動リンクが戻ったときに前の入れ替えが生き返る。PR イベントがリンクを消したときは残る |
+| 2026-11-24 | 役割は表示だけに使い、マージ時の自動完了は変えない | 1 つのタスクにタイトルの末尾が `(KEY-N)` の PR が複数あると（スタック PR）、最初のマージでタスクが完了してしまう |

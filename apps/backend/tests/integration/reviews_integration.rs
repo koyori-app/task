@@ -24,6 +24,7 @@
 // - 直しの検め: 欄が無い・line が 0・題が空・file が 1001 文字は 400 で、指摘は変わらない
 // - 重大度は直せない: `severity` を送ると（ほかの欄と一緒でも）400 で、何も変わらない
 // - 直しとマージ可否: 題・本文・位置を直しても、集計の判定（塞いでいる件数・マージ可否）は変わらない
+// - 直しの境界（IDOR）: 別プロジェクト（同じテナント）・別テナントの指摘 id を渡すと 404 で、指摘は変わらず履歴も残らない（対照: 正しいプロジェクトの道なら 200）
 
 use crate::common::TestApp;
 use axum::http::StatusCode;
@@ -2966,6 +2967,67 @@ async fn only_the_round_author_can_edit_a_finding() {
     fx.app.cleanup_user(fx.developer.id).await;
 }
 
+/// 別のプロジェクトの指摘 id を渡しても直せない。同じテナントの別プロジェクトでも、
+/// 別テナントの利用者が自分の道に差し込んでも 404 で、指摘は変わらない（IDOR の対照: TASK-577）。
+#[tokio::test]
+async fn a_finding_of_another_project_or_tenant_is_not_found_when_edited() {
+    let mut fx = setup().await;
+    fx.login(&fx.reviewer.clone()).await;
+    let (_, finding) = submit_round(&fx, 903, "high", "守る指摘").await;
+
+    // 同じテナントの別プロジェクト: テナントのオーナーは両方に入れるが、指摘は元のプロジェクトのもの
+    let other_project = crate::common::insert_extra_project(&fx.app, fx.tenant_id).await;
+    let cross_project = fx
+        .app
+        .patch_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{other_project}/review-findings/{finding}/content",
+                fx.tenant_id
+            ),
+            serde_json::json!({ "title": "別プロジェクトから直す" }),
+        )
+        .await;
+    assert_eq!(cross_project.status(), StatusCode::NOT_FOUND);
+
+    // 別テナント: 自分のテナント・プロジェクトの道に、よその指摘 id を差し込む
+    let outsider = fx.app.insert_user_default().await;
+    let other = fx.app.insert_tenant_project(outsider.id).await;
+    fx.login(&outsider.clone()).await;
+    let cross_tenant = fx
+        .app
+        .patch_json_with_session(
+            &format!(
+                "/v1/tenants/{}/projects/{}/review-findings/{finding}/content",
+                other.tenant_id, other.project_id
+            ),
+            serde_json::json!({ "title": "別テナントから直す" }),
+        )
+        .await;
+    assert_eq!(cross_tenant.status(), StatusCode::NOT_FOUND);
+
+    // 元のプロジェクトの道へ入っても、テナントの外の者は通れない
+    let outside_path = edit(&fx, &finding, serde_json::json!({ "title": "外から直す" })).await;
+    assert_eq!(outside_path.status(), StatusCode::FORBIDDEN);
+
+    let row = finding_row(&fx, &finding).await;
+    assert_eq!(row.title, "守る指摘", "断ったら指摘は変わらない");
+    assert!(row.edited_at.is_none());
+    assert!(edits_of(&fx, &finding).await.is_empty());
+
+    // 対照: 正しいプロジェクトの道で作成者が直せば 200
+    fx.login(&fx.reviewer.clone()).await;
+    assert_eq!(
+        edit(&fx, &finding, serde_json::json!({ "title": "直した" }))
+            .await
+            .status(),
+        StatusCode::OK
+    );
+
+    fx.app.cleanup_user(outsider.id).await;
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
 /// 直せるのは open の間だけ。理由を本文に入れた 409 を返す（TASK-577）。
 #[tokio::test]
 async fn a_finding_that_is_not_open_cannot_be_edited() {
@@ -3142,6 +3204,120 @@ async fn editing_a_finding_does_not_change_the_merge_verdict() {
         after["counts"], before["counts"],
         "重大度 × 状態の件数も変わらない"
     );
+
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+/// PR 一覧の行が、全重大度の承認待ち（fixed）の数と、リポジトリ・ホスト・PR の URL を返す。
+#[tokio::test]
+async fn pull_request_rows_carry_fixed_counts_and_host_fields() {
+    let mut fx = setup().await;
+    link_repo(&fx, "acme", "app").await;
+    fx.login(&fx.reviewer.clone()).await;
+    let (_, ids) = submit_round_with(
+        &fx,
+        618,
+        OLD_HEAD,
+        &[
+            ("high", "high fixed"),
+            ("low", "low fixed"),
+            ("low", "low open"),
+        ],
+    )
+    .await;
+
+    fx.login(&fx.developer.clone()).await;
+    for id in &ids[..2] {
+        assert_eq!(
+            transition(&fx, id, "fixed").await.status(),
+            StatusCode::OK,
+            "修正者は fixed にできる"
+        );
+    }
+
+    let listed = json(
+        fx.app
+            .get_with_session(&format!("{}/pull-requests", fx.reviews_path()))
+            .await,
+    )
+    .await;
+    let row = &listed.as_array().expect("PR list")[0];
+    assert_eq!(row["pr_number"], 618);
+    assert_eq!(row["unresolved"], 3);
+    assert_eq!(row["blocking"], 1);
+    assert_eq!(row["blocking_fixed"], 1);
+    assert_eq!(row["unresolved_fixed"], 2, "fixed は重大度を問わず数える");
+    assert_eq!(row["repository"], "acme/app");
+    assert_eq!(row["host"], "github");
+    assert!(
+        row.as_object().expect("row").contains_key("html_url") && row["html_url"].is_null(),
+        "webhook を受けていない PR 行の URL は null: {row}"
+    );
+
+    // webhook が届いて PR 行に URL が入ったあとは、その URL をそのまま返す
+    {
+        use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
+        let updated = fx
+            .app
+            .state
+            .db
+            .execute_raw(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                "UPDATE forge_pull_requests SET html_url = $1 WHERE project_id = $2 AND number = $3",
+                [
+                    "https://ghe.example.com/acme/app/pull/618".into(),
+                    fx.project_id.into(),
+                    618.into(),
+                ],
+            ))
+            .await
+            .expect("update html_url");
+        assert_eq!(
+            updated.rows_affected(),
+            1,
+            "起票で用意した PR 行が 1 つある"
+        );
+    }
+    let listed = json(
+        fx.app
+            .get_with_session(&format!("{}/pull-requests", fx.reviews_path()))
+            .await,
+    )
+    .await;
+    assert_eq!(
+        listed.as_array().expect("PR list")[0]["html_url"],
+        "https://ghe.example.com/acme/app/pull/618"
+    );
+
+    fx.app.cleanup_user(fx.reviewer.id).await;
+    fx.app.cleanup_user(fx.developer.id).await;
+}
+
+/// 連携の無いプロジェクトの行は、リポジトリもホストも持たない。
+#[tokio::test]
+async fn pull_request_rows_of_unlinked_projects_have_no_repository() {
+    let mut fx = setup().await;
+    fx.login(&fx.reviewer.clone()).await;
+    submit_round(&fx, 618, "low", "unlinked").await;
+
+    let listed = json(
+        fx.app
+            .get_with_session(&format!("{}/pull-requests", fx.reviews_path()))
+            .await,
+    )
+    .await;
+    let row = listed.as_array().expect("PR list")[0]
+        .as_object()
+        .expect("row")
+        .clone();
+    assert_eq!(row["unresolved_fixed"], 0);
+    for key in ["repository", "host", "html_url"] {
+        assert!(
+            row.contains_key(key) && row[key].is_null(),
+            "{key} は null: {row:?}"
+        );
+    }
 
     fx.app.cleanup_user(fx.reviewer.id).await;
     fx.app.cleanup_user(fx.developer.id).await;
