@@ -216,7 +216,7 @@ Device Token の規則の定義元は [Bearer 認証・認可の「Desktop 認�
 - 環境設定で「実験的機能を表示する」を有効にしたときだけ、区切り線の下に「実験的機能」（`/settings/experiments`）が加わる。この設定はナビの項目を出すだけで、機能ごとの有効・無効はそのページのフラグで切り替える（現在のフラグは「ガントチャート」（`koyoriArcIntegration`）だけ）
 - 項目は `apps/frontend/src/components/settings/AccountSettingsNav.vue` の `items` に定義する。`href` を足すとその項目が有効になる
 
-環境設定（`/settings/preferences`）と実験的機能の値はブラウザの localStorage に保存する。アカウントには保存しないので、ほかの端末や別のブラウザには引き継がれない。環境設定の項目は「実験的機能を表示する」「絵文字の字」「タスク一覧でサブタスクを最初から展開する」の 3 つで、定義は `apps/frontend/src/lib/preferences.ts` の `PREFERENCE_TABLE` に置く。
+環境設定（`/settings/preferences`）と実験的機能の値はブラウザの localStorage に保存する。アカウントには保存しないので、ほかの端末や別のブラウザには引き継がれない。環境設定の項目は「実験的機能を表示する」「絵文字の字」「タスク一覧でサブタスクを最初から展開する」「ガントに稲妻線を出す」「ガントに依存の矢印を出す」「タスクの作成で、日付を選んだら次の行へ進む」の 6 つで、定義は `apps/frontend/src/lib/preferences.ts` の `PREFERENCE_TABLE` に置く。
 
 テーマ（`/settings/theme`）は、画面の配色（ライト／ダーク）を `ThemeSwitch` で切り替える。選んだ値は localStorage の `koyori-theme` に残し、アカウントには保存しない。まだ選んでいなければ OS の配色に合わせる。head の `themeScript`（`apps/frontend/src/pages/+Head.vue`）が、描画の前に `html` の `data-theme` を `light` か `dark` に決める。
 
@@ -397,3 +397,4 @@ backend は「その連携がログイン用の最後の 1 件 かつ パスワ�
 | 2026-11-14 | task 側の暗い配色の条件は `html` の `data-theme` が `light` でないこと | ui の既定が暗い配色で、属性が無いときも ui と同じ配色になる |
 | 2026-11-17 | プロフィール画面からアバターの URL 入力欄を外し、画像のアップロードだけにする。`PATCH /v1/auth/me` の `avatar_url` は残す（TASK-551） | URL 欄はアップロードが無かった頃の代わりで、外部 URL は閲覧者の IP アドレスと User-Agent を URL の持ち主に渡す。API は既存の値と利用者を壊さないよう変えない |
 | 2026-11-19 | MCP の OAuth で許可した接続を、アクセストークンのページではなく新しいページ「連携中のアプリ」（`/settings/apps`）に出す（TASK-563） | PAT は利用者が発行するもので、許可はクライアントが求めて利用者が与えるものである。一覧を分けると、解除する対象を探しやすい |
+| 2026-11-25 | タスク作成の日付パネルで行を自動で進めるかは環境設定（localStorage）に置き、既定は有効にする（TASK-588） | 入力の癖の好みなので端末ごとでよい。進めるのは開始予定日を選んだ後だけで、期限だけを入れる流れは変えない |

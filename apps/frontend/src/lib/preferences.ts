@@ -37,6 +37,12 @@ export const PREFERENCE_TABLE = {
       'ガントに、ブロックの関係を矢印で出します（狭い画面では行に依存の印を添えます）。ガントの切り替えで変えた時も、ここに覚えます。',
     default: true,
   },
+  advanceDateRowOnPick: {
+    name: 'タスクの作成で、日付を選んだら次の行へ進む',
+    description:
+      'タスクを作る画面の日付で、開始予定日を選ぶと期限の行へ、続けて期限を選ぶと最終期限の行へ進みます。',
+    default: true,
+  },
 } as const satisfies SettingTable;
 
 export type PreferenceKey = keyof typeof PREFERENCE_TABLE;
