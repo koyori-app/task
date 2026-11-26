@@ -432,19 +432,25 @@ export const UnscheduledDrawerScroll: Story = {
   play: async ({ canvasElement }) => playUnscheduledDrawerScroll(canvasElement),
 };
 
+// 頁は幅 375 の箱に描く。VRT の撮り手は物語の globals.viewport を効かせず窓の幅（1280）のまま
+// 描くので、窓の幅に頼ると手元（addon-vitest）と VRT で別の幅になる。頁にはこの幅で形を変える
+// 作りが無く（media query も innerWidth も見ない）、drawer は窓の右に固定の幅（280）で出る
+const NARROW_PAGE_PX = 375;
+
 export const UnscheduledDrawerScrollNarrow: Story = {
   name: '期間なし drawer を巻く（幅 375）',
-  decorators: [withContext()],
-  parameters: {
-    viewport: {
-      options: { narrow375: { name: '375', styles: { width: '375px', height: '812px' } } },
-    },
-  },
-  globals: { viewport: { value: 'narrow375', isRotated: false } },
+  decorators: [
+    () => ({
+      template: `<div data-narrow-page style="width: ${NARROW_PAGE_PX}px"><story /></div>`,
+    }),
+    withContext(),
+  ],
   beforeEach: UnscheduledDrawerScroll.beforeEach,
   play: async ({ canvasElement }) => {
-    // 既定の幅（414）で走ると通常の物語と同じ条件になるので、幅 375 で走っておることを先に確かめる
-    await expect(canvasElement.ownerDocument.defaultView!.innerWidth).toBe(375);
+    // 既定の幅で走ると通常の物語と同じ条件になるので、幅 375 で描いておることを先に確かめる
+    const page = canvasElement.querySelector<HTMLElement>('[data-narrow-page]')!;
+    await expect(page.getBoundingClientRect().width).toBe(NARROW_PAGE_PX);
+    await expect(page.scrollWidth).toBeLessThanOrEqual(NARROW_PAGE_PX);
     await playUnscheduledDrawerScroll(canvasElement);
   },
 };
