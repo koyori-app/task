@@ -30970,8 +30970,12 @@
       },
       "GithubIntegrationResponse": {
         "type": "object",
-        "required": ["connected"],
+        "required": ["connected", "can_manage"],
         "properties": {
+          "can_manage": {
+            "type": "boolean",
+            "description": "見ている本人が連携を変えられるか（連携・解除・Issue の取り込み）。"
+          },
           "connected": {
             "type": "boolean"
           },

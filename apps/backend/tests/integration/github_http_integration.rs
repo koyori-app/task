@@ -1,8 +1,12 @@
-use crate::common::{TestApp, TestTenantProject, unique_installation_id};
+use crate::common::{
+    TestApp, TestTenantProject, TestUser, execute_sql, stop_inheriting, unique_installation_id,
+};
 use axum::http::StatusCode;
 use backend::utils::github::install_state::{
     self as github_oauth_state, GithubOAuthStateKind, GithubOAuthStatePayload,
 };
+use entity::project_members::{self, ProjectRole};
+use entity::tenant_members::{self, TenantRole};
 use entity::{github_integrations, projects, scopes::Scope, tenants};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
@@ -1624,6 +1628,7 @@ async fn github_http_integration_suite() {
                 project_id: tp.project_id,
                 user_id: outsider.id,
                 installation_id,
+                basis: Default::default(),
             },
         )
         .await
@@ -1734,6 +1739,7 @@ async fn github_http_integration_suite() {
                 project_id: tp.project_id,
                 user_id: user.id,
                 installation_id: unique_multi_repo_installation_id(),
+                basis: Default::default(),
             },
         )
         .await
@@ -2299,6 +2305,7 @@ async fn github_http_integration_suite() {
             project_id: tp.project_id,
             user_id: user.id,
             installation_id: unique_multi_repo_installation_id(),
+            basis: Default::default(),
         };
         github_oauth_state::store_select_token(&app.state.redis_client, &token, &payload)
             .await
@@ -2417,6 +2424,7 @@ async fn github_http_integration_suite() {
                 project_id: tp.project_id,
                 user_id: user.id,
                 installation_id,
+                basis: Default::default(),
             },
         )
         .await
@@ -2452,6 +2460,7 @@ async fn github_http_integration_suite() {
                 project_id: tp.project_id,
                 user_id: user.id,
                 installation_id,
+                basis: Default::default(),
             },
         )
         .await
@@ -2965,4 +2974,588 @@ async fn github_http_integration_suite() {
 
     // 16. 他のテナントで連携済みのインストールを、別のテナントから連携できる（TASK-593）
     authorize_flow_scenarios(&mut app, &mock_server).await;
+
+    // 17. 連携を変えられる人と、状態を読める人（TASK-595）
+    integration_manager_scenarios(&mut app).await;
+
+    // 18. プロジェクト Admin の解除は、GitHub 側の App を外さない（TASK-595）
+    project_admin_disconnect_scenarios(&mut app, &mock_server).await;
+}
+
+fn import_path(tp: &TestTenantProject) -> String {
+    format!(
+        "/v1/tenants/{}/projects/{}/github/import",
+        tp.tenant_id, tp.project_id
+    )
+}
+
+async fn insert_tenant_member(app: &TestApp, tenant_id: Uuid, user_id: Uuid, role: TenantRole) {
+    tenant_members::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        tenant_id: Set(tenant_id),
+        user_id: Set(user_id),
+        role: Set(role),
+        department: Set(None),
+        position: Set(None),
+        team: Set(None),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert tenant member");
+}
+
+async fn insert_project_member(app: &TestApp, project_id: Uuid, user_id: Uuid, role: ProjectRole) {
+    project_members::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        project_id: Set(project_id),
+        user_id: Set(user_id),
+        role: Set(role),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert project member");
+}
+
+async fn remove_tenant_member(app: &TestApp, tenant_id: Uuid, user_id: Uuid) {
+    tenant_members::Entity::delete_many()
+        .filter(tenant_members::Column::TenantId.eq(tenant_id))
+        .filter(tenant_members::Column::UserId.eq(user_id))
+        .exec(&app.state.db)
+        .await
+        .expect("delete tenant member");
+}
+
+/// 個人プロジェクト（Inbox）を作る。持ち主はプロジェクト Admin の ACE を持つ。
+async fn insert_personal_project(
+    app: &TestApp,
+    tenant_id: Uuid,
+    owner_id: Uuid,
+) -> TestTenantProject {
+    let project_id = Uuid::new_v4();
+    projects::ActiveModel {
+        id: Set(project_id),
+        name: Set("inbox".into()),
+        description: Set(String::new()),
+        tenant_id: Set(tenant_id),
+        icon_emoji: Set(None),
+        icon_url: Set(None),
+        key: Set(format!("ME{}", &project_id.to_string()[..8].to_uppercase())),
+        is_personal: Set(true),
+        personal_owner_id: Set(Some(owner_id)),
+        inherit_tenant_members: Set(true),
+    }
+    .insert(&app.state.db)
+    .await
+    .expect("insert personal project");
+    insert_project_member(app, project_id, owner_id, ProjectRole::Admin).await;
+    TestTenantProject {
+        tenant_id,
+        project_id,
+    }
+}
+
+/// インストールの callback が、GitHub のユーザー認可へ回したことを確かめて、その state を返す。
+/// 選択トークンも連携行も出さずに回すので、フラグメントは付かない。
+fn authorize_state_from_redirect(location: &str) -> String {
+    assert!(
+        location.starts_with("https://github.com/login/oauth/authorize?client_id="),
+        "unexpected redirect location: {location}"
+    );
+    assert!(
+        !location.contains("github_select"),
+        "unexpected redirect location: {location}"
+    );
+    state_from_install_url(location)
+}
+
+/// セッションを別の利用者に切り替える。
+async fn login_as(app: &mut TestApp, user: &TestUser) {
+    app.reset_session_client();
+    app.login_session(&user.email, &user.password).await;
+}
+
+async fn install_status(app: &TestApp, tp: &TestTenantProject) -> StatusCode {
+    app.get_with_session(&install_path(tp)).await.status()
+}
+
+async fn integration_body(app: &TestApp, tp: &TestTenantProject) -> serde_json::Value {
+    let response = app.get_with_session(&integration_path(tp)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    response.json().await.expect("integration json")
+}
+
+/// シナリオ 17: 連携を変えられるのは Webhook 管理と同じ人（オーナー、プロジェクト Admin、その
+/// プロジェクトに入れるテナント Admin）。状態はプロジェクトに入れる人が読める（TASK-595）。
+///
+/// 修正前はテナントのオーナーしか通らず、テナント Admin もプロジェクト Admin も、状態の
+/// 取得を含む全部の口で 403 になっていた。
+///
+/// 連携先を選ぶ根拠は別に決まる。オーナーと入れるテナント Admin はテナントが使っている
+/// インストールを再利用できる。プロジェクト Admin の ACE だけで通る人は、インストールが見える
+/// 全リポジトリの admin であることを GitHub に確かめる経路でしか選べない。
+async fn integration_manager_scenarios(app: &mut TestApp) {
+    let owner = app.insert_user(false, false).await;
+    let tenant_admin = app.insert_user(false, false).await;
+    let project_admin = app.insert_user(false, false).await;
+    let member = app.insert_user(false, false).await;
+    let outsider = app.insert_user(false, false).await;
+    let demoted = app.insert_user(false, false).await;
+    let removed = app.insert_user(false, false).await;
+    let former = app.insert_user(false, false).await;
+
+    // P: 継承ありの共有プロジェクト。
+    let p = app.insert_tenant_project(owner.id).await;
+    insert_tenant_member(app, p.tenant_id, tenant_admin.id, TenantRole::Admin).await;
+    insert_tenant_member(app, p.tenant_id, project_admin.id, TenantRole::Member).await;
+    insert_tenant_member(app, p.tenant_id, member.id, TenantRole::Member).await;
+    insert_project_member(app, p.project_id, project_admin.id, ProjectRole::Admin).await;
+
+    // Q: 継承を切った共有プロジェクト。オーナー以外は誰も入れない。installation X を使う。
+    let q = insert_project_in_tenant(app, p.tenant_id).await;
+    stop_inheriting(&app.state.db, q.project_id).await;
+    let x_id = unique_old_installation_id();
+    let x_row = insert_integration(app, &q, owner.id, x_id, "repo-1").await;
+
+    // R: 継承ありの共有プロジェクト。テナント Admin が入れる。installation Y を使う。
+    let r = insert_project_in_tenant(app, p.tenant_id).await;
+    let y_id = unique_old_installation_id();
+    let y_row = insert_integration(app, &r, owner.id, y_id, "repo-2").await;
+
+    // テナント Admin の Inbox。installation Z を使う。Inbox ではテナント Admin も ACE だけの人。
+    let admin_inbox = insert_personal_project(app, p.tenant_id, tenant_admin.id).await;
+    let z_id = unique_old_installation_id();
+    let z_row = insert_integration(app, &admin_inbox, tenant_admin.id, z_id, "repo-5").await;
+
+    // --- テナント Admin ---
+    login_as(app, &tenant_admin).await;
+    assert_eq!(install_status(app, &p).await, StatusCode::OK);
+    assert_eq!(
+        app.get_with_session(&authorize_path(&p)).await.status(),
+        StatusCode::OK
+    );
+    let body = integration_body(app, &p).await;
+    assert_eq!(body["connected"], false);
+    assert_eq!(body["can_manage"], true);
+
+    // 再利用の候補は、本人がオーナーか入れるテナント Admin であるプロジェクトのものだけ。
+    // 入れない Q の X も、ACE だけで管理する自分の Inbox の Z も出ない。
+    let candidates = reusable_installations(app, &p).await;
+    assert_eq!(candidates.len(), 1, "candidates: {candidates:?}");
+    assert_eq!(candidates[0]["source_integration_id"], y_row.id.to_string());
+
+    // 自分の Inbox の連携行は、共有プロジェクトへの再利用元にならない。
+    assert_eq!(
+        post_reuse(app, &p, z_row.id).await.status(),
+        StatusCode::NOT_FOUND
+    );
+    // callback に Z を差し込んでも「使用中」として扱わない。
+    let state_token = get_install_state(app, &p).await;
+    let location = redirect_location(app, &callback_path_without_code(&state_token, z_id)).await;
+    assert!(
+        location.contains("github_error=installation_authorization_required"),
+        "unexpected redirect location: {location}"
+    );
+    // Inbox の中では ACE だけの人なので、テナントの信頼による再利用は出ない。
+    assert!(reusable_installations(app, &admin_inbox).await.is_empty());
+
+    // 入れないプロジェクト Q は、変えることも状態を読むこともできない。
+    assert_eq!(install_status(app, &q).await, StatusCode::FORBIDDEN);
+    assert_eq!(
+        app.get_with_session(&integration_path(&q)).await.status(),
+        StatusCode::FORBIDDEN
+    );
+
+    // Q の連携行は再利用元にできない。行の有無を漏らさないよう、存在しないのと同じ応答。
+    let response = post_reuse(app, &p, x_row.id).await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let body: serde_json::Value = response.json().await.expect("reuse error json");
+    assert!(body.get("select_token").is_none());
+
+    // callback に X を差し込んでも、本人が変えられるプロジェクトが使っていないので
+    // 「使用中」として扱わず、新規と同じ所有者確認（code）を求める。
+    let state_token = get_install_state(app, &p).await;
+    let location = redirect_location(app, &callback_path_without_code(&state_token, x_id)).await;
+    assert!(
+        location.contains("github_error=installation_authorization_required"),
+        "unexpected redirect location: {location}"
+    );
+    assert!(find_integration(app, &p).await.is_none());
+
+    // Y は本人が変えられる R が使っているので、オーナーと同じく code なしで先へ進む。
+    let state_token = get_install_state(app, &p).await;
+    let location = redirect_location(app, &callback_path_without_code(&state_token, y_id)).await;
+    assert!(
+        location.contains("github_select="),
+        "unexpected redirect location: {location}"
+    );
+
+    // Y を再利用して P を連携する。
+    let select_token = reuse_token(app, &p, y_row.id).await;
+    assert_eq!(
+        get_repositories(app, &p, &select_token).await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        connect(app, &p, &select_token, "repo-3").await.status(),
+        StatusCode::NO_CONTENT
+    );
+    let p_row = find_integration(app, &p).await.expect("integration row");
+    assert_eq!(p_row.installation_id, y_id);
+    assert_eq!(p_row.created_by, tenant_admin.id);
+
+    // GitHub のユーザー認可の経路も、選択トークンの発行まで通る。
+    let authorize = authorize_token(app, &p, &owner_code(y_id)).await;
+    let candidate_id = only_candidate(app, &p, &authorize).await;
+    assert_eq!(
+        post_authorized_select(app, &p, &authorize, candidate_id)
+            .await
+            .status(),
+        StatusCode::OK
+    );
+
+    // PAT では使えない（セッション専用のまま）。
+    let pat = app
+        .insert_pat(tenant_admin.id, p.tenant_id, vec![Scope::Api], None)
+        .await;
+    assert_eq!(
+        app.get_with_bearer(&integration_path(&p), &pat)
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        app.get_with_bearer(&install_path(&p), &pat).await.status(),
+        StatusCode::FORBIDDEN
+    );
+
+    // --- テナント Member（P に入れるが、変えられない）---
+    login_as(app, &member).await;
+    let body = integration_body(app, &p).await;
+    assert_eq!(body["connected"], true);
+    assert_eq!(body["repo_owner"], "acme");
+    assert_eq!(body["repo_name"], "repo-3");
+    assert_eq!(body["can_manage"], false);
+    assert!(body.get("installation_id").is_none());
+
+    assert_eq!(install_status(app, &p).await, StatusCode::FORBIDDEN);
+    for path in [
+        authorize_path(&p),
+        installations_path(&p),
+        authorized_installations_path(&p),
+    ] {
+        assert_eq!(
+            app.get_with_session(&path).await.status(),
+            StatusCode::FORBIDDEN,
+            "GET {path}"
+        );
+    }
+    assert_eq!(
+        post_reuse(app, &p, y_row.id).await.status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        get_repositories(app, &p, "any-token").await.status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        connect(app, &p, "any-token", "repo-4").await.status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        app.post_json_with_session(
+            &authorized_select_path(&p),
+            serde_json::json!({ "authorize_token": "any-token", "candidate_id": Uuid::new_v4() }),
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        app.post_json_with_session(&import_path(&p), serde_json::json!({}))
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        app.delete_with_session(&integration_path(&p))
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    let unchanged = find_integration(app, &p).await.expect("integration row");
+    assert_eq!(unchanged.repo_name, "repo-3");
+
+    // 個人プロジェクト: 持ち主（プロジェクト Admin）は変えられる。
+    let inbox = insert_personal_project(app, p.tenant_id, member.id).await;
+    insert_project_member(app, inbox.project_id, tenant_admin.id, ProjectRole::Member).await;
+    assert_eq!(install_status(app, &inbox).await, StatusCode::OK);
+
+    // --- プロジェクト Admin（テナントロールは Member）---
+    // P は、複数のリポジトリが見える Y に連携済み。
+    login_as(app, &project_admin).await;
+    assert_eq!(install_status(app, &p).await, StatusCode::OK);
+    assert_eq!(integration_body(app, &p).await["can_manage"], true);
+
+    // ACE だけでは、テナントの信頼による再利用を使えない。自分が管理する P 自身の行でも、
+    // そのインストールが見える全リポジトリを任せる根拠にならない。
+    assert!(reusable_installations(app, &p).await.is_empty());
+    for source in [p_row.id, y_row.id] {
+        assert_eq!(
+            post_reuse(app, &p, source).await.status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+
+    // インストール画面から戻っても、クエリの installation_id では先へ進まない。state に
+    // 束縛済みの Y でも選択トークンは出ず、GitHub のユーザー認可へ回る。
+    let state_token = get_install_state(app, &p).await;
+    let location = redirect_location(app, &callback_path_without_code(&state_token, y_id)).await;
+    let authorize_state = authorize_state_from_redirect(&location);
+
+    // admin でないリポジトリがある利用者は、連携先を選べない。
+    let location = redirect_location(
+        app,
+        &authorize_callback_path(&authorize_state, &format!("member-{y_id}")),
+    )
+    .await;
+    let authorize = authorize_token_from_location(&location);
+    let candidate_id = only_candidate(app, &p, &authorize).await;
+    assert_select_rejected(
+        post_authorized_select(app, &p, &authorize, candidate_id).await,
+        StatusCode::FORBIDDEN,
+        "github-installation-admin-required",
+    )
+    .await;
+    let unchanged = find_integration(app, &p).await.expect("integration row");
+    assert_eq!(unchanged.repo_name, "repo-3");
+
+    // 連携済みのプロジェクトでは、候補は今のインストールだけ。別のインストールが見えても
+    // 出さない（確定できないため）。今のインストールが見えない利用者は先へ進めない。
+    let other_id = unique_old_installation_id();
+    let authorize = authorize_token(app, &p, &format!("multi-{other_id}-{y_id}")).await;
+    let candidate_id = only_candidate(app, &p, &authorize).await;
+    let state_token = get_authorize_state(app, &p).await;
+    let location = redirect_location(
+        app,
+        &authorize_callback_path(&state_token, &owner_code(other_id)),
+    )
+    .await;
+    assert!(
+        location.contains("github_error=installation_forbidden"),
+        "unexpected redirect location: {location}"
+    );
+
+    // 全リポジトリの admin なら、GitHub の確認を根拠に連携先を替えられる。
+    let response = post_authorized_select(app, &p, &authorize, candidate_id).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value = response.json().await.expect("select json");
+    let select_token = body["select_token"].as_str().expect("select_token");
+    assert_eq!(
+        get_repositories(app, &p, select_token).await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        connect(app, &p, select_token, "repo-4").await.status(),
+        StatusCode::NO_CONTENT
+    );
+    let changed = find_integration(app, &p).await.expect("integration row");
+    assert_eq!(changed.installation_id, y_id);
+    assert_eq!(changed.repo_name, "repo-4");
+
+    // --- テナントを外れたあとも ACE が残る人 ---
+    // 自分の Inbox を installation W に連携し、共有プロジェクト S の Admin の ACE を持つ。
+    insert_tenant_member(app, p.tenant_id, former.id, TenantRole::Member).await;
+    let former_inbox = insert_personal_project(app, p.tenant_id, former.id).await;
+    let w_id = unique_old_installation_id();
+    let w_row = insert_integration(app, &former_inbox, former.id, w_id, "repo-6").await;
+    let s = insert_project_in_tenant(app, p.tenant_id).await;
+    insert_project_member(app, s.project_id, former.id, ProjectRole::Admin).await;
+    remove_tenant_member(app, p.tenant_id, former.id).await;
+
+    login_as(app, &former).await;
+    assert_eq!(install_status(app, &s).await, StatusCode::OK);
+    // 残った Inbox の ACE は、W を S へ持ち込む根拠にならない。
+    assert!(reusable_installations(app, &s).await.is_empty());
+    assert_eq!(
+        post_reuse(app, &s, w_row.id).await.status(),
+        StatusCode::NOT_FOUND
+    );
+    let state_token = get_install_state(app, &s).await;
+    let location = redirect_location(app, &callback_path_without_code(&state_token, w_id)).await;
+    authorize_state_from_redirect(&location);
+    assert!(find_integration(app, &s).await.is_none());
+
+    // --- 選択トークンを得たあとで、テナント Admin から外れた人 ---
+    insert_tenant_member(app, p.tenant_id, demoted.id, TenantRole::Admin).await;
+    login_as(app, &demoted).await;
+    let select_token = reuse_token(app, &p, y_row.id).await;
+    assert_eq!(
+        get_repositories(app, &p, &select_token).await.status(),
+        StatusCode::OK
+    );
+    // テナント Member へ下がり、P の Admin の ACE だけが残る。連携は変えられるが、テナントの
+    // 信頼で発行したトークンはもう使えない。
+    remove_tenant_member(app, p.tenant_id, demoted.id).await;
+    insert_tenant_member(app, p.tenant_id, demoted.id, TenantRole::Member).await;
+    insert_project_member(app, p.project_id, demoted.id, ProjectRole::Admin).await;
+    assert_eq!(install_status(app, &p).await, StatusCode::OK);
+    assert_eq!(
+        get_repositories(app, &p, &select_token).await.status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        connect(app, &p, &select_token, "repo-7").await.status(),
+        StatusCode::FORBIDDEN
+    );
+    let unchanged = find_integration(app, &p).await.expect("integration row");
+    assert_eq!(unchanged.repo_name, "repo-4");
+
+    // --- state と選択トークンを得たあとで、テナントから外された人 ---
+    insert_tenant_member(app, p.tenant_id, removed.id, TenantRole::Admin).await;
+    login_as(app, &removed).await;
+    let state_token = get_install_state(app, &p).await;
+    let select_token = reuse_token(app, &p, y_row.id).await;
+    remove_tenant_member(app, p.tenant_id, removed.id).await;
+    assert_eq!(
+        app.get_with_session(&callback_path_without_code(&state_token, y_id))
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        get_repositories(app, &p, &select_token).await.status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        connect(app, &p, &select_token, "repo-7").await.status(),
+        StatusCode::FORBIDDEN
+    );
+    let unchanged = find_integration(app, &p).await.expect("integration row");
+    assert_eq!(unchanged.repo_name, "repo-4");
+
+    // --- テナントに居ない人 ---
+    login_as(app, &outsider).await;
+    assert_eq!(install_status(app, &p).await, StatusCode::FORBIDDEN);
+    assert_eq!(
+        app.get_with_session(&integration_path(&p)).await.status(),
+        StatusCode::FORBIDDEN
+    );
+
+    // --- オーナー: 今までどおり全部の連携行を使える（絞り込みが掛からない）---
+    login_as(app, &owner).await;
+    assert_eq!(integration_body(app, &p).await["can_manage"], true);
+    // X（Q）、Y（R と P）、Z と W（個人プロジェクト）の 4 件。
+    let candidates = reusable_installations(app, &p).await;
+    assert_eq!(candidates.len(), 4, "candidates: {candidates:?}");
+    assert_eq!(post_reuse(app, &p, x_row.id).await.status(), StatusCode::OK);
+
+    // --- テナント Admin: 個人プロジェクトはテナントロールでは変えられない ---
+    login_as(app, &tenant_admin).await;
+    assert_eq!(integration_body(app, &inbox).await["can_manage"], false);
+    assert_eq!(install_status(app, &inbox).await, StatusCode::FORBIDDEN);
+
+    // 取り込みと解除。
+    assert_eq!(
+        app.post_json_with_session(&import_path(&p), serde_json::json!({}))
+            .await
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(
+        app.delete_with_session(&integration_path(&p))
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert!(find_integration(app, &p).await.is_none());
+
+    // 2FA の強制は落とさない。2FA の無いテナント Admin はここで止まる。
+    execute_sql(
+        &app.state.db,
+        "UPDATE tenants SET require_2fa = true WHERE id = $1",
+        vec![p.tenant_id.into()],
+    )
+    .await;
+    let response = app.get_with_session(&install_path(&p)).await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body: serde_json::Value = response.json().await.expect("2fa error json");
+    assert_eq!(body["message"], "2fa-setup-required");
+
+    // 未ログインは、状態の取得も 401。
+    app.reset_session_client();
+    assert_eq!(
+        app.get(&integration_path(&p)).await.status(),
+        StatusCode::UNAUTHORIZED
+    );
+
+    for user in [
+        &tenant_admin,
+        &project_admin,
+        &member,
+        &outsider,
+        &demoted,
+        &removed,
+        &former,
+        &owner,
+    ] {
+        app.cleanup_user(user.id).await;
+    }
+    app.reset_session_client();
+}
+
+/// シナリオ 18: 最後の連携行を解除しても、GitHub 側のアンインストールはテナントの信頼で
+/// 任せられる人（オーナーと入れるテナント Admin）に限る（TASK-595）。
+///
+/// アンインストールは GitHub 側の組織の全対象リポジトリから App を外す。修正前は
+/// プロジェクト Admin の ACE だけの人が最後の連携を解除すると、App ごと消えていた。
+async fn project_admin_disconnect_scenarios(app: &mut TestApp, mock_server: &MockServer) {
+    let owner = app.insert_user(false, false).await;
+    let tenant_admin = app.insert_user(false, false).await;
+    let project_admin = app.insert_user(false, false).await;
+
+    let p = app.insert_tenant_project(owner.id).await;
+    insert_tenant_member(app, p.tenant_id, tenant_admin.id, TenantRole::Admin).await;
+    insert_tenant_member(app, p.tenant_id, project_admin.id, TenantRole::Member).await;
+    insert_project_member(app, p.project_id, project_admin.id, ProjectRole::Admin).await;
+
+    // プロジェクト Admin: 連携行は消えるが、他に使う行が無くても App は残す。
+    let p_id = unique_old_installation_id();
+    insert_integration(app, &p, owner.id, p_id, "repo-1").await;
+    login_as(app, &project_admin).await;
+    assert_eq!(
+        app.delete_with_session(&integration_path(&p))
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert!(find_integration(app, &p).await.is_none());
+    assert_eq!(
+        delete_installation_count(mock_server, p_id).await,
+        0,
+        "プロジェクト Admin の解除で GitHub App をアンインストールしない"
+    );
+
+    // 対照: テナント Admin とオーナーの解除は、最後の連携なら今までどおり App も外す。
+    for user in [&tenant_admin, &owner] {
+        let installation_id = unique_old_installation_id();
+        insert_integration(app, &p, owner.id, installation_id, "repo-2").await;
+        login_as(app, user).await;
+        assert_eq!(
+            app.delete_with_session(&integration_path(&p))
+                .await
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+        assert!(find_integration(app, &p).await.is_none());
+        assert_eq!(
+            delete_installation_count(mock_server, installation_id).await,
+            1,
+            "テナントの信頼で任せられる人の解除は GitHub App もアンインストールする"
+        );
+    }
+
+    for user in [&tenant_admin, &project_admin, &owner] {
+        app.cleanup_user(user.id).await;
+    }
+    app.reset_session_client();
 }

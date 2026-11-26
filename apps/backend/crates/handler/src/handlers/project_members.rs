@@ -163,9 +163,42 @@ pub(crate) async fn require_project_admin<C: ConnectionTrait>(
     project_id: Uuid,
     user_id: Uuid,
 ) -> Result<(), AppError> {
+    project_admin_ground(db, tenant_id, project_id, user_id)
+        .await?
+        .map(|_| ())
+        .ok_or(AppError::Forbidden)
+}
+
+/// プロジェクトを管理できる根拠。強い順に見る。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProjectAdminGround {
+    /// テナントオーナー。
+    TenantOwner,
+    /// 共有プロジェクトに今も入れるテナント `Admin`。
+    TenantAdmin,
+    /// プロジェクト `Admin` の ACE だけ。プロジェクトの中の権限で、テナントの信頼ではない。
+    ProjectAce,
+}
+
+/// [`require_project_admin`] の判定を、通った根拠つきで返す。管理できなければ `None`。
+///
+/// テナントの信頼（オーナー・テナント `Admin`）と ACE を見分けたい呼び出し元のためのもの。
+/// プロジェクトがテナントに無ければ 404。
+pub(crate) async fn project_admin_ground<C: ConnectionTrait>(
+    db: &C,
+    tenant_id: Uuid,
+    project_id: Uuid,
+    user_id: Uuid,
+) -> Result<Option<ProjectAdminGround>, AppError> {
     let project = get_project_in_tenant(db, tenant_id, project_id).await?;
     if is_tenant_owner(db, tenant_id, user_id).await? {
-        return Ok(());
+        return Ok(Some(ProjectAdminGround::TenantOwner));
+    }
+    if !project.is_personal
+        && has_tenant_admin_role(db, tenant_id, user_id).await?
+        && project_is_open_or_member(db, project_id, user_id).await?
+    {
+        return Ok(Some(ProjectAdminGround::TenantAdmin));
     }
     let member = project_members::Entity::find()
         .filter(project_members::Column::ProjectId.eq(project_id))
@@ -173,15 +206,9 @@ pub(crate) async fn require_project_admin<C: ConnectionTrait>(
         .one(db)
         .await?;
     if member.is_some_and(|m| m.role == ProjectRole::Admin) {
-        return Ok(());
+        return Ok(Some(ProjectAdminGround::ProjectAce));
     }
-    if !project.is_personal
-        && has_tenant_admin_role(db, tenant_id, user_id).await?
-        && project_is_open_or_member(db, project_id, user_id).await?
-    {
-        return Ok(());
-    }
-    Err(AppError::Forbidden)
+    Ok(None)
 }
 
 /// メンバー行に表示用のユーザー情報を同梱する。FK があるため利用者は必ず居るはずで、
