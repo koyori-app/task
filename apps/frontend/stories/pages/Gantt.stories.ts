@@ -435,9 +435,18 @@ export const UnscheduledDrawerScroll: Story = {
 export const UnscheduledDrawerScrollNarrow: Story = {
   name: '期間なし drawer を巻く（幅 375）',
   decorators: [withContext()],
-  parameters: { viewport: { defaultViewport: 'mobile2' } },
+  parameters: {
+    viewport: {
+      options: { narrow375: { name: '375', styles: { width: '375px', height: '812px' } } },
+    },
+  },
+  globals: { viewport: { value: 'narrow375', isRotated: false } },
   beforeEach: UnscheduledDrawerScroll.beforeEach,
-  play: async ({ canvasElement }) => playUnscheduledDrawerScroll(canvasElement),
+  play: async ({ canvasElement }) => {
+    // 既定の幅（414）で走ると通常の物語と同じ条件になるので、幅 375 で走っておることを先に確かめる
+    await expect(canvasElement.ownerDocument.defaultView!.innerWidth).toBe(375);
+    await playUnscheduledDrawerScroll(canvasElement);
+  },
 };
 
 /** 像撮影用。play を付けない（最後の click で詳細が開くのを避ける）。 */
