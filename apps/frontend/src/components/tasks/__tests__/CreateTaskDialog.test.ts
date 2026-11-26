@@ -4,7 +4,8 @@
 // - 入力消去の後から旧応答が到着しても表示しない（1 ケース。閉じる・タスク切替は同じ key の仕組みなので重ねない）
 // - 取得失敗でも作成ボタンが押せる
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { ref, nextTick } from 'vue';
+import { ref, nextTick, type Plugin } from 'vue';
+import { createPinia, setActivePinia } from 'pinia';
 import { mount, flushPromises, DOMWrapper } from '@vue/test-utils';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
 import type { components } from '@/generated/api';
@@ -63,6 +64,7 @@ import {
 } from '@/components/__tests__/picker';
 import { PRIORITY_CONFIG } from '@/lib/task-display';
 import { DEADLINE_ORDER_MESSAGE } from '@/lib/task-date';
+import { usePreferencesStore } from '@/stores/preferences';
 
 // 「続けて作成」はブラウザに覚えさせるので、テストの間で持ち越さない
 beforeEach(() => localStorage.clear());
@@ -134,6 +136,8 @@ type MountOptions = {
   membersError?: boolean;
   initialTitle?: string;
   initialAssigneeIds?: string[];
+  /** 追加で入れる plugin（pinia など） */
+  plugins?: Plugin[];
 };
 
 function mountDialog(queryClient: QueryClient, options: MountOptions = {}) {
@@ -157,7 +161,7 @@ function mountDialog(queryClient: QueryClient, options: MountOptions = {}) {
       initialAssigneeIds: options.initialAssigneeIds,
     },
     global: {
-      plugins: [[VueQueryPlugin, { queryClient }]],
+      plugins: [[VueQueryPlugin, { queryClient }], ...(options.plugins ?? [])],
       // 似ているタスクのリンクは表示用のテナント ID（ルートの tenant）で組む
       provide: { 'vike-vue:usePageContext': { routeParams: { tenant: 'acme' } } },
     },
@@ -1368,6 +1372,62 @@ describe('CreateTaskDialog dates', () => {
     });
     expect(document.body.textContent).not.toContain(DEADLINE_ORDER_MESSAGE);
     wrapper.unmount();
+  });
+
+  /** 行を押さずに、今の行のカレンダーで日を押す */
+  async function clickDay(date: string) {
+    const day = document.body.querySelector<HTMLElement>(`${DATE_PANEL} [data-date="${date}"]`);
+    if (!day) throw new Error(`${date} not found in the calendar`);
+    day.click();
+    await nextTick();
+    await nextTick();
+  }
+
+  const activeRow = () =>
+    document.body
+      .querySelector('[data-date-field][aria-pressed="true"]')
+      ?.getAttribute('data-date-field');
+
+  it('環境設定が既定（有効）なら、開始予定日から行を押さずに 3 つ続けて選んで送れる', async () => {
+    const wrapper = mountDialog(queryClient);
+    await nextTick();
+    await new DOMWrapper(getTitleInput()).setValue('続けて選ぶ');
+    datesChip().click();
+    await nextTick();
+    document.body.querySelector<HTMLElement>('[data-date-field="plannedStartOn"]')!.click();
+    await nextTick();
+    await clickDay('2026-10-19');
+    await clickDay('2026-10-23');
+    await clickDay('2026-10-31');
+
+    await submitForm();
+
+    expect(mutateAsync.mock.calls[0][0].body).toMatchObject({
+      planned_start_on: '2026-10-19',
+      soft_deadline: '2026-10-23T00:00:00.000Z',
+      hard_deadline: '2026-10-31T00:00:00.000Z',
+    });
+    wrapper.unmount();
+  });
+
+  it('環境設定で切ると、開始予定日を選んでも行は進まない', async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    try {
+      usePreferencesStore().set('advanceDateRowOnPick', false);
+      const wrapper = mountDialog(queryClient, { plugins: [pinia] });
+      await nextTick();
+      datesChip().click();
+      await nextTick();
+      document.body.querySelector<HTMLElement>('[data-date-field="plannedStartOn"]')!.click();
+      await nextTick();
+      await clickDay('2026-10-19');
+
+      expect(activeRow()).toBe('plannedStartOn');
+      wrapper.unmount();
+    } finally {
+      setActivePinia(undefined);
+    }
   });
 });
 
