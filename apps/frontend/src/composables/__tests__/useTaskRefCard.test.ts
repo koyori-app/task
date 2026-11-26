@@ -77,6 +77,49 @@ it.each([
     );
   }
 });
+// カードのアイコンはステータスの一覧から出す。タスクが先に届いても、一覧が届くまで ready にしない
+// （ready の間にアイコンが無いと、後から現れて ID の字を横へ押す）
+it('ステータスの一覧が届くまでは ready にしない', async () => {
+  let releaseStatuses!: () => void;
+  const statusesHeld = new Promise<void>((resolve) => {
+    releaseStatuses = resolve;
+  });
+  const fetch = vi.fn(async (req: Request) => {
+    const json = (value: unknown) =>
+      new Response(JSON.stringify(value), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    if (req.url.endsWith('/projects')) return json([{ id: 'project', key: 'TASK', name: '開発' }]);
+    if (req.url.endsWith('/statuses')) {
+      await statusesHeld;
+      return json([{ id: 'status', name: '完了', color: '#123456', is_done_state: true }]);
+    }
+    return json(task);
+  });
+  vi.stubGlobal('fetch', fetch);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  let card!: ReturnType<typeof useTaskRefCard>;
+  mount(
+    defineComponent({
+      setup() {
+        card = useTaskRefCard(tenantId, ref(target));
+        return () => null;
+      },
+    }),
+    { global: { plugins: [[VueQueryPlugin, { queryClient: client }]] } },
+  );
+  // タスクは届いた
+  await vi.waitFor(() =>
+    expect(fetch.mock.calls.some(([r]) => r.url.includes('/tasks/'))).toBe(true),
+  );
+  await vi.waitFor(() => expect(client.isFetching({ queryKey: ['get', GET_TASK_PATH] })).toBe(0));
+  expect(card.state.value).toBe('loading');
+  expect(card.task.value).toBeNull();
+  releaseStatuses();
+  await vi.waitFor(() => expect(card.state.value).toBe('ready'));
+  expect(card.status.value).toMatchObject({ name: '完了', fill: { kind: 'done' } });
+});
 it('一覧にないキーではタスクを取得しない', async () => {
   const { card, fetch } = setup(200, false);
   await vi.waitFor(() => expect(card.state.value).toBe('unavailable'));
