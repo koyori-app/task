@@ -105,6 +105,11 @@ const unscheduledTasks: ScheduleTask[] = [
   task(8, { title: '用語集', project: PROJECT_DOC }),
 ];
 
+/** 期間なし drawer の縦スクロール確かめ用 */
+const manyUnscheduledTasks: ScheduleTask[] = Array.from({ length: 150 }, (_, i) =>
+  task(900 + i, { title: `期間なし ${i + 1}` }),
+);
+
 // 縦に長い図。狭い画面（試験の既定の幅 414px）の範囲 7/13〜7/19 に収める
 const manyTasks: ScheduleTask[] = Array.from({ length: 20 }, (_, i) =>
   task(100 + i, {
@@ -381,6 +386,86 @@ export const DependencyToggle: Story = {
     await userEvent.click(canvas.getByRole('switch', { name: '依存の矢印' }));
     await waitFor(() => expect(canvas.queryByTestId('gantt-legend-dependency')).toBeNull());
   },
+};
+
+async function playUnscheduledDrawerScroll(canvasElement: HTMLElement) {
+  const canvas = within(canvasElement);
+  await userEvent.click(await canvas.findByTestId('gantt-unscheduled'));
+  const list = await canvas.findByTestId('gantt-unscheduled-list');
+  await waitFor(() => expect(list.scrollHeight).toBeGreaterThan(list.clientHeight));
+
+  const heading = canvas.getByRole('heading', { name: /期間の無いタスク/ });
+  const headingTopBefore = heading.getBoundingClientRect().top;
+
+  const lastTitle = '期間なし 150';
+  const lastButton = canvas.getByText(lastTitle).closest('button')!;
+  const maxScroll = list.scrollHeight - list.clientHeight;
+
+  list.scrollTop = list.scrollHeight;
+  await waitFor(async () => {
+    await expect(list.scrollTop).toBeGreaterThan(0);
+    await expect(list.scrollTop).toBeGreaterThanOrEqual(maxScroll - 1);
+  });
+
+  const listRect = list.getBoundingClientRect();
+  const btnRect = lastButton.getBoundingClientRect();
+  await expect(btnRect.top).toBeGreaterThanOrEqual(listRect.top - 1);
+  await expect(btnRect.bottom).toBeLessThanOrEqual(listRect.bottom + 1);
+
+  await expect(Math.abs(heading.getBoundingClientRect().top - headingTopBefore)).toBeLessThan(1);
+
+  list.scrollTop = 0;
+  await waitFor(() => expect(list.scrollTop).toBe(0));
+  lastButton.focus();
+  await waitFor(() => expect(list.scrollTop).toBeGreaterThan(0));
+
+  await userEvent.click(lastButton);
+}
+
+export const UnscheduledDrawerScroll: Story = {
+  name: '期間なし drawer を巻く',
+  decorators: [withContext()],
+  beforeEach: () => {
+    window.scrollTo(0, 0);
+    return createMockFetch({ tasks: sampleTasks.slice(0, 2), unscheduled: manyUnscheduledTasks });
+  },
+  play: async ({ canvasElement }) => playUnscheduledDrawerScroll(canvasElement),
+};
+
+// 頁は幅 375 の箱に描く。VRT の撮り手は物語の globals.viewport を効かせず窓の幅（1280）のまま
+// 描くので、窓の幅に頼ると手元（addon-vitest）と VRT で別の幅になる。頁にはこの幅で形を変える
+// 作りが無く（media query も innerWidth も見ない）、drawer は窓の右に固定の幅（280）で出る
+const NARROW_PAGE_PX = 375;
+
+export const UnscheduledDrawerScrollNarrow: Story = {
+  name: '期間なし drawer を巻く（幅 375）',
+  decorators: [
+    () => ({
+      template: `<div data-narrow-page style="width: ${NARROW_PAGE_PX}px"><story /></div>`,
+    }),
+    withContext(),
+  ],
+  beforeEach: UnscheduledDrawerScroll.beforeEach,
+  play: async ({ canvasElement }) => {
+    // 既定の幅で走ると通常の物語と同じ条件になるので、幅 375 で描いておることを先に確かめる
+    const page = canvasElement.querySelector<HTMLElement>('[data-narrow-page]')!;
+    await expect(page.getBoundingClientRect().width).toBe(NARROW_PAGE_PX);
+    await expect(page.scrollWidth).toBeLessThanOrEqual(NARROW_PAGE_PX);
+    await playUnscheduledDrawerScroll(canvasElement);
+  },
+};
+
+/** 像撮影用。play を付けない（最後の click で詳細が開くのを避ける）。 */
+export const UnscheduledDrawerScrollCapture: Story = {
+  ...UnscheduledDrawerScroll,
+  name: '期間なし drawer（像撮影）',
+  play: undefined,
+};
+
+export const UnscheduledDrawerScrollCaptureNarrow: Story = {
+  ...UnscheduledDrawerScrollNarrow,
+  name: '期間なし drawer（像撮影・幅 375）',
+  play: undefined,
 };
 
 // 頁の縦のスクロールは layout の main（overflow-y: auto）が持つ。低性能の端末（deviceMemory の無い
