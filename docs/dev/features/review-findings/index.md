@@ -124,6 +124,20 @@ stateDiagram-v2
 - 各遷移は誰がいつ行ったかを `review_finding_transitions` に記録する。任意の `note` も残す。起票は `from_state` が NULL の行である
 - 状態遷移は指摘の行をロックして直列化する（`SELECT … FOR UPDATE` 相当）。状態の確認、副作用（繰り延べタスクの起票・再オープン・クローズ）、`deferred_task_id` と状態の更新までを同一トランザクションで行う
 
+### 内容の直し
+
+指摘を出した人は、出した後に気づいた誤り（題・本文・位置）を直せる（TASK-577）。
+
+- 直せるのは、その指摘を含むラウンドの作成者だけである。ほかの利用者は 403 になる。
+- 直せるのは、状態が `open` の間だけである。`open` でなければ、理由を本文に入れた 409 を返す。修正側が着手や修正を宣言した後に中身が変わると、何を直したのかの記録が食い違うためである。直したければ、先に状態を `open` へ戻す。
+- 直せる欄は `title`・`body`・`file`・`line` で、上限は起票と同じである。省いた欄は変えず、`file` と `line` は `null` で消す。
+- 重大度は直せない。`severity` を送ると、ほかの欄と一緒でも 400 で断り、何も変えない。重大度はマージ可否を決めるので、後から動かせると出し直しの記録を経ずに基準が変わる。重さを変えたいときは、指摘を取り下げて出し直す。
+- 変わった欄ごとに、前後の値を `review_finding_edits` に残す。同じ直しで変わった欄は `edit_id` で束ねる。今と同じ値だけを渡した直しは、何も書かない。
+- 指摘の `edited_at` に、最後に直した時刻を入れる。状態の遷移の履歴（`review_finding_transitions`）には混ぜない。
+- 直しでは、マージ可否の集計の判定は変わらない。集計は重大度と状態で数え、直しはどちらも変えないためである。
+- 直した後は、状態遷移と同じく要約更新ジョブを投入する。通知と Webhook は作らない。
+- 引き継ぎの写しは、写した時点の内容から始まる（`edited_at` は空で、元の直しの履歴は元の指摘に残る）。
+
 ### 繰り延べ
 
 `deferred` にした時点で、同じプロジェクトへ通常タスク（優先度 Low、本文に指摘への参照）を自動起票して `deferred_task_id` にリンクする。以降の追跡は普段のタスク運用に乗る。`open` へ戻す際は、システムが自動起票したタスクを自動でクローズする。
@@ -181,6 +195,11 @@ task review carry-over --project TASK --from-pr 711 --to-pr 711 --from-repo acme
 # 状態遷移
 task review resolve <finding-id> --project TASK --state fixed
 task review resolve <finding-id> --project TASK --state deferred --note "後で直す"
+
+# 出した指摘の内容を直す（ラウンドの作成者だけ、open の間だけ）。渡した欄だけを直す
+task review edit <finding-id> --project TASK --title "題を直す"
+task review edit <finding-id> --project TASK --body-file body.md --line 120
+task review edit <finding-id> --project TASK --clear-file --clear-line   # 位置を消す
 
 # 集計。マージできない状態なら非 0 で終了する（CI や手元のマージ前確認に使える）
 task review summary --project TASK --pr 618
@@ -294,8 +313,20 @@ task notifications settings --project TASK --email ""      # メールは受け�
 | `fixed_by` | 最後に `fixed` を宣言した利用者。差し戻し後も消さない。自分の修正の `verified` を止める判定に使う |
 | `carried_root_finding_id` | 写しの大元の指摘 ID。外部キーにせず削除後も保持する |
 | `carried_from_finding_id` | 引き継ぎの写しのとき、元の指摘。元の指摘が消えたら NULL |
+| `edited_at` | 内容（題・本文・位置）を最後に直した時刻。直していなければ NULL |
 
-定義は [m20260826000000_review_findings.rs](https://github.com/koyori-app/task/blob/main/apps/backend/migration/src/m20260826000000_review_findings.rs) にある。引き継ぎの 4 列は [m20261115000000_review_carry_over.rs](https://github.com/koyori-app/task/blob/main/apps/backend/migration/src/m20261115000000_review_carry_over.rs) で足した。PR の実体表 `forge_pull_requests` は[Git ホスティング連携のデータ](/dev/features/tasks/github-tasks#データ)に書く。
+`review_finding_edits`（内容の直しの履歴）の列は次のとおりである。
+
+| 列 | 内容 |
+|---|---|
+| `finding_id` | 直した指摘。指摘が消えれば行も消える |
+| `edit_id` | 1 回の直しの ID。同じ直しで変わった欄の行が同じ値を持つ |
+| `actor_id` | 直した利用者 |
+| `field` | 変わった欄（`title` / `body` / `file` / `line`） |
+| `before_value` / `after_value` | 前後の値。文字列で持ち、`line` は 10 進の字、NULL は「無い」を表す |
+| `created_at` | 直した時刻 |
+
+定義は [m20260826000000_review_findings.rs](https://github.com/koyori-app/task/blob/main/apps/backend/migration/src/m20260826000000_review_findings.rs) にある。引き継ぎの 4 列は [m20261115000000_review_carry_over.rs](https://github.com/koyori-app/task/blob/main/apps/backend/migration/src/m20261115000000_review_carry_over.rs) で足した。`edited_at` と直しの履歴は [m20261122000000_review_finding_edits.rs](https://github.com/koyori-app/task/blob/main/apps/backend/migration/src/m20261122000000_review_finding_edits.rs) で足した。PR の実体表 `forge_pull_requests` は[Git ホスティング連携のデータ](/dev/features/tasks/github-tasks#データ)に書く。
 
 ## API
 
@@ -311,6 +342,7 @@ task notifications settings --project TASK --email ""      # メールは受け�
 | GET | `/v1/tenants/{t}/projects/{p}/reviews/summary?pr=618` | PR 単位の集計。重大度 × 状態の件数、ラウンド数、最新ラウンドの `head_sha`、集計対象のリポジトリ、オーナー代行での棄却件数、「マージ可否」、表示用の判定 `gate` |
 | GET | `/v1/tenants/{t}/projects/{p}/review-findings?pr=618&state=&severity=` | PR の指摘一覧。状態・重大度で絞り込み、各指摘に `available_actions`。CLI の `review list` と UI の一覧が使う |
 | PATCH | `/v1/tenants/{t}/projects/{p}/review-findings/{id}` | 状態遷移（`state` と任意のコメント）。応答の指摘にも遷移後の `available_actions` |
+| PATCH | `/v1/tenants/{t}/projects/{p}/review-findings/{id}/content` | 内容の直し（`title`・`body`・`file`・`line` のうち渡した欄）。[内容の直し](#内容の直し)の規則に従う。応答は直した後の指摘 |
 
 PR 単位の読み取りの規則は次のとおりである。
 
@@ -334,7 +366,7 @@ PR 単位の読み取りの規則は次のとおりである。
 - 起票と状態遷移は in-app 通知を作る（起票・遷移と同じトランザクション）。受信者の規則は[通知・ウォッチャー](/dev/features/tasks/notifications)に書く
 - 起票と状態遷移は Webhook イベント（`review.round_created` / `review.finding_changed`）も同じトランザクションで積む
 - 起票の上限は、指摘が 1 ラウンド 200 件、`summary` が 20000 文字、`title` が 1〜200 文字、`body` が 1〜20000 文字、`file` が 1000 文字、`line` が 1 以上である。遷移の `note` は 2000 文字まで
-- 409 は理由を本文（`message`）に入れる。High / Medium の繰り延べ・規則にない遷移・既定ステータスが無いの 3 つと、引き継ぎの 2 つ（元の PR にラウンドが無い、引き継げる指摘が無い）である。共通の `conflict` だけでは、CLI から使うレビュワーが「直すのか、取り下げるのか」を選べない
+- 409 は理由を本文（`message`）に入れる。High / Medium の繰り延べ・規則にない遷移・既定ステータスが無いの 3 つと、引き継ぎの 2 つ（元の PR にラウンドが無い、引き継げる指摘が無い）と、`open` でない指摘の直しである。共通の `conflict` だけでは、CLI から使うレビュワーが「直すのか、取り下げるのか」を選べない
 
 引き継ぎの規則は次のとおりである。
 
@@ -357,6 +389,7 @@ PR 単位の読み取りの規則は次のとおりである。
 |---|---|---|
 | 閲覧 | プロジェクトに入れる人全員 | `read:review` |
 | 起票・状態遷移 | [状態遷移](#状態遷移)の主体の規則に従う | `write:review` |
+| 内容の直し | その指摘を含むラウンドの作成者。`open` の間だけ | `write:review` |
 | 引き継ぎ | プロジェクトに入れる人全員。引き継いだ人は写しの指摘の `rejected` / `verified` の権限を得ない | `write:review` |
 | 通知の読み取り・既読化（CLI） | 本人 | タスク通知は `read:task` / `write:task`、レビュー通知は `read:review` / `write:review` |
 | 通知設定の読み取り・更新（CLI） | 本人 | `read:task` / `write:task`。`--project` にキーを渡すと UUID を引くためにプロジェクト API を呼ぶので `read:project` も要る。UUID を渡せば要らない |
@@ -421,6 +454,7 @@ PR の一覧と PR の詳細の 2 画面である。
 - 繰り延べと取り下げは行の中に理由の入力欄を開き、理由を `note` として送る。繰り延べの理由は任意で、取り下げの理由は画面で必須にする。API は `note` を任意のまま受ける
 - `deferred` の行は、繰り延べ先のタスクの番号をタスク詳細へのリンクで出す
 - 開いた行には最後の遷移を 1 件出し、行のメニューから全部の遷移履歴に切り替えられる
+- 内容を直した指摘には「編集済み」の印を出し、直した時刻を印の title に出す。画面から内容を直す操作は持たない（直すのは CLI と API）
 - 起票の下書きを抱えたまま「PR の一覧」へ戻ろうとすると確認を挟み、タブを閉じる・再読み込みは `beforeunload` で止める。ブラウザの「戻る」は確認しない
 - 「GitHub で開く」は PR 行のホスト（`host`）のロゴと名前で出す。PR 行の `html_url` があればそれを開き、無ければホストとリポジトリから URL を組む。知らないホストでも `html_url` があれば、ロゴと名前なしの「ホストで開く」を出す
 - レビュアーの絞り込みはラウンドの一覧から当てる。ラウンドが届くまでは読み込み中を出し、取得に失敗したら理由と再試行を出す（条件に合う指摘が無いとは言わない）
@@ -551,3 +585,4 @@ PR の一覧と PR の詳細の 2 画面である。
 | 2026-11-22 | マージ可否の表示は、満たしていない条件だけを出す。オーナー代行での棄却の件数は、件数があるときだけ残す | 満たしている条件と説明文が並ぶと、直すものが埋もれる。代行の条件はオーナー自身が作れるので、可否を読む場所に痕跡を残す決まりは変えない |
 | 2026-11-22 | 取り下げの理由は画面で必須にし、繰り延べの理由は任意にする。API の `note` は任意のまま変えない | 取り下げは指摘を対応しないと決める操作で、理由が無いと後から判断を追えない。CLI と MCP は今も理由なしで遷移を送れる |
 | 2026-11-22 | PR 一覧の行に `unresolved_fixed`・`repository`・`host`・`html_url` を足す | 一覧の High・Medium / Low・Nit / 承認待ちの 3 列を同じ数え方にするには、全重大度の fixed の数が要る。ホストのロゴと PR・コミットへのリンクは PR 行のホストから決める |
+| 2026-11-22 | 指摘を出した人が、`open` の間だけ内容（題・本文・位置）を直せるようにする（TASK-577）。重大度は直せない（送れば 400）。口は状態遷移の PATCH と分けて `…/review-findings/{id}/content` に置き、変わった欄ごとの前後を `review_finding_edits` に残す。応答には `edited_at` を足し、画面は「編集済み」の印だけを出す | 出した後に誤りに気づいても、取り下げて出し直すしかなかった。状態遷移の PATCH は `state` が必須で、主体の規則（`write:review` を持つ誰でも、一部はレビュー側）も直しの主体（その指摘のラウンドの作成者）と違うので、混ぜると要求の型と権限の規則がどちらも濁る。履歴を遷移の表に混ぜると、`from_state` が NULL の行を起票と読む規則が崩れる。`open` に限るのは、着手や修正の宣言の後に中身が変わると記録が食い違うため。重大度を外すのは、マージ可否を決める重さを出し直しの記録を経ずに動かせないようにするため |

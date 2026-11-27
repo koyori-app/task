@@ -5,6 +5,8 @@
 主なユースケースは AI レビュワーと CI からの `task review submit` / `task review summary`
 （マージ前ゲート）。出し直した PR へ未解決の指摘を写す（元は変えない）操作は
 `task review carry-over --project TASK --from-pr 790 --to-pr 1119`。
+出した指摘を後から直すときは `task review edit <finding-id> --project TASK --title …`
+（直せるのはその指摘のラウンドの作成者だけで、`open` の間だけ。重大度は直せない）。
 コマンドの仕様は `docs/dev/features/review-findings/index.md` の「CLI」が正。
 
 ## 導入

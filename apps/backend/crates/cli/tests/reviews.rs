@@ -7,6 +7,7 @@
 // - CLI のリポジトリ検査: 連携の無いプロジェクトでは不成立（`--allow-unlinked` を付けたときだけ通す）。同じく gate_failure の単体テストで見る
 // - 引き継ぎ: `review carry-over` は `reviews/carry-over` へ元と先の PR 番号（と任意の元リポジトリ）を送る。PR 番号が 1 未満・`--from-repo` が owner/name でない・元と先が同じ PR（`--from-repo` 無し）は、何も送らず終了コード 2
 // - 指摘数の境界: 201 件は CLI の事前検証で弾く（crates/cli/src/commands/reviews.rs の単体テスト）
+// - 指摘の直し（TASK-577）: `review edit` は渡した欄だけを `review-findings/{id}/content` へ送る。`--clear-file` / `--clear-line` は null で消す。`--body-file` は本文を file から読む。1 未満の行・直す欄が無い・空の題は、何も送らず終了コード 2。重大度は直せないので `--severity` を持たない
 
 mod common;
 
@@ -417,4 +418,167 @@ async fn carry_over_rejects_bad_arguments_before_sending() {
         assert!(err.message.starts_with(expected), "{}", err.message);
         assert!(harness.sent_nothing().await, "{args:?}");
     }
+}
+
+async fn mount_edit(harness: &Harness, body: serde_json::Value) {
+    Mock::given(method("PATCH"))
+        .and(path(project_path("review-findings/finding-1/content")))
+        .and(body_json(body))
+        .respond_with(ResponseTemplate::new(200).set_body_json(finding_json()))
+        .expect(1)
+        .mount(&harness.server)
+        .await;
+}
+
+#[tokio::test]
+async fn edit_sends_only_the_given_fields_to_the_content_path() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    mount_edit(&harness, json!({ "title": "直した題", "line": 7 })).await;
+
+    let code = harness
+        .run(&[
+            "task",
+            "review",
+            "edit",
+            "finding-1",
+            "--project",
+            "APP",
+            "--title",
+            "直した題",
+            "--line",
+            "7",
+        ])
+        .await
+        .unwrap();
+    assert_eq!(code, 0);
+}
+
+#[tokio::test]
+async fn edit_clears_the_location_with_null() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    mount_edit(&harness, json!({ "file": null, "line": null })).await;
+
+    let code = harness
+        .run(&[
+            "task",
+            "review",
+            "edit",
+            "finding-1",
+            "--project",
+            "APP",
+            "--clear-file",
+            "--clear-line",
+        ])
+        .await
+        .unwrap();
+    assert_eq!(code, 0);
+}
+
+#[tokio::test]
+async fn edit_reads_the_body_from_a_file() {
+    let harness = harness().await;
+    mount_project_lookup(&harness).await;
+    mount_edit(&harness, json!({ "body": "## 直した本文\n\n手順" })).await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("body.md");
+    std::fs::write(&file, "## 直した本文\n\n手順\n").unwrap();
+
+    let code = harness
+        .run(&[
+            "task",
+            "review",
+            "edit",
+            "finding-1",
+            "--project",
+            "APP",
+            "--body-file",
+            file.to_str().unwrap(),
+        ])
+        .await
+        .unwrap();
+    assert_eq!(code, 0);
+}
+
+#[tokio::test]
+async fn edit_rejects_bad_arguments_before_sending() {
+    let cases: [(&[&str], &str); 3] = [
+        (&["--line", "0"], "--line must be a positive integer"),
+        (&[], "the edit does not satisfy the API's limits"),
+        (
+            &["--title", ""],
+            "the edit does not satisfy the API's limits",
+        ),
+    ];
+    for (args, expected) in cases {
+        let harness = harness().await;
+        let mut argv = vec!["task", "review", "edit", "finding-1", "--project", "APP"];
+        argv.extend(args);
+        let err = harness.run(&argv).await.unwrap_err();
+        assert_eq!(err.exit_code, 2, "{args:?}");
+        assert!(err.message.starts_with(expected), "{}", err.message);
+        assert!(harness.sent_nothing().await, "{args:?}");
+    }
+}
+
+#[test]
+fn edit_does_not_take_a_value_and_its_clear_flag_together() {
+    for argv in [
+        vec![
+            "task",
+            "review",
+            "edit",
+            "f",
+            "--project",
+            "APP",
+            "--file",
+            "a.rs",
+            "--clear-file",
+        ],
+        vec![
+            "task",
+            "review",
+            "edit",
+            "f",
+            "--project",
+            "APP",
+            "--line",
+            "3",
+            "--clear-line",
+        ],
+        vec![
+            "task",
+            "review",
+            "edit",
+            "f",
+            "--project",
+            "APP",
+            "--body",
+            "b",
+            "--body-file",
+            "x",
+        ],
+    ] {
+        assert!(
+            <task_cli::cli::Cli as clap::Parser>::try_parse_from(argv.clone()).is_err(),
+            "{argv:?}"
+        );
+    }
+}
+
+/// 重大度は直せない（TASK-577）。旗そのものを持たない。
+#[test]
+fn edit_has_no_severity_flag() {
+    let argv = [
+        "task",
+        "review",
+        "edit",
+        "f",
+        "--project",
+        "APP",
+        "--severity",
+        "low",
+    ];
+    assert!(<task_cli::cli::Cli as clap::Parser>::try_parse_from(argv).is_err());
 }

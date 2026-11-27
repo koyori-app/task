@@ -1379,6 +1379,7 @@ async fn scenario(
                     carried_root_finding_id: Set(None),
                     created_at: Set(now.into()),
                     updated_at: Set(now.into()),
+                    edited_at: Set(None),
                 }
                 .insert(&app.state.db)
                 .await

@@ -318,4 +318,18 @@ describe('ReviewFindingRow', () => {
     await flushPromises();
     expect(wrapper.find('[data-testid="deferred-task"]').exists()).toBe(false);
   });
+
+  it('内容を直した指摘にだけ「編集済み」の印を出し、直した時刻を title に出す', () => {
+    const edited = mountRow({ edited_at: '2026-11-22T03:04:05Z' });
+    const mark = edited.get('[data-testid="finding-edited"]');
+    expect(mark.text()).toBe('編集済み');
+    expect(mark.attributes('title')).toBe(
+      `${new Date('2026-11-22T03:04:05Z').toLocaleString('ja-JP')} に編集`,
+    );
+    // 画面から直す操作は持たない（直すのは CLI と API）
+    expect(edited.text()).not.toContain('編集する');
+
+    const plain = mountRow();
+    expect(plain.find('[data-testid="finding-edited"]').exists()).toBe(false);
+  });
 });

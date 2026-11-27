@@ -25,6 +25,7 @@ import {
   SEVERITY_LABELS,
   STATE_LABELS,
   countsAsUnresolved,
+  editedTitle,
   findingActionButtons,
   type FindingActionButton,
   type FindingState,
@@ -202,6 +203,14 @@ function transitionText(history: ReviewFinding['transitions'][number]): string {
       />
       <Badge :label="STATE_LABELS[finding.state]" tone="neutral" appearance="outline" size="sm" />
       <span class="text-muted-foreground shrink-0 text-xs">R{{ finding.round }}</span>
+      <span
+        v-if="editedTitle(finding)"
+        class="text-muted-foreground shrink-0 text-xs"
+        :title="editedTitle(finding) ?? undefined"
+        data-testid="finding-edited"
+      >
+        編集済み
+      </span>
       <span v-if="finding.line" class="text-muted-foreground shrink-0 font-mono text-xs">
         :{{ finding.line }}
       </span>

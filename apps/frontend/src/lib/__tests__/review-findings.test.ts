@@ -4,6 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  editedTitle,
   STATES,
   countsAsUnresolved,
   fileProgress,
@@ -428,5 +429,14 @@ describe('transitionErrorMessage', () => {
     );
     expect(transitionErrorMessage(500, undefined)).toBe('状態を更新できませんでした。');
     expect(transitionErrorMessage(undefined, undefined)).toBe('状態を更新できませんでした。');
+  });
+});
+
+describe('editedTitle', () => {
+  it('直した指摘だけに、直した時刻の title を返す', () => {
+    expect(editedTitle(finding())).toBeNull();
+    expect(editedTitle(finding({ edited_at: null }))).toBeNull();
+    const title = editedTitle(finding({ edited_at: '2026-11-22T03:04:05Z' }));
+    expect(title).toBe(`${new Date('2026-11-22T03:04:05Z').toLocaleString('ja-JP')} に編集`);
   });
 });

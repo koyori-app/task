@@ -357,3 +357,12 @@ export function mergeGateView(summary: ReviewSummary): MergeGateView {
       );
   }
 }
+
+/**
+ * 内容を直した指摘の「編集済み」の印の title（直した時刻）。直していなければ null。
+ * 直すのは指摘を出した人だけで、open の間だけ（TASK-577）。画面は印を出すだけで、直す操作は持たない。
+ */
+export function editedTitle(finding: ReviewFinding): string | null {
+  if (!finding.edited_at) return null;
+  return `${new Date(finding.edited_at).toLocaleString('ja-JP')} に編集`;
+}

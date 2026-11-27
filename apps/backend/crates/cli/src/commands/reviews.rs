@@ -12,7 +12,7 @@ use entity::review_findings::{FindingSeverity, FindingState};
 use payload::reviews::{
     CarryOverReviewRequest, CarryOverReviewResponse, CreateFindingInput, CreateReviewRequest,
     FindingResponse, ReviewDetailResponse, ReviewResponse, ReviewSummaryResponse,
-    UpdateFindingStateRequest,
+    UpdateFindingContentRequest, UpdateFindingStateRequest,
 };
 use sea_orm::Iterable;
 use serde::Serialize;
@@ -24,6 +24,7 @@ use crate::cli::ReviewCommand;
 use crate::error::{CliError, Result};
 use crate::output::{OutputOptions, print};
 use crate::resolve::resolve_project;
+use crate::text_input::resolve_body;
 
 /// 実行後に呼び出し側へ返す終了コード。ゲートは通してよい理由が揃わなければ 1 で終わる。
 pub async fn run(context: &Context, command: ReviewCommand, output: OutputOptions) -> Result<i32> {
@@ -190,6 +191,57 @@ pub async fn run(context: &Context, command: ReviewCommand, output: OutputOption
                         &id,
                     ],
                     &UpdateFindingStateRequest { state, note },
+                )
+                .await?;
+            print(&updated, output);
+        }
+        ReviewCommand::Edit {
+            id,
+            project,
+            title,
+            body,
+            body_file,
+            file,
+            clear_file,
+            line,
+            clear_line,
+        } => {
+            let request = UpdateFindingContentRequest {
+                // 重大度は直せない（旗も持たない）。送らなければ API も断らない
+                severity: None,
+                title,
+                body: resolve_body(body, body_file, "finding body")?,
+                // 消すのは明示の旗だけ。空文字を「消す」と読むと、打ち間違いで位置が消える
+                file: if clear_file {
+                    Some(None)
+                } else {
+                    file.map(Some)
+                },
+                line: if clear_line {
+                    Some(None)
+                } else {
+                    line.as_deref()
+                        .map(|raw| parse_pr_flag("--line", raw).map(Some))
+                        .transpose()?
+                },
+            };
+            check_content_rules(&request)?;
+            // 検証を終えてから接続する。設定不足で、直せる誤りの指摘を隠さない
+            let api = &context.connect().await?;
+            let project = resolve_project(api, &project).await?;
+            let updated: FindingResponse = api
+                .patch(
+                    &[
+                        "v1",
+                        "tenants",
+                        api.tenant_id(),
+                        "projects",
+                        &project.id.to_string(),
+                        "review-findings",
+                        &id,
+                        "content",
+                    ],
+                    &request,
                 )
                 .await?;
             print(&updated, output);
@@ -445,6 +497,24 @@ fn check_payload_rules(request: &CreateReviewRequest) -> Result<()> {
     )))
 }
 
+/// 直しの要求を送る前に、API と同じ規則（[`UpdateFindingContentRequest`] の検証）で見る。
+fn check_content_rules(request: &UpdateFindingContentRequest) -> Result<()> {
+    let Err(errors) = request.validate() else {
+        return Ok(());
+    };
+    let mut lines = Vec::new();
+    collect_violations(&errors, "", &mut lines);
+    // 欄をまたぐ規則（直す欄が無い・file と line の上限）は欄の名を持たないので、文だけを出す
+    let lines: Vec<String> = lines
+        .into_iter()
+        .map(|line| line.replacen("  __all__: ", "  ", 1))
+        .collect();
+    Err(CliError::validation(format!(
+        "the edit does not satisfy the API's limits:\n{}",
+        lines.join("\n")
+    )))
+}
+
 /// `findings[0].line` の形になるよう、入れ子とリストを辿ってパスを組み立てる。
 fn collect_violations(errors: &ValidationErrors, prefix: &str, out: &mut Vec<String>) {
     for (field, kind) in errors.errors() {
@@ -558,6 +628,12 @@ fn format_finding(finding: &FindingResponse) -> String {
     );
     if let Some(source) = finding.carried_from_finding_id {
         line.push_str(&format!("\tcarried from finding {source}"));
+    }
+    if let Some(edited_at) = finding.edited_at {
+        line.push_str(&format!(
+            "\tedited {}",
+            edited_at.format("%Y-%m-%d %H:%M UTC")
+        ));
     }
     line
 }
@@ -1174,9 +1250,22 @@ mod tests {
             carried_from_finding_id: None,
             created_at: Utc.timestamp_opt(0, 0).unwrap(),
             updated_at: Utc.timestamp_opt(0, 0).unwrap(),
+            edited_at: None,
             transitions: vec![],
             available_actions: vec![],
         }
+    }
+
+    /// 直した指摘は一行の末尾に直した時刻を添える（TASK-577）。直していなければ何も足さない。
+    #[test]
+    fn renders_when_a_finding_was_edited() {
+        let plain = format_finding(&finding(Some("src/App.vue"), Some(42)));
+        assert!(!plain.contains("edited"), "{plain}");
+
+        let mut edited = finding(Some("src/App.vue"), Some(42));
+        edited.edited_at = Some(Utc.timestamp_opt(1_795_000_000, 0).unwrap());
+        let line = format_finding(&edited);
+        assert!(line.ends_with("\tedited 2026-11-18 11:06 UTC"), "{line}");
     }
 
     #[test]

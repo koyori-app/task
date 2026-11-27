@@ -41,6 +41,12 @@ pub enum ReviewError {
     /// `fixed` を宣言した本人が `verified` に進めようとした。
     #[error("the fixer cannot verify their own fix")]
     SelfVerification,
+    /// 指摘の内容の直しを、その指摘を含むラウンドの作成者以外が行おうとした。
+    #[error("only the author of the finding's round can edit it")]
+    EditorOnly,
+    /// 内容を直せるのは `open` の間だけ。
+    #[error("a {0:?} finding cannot be edited")]
+    NotEditable(FindingState),
     /// マージ前必須の重大度を繰り延べようとした。
     #[error("severity {0:?} cannot be deferred")]
     NotDeferrable(FindingSeverity),
@@ -78,7 +84,13 @@ impl From<ReviewError> for common::error::AppError {
             )),
             ReviewError::ReviewerOnly
             | ReviewError::FindingAuthorOnly
-            | ReviewError::SelfVerification => Self::Forbidden,
+            | ReviewError::SelfVerification
+            | ReviewError::EditorOnly => Self::Forbidden,
+            // 直す人は合っているが、今の状態では直せない。遷移の誤りと同じ 409 で理由を返す
+            ReviewError::NotEditable(state) => Self::ConflictDetail(format!(
+                "{} の指摘は直せません（内容を直せるのは open の間だけです）",
+                state.as_str()
+            )),
             // 既定ステータスが無いプロジェクトでは繰り延べ先タスクを作れない。
             // 利用者が直せる状態の問題なので 409（指摘の状態は変えない）
             ReviewError::NoDefaultStatus(_) => Self::ConflictDetail(
@@ -428,6 +440,8 @@ pub async fn carry_over<C: ConnectionTrait>(
                 )),
                 created_at: Set(now.into()),
                 updated_at: Set(now.into()),
+                // 写しは写した時点の内容から始まる。元の直しの記録は元の指摘に残る
+                edited_at: Set(None),
             }
             .insert(db)
             .await?;
@@ -1003,6 +1017,138 @@ pub async fn apply_transition<C: ConnectionTrait>(
     record_transition(db, finding_id, actor_id, Some(from), to, note).await?;
 
     Ok(updated)
+}
+
+/// 指摘の内容の直し（TASK-577）。`None` の欄は変えない。`file` / `line` は `Some(None)` で消す。
+///
+/// 重大度は持たない（直せない）。マージ可否の集計は重大度で数えるので、直しで集計は変わらない。
+#[derive(Debug, Clone, Default)]
+pub struct FindingEdit {
+    pub title: Option<String>,
+    pub body: Option<String>,
+    pub file: Option<Option<String>>,
+    pub line: Option<Option<i32>>,
+}
+
+impl From<payload::reviews::UpdateFindingContentRequest> for FindingEdit {
+    fn from(request: payload::reviews::UpdateFindingContentRequest) -> Self {
+        Self {
+            title: request.title,
+            body: request.body,
+            file: request.file,
+            line: request.line,
+        }
+    }
+}
+
+/// 内容の直しの可否。直せるのはその指摘を含むラウンドの作成者だけで、`open` の間だけ。
+///
+/// 作成者かどうかを先に見る。作成者でない人には、状態を手がかりにした 409 ではなく 403 を返す。
+/// 状態を `open` に限るのは、修正側が着手や修正の宣言をした後に指摘の中身が変わると、
+/// 何を直したのかの記録が食い違うため。
+pub fn check_edit(
+    finding: &review_findings::Model,
+    review: &reviews::Model,
+    actor_id: Uuid,
+) -> Result<(), ReviewError> {
+    if review.reviewer_id != actor_id {
+        return Err(ReviewError::EditorOnly);
+    }
+    if finding.state != FindingState::Open {
+        return Err(ReviewError::NotEditable(finding.state));
+    }
+    Ok(())
+}
+
+/// 直しで変わる欄を `(欄の名, 前, 後)` で並べる。今と同じ値の欄は含めない。
+///
+/// 値は履歴の表と同じく文字列で持つ（`line` は 10 進の字、`None` は「無い」）。
+pub fn edit_changes(
+    finding: &review_findings::Model,
+    edit: &FindingEdit,
+) -> Vec<(&'static str, Option<String>, Option<String>)> {
+    let mut changes = Vec::new();
+    if let Some(title) = &edit.title
+        && *title != finding.title
+    {
+        changes.push(("title", Some(finding.title.clone()), Some(title.clone())));
+    }
+    if let Some(body) = &edit.body
+        && *body != finding.body
+    {
+        changes.push(("body", Some(finding.body.clone()), Some(body.clone())));
+    }
+    if let Some(file) = &edit.file
+        && *file != finding.file
+    {
+        changes.push(("file", finding.file.clone(), file.clone()));
+    }
+    if let Some(line) = edit.line
+        && line != finding.line
+    {
+        changes.push((
+            "line",
+            finding.line.map(|value| value.to_string()),
+            line.map(|value| value.to_string()),
+        ));
+    }
+    changes
+}
+
+/// 指摘の内容を直し、変わった欄を `review_finding_edits` に残す（TASK-577）。
+///
+/// 変わる欄が無ければ何も書かず、元の行と `false` を返す。`true` は書いたことを表し、
+/// 呼び出し側は要約の更新ジョブを積むかの判断に使う。
+pub async fn apply_edit<C: ConnectionTrait>(
+    db: &C,
+    finding: review_findings::Model,
+    review: &reviews::Model,
+    edit: FindingEdit,
+    actor_id: Uuid,
+) -> Result<(review_findings::Model, bool), ReviewError> {
+    check_edit(&finding, review, actor_id)?;
+    let changes = edit_changes(&finding, &edit);
+    if changes.is_empty() {
+        return Ok((finding, false));
+    }
+
+    let now = chrono::Utc::now();
+    let finding_id = finding.id;
+    let mut active: review_findings::ActiveModel = finding.into();
+    if let Some(title) = edit.title {
+        active.title = Set(title);
+    }
+    if let Some(body) = edit.body {
+        active.body = Set(body);
+    }
+    if let Some(file) = edit.file {
+        active.file = Set(file);
+    }
+    if let Some(line) = edit.line {
+        active.line = Set(line);
+    }
+    active.edited_at = Set(Some(now.into()));
+    active.updated_at = Set(now.into());
+    let updated = active.update(db).await?;
+
+    // 同じ直しで変わった欄は edit_id で束ね、時刻も揃える
+    let edit_id = Uuid::new_v4();
+    entity::review_finding_edits::Entity::insert_many(changes.into_iter().map(
+        |(field, before, after)| entity::review_finding_edits::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            finding_id: Set(finding_id),
+            edit_id: Set(edit_id),
+            actor_id: Set(actor_id),
+            field: Set(field.to_owned()),
+            before_value: Set(before),
+            after_value: Set(after),
+            created_at: Set(now.into()),
+        },
+    ))
+    .exec(db)
+    .await?;
+
+    Ok((updated, true))
 }
 
 /// 遷移履歴を 1 行残す。`from` が `None` の行は起票（登録）を表す。
@@ -2180,5 +2326,134 @@ mod tests {
             (FindingSeverity::Nit, Fixed, 13),
         ];
         assert_eq!(blocking_count(&counts), 20);
+    }
+}
+
+#[cfg(test)]
+mod edit_tests {
+    use super::*;
+
+    fn review(reviewer_id: Uuid) -> reviews::Model {
+        reviews::Model {
+            id: Uuid::new_v4(),
+            project_id: Uuid::new_v4(),
+            integration_id: None,
+            repo_owner: String::new(),
+            repo_name: String::new(),
+            pr_number: 1230,
+            round: 1,
+            head_sha: "a".repeat(40),
+            reviewer_id,
+            summary: String::new(),
+            pr_title: None,
+            pr_author: None,
+            pr_head_sha: None,
+            pr_head_checked_at: None,
+            summary_comment_id: None,
+            carried_from_review_id: None,
+            carried_by: None,
+            created_at: chrono::Utc::now().into(),
+        }
+    }
+
+    fn finding(state: FindingState) -> review_findings::Model {
+        review_findings::Model {
+            id: Uuid::new_v4(),
+            review_id: Uuid::new_v4(),
+            severity: FindingSeverity::Medium,
+            title: "題".into(),
+            body: "本文".into(),
+            file: Some("src/App.vue".into()),
+            line: Some(42),
+            state,
+            deferred_task_id: None,
+            fixed_by: None,
+            carried_from_finding_id: None,
+            carried_root_finding_id: None,
+            created_at: chrono::Utc::now().into(),
+            updated_at: chrono::Utc::now().into(),
+            edited_at: None,
+        }
+    }
+
+    /// 直せるのはラウンドの作成者だけで、open の間だけ（TASK-577）。
+    #[test]
+    fn only_the_round_author_can_edit_and_only_while_open() {
+        let author = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let round = review(author);
+
+        assert!(check_edit(&finding(FindingState::Open), &round, author).is_ok());
+        assert!(matches!(
+            check_edit(&finding(FindingState::Open), &round, other),
+            Err(ReviewError::EditorOnly)
+        ));
+        for state in [
+            FindingState::Fixing,
+            FindingState::Fixed,
+            FindingState::Verified,
+            FindingState::Deferred,
+            FindingState::Rejected,
+        ] {
+            assert!(
+                matches!(
+                    check_edit(&finding(state), &round, author),
+                    Err(ReviewError::NotEditable(s)) if s == state
+                ),
+                "{state:?} は直せない"
+            );
+            // 作成者でなければ、状態にかかわらず 403 の側で断る
+            assert!(matches!(
+                check_edit(&finding(state), &round, other),
+                Err(ReviewError::EditorOnly)
+            ));
+        }
+    }
+
+    /// 409 は理由を本文に入れ、作成者でないことは 403 にする。
+    #[test]
+    fn edit_errors_map_to_forbidden_and_a_conflict_with_the_reason() {
+        use common::error::AppError;
+
+        assert!(matches!(
+            AppError::from(ReviewError::EditorOnly),
+            AppError::Forbidden
+        ));
+        match AppError::from(ReviewError::NotEditable(FindingState::Fixed)) {
+            AppError::ConflictDetail(message) => assert!(
+                message.contains("fixed") && message.contains("open の間だけ"),
+                "{message}"
+            ),
+            other => panic!("409 の詳細になっていない: {other:?}"),
+        }
+    }
+
+    /// 変わる欄だけを前後の値つきで並べ、今と同じ値は数えない。
+    #[test]
+    fn edit_changes_list_only_the_fields_that_change() {
+        let current = finding(FindingState::Open);
+        let same = FindingEdit {
+            title: Some("題".into()),
+            body: Some("本文".into()),
+            file: Some(Some("src/App.vue".into())),
+            line: Some(Some(42)),
+        };
+        assert!(edit_changes(&current, &same).is_empty());
+        assert!(edit_changes(&current, &FindingEdit::default()).is_empty());
+
+        let changed = FindingEdit {
+            title: None,
+            body: Some("直した本文".into()),
+            file: Some(None),
+            line: Some(Some(7)),
+        };
+        assert_eq!(
+            edit_changes(&current, &changed),
+            vec![
+                ("body", Some("本文".into()), Some("直した本文".into())),
+                ("file", Some("src/App.vue".into()), None),
+                ("line", Some("42".into()), Some("7".into())),
+            ]
+        );
     }
 }

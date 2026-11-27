@@ -15988,6 +15988,150 @@
         }
       }
     },
+    "/v1/tenants/{tenant_id}/projects/{project_id}/review-findings/{id}/content": {
+      "patch": {
+        "tags": ["Reviews"],
+        "summary": "指摘の内容を直す",
+        "description": "題・本文・位置（file / line）を直す。省略した欄は変えず、`file` / `line` は `null` で消す。重大度は直せず、`severity` を送ると 400 を返す（重さを変えたいときは、指摘を取り下げて出し直す）。\n\n直せるのはその指摘を含むラウンドの作成者だけで、状態が `open` の間だけ。変わった欄は前後の値つきで履歴に残し、応答の `edited_at` に直した時刻を入れる。今と同じ値だけを渡した場合は何も書かずに 200 を返す。マージ可否の集計は重大度で数えるので、直しでは変わらない。",
+        "operationId": "update_review_finding_content",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "description": "テナントID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "プロジェクトID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "指摘ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateFindingContentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "直した後の指摘",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ログインまたはセッションが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "この操作は許可されていません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "リソースが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状態が open でない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバー側で問題が発生しました。時間をおいて再度お試しください",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "API 共通のエラー応答ボディ。",
+                  "required": ["message"],
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "internal-error"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tenants/{tenant_id}/projects/{project_id}/reviews": {
       "get": {
         "tags": ["Reviews"],
@@ -30790,6 +30934,11 @@
             "format": "uuid",
             "description": "繰り延べ時に自動起票した通常タスク"
           },
+          "edited_at": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "内容（題・本文・位置）を最後に直した時刻。直していなければ `null`"
+          },
           "file": {
             "type": ["string", "null"]
           },
@@ -34676,6 +34825,27 @@
             "description": "`null` でルート（フォルダなし）へ移動。フィールド省略時は変更なし。"
           },
           "name": {
+            "type": ["string", "null"]
+          }
+        }
+      },
+      "UpdateFindingContentRequest": {
+        "type": "object",
+        "description": "指摘の内容の直し（TASK-577）。省略した欄は変えない。`file` / `line` は `null` で消す。\n\n直せるのは、その指摘を含むラウンドの作成者だけで、状態が `open` の間だけ（仕様 §3）。\n欄の上限は起票（[`CreateFindingInput`]）と同じ。重大度は直せない（マージ可否を決める\n重さを後から動かせると、出し直しの記録を経ずに基準が変わる）。重さを変えたいときは、\n指摘を取り下げて出し直す。",
+        "properties": {
+          "body": {
+            "type": ["string", "null"]
+          },
+          "file": {
+            "type": ["string", "null"],
+            "description": "位置のファイル。`null` で消す"
+          },
+          "line": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "description": "位置の行（1 以上）。`null` で消す"
+          },
+          "title": {
             "type": ["string", "null"]
           }
         }

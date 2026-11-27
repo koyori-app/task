@@ -321,6 +321,7 @@ pub async fn create_review(
             carried_root_finding_id: Set(None),
             created_at: Set(now.into()),
             updated_at: Set(now.into()),
+            edited_at: Set(None),
         }
         .insert(&txn)
         .await?;
@@ -945,6 +946,89 @@ pub async fn update_review_finding_state(
         review.pr_number,
     )
     .await;
+
+    let transitions = load_transitions(&state.db, &[updated.id])
+        .await?
+        .remove(&updated.id)
+        .unwrap_or_default();
+    let available = service::reviews::available_actions(
+        &state.db,
+        tenant_id,
+        std::slice::from_ref(&review),
+        std::slice::from_ref(&updated),
+        auth.user_id,
+    )
+    .await?
+    .remove(&updated.id)
+    .unwrap_or_default();
+
+    Ok(Json(FindingResponse::from_parts(
+        updated,
+        review.pr_number,
+        review.round,
+        transitions,
+        available,
+    )))
+}
+
+#[axum::debug_handler]
+#[utoipa::path(
+    patch,
+    path = "/{id}/content",
+    operation_id = "update_review_finding_content",
+    tag = "Reviews",
+    summary = "指摘の内容を直す",
+    description = "題・本文・位置（file / line）を直す。省略した欄は変えず、`file` / `line` は `null` で消す。重大度は直せず、`severity` を送ると 400 を返す（重さを変えたいときは、指摘を取り下げて出し直す）。\n\n直せるのはその指摘を含むラウンドの作成者だけで、状態が `open` の間だけ。変わった欄は前後の値つきで履歴に残し、応答の `edited_at` に直した時刻を入れる。今と同じ値だけを渡した場合は何も書かずに 200 を返す。マージ可否の集計は重大度で数えるので、直しでは変わらない。",
+    params(
+        ("tenant_id" = Uuid, Path, description = "テナントID"),
+        ("project_id" = Uuid, Path, description = "プロジェクトID"),
+        ("id" = Uuid, Path, description = "指摘ID"),
+    ),
+    request_body = UpdateFindingContentRequest,
+    responses(
+        (status = 200, description = "直した後の指摘", body = FindingResponse),
+        (status = 403, description = "その指摘を含むラウンドの作成者でない", body = ServerError),
+        (status = 409, description = "状態が open でない", body = ServerError),
+        CrudErrors,
+    )
+)]
+pub async fn update_review_finding_content(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((tenant_id, project_id, finding_id)): Path<(Uuid, Uuid, Uuid)>,
+    Valid(Json(payload)): Valid<Json<UpdateFindingContentRequest>>,
+) -> Result<Json<FindingResponse>, AppError> {
+    ensure_write_access(&state, &auth, tenant_id, project_id).await?;
+
+    let txn = state.db.begin().await?;
+
+    // 状態の遷移と同じく指摘の行を掴んでから状態を読む。掴まないと、直しと遷移
+    // （open → fixed など）が重なったとき、修正の宣言の後の指摘を直せてしまう
+    let finding = review_findings::Entity::find_by_id(finding_id)
+        .lock(LockType::Update)
+        .one(&txn)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    // 他プロジェクトの指摘 ID を渡されても存在を漏らさない
+    let review = find_review(&txn, project_id, finding.review_id).await?;
+
+    let (updated, changed) =
+        service::reviews::apply_edit(&txn, finding, &review, payload.into(), auth.user_id).await?;
+
+    txn.commit().await?;
+
+    // 要約コメントは指摘の題を載せるので、直したら更新する
+    if changed {
+        job::review_summary::enqueue_best_effort(
+            &state.review_summary_storage,
+            &state.redis_client,
+            project_id,
+            &review.repo_owner,
+            &review.repo_name,
+            review.pr_number,
+        )
+        .await;
+    }
 
     let transitions = load_transitions(&state.db, &[updated.id])
         .await?
