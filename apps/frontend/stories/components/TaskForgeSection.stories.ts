@@ -290,24 +290,36 @@ export const Tabs: Story = {
   },
 };
 
+// セクションはそれ自身の幅で並びを変える。狭い幅は物語の箱の幅で作る:
+// VRT の撮り手は物語の globals.viewport を効かせず、窓の幅（1280）のまま描く
+const NARROW_SECTION_PX = 320;
+
 export const NarrowTabs: Story = {
   name: '狭い幅では取り込み元がタブの下へ回る',
   ...Tabs,
+  decorators: [
+    () => ({
+      template: `<div data-narrow-box style="width: ${NARROW_SECTION_PX}px"><story /></div>`,
+    }),
+  ],
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await canvas.findByRole('tab', { name: 'Pull Requests 2' });
+    const box = canvasElement.querySelector<HTMLElement>('[data-narrow-box]')!;
+    const section = canvasElement.querySelector<HTMLElement>('[data-forge-tabs]')!;
+    // 窓の幅によらず、狭い箱の中で撃っておる
+    await expect(box.getBoundingClientRect().width).toBe(NARROW_SECTION_PX);
     const source = canvasElement.querySelector<HTMLElement>('[data-forge-issue-source]')!;
     const tabs = canvas.getByRole('tablist').getBoundingClientRect();
     await waitFor(() =>
       expect(source.getBoundingClientRect().top).toBeGreaterThanOrEqual(tabs.bottom),
     );
-    // 横にはみ出さない
-    await expect(canvasElement.ownerDocument.documentElement.scrollWidth).toBeLessThanOrEqual(
-      canvasElement.ownerDocument.documentElement.clientWidth,
+    // 箱から横にはみ出さない
+    await expect(section.getBoundingClientRect().right).toBeLessThanOrEqual(
+      box.getBoundingClientRect().right + 0.5,
     );
+    await expect(source.scrollWidth).toBeLessThanOrEqual(source.clientWidth);
   },
-  parameters: { viewport: { defaultViewport: 'mobile1' } },
-  globals: { viewport: { value: 'mobile1', isRotated: false } },
 };
 
 export const SourceBesideTabsAtAnyWidth: Story = {

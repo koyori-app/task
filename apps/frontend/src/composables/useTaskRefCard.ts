@@ -53,7 +53,9 @@ export function useTaskRefCard(
     if (resolved.isProjectNotFound.value) return 'unavailable';
     const status = (taskQuery.error.value as { status?: number } | null)?.status;
     if (taskQuery.data.value === null || status === 403 || status === 404) return 'unavailable';
-    if (taskQuery.data.value) return 'ready';
+    // アイコンはステータスの一覧から出すので、一覧が届くまで（失敗なら待たずに）ready にしない。
+    // ready の後でアイコンが現れると、ID の字を横へ押す
+    if (taskQuery.data.value) return statusesQuery.isPending.value ? 'loading' : 'ready';
     if (resolved.isError.value || taskQuery.isError.value) return 'error';
     return 'loading';
   });
