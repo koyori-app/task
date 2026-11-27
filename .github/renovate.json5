@@ -1,238 +1,199 @@
 {
-  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:base"],
-  "ignorePresets": [":prHourlyLimit2"],
-  // "baseBranches": ["develop", "master"],
-  // 窓は月曜の 5 時から 9 時（JST）にする。
-  // 何のために: before 9am だけでは窓の始まりが無く、月曜の 0 時から効く。
-  // 8 月からの renovate の PR は、9 割が月曜の 0 時台から 2 時台に作られて
-  // いた。深夜に手を動かしている時に PR と CI が一斉に湧き、作業の CI を
-  // 押し退けていた。人が寝ている明け方に湧かせ、朝には捌けているようにする。
-  "schedule": ["after 5am and before 9am on monday"],
-  "timezone": "Asia/Tokyo",
-  // "dependencyDashboard": false,
-  "automerge": false,
-  // 枝を焼き直すのは、衝突した時だけにする。
-  // 理由: 既定の auto は、automerge を持つ規則に behind-base-branch を当てる。
-  // main が一つ進むたびに開いている枝が全て焼き直され、CI が積もって捌けなく
-  // なった。この設定を書いた時点で、開いている PR 82 件のうち renovate の PR
-  // が 60 件あり、Actions の待ち行列には run が 302 本並んでいた。
-  // main には枝の保護も ruleset も無く、PR が最新であることを強いていない。
-  // そのため、焼き直さなくても automerge は止まらない。
-  // 二つの更新が互いに試されないまま続けて入りうることは承知している。
-  // そもそも main に保護が無いので、焼き直していても、この隙は閉じていない。
-  // 検めが通った時の main と、実際に入る時の main は今でも別物になりうる。
-  // この変更で広がるのは隙の幅であって、隙が新しく生まれるわけではない。
-  // main への push で backend-test や e2e などが走るので、壊れればそこで分かる。
-  // 分かった時に直す。焼き直しを増やして先回りで防ぐことはしない。
-  "rebaseWhen": "conflicted",
-  // この札を貼った PR だけは、main より遅れるたびに焼き直す。
-  // merge する前に最新の main で試し直したい PR に貼る。
-  // 札を PR から外せば、その PR は他と同じく衝突した時だけ焼き直す。
-  "keepUpdatedLabel": "dependencies/keep-updated",
-  "prHourlyLimit": 100,
-  "prConcurrentLimit": 100,
-  "branchConcurrentLimit": 100,
-  // "labels": ["type/Dependencies📦"],
-  "labels": ["dependencies"],
-  // Coder のイメージの ARG は、built-in の manager が拾わないので regex で拾う。
-  // 何のために: dockerfile manager は FROM の image しか見ず、ARG NODE_VERSION と
-  // ARG RUST_VERSION は対象外だった（2026-11 に dry-run で確かめた）。Renovate が
-  // .node-version と rust-toolchain.toml を上げても、Coder のイメージの版は
-  // 手で合わせるしかなかった。
-  // なぜこの形か: datasource と versioning は、.node-version（nodenv）と
-  // rust-toolchain.toml（rust-toolchain）が今使っている物に揃える。
-  // nodenv は node-version と node、rust-toolchain は rust-version と
-  // rust-release-channel。揃えないと、同じ更新が群れの中で別の版に解けてしまう。
-  // ARG の名で拾うのは、この Dockerfile の ARG が版の唯一の書き場所で、
-  // 注の位置や並びに依らないため。
-  // 何が起きたら解くか: Coder のイメージが ARG を使わなくなった時（版を
-  // .node-version などから直に読む作りに変えた時）。
-  "customManagers": [
-    {
-      "customType": "regex",
-      "managerFilePatterns": ["/^coder/build/Dockerfile$/"],
-      "matchStrings": ["ARG NODE_VERSION=(?<currentValue>\\S+)"],
-      "depNameTemplate": "node",
-      "datasourceTemplate": "node-version",
-      "versioningTemplate": "node"
-    },
-    {
-      "customType": "regex",
-      "managerFilePatterns": ["/^coder/build/Dockerfile$/"],
-      "matchStrings": ["ARG RUST_VERSION=(?<currentValue>\\S+)"],
-      "depNameTemplate": "rust",
-      "datasourceTemplate": "rust-version",
-      "versioningTemplate": "rust-release-channel"
-    }
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: [
+    'config:recommended',
   ],
-  "packageRules": [
+  ignorePresets: [
+    ':prHourlyLimit2',
+  ],
+  schedule: [
+    'after 5am and before 9am on monday',
+  ],
+  timezone: 'Asia/Tokyo',
+  automerge: false,
+  rebaseWhen: 'conflicted',
+  keepUpdatedLabel: 'dependencies/keep-updated',
+  prHourlyLimit: 100,
+  prConcurrentLimit: 100,
+  branchConcurrentLimit: 100,
+  labels: [
+    'dependencies',
+  ],
+  customManagers: [
     {
-      "matchManagers": ["github-actions", "gitlabci", "gitlabci-include"],
-      "automerge": true,
-      "matchUpdateTypes": ["minor", "patch", "digest"],
-      // Apply the same cooldown to CI action updates before automerge.
-      "minimumReleaseAge": "1 day"
+      customType: 'regex',
+      managerFilePatterns: [
+        '/^coder/build/Dockerfile$/',
+      ],
+      matchStrings: [
+        'ARG NODE_VERSION=(?<currentValue>\\S+)',
+      ],
+      depNameTemplate: 'node',
+      datasourceTemplate: 'node-version',
+      versioningTemplate: 'node',
     },
     {
-      "matchManagers": ["cargo"],
-      "automerge": true,
-      "matchUpdateTypes": ["minor", "patch", "digest"],
-      // Keep Rust crate automerge on the same cooldown as npm/pnpm.
-      "minimumReleaseAge": "1 day"
+      customType: 'regex',
+      managerFilePatterns: [
+        '/^coder/build/Dockerfile$/',
+      ],
+      matchStrings: [
+        'ARG RUST_VERSION=(?<currentValue>\\S+)',
+      ],
+      depNameTemplate: 'rust',
+      datasourceTemplate: 'rust-version',
+      versioningTemplate: 'rust-release-channel',
+    },
+  ],
+  packageRules: [
+    {
+      matchManagers: [
+        'github-actions',
+        'gitlabci',
+        'gitlabci-include',
+      ],
+      automerge: true,
+      matchUpdateTypes: [
+        'minor',
+        'patch',
+        'digest',
+      ],
+      minimumReleaseAge: '1 day',
     },
     {
-      "matchManagers": ["npm"],
-      // "addLabels": ["topic/JavaScript🧶"]
-      "automerge": true,
-      "matchUpdateTypes": ["minor", "patch", "digest"],
-      // Align Renovate automerge with pnpm v11's default supply-chain delay.
-      "minimumReleaseAge": "1 day"
+      matchManagers: [
+        'cargo',
+      ],
+      automerge: true,
+      matchUpdateTypes: [
+        'minor',
+        'patch',
+        'digest',
+      ],
+      minimumReleaseAge: '1 day',
     },
     {
-      "matchManagers": ["docker-compose", "dockerfile"],
-      // "addLabels": ["topic/Docker⚓"]
-      "automerge": true,
-      "matchUpdateTypes": ["minor", "patch", "digest"],
-      // Apply the same cooldown to container image updates before automerge.
-      "minimumReleaseAge": "1 day"
+      matchManagers: [
+        'npm',
+      ],
+      automerge: true,
+      matchUpdateTypes: [
+        'minor',
+        'patch',
+        'digest',
+      ],
+      minimumReleaseAge: '1 day',
     },
     {
-      "matchManagers": ["npm"],
-      "matchPackagePatterns": ["scalar"],
-      "groupName": "scalar"
+      matchManagers: [
+        'docker-compose',
+        'dockerfile',
+      ],
+      automerge: true,
+      matchUpdateTypes: [
+        'minor',
+        'patch',
+        'digest',
+      ],
+      minimumReleaseAge: '1 day',
     },
     {
-      "matchManagers": ["npm"],
-      "matchPackagePatterns": ["regle"],
-      "groupName": "regle"
+      matchManagers: [
+        'npm',
+      ],
+      groupName: 'scalar',
+      matchPackageNames: [
+        '/scalar/',
+      ],
     },
     {
-      "matchManagers": ["npm"],
-      "matchPackagePatterns": ["vueuse"],
-      "groupName": "vueuse"
+      matchManagers: [
+        'npm',
+      ],
+      groupName: 'regle',
+      matchPackageNames: [
+        '/regle/',
+      ],
     },
     {
-      "matchManagers": ["npm"],
-      "matchPackagePatterns": ["vue-macros"],
-      "groupName": "vue-macros"
+      matchManagers: [
+        'npm',
+      ],
+      groupName: 'vueuse',
+      matchPackageNames: [
+        '/vueuse/',
+      ],
     },
     {
-      "matchManagers": ["npm"],
-      "matchPackageNames": ["vite", "vite-plus"],
-      "matchPackagePatterns": ["^@voidzero-dev/"],
-      "groupName": "vite-plus"
+      matchManagers: [
+        'npm',
+      ],
+      groupName: 'vue-macros',
+      matchPackageNames: [
+        '/vue-macros/',
+      ],
     },
     {
-      // vitest と @vitest/* は renovate では上げない。
-      // vite-plus は決まった版の vitest を抱え、@vitest/*（coverage-v8、browser-playwright など）は
-      // その版にぴたりと揃っていないと vp test が落ちる（vite-plus bundles vitest@… の検め）。
-      // vitest が vite-plus より先に出ると、群れに束ねても vitest と @vitest/* だけの PR が立ち、
-      // 必ず落ちていた（#949）。群れの決まりでは「vite-plus が抱える版に合わせる」を書けない。
-      // vite-plus を上げて抱える vitest の版が変われば、その PR の CI が同じ検めで落ちるので、
-      // その PR の上で vitest と @vitest/* を揃える。
-      "matchManagers": ["npm"],
-      "matchPackageNames": ["vitest"],
-      "matchPackagePatterns": ["^@vitest/"],
-      "enabled": false
+      matchManagers: [
+        'npm',
+      ],
+      matchPackageNames: [
+        'vite',
+        'vite-plus',
+        '/^@voidzero-dev//',
+      ],
+      groupName: 'vite-plus',
     },
     {
-      // @codemirror/ の package は一つの PR で揃えて上げる。
-      // 何のために束ねたか: どの package も @codemirror/state の EditorState や
-      // Extension を受け渡す。版がずれると state が二つ入り、同じ型が別の実体
-      // になって typecheck が落ちる。実行時も instanceof が壊れ、編集器が描け
-      // なくなる（#694）。別々の PR で上げれば、途中の版で必ずずれる。
-      // なぜ前方一致か: どの package も state を引くので、後から足した package
-      // も同じ群れに入る。名指しにすると、足した時の書き足しを忘れて漏れる。
-      // renovate の既定（group:recommended の group:codemirror）も同じく束ねる。
-      // ここに書くのは、束ねる理由を残し、既定が変わっても外れないようにするため。
-      // 束ねても、lock の推移の解決に古い state が残ることは防げない（#694 で
-      // 起きた）。二重取りが出たら lock を取り直す。
-      // 何が起きたら解くか: 解かない。分けた方が細かく見られると思っても分けない。
-      "matchManagers": ["npm"],
-      "matchPackagePatterns": ["^@codemirror/"],
-      "groupName": "codemirror"
+      matchManagers: [
+        'npm',
+      ],
+      matchPackageNames: [
+        'vitest',
+        '/^@vitest//',
+      ],
+      enabled: false,
     },
     {
-      // Node の版を書く所のうち、版を厳格に指す二か所を一つの PR に束ねる。
-      // 対象: .node-version（nodenv manager）と、coder/build/Dockerfile の
-      // ARG NODE_VERSION（上の customManagers）。どちらも 24.22.0 のように patch
-      // まで書く。
-      // 何のために束ねたか: Coder のイメージは .node-version と同じ版の Node を
-      // 入れる想定だが、二つは別の manager が別々に拾うので、束ねなければ別の PR
-      // になり、片方だけが入って版がずれる。ずれても CI は落ちない（Coder の
-      // イメージは CI で作らない）ので、気づけない。
-      // なぜこの形か: matchManagers と matchDepNames の両方で絞る。depName が
-      // node なだけだと、workflows の setup-node や frontend の Dockerfile も
-      // 巻き込む。束ねない理由は次のとおり。
-      // - workflows の node-version（'24' のように major だけ）は、版を厳格に
-      //   指す所ではなく、CI が使う Node の major を表すだけなので、揃えない。
-      // - apps/frontend/Dockerfile の FROM node:24-bookworm-slim も major だけの
-      //   tag で、patch は image を作り直すたびに最新へ流れる。ビルドだけに使う
-      //   builder ステージで、配布する runtime は oven/bun なので、strict に固める
-      //   利点が薄く、digest を固めれば PR が増える。固めないので群れにも入れない。
-      //   この tag は、今までどおり dockerfile manager が単独の PR で上げる。
-      // major の上げは、separateMajorMinor（既定 true）が群れより優先されるので、
-      // patch の群れとは別の PR になる（renovate/node-runtime と
-      // renovate/major-node-runtime）。major の PR でも、この二か所は同じ PR で
-      // 動く。
-      // 自動で merge しない。この群れの manager には automerge の規則が無く、
-      // 群れの automerge は全員が true の時だけ効くので、人が見て押す。
-      // 何が起きたら解くか: Coder のイメージが .node-version に追従しなくなった
-      // 時（Coder が別の版を使うと決めた時）に解く。
-      "matchManagers": ["nodenv", "custom.regex"],
-      "matchDepNames": ["node"],
-      "groupName": "node-runtime"
+      matchManagers: [
+        'npm',
+      ],
+      groupName: 'codemirror',
+      matchPackageNames: [
+        '/^@codemirror//',
+      ],
     },
     {
-      // Rust の版を書く所のうち、版を厳格に指す三か所を一つの PR に束ねる。
-      // 対象: rust-toolchain.toml（rust-toolchain manager）、coder/build/Dockerfile
-      // の ARG RUST_VERSION（上の customManagers）、apps/backend/Dockerfile の
-      // FROM rust:1.95-bookworm（dockerfile manager）。
-      // 何のために束ねたか: backend の Docker build は apps/backend を文脈に
-      // するので rust-toolchain.toml が入らず、Dockerfile の tag が唯一の版指定に
-      // なる。束ねなければ rust-toolchain.toml だけが上がって Docker build が
-      // 古い Rust のまま成功する。Coder の ARG は、ずれても rustup が
-      // rust-toolchain.toml の版を取得するので壊れないが、イメージに焼いた版が
-      // 使われなくなり、取得が走る。
-      // CI の version-sync（scripts/check-docker-versions.sh）は、rust-toolchain.toml
-      // と backend の Dockerfile の major.minor のずれを検めるので、束ねれば
-      // この検めを通ったまま上がる。
-      // なぜこの形か: Rust は minor（1.95 → 1.96）で上がるので、tag が 1.95 のように
-      // minor までの形でも、三か所が同じ minor の更新として同じ PR に入る。
-      // patch（1.95.0 → 1.95.1）の時は tag が動かず、残る二か所が上がる。
-      // tag が patch を含まず、同じ minor の最新へ流れるのは今までどおり。
-      // 自動で merge しない（automerge を false に固定する）。toolchain の更新は
-      // lint の増減で CI が落ちうるので、人が見る。
-      // minimumReleaseAge を外す理由: 上の dockerfile の規則が、docker の minor の
-      // 更新に「リリースから 1 日」の冷却を付ける。この群れでは Dockerfile の分だけ
-      // 冷却中として枝から外れ（dry-run で確かめた）、toolchain と ARG だけの PR が
-      // 先に立つ。すると version-sync が落ち、後から Dockerfile が足されるまで
-      // 赤いままになる。冷却は automerge を遅らせるための物で、この群れは
-      // automerge しないので、外して三か所を同時に出す。
-      // 何が起きたら解くか: backend の Dockerfile が rust-toolchain.toml から
-      // 版を読む作りに変わった時（build 文脈にそれを入れた時）に、dockerfile の分を
-      // 外す。
-      "matchManagers": ["rust-toolchain", "custom.regex", "dockerfile"],
-      "matchDepNames": ["rust"],
-      "groupName": "rust-toolchain",
-      "automerge": false,
-      "minimumReleaseAge": null
+      matchManagers: [
+        'nodenv',
+        'custom.regex',
+      ],
+      matchDepNames: [
+        'node',
+      ],
+      groupName: 'node-runtime',
     },
     {
-      // workspace-hack の Cargo.toml は renovate に上げさせない。
-      // 理由: この file は cargo hakari generate が生む（設定は
-      // apps/backend/.config/hakari.toml）。中の版は本体の crate の依存から
-      // 決まる。renovate が直に上げると generate の出力と食い違い、CI の
-      // backend-fmt の検め（cargo hakari generate --diff）で必ず落ちる。
-      // hakari が付けた sha2-93f6ce9d446188ac のような名も、別の依存と見なされる。
-      // この規則を書いた時点で、開いている renovate の PR 63 件のうち 41 件が
-      // この file だけを触る PR だった。
-      // 本体の crate を上げる PR は、これまでどおり作られる。workspace-hack が
-      // 追従していなければ同じ検めで落ちるので、その時は generate を打つ。
-      "matchManagers": ["cargo"],
-      "matchFileNames": ["apps/backend/crates/workspace-hack/Cargo.toml"],
-      "enabled": false
-    }
-  ]
+      matchManagers: [
+        'rust-toolchain',
+        'custom.regex',
+        'dockerfile',
+      ],
+      matchDepNames: [
+        'rust',
+      ],
+      groupName: 'rust-toolchain',
+      automerge: false,
+      minimumReleaseAge: null,
+    },
+    {
+      matchManagers: [
+        'cargo',
+      ],
+      matchFileNames: [
+        'apps/backend/crates/workspace-hack/Cargo.toml',
+      ],
+      enabled: false,
+    },
+  ],
 }
