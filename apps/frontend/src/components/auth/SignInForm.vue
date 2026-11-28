@@ -10,6 +10,7 @@ import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
 import { meQueryOptions, useLoginMutation } from '@/lib/api-vue-query';
 import { arkMessage } from '@/lib/auth-validation';
 import { useRedirectAfter, withRedirectAfter } from '@/composables/useRedirectAfter';
+import { useSignedInRedirect } from '@/composables/useSignedInRedirect';
 import { requiresTwoFactor, twoFactorPath } from '@/lib/two-factor';
 import { consumeNotice, PASSWORD_CHANGED_NOTICE } from '@/lib/one-time-notice';
 
@@ -29,6 +30,11 @@ const schema = type({
 });
 
 const redirectAfter = useRedirectAfter();
+const { redirectIfSignedIn } = useSignedInRedirect();
+// ログイン中に共有された /signin?redirect_after=… を開いたら、サインインさせずに戻り先へ進める
+onMounted(() => {
+  void redirectIfSignedIn(redirectAfter);
+});
 const queryClient = useQueryClient();
 const loginMutation = useLoginMutation();
 const submitError = ref<string | null>(null);

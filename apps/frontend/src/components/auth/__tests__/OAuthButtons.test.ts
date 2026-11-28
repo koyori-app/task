@@ -11,12 +11,17 @@ const jsonResponse = (data: unknown, status = 200) =>
     headers: { 'Content-Type': 'application/json' },
   });
 
-function stubProviders(providers: Provider[]) {
+function stubProviders(providers: Provider[], options: { signedIn?: boolean } = {}) {
   const fetchMock = vi.fn(async (req: Request | string) => {
     const url = typeof req === 'string' ? req : req.url;
     const pathname = new URL(url, 'http://localhost').pathname;
     if (pathname.endsWith('/v1/auth/oauth/providers')) {
       return jsonResponse({ providers });
+    }
+    if (pathname.endsWith('/v1/auth/me')) {
+      return options.signedIn
+        ? jsonResponse({ id: 'u1', username: 'alice', email: 'alice@example.com' })
+        : jsonResponse({ message: 'unauthorized' }, 401);
     }
     return jsonResponse({ message: 'not-found' }, 404);
   });
@@ -98,10 +103,27 @@ describe('OAuthButtons', () => {
     await flushPromises();
 
     bodyButton('GitLab で続ける')!.click();
+    await flushPromises();
 
     expect(assignSpy).toHaveBeenCalledWith(
       '/api/v1/auth/oauth/gitlab?redirect_after=%2F&error_redirect_after=%2F',
     );
+  });
+
+  it('別のタブで既にログインしていれば、OAuth を始めずに戻り先へ進む', async () => {
+    stubProviders([{ provider: 'github', requires_instance_url: false, sign_in: true }], {
+      signedIn: true,
+    });
+    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+    const replaceSpy = vi.spyOn(window.location, 'replace').mockImplementation(() => {});
+    mountButtons({ redirectAfter: '/acme/projects/APP/reviews/10' });
+    await flushPromises();
+
+    bodyButton('GitHub で続ける')!.click();
+    await flushPromises();
+
+    expect(replaceSpy).toHaveBeenCalledWith('/acme/projects/APP/reviews/10');
+    expect(assignSpy).not.toHaveBeenCalled();
   });
 
   it('redirect-after prop を遷移 URL に反映する', async () => {
@@ -111,6 +133,7 @@ describe('OAuthButtons', () => {
     await flushPromises();
 
     bodyButton('GitHub で続ける')!.click();
+    await flushPromises();
 
     expect(assignSpy).toHaveBeenCalledWith(
       '/api/v1/auth/oauth/github?redirect_after=%2Fdashboard&error_redirect_after=%2F',
@@ -124,6 +147,7 @@ describe('OAuthButtons', () => {
     await flushPromises();
 
     bodyButton('GitLab で続ける')!.click();
+    await flushPromises();
 
     expect(assignSpy).toHaveBeenCalledWith(
       '/api/v1/auth/oauth/gitlab?redirect_after=%2F&error_redirect_after=%2Fsignin',
@@ -139,6 +163,8 @@ describe('OAuthButtons', () => {
     const button = bodyButton('GitLab (セルフホスト) で続ける');
     expect(button?.disabled).toBe(true);
     button!.click();
+    await flushPromises();
+    await flushPromises();
     expect(assignSpy).not.toHaveBeenCalled();
   });
 
@@ -153,6 +179,8 @@ describe('OAuthButtons', () => {
     const button = bodyButton('GitLab (セルフホスト) で続ける');
     expect(button?.disabled).toBe(false);
     button!.click();
+    await flushPromises();
+    await flushPromises();
 
     expect(assignSpy).toHaveBeenCalledWith(
       '/api/v1/auth/oauth/gitlab_selfhosted?redirect_after=%2F&error_redirect_after=%2F&instance_url=https%3A%2F%2Fgitlab.example.com',

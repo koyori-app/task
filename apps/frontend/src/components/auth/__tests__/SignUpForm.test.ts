@@ -13,7 +13,11 @@ describe('SignUpForm', () => {
   it('中身のない画像の面を出さない', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => Response.json({ providers: [] })),
+      vi.fn(async (req: Request | string) =>
+        String(typeof req === 'string' ? req : req.url).includes('/v1/auth/me')
+          ? Response.json({ message: 'unauthorized' }, { status: 401 })
+          : Response.json({ providers: [] }),
+      ),
     );
     const wrapper = mount(SignUpForm, {
       global: { plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]] },
@@ -36,6 +40,9 @@ describe('SignUpForm', () => {
         const url = typeof req === 'string' ? req : req.url;
         if (new URL(url, 'http://localhost').pathname.endsWith('/v1/auth/register')) {
           return new Response('', { status: 201 });
+        }
+        if (new URL(url, 'http://localhost').pathname.endsWith('/v1/auth/me')) {
+          return Response.json({ message: 'unauthorized' }, { status: 401 });
         }
         return Response.json({ providers: [] });
       }),

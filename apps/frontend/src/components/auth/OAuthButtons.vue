@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { Button, Field, Input } from '@koyori-app/ui-vue';
+import { useSignedInRedirect } from '@/composables/useSignedInRedirect';
 import { useOAuthProvidersQuery } from '@/lib/api-vue-query';
 import { providerLabel, startOAuth } from '@/lib/oauth-providers';
 
@@ -14,6 +15,7 @@ const { data } = useOAuthProvidersQuery();
 const signInProviders = computed(() => data.value?.providers.filter((p) => p.sign_in) ?? []);
 const instanceUrls = ref<Record<string, string>>({});
 const showOAuthError = ref(false);
+const { redirectIfSignedIn } = useSignedInRedirect();
 
 onMounted(() => {
   // OAuth コールバックが失敗すると backend が ?oauth_error= 付きで戻す。
@@ -21,9 +23,11 @@ onMounted(() => {
   showOAuthError.value = params.has('oauth_error');
 });
 
-function onStart(provider: string, requiresInstanceUrl: boolean) {
+async function onStart(provider: string, requiresInstanceUrl: boolean) {
   const instanceUrl = requiresInstanceUrl ? instanceUrls.value[provider]?.trim() : undefined;
   if (requiresInstanceUrl && !instanceUrl) return;
+  // 別のタブで既にログインしていれば、OAuth を始めずに戻り先へ進む（始めると連携の追加とみなされる）
+  if (await redirectIfSignedIn(props.redirectAfter)) return;
   startOAuth(provider, {
     redirectAfter: props.redirectAfter,
     // プロバイダーエラー時は OAuth ボタンのあるページ（signin/signup）へ戻してエラーを表示させる。
