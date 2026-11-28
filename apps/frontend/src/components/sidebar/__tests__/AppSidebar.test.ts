@@ -368,6 +368,15 @@ describe('AppSidebar の上端', () => {
     expect(header.exists()).toBe(true);
     expect(header.props()).toMatchObject({ tenant: ACME, label: 'Acme' });
   });
+
+  it('見出しのメニューで項目を選ぶと、狭い画面のサイドバーを閉じる', () => {
+    const onClose = vi.fn();
+    const wrapper = mountSidebar(onClose);
+
+    wrapper.findComponent({ name: 'SidebarTenantHeader' }).vm.$emit('close');
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('AppSidebar の下端', () => {

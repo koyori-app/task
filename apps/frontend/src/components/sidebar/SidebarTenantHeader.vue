@@ -13,7 +13,17 @@ const props = defineProps<{
   rail?: boolean;
 }>();
 
+const emit = defineEmits<{
+  /** 項目を選んだ。狭い画面では Drawer を閉じ、遷移先と toast を Drawer の裏に隠さない */
+  close: [];
+}>();
+
 const { items, onSelect } = useTenantMenu(() => props.tenant);
+
+function select(value: string) {
+  emit('close');
+  onSelect(value);
+}
 </script>
 
 <template>
@@ -27,7 +37,7 @@ const { items, onSelect } = useTenantMenu(() => props.tenant);
       variant="ghost"
       ariaLabel="テナントのメニュー"
       :items="items"
-      :on-select="onSelect"
+      :on-select="select"
       top-layer
     >
       <template #icon><EllipsisIcon /></template>

@@ -90,6 +90,22 @@ describe('SidebarTenantHeader', () => {
     ).toEqual(['表示 ID をコピー']);
   });
 
+  // 狭い画面の Drawer を閉じる。遷移先も、コピーの toast も Drawer の裏に隠さない
+  it.each(['テナント設定', 'メンバー', '表示 ID をコピー'])(
+    'emits close when %s is chosen',
+    async (label) => {
+      const wrapper = mountHeader({ tenant: alpha, label: 'Alpha' });
+      await wrapper.get('button[aria-label="テナントのメニュー"]').trigger('click');
+
+      const item = wrapper
+        .findAll('[role^="menuitem"]:not([hidden])')
+        .find((candidate) => candidate.text() === label);
+      await item!.trigger('click');
+
+      expect(wrapper.emitted('close')).toHaveLength(1);
+    },
+  );
+
   it('has no menu while the tenant is not decided', () => {
     const wrapper = mountHeader({ tenant: null, label: 'テナントを読み込み中…' });
 

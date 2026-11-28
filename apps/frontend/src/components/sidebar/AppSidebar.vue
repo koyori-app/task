@@ -154,7 +154,12 @@ function closeOnNavigate(event: MouseEvent) {
     @click="closeOnNavigate"
   >
     <template #header>
-      <SidebarTenantHeader :tenant="tenantStore.selectedTenant" :label="tenantLabel" :rail="rail" />
+      <SidebarTenantHeader
+        :tenant="tenantStore.selectedTenant"
+        :label="tenantLabel"
+        :rail="rail"
+        @close="emit('close')"
+      />
     </template>
     <!-- カードのリンクも Sidebar の中の <a> なので、closeOnNavigate が狭い画面の Drawer を閉じる -->
     <template #footer>

@@ -178,4 +178,24 @@ describe('AppTenantRail', () => {
       ),
     ).toEqual(['表示 ID をコピー']);
   });
+
+  // コピーでも閉じる。Drawer を開いたままだと toast が Drawer の裏に隠れる
+  it.each(['メンバー', '表示 ID をコピー'])(
+    'closes the drawer when %s is chosen',
+    async (label) => {
+      const { wrapper, rail } = mountRail('alpha');
+      rail.vm.$emit('menu', alpha, { x: 10, y: 20 });
+      await flushPromises();
+
+      const item = [
+        ...document.body.querySelectorAll<HTMLElement>(
+          '[role="menu"][aria-label="Alpha のメニュー"] [role="menuitem"]:not([hidden])',
+        ),
+      ].find((candidate) => candidate.textContent?.trim() === label);
+      item!.click();
+      await flushPromises();
+
+      expect(wrapper.emitted('close')).toHaveLength(1);
+    },
+  );
 });

@@ -52,7 +52,8 @@ function openMenu(tenant: Tenant, position: { x: number; y: number }) {
 }
 
 function onMenuSelect(value: string) {
-  if (value !== 'copy-id') emit('close');
+  // コピーでも閉じる。Toaster は Drawer より先に top layer へ入るので、開いたままだと toast が裏に隠れる
+  emit('close');
   tenantMenu.onSelect(value);
 }
 </script>
