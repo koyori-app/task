@@ -14,18 +14,19 @@ pub mod resolve;
 pub mod text_input;
 pub mod update;
 
-use std::cell::OnceCell;
+use std::cell::{Cell, OnceCell};
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use api::ApiClient;
 use cli::{Cli, Command};
-use config::{ConfigStore, RuntimeConfig, resolve_runtime_with};
+use config::{ConfigStore, ProfileOrigin, RuntimeConfig, resolve_runtime_with, select_profile};
 use error::Result;
 use output::OutputOptions;
 use repo_config::RepoConfig;
 
 /// 環境変数の読み取り。テストは実プロセスの環境を見ない実装を差し込む。
-type EnvLookup = Box<dyn Fn(&str) -> Option<String>>;
+type EnvLookup = Rc<dyn Fn(&str) -> Option<String>>;
 
 /// 設定ファイルと環境変数の出どころ。
 ///
@@ -41,6 +42,12 @@ pub struct Context {
     repo_dir: Option<PathBuf>,
     /// 読んだ `.koyori-task.yaml`。1 プロセスで 1 回だけ読み、以降は同じ内容を使う
     repo: OnceCell<Option<RepoConfig>>,
+    /// `--profile` の値（そのまま）。読む経路の選択に使う。1 回の `run` の間だけ持つ
+    profile_flag: Option<String>,
+    /// 書く操作（`config` / `auth token` / `auth logout`）の対象。`--profile default` と省略はトップレベル（`None`）
+    profile_target: Option<String>,
+    /// `.koyori-task.yaml` 由来のプロファイルを標準エラーに出したか（1 回の実行で 1 回だけ出す）
+    profile_announced: Cell<bool>,
 }
 
 impl Context {
@@ -67,10 +74,13 @@ impl Context {
     pub fn new(store: ConfigStore, env: impl Fn(&str) -> Option<String> + 'static) -> Self {
         Self {
             store,
-            env: Box::new(env),
+            env: Rc::new(env),
             updater: None,
             repo_dir: None,
             repo: OnceCell::new(),
+            profile_flag: None,
+            profile_target: None,
+            profile_announced: Cell::new(false),
         }
     }
 
@@ -81,9 +91,6 @@ impl Context {
     }
 
     /// `.koyori-task.yaml` を（まだなら）読む。失敗は覚えずに返す。
-    ///
-    /// `profile` はまだ扱えない。黙って無視すると、別のトークンで送るつもりの要求が
-    /// 既定のトークンで送られるので、要求を送る前に止める
     fn repo_config(&self) -> Result<Option<&RepoConfig>> {
         if let Some(config) = self.repo.get() {
             return Ok(config.as_ref());
@@ -98,12 +105,6 @@ impl Context {
                     "warning: unknown key \"{key}\" in {} (ignored)",
                     config.path.display()
                 );
-            }
-            if config.profile.is_some() {
-                return Err(error::CliError::validation(format!(
-                    "`profile` in {} is not supported by this version of the CLI; remove it or update the CLI",
-                    config.path.display()
-                )));
             }
         }
         Ok(self.repo.get_or_init(|| config).as_ref())
@@ -146,11 +147,50 @@ impl Context {
         &self.store
     }
 
+    /// 書く操作（`config` / `auth token` / `auth logout`）の対象。`None` はトップレベル。
+    /// `TASK_PROFILE` と `.koyori-task.yaml` は見ない
+    pub(crate) fn profile_flag(&self) -> Option<&str> {
+        self.profile_target.as_deref()
+    }
+
+    /// 1 回の `run` 用の Context。`--profile` をここにだけ持たせ、使い回す Context に残さない。
+    fn for_run(&self, profile_flag: Option<String>, profile_target: Option<String>) -> Self {
+        Self {
+            store: self.store.clone(),
+            env: Rc::clone(&self.env),
+            updater: None,
+            repo_dir: self.repo_dir.clone(),
+            repo: self.repo.clone(),
+            profile_flag,
+            profile_target,
+            profile_announced: Cell::new(false),
+        }
+    }
+
     fn runtime(&self) -> Result<RuntimeConfig> {
         // 要求を送る口は全部ここを通る。`--project` の明示や env の指定があっても、
-        // 壊れたファイルや未対応の `profile` を見逃さないよう、設定の判定より先に読む
-        self.repo_config()?;
-        resolve_runtime_with(&self.store, |key| (self.env)(key))
+        // 壊れたファイルを見逃さないよう、設定の判定より先に読む
+        let repo = self.repo_config()?;
+        let repo_profile = repo.and_then(|config| {
+            config
+                .profile
+                .as_deref()
+                .map(|name| (name, config.path.as_path()))
+        });
+        let selection = select_profile(
+            self.profile_flag.as_deref(),
+            |key| (self.env)(key),
+            repo_profile,
+        );
+        let runtime = resolve_runtime_with(&self.store, |key| (self.env)(key), selection.as_ref())?;
+        // 両 env で選択を無視したとき（`runtime.profile` が `None`）は出さない
+        if let (Some(selection), Some(_)) = (&selection, &runtime.profile)
+            && let ProfileOrigin::RepoFile(path) = &selection.origin
+            && !self.profile_announced.replace(true)
+        {
+            eprintln!("profile: {} (from {})", selection.name, path.display());
+        }
+        Ok(runtime)
     }
 
     /// テナント付きのパスを叩く API クライアントを作る。tenant_id が未設定なら
@@ -185,10 +225,18 @@ pub async fn run(cli: Cli, context: &Context) -> Result<i32> {
         ));
     }
 
+    // 不正な名前は、接続しないコマンドでも早く止める
+    let profile_target = config::profile_target(cli.profile.as_deref())?.map(str::to_owned);
+    let base = context;
+    // `--profile` はこの実行の Context にだけ持たせる（使い回す Context に前の実行の値を残さない）
+    let context = &base.for_run(cli.profile.clone(), profile_target);
+
     // 設定を要らないコマンド（`config` と手元のトークン操作）を、設定不足で落とさない。
     // 落とすと、トークンを保存する前に何もできなくなる
     match cli.command {
-        Command::Config { command } => commands::config::run(command, context.store(), output),
+        Command::Config { command } => {
+            commands::config::run(command, context.store(), context.profile_flag(), output)
+        }
         Command::Auth { command } => commands::auth::run(command, context, output).await,
         Command::Projects { command } => commands::projects::run(context, command, output).await,
         Command::Tasks { command } => commands::tasks::run(context, *command, output, fields).await,
@@ -199,7 +247,7 @@ pub async fn run(cli: Cli, context: &Context) -> Result<i32> {
             commands::notifications::run(context, command, output).await
         }
         Command::Tenants { command } => commands::tenants::run(context, command, output).await,
-        Command::SelfUpdate => match &context.updater {
+        Command::SelfUpdate => match &base.updater {
             Some(updater) => update::self_update(updater, output).await,
             None => Err(error::CliError::new(
                 "self-update is not available in this build",

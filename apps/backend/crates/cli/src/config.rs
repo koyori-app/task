@@ -1,5 +1,6 @@
 //! `~/.config/task/config.yaml` の読み書きと、実行時設定の解決。
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -9,6 +10,9 @@ use crate::error::{CliError, Result};
 /// `config get` / `set` / `unset` が触れるキー。
 pub const CONFIG_KEYS: [&str; 3] = ["api_url", "token", "tenant_id"];
 
+/// トップレベルを明示する名前。`profiles.default` は作れず、手で書かれていても使わない。
+pub const DEFAULT_PROFILE: &str = "default";
+
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -17,9 +21,151 @@ pub struct TaskConfig {
     pub token: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tenant_id: Option<String>,
+    /// 名前付きの接続。選んだら `api_url` / `token` / `tenant_id` を丸ごとここから取る
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        deserialize_with = "profiles_or_empty"
+    )]
+    pub profiles: BTreeMap<String, Profile>,
+}
+
+/// 名前付きプロファイル 1 つ。トップレベルの値は継がない。
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Profile {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<String>,
+}
+
+impl Profile {
+    pub fn get(&self, key: &str) -> Option<&String> {
+        match key {
+            "api_url" => self.api_url.as_ref(),
+            "token" => self.token.as_ref(),
+            "tenant_id" => self.tenant_id.as_ref(),
+            _ => None,
+        }
+    }
+
+    pub fn set(&mut self, key: &str, value: Option<String>) {
+        match key {
+            "api_url" => self.api_url = value,
+            "token" => self.token = value,
+            "tenant_id" => self.tenant_id = value,
+            _ => {}
+        }
+    }
+}
+
+/// `profiles:` だけの行（null）や `work:` だけの行（null）を空として読む。
+fn profiles_or_empty<'de, D>(
+    deserializer: D,
+) -> std::result::Result<BTreeMap<String, Profile>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = Option::<BTreeMap<String, Option<Profile>>>::deserialize(deserializer)?;
+    Ok(raw
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(name, profile)| (name, profile.unwrap_or_default()))
+        .collect())
+}
+
+/// プロファイル名の検証。`[A-Za-z0-9_-]{1,64}` で、予約名 `default` は弾く。
+pub fn check_profile_name(name: &str) -> Result<()> {
+    if name == DEFAULT_PROFILE {
+        return Err(CliError::validation(
+            "Profile name \"default\" is reserved for the top level of the config",
+        ));
+    }
+    let valid = (1..=64).contains(&name.len())
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+    if !valid {
+        return Err(CliError::validation(format!(
+            "Invalid profile name {name:?}: use 1-64 characters of A-Z, a-z, 0-9, _ and -"
+        )));
+    }
+    Ok(())
+}
+
+/// `--profile` の値を、書く操作・読む操作の対象にする。`default` はトップレベル（`None`）。
+pub fn profile_target(flag: Option<&str>) -> Result<Option<&str>> {
+    match flag {
+        None | Some(DEFAULT_PROFILE) => Ok(None),
+        Some(name) => check_profile_name(name).map(|()| Some(name)),
+    }
+}
+
+/// 書く操作の出力に添える対象の名前。トップレベルは `default`。
+pub fn profile_label(profile: Option<&str>) -> &str {
+    profile.unwrap_or(DEFAULT_PROFILE)
+}
+
+fn profile_missing_for_write(name: &str, path: &Path) -> CliError {
+    CliError::validation(format!(
+        "Profile \"{name}\" is not defined in {}. Create it with `task config set --profile {name} api_url <url>`.",
+        path.display()
+    ))
 }
 
 impl TaskConfig {
+    /// 対象（`None` はトップレベル）のキーの値。名前が無ければ終了コード 2。
+    pub fn value(&self, profile: Option<&str>, key: &str, path: &Path) -> Result<Option<&String>> {
+        match profile {
+            None => Ok(self.get(key)),
+            Some(name) => self
+                .profiles
+                .get(name)
+                .map(|profile| profile.get(key))
+                .ok_or_else(|| profile_missing_for_write(name, path)),
+        }
+    }
+
+    /// 対象のキーを書き換える。`create` が偽なら、無い名前は終了コード 2（作らない）。
+    /// 対象以外（トップレベルや他のプロファイル）は触らない。
+    pub fn set_value(
+        &mut self,
+        profile: Option<&str>,
+        key: &str,
+        value: Option<String>,
+        create: bool,
+        path: &Path,
+    ) -> Result<()> {
+        let Some(name) = profile else {
+            self.set(key, value);
+            return Ok(());
+        };
+        if create {
+            check_profile_name(name)?;
+            self.profiles
+                .entry(name.to_string())
+                .or_default()
+                .set(key, value);
+            return Ok(());
+        }
+        self.profiles
+            .get_mut(name)
+            .ok_or_else(|| profile_missing_for_write(name, path))?
+            .set(key, value);
+        Ok(())
+    }
+
+    /// 名前付きプロファイルの名前（予約名 `default` は除く）。
+    pub fn profile_names(&self) -> Vec<&str> {
+        self.profiles
+            .keys()
+            .map(String::as_str)
+            .filter(|name| *name != DEFAULT_PROFILE)
+            .collect()
+    }
+
     pub fn get(&self, key: &str) -> Option<&String> {
         match key {
             "api_url" => self.api_url.as_ref(),
@@ -208,14 +354,18 @@ pub enum TenantSource {
 impl TenantSource {
     /// 403 だけでは束縛の食い違いと断定できないので、条件付きの文にする。
     /// env は config に勝つので、env 由来に `config unset` を勧めても解消しない
-    pub fn forbidden_hint(self) -> &'static str {
-        match self {
-            Self::Env => {
-                "tenant_id is set by TASK_TENANT; if the token cannot be used in that tenant, unset it"
+    /// `profile` は接続を取った名前付きプロファイル（トップレベルなら `None`）。
+    pub fn forbidden_hint(self, profile: Option<&str>) -> String {
+        match (self, profile) {
+            (Self::Env, _) => {
+                "tenant_id is set by TASK_TENANT; if the token cannot be used in that tenant, unset it".to_string()
             }
-            Self::Config => {
-                "tenant_id is set in config; if the token cannot be used in that tenant, run `task config unset tenant_id`"
+            (Self::Config, None) => {
+                "tenant_id is set in config; if the token cannot be used in that tenant, run `task config unset tenant_id`".to_string()
             }
+            (Self::Config, Some(name)) => format!(
+                "tenant_id is set in profile \"{name}\" of config; if the token cannot be used in that tenant, run `task config unset --profile {name} tenant_id`"
+            ),
         }
     }
 }
@@ -227,26 +377,111 @@ pub struct RuntimeConfig {
     pub token: String,
     /// 明示された tenant_id と由来。無ければトークンの束縛先を `/me` から引く
     pub tenant: Option<(String, TenantSource)>,
+    /// 接続を取った名前付きプロファイル。トップレベルと両 env は `None`
+    pub profile: Option<String>,
+}
+
+/// プロファイルをどこで選んだか。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProfileOrigin {
+    Flag,
+    Env,
+    RepoFile(PathBuf),
+}
+
+impl std::fmt::Display for ProfileOrigin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Flag => f.write_str("--profile"),
+            Self::Env => f.write_str("TASK_PROFILE"),
+            Self::RepoFile(path) => write!(f, "{}", path.display()),
+        }
+    }
+}
+
+/// 選ばれた名前付きプロファイル。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileSelection {
+    pub name: String,
+    pub origin: ProfileOrigin,
+}
+
+/// `--profile` > `TASK_PROFILE` > `.koyori-task.yaml` の `profile` の順で 1 つ選ぶ。
+///
+/// 上位があれば下位は見ない。空文字の `TASK_PROFILE` は未設定。`default` は
+/// トップレベルの明示なので `None` を返し、下位も見ない。
+pub fn select_profile(
+    flag: Option<&str>,
+    env: impl Fn(&str) -> Option<String>,
+    repo: Option<(&str, &Path)>,
+) -> Option<ProfileSelection> {
+    let (name, origin) = if let Some(name) = flag {
+        (name.to_string(), ProfileOrigin::Flag)
+    } else if let Some(name) = env("TASK_PROFILE").filter(|value| !value.is_empty()) {
+        (name, ProfileOrigin::Env)
+    } else if let Some((name, path)) = repo {
+        (
+            name.to_string(),
+            ProfileOrigin::RepoFile(path.to_path_buf()),
+        )
+    } else {
+        return None;
+    };
+    (name != DEFAULT_PROFILE).then_some(ProfileSelection { name, origin })
 }
 
 /// 環境変数を設定ファイルより優先して解決する。
 ///
 /// `TASK_API_URL` と `TASK_TOKEN` は組で扱う。項目ごとに上書きすると、config の
-/// トークンが env の別インスタンスへ送られる。両方が env にあれば config は読まない。
+/// トークンが env の別インスタンスへ送られる。両方が env にあれば config は読まない
+/// （プロファイルの指定も見ない）。env が無ければ、選ばれたプロファイルか、無ければ
+/// トップレベルから `api_url` / `token` / `tenant_id` を丸ごと取る。層をまたいで補わない。
 /// `TASK_TENANT` は送り先を変えないので単独で効く。
 pub fn resolve_runtime_with(
     store: &ConfigStore,
     env: impl Fn(&str) -> Option<String>,
+    selection: Option<&ProfileSelection>,
 ) -> Result<RuntimeConfig> {
     // 空文字は未設定として扱う（`TASK_TOKEN=` で外したつもりの値を拾わない）
     let var = |key: &str| env(key).filter(|value| !value.is_empty());
+    let mut profile = None;
     let (api_url, token, file_tenant) = match (var("TASK_API_URL"), var("TASK_TOKEN")) {
         // config は tenant_id も含めて読まない。env のトークンは別テナントのことが多く、
         // config の tenant_id を残すと毎回 403 になる。壊れた config でも止めない
         (Some(api_url), Some(token)) => (Some(api_url), Some(token), None),
         (None, None) => {
             let file = store.load()?;
-            (file.api_url, file.token, file.tenant_id)
+            match selection {
+                None => (file.api_url, file.token, file.tenant_id),
+                Some(selection) => {
+                    let name = &selection.name;
+                    let Some(found) = file.profiles.get(name) else {
+                        return Err(CliError::validation(format!(
+                            "Profile \"{name}\" (from {}) is not defined in {}. Create it with `task config set --profile {name} api_url <url>` and `task auth token --profile {name}`.",
+                            selection.origin,
+                            store.path().display(),
+                        )));
+                    };
+                    let missing: Vec<&str> = [
+                        found.api_url.is_none().then_some("api_url"),
+                        found.token.is_none().then_some("token"),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                    if !missing.is_empty() {
+                        return Err(CliError::validation(format!(
+                            "Profile \"{name}\" (from {}) is missing {} in {}. Set them with `task config set --profile {name} api_url <url>` and `task auth token --profile {name}`; they are not taken from the top level.",
+                            selection.origin,
+                            missing.join(", "),
+                            store.path().display(),
+                        )));
+                    }
+                    profile = Some(name.clone());
+                    let found = found.clone();
+                    (found.api_url, found.token, found.tenant_id)
+                }
+            }
         }
         (api_url, _) => {
             let (set, unset) = if api_url.is_some() {
@@ -287,6 +522,7 @@ pub fn resolve_runtime_with(
         api_url: api_url.unwrap().trim_end_matches('/').to_string(),
         token: token.unwrap(),
         tenant,
+        profile,
     })
 }
 
@@ -426,6 +662,7 @@ mod tests {
                 api_url: Some("https://task.invalid/".into()),
                 token: Some("secret".into()),
                 tenant_id: Some("tenant-1".into()),
+                ..Default::default()
             })
             .unwrap();
 
@@ -536,15 +773,20 @@ mod tests {
                 api_url: Some("https://file.invalid".into()),
                 token: Some("file-token".into()),
                 tenant_id: Some("file-tenant".into()),
+                ..Default::default()
             })
             .unwrap();
 
-        let resolved = resolve_runtime_with(&store, |key| match key {
-            "TASK_API_URL" => Some("https://api.invalid/".into()),
-            "TASK_TOKEN" => Some("env-token".into()),
-            "TASK_TENANT" => Some("env-tenant".into()),
-            _ => None,
-        })
+        let resolved = resolve_runtime_with(
+            &store,
+            |key| match key {
+                "TASK_API_URL" => Some("https://api.invalid/".into()),
+                "TASK_TOKEN" => Some("env-token".into()),
+                "TASK_TENANT" => Some("env-tenant".into()),
+                _ => None,
+            },
+            None,
+        )
         .unwrap();
 
         assert_eq!(
@@ -553,6 +795,7 @@ mod tests {
                 api_url: "https://api.invalid".into(),
                 token: "env-token".into(),
                 tenant: Some(("env-tenant".into(), TenantSource::Env)),
+                profile: None,
             }
         );
     }
@@ -563,6 +806,7 @@ mod tests {
                 api_url: Some("https://file.invalid".into()),
                 token: Some("file-token".into()),
                 tenant_id: Some("file-tenant".into()),
+                ..Default::default()
             })
             .unwrap();
     }
@@ -578,7 +822,8 @@ mod tests {
             ("TASK_API_URL", "TASK_TOKEN"),
             ("TASK_TOKEN", "TASK_API_URL"),
         ] {
-            let err = resolve_runtime_with(&store, env_of(&[(set, "env-value")])).unwrap_err();
+            let err =
+                resolve_runtime_with(&store, env_of(&[(set, "env-value")]), None).unwrap_err();
 
             assert_eq!(err.exit_code, 2, "{set}");
             assert!(
@@ -602,7 +847,7 @@ mod tests {
         save_complete_file(&store);
 
         let resolved =
-            resolve_runtime_with(&store, env_of(&[("TASK_TENANT", "env-tenant")])).unwrap();
+            resolve_runtime_with(&store, env_of(&[("TASK_TENANT", "env-tenant")]), None).unwrap();
 
         assert_eq!(
             resolved,
@@ -610,6 +855,7 @@ mod tests {
                 api_url: "https://file.invalid".into(),
                 token: "file-token".into(),
                 tenant: Some(("env-tenant".into(), TenantSource::Env)),
+                profile: None,
             }
         );
     }
@@ -626,6 +872,7 @@ mod tests {
                 ("TASK_TOKEN", ""),
                 ("TASK_TENANT", ""),
             ]),
+            None,
         )
         .unwrap();
         assert_eq!(
@@ -634,6 +881,7 @@ mod tests {
                 api_url: "https://file.invalid".into(),
                 token: "file-token".into(),
                 tenant: Some(("file-tenant".into(), TenantSource::Config)),
+                profile: None,
             }
         );
 
@@ -641,6 +889,7 @@ mod tests {
         let err = resolve_runtime_with(
             &store,
             env_of(&[("TASK_API_URL", "https://api.invalid"), ("TASK_TOKEN", "")]),
+            None,
         )
         .unwrap_err();
         assert_eq!(err.exit_code, 2);
@@ -655,7 +904,7 @@ mod tests {
     #[test]
     fn names_every_missing_setting_and_exits_two() {
         let (_home, store) = store();
-        let err = resolve_runtime_with(&store, |_| None).unwrap_err();
+        let err = resolve_runtime_with(&store, |_| None, None).unwrap_err();
 
         assert_eq!(err.exit_code, 2);
         for expected in ["api_url (TASK_API_URL)", "token (TASK_TOKEN)"] {
@@ -673,10 +922,11 @@ mod tests {
                 api_url: Some("https://api.invalid".into()),
                 token: Some("token-1".into()),
                 tenant_id: None,
+                ..Default::default()
             })
             .unwrap();
 
-        let resolved = resolve_runtime_with(&store, |_| None).unwrap();
+        let resolved = resolve_runtime_with(&store, |_| None, None).unwrap();
 
         assert_eq!(
             resolved,
@@ -684,6 +934,7 @@ mod tests {
                 api_url: "https://api.invalid".into(),
                 token: "token-1".into(),
                 tenant: None,
+                profile: None,
             }
         );
     }
@@ -695,6 +946,7 @@ mod tests {
             api_url: Some("https://task.invalid".into()),
             token: Some("secret".into()),
             tenant_id: None,
+            ..Default::default()
         };
         store.save(&config).unwrap();
 
@@ -704,5 +956,400 @@ mod tests {
         let raw = std::fs::read_to_string(store.path()).unwrap();
         assert!(!raw.contains("token"), "{raw}");
         assert_eq!(store.load().unwrap().token, None);
+    }
+
+    fn profile(api_url: Option<&str>, token: Option<&str>, tenant_id: Option<&str>) -> Profile {
+        Profile {
+            api_url: api_url.map(Into::into),
+            token: token.map(Into::into),
+            tenant_id: tenant_id.map(Into::into),
+        }
+    }
+
+    /// トップレベルは A、`work` は B を指す config。
+    fn save_with_profiles(store: &ConfigStore, profiles: &[(&str, Profile)]) -> TaskConfig {
+        let config = TaskConfig {
+            api_url: Some("https://top.invalid".into()),
+            token: Some("top-token".into()),
+            tenant_id: Some("top-tenant".into()),
+            profiles: profiles
+                .iter()
+                .map(|(name, profile)| (name.to_string(), profile.clone()))
+                .collect(),
+        };
+        store.save(&config).unwrap();
+        config
+    }
+
+    fn selected(name: &str, origin: ProfileOrigin) -> ProfileSelection {
+        ProfileSelection {
+            name: name.into(),
+            origin,
+        }
+    }
+
+    #[test]
+    fn round_trips_profiles_and_omits_an_empty_map() {
+        let (_home, store) = store();
+        let config = save_with_profiles(
+            &store,
+            &[
+                ("work", profile(Some("https://b.invalid"), Some("b"), None)),
+                ("empty", Profile::default()),
+            ],
+        );
+        assert_eq!(store.load().unwrap(), config);
+
+        store
+            .save(&TaskConfig {
+                token: Some("t".into()),
+                ..Default::default()
+            })
+            .unwrap();
+        let raw = std::fs::read_to_string(store.path()).unwrap();
+        assert!(!raw.contains("profiles"), "{raw}");
+    }
+
+    #[test]
+    fn reads_null_profiles_and_the_old_top_level_only_form() {
+        let (_home, store) = store();
+        std::fs::create_dir_all(store.path().parent().unwrap()).unwrap();
+
+        std::fs::write(store.path(), "token: t\nprofiles:\n").unwrap();
+        let config = store.load().unwrap();
+        assert_eq!(config.token.as_deref(), Some("t"));
+        assert!(config.profiles.is_empty());
+
+        std::fs::write(store.path(), "profiles:\n  work:\n").unwrap();
+        assert_eq!(store.load().unwrap().profiles["work"], Profile::default());
+
+        std::fs::write(
+            store.path(),
+            "api_url: https://a.invalid\ntoken: t\ntenant_id: x\n",
+        )
+        .unwrap();
+        let config = store.load().unwrap();
+        assert_eq!(config.tenant_id.as_deref(), Some("x"));
+        assert!(config.profiles.is_empty());
+    }
+
+    #[test]
+    fn selects_the_flag_then_the_env_then_the_repository_file() {
+        let repo = Path::new("/repo/.koyori-task.yaml");
+        let env = env_of(&[("TASK_PROFILE", "env")]);
+
+        assert_eq!(
+            select_profile(Some("flag"), &env, Some(("file", repo))),
+            Some(selected("flag", ProfileOrigin::Flag))
+        );
+        assert_eq!(
+            select_profile(None, &env, Some(("file", repo))),
+            Some(selected("env", ProfileOrigin::Env))
+        );
+        assert_eq!(
+            select_profile(None, env_of(&[("TASK_PROFILE", "")]), Some(("file", repo))),
+            Some(selected("file", ProfileOrigin::RepoFile(repo.into())))
+        );
+        assert_eq!(select_profile(None, env_of(&[]), None), None);
+    }
+
+    /// `default` はトップレベルの明示。下位の指定を見ない。
+    #[test]
+    fn default_selects_the_top_level_and_hides_lower_choices() {
+        let repo = Path::new("/repo/.koyori-task.yaml");
+        let env = env_of(&[("TASK_PROFILE", "env")]);
+        assert_eq!(
+            select_profile(Some("default"), &env, Some(("file", repo))),
+            None
+        );
+        assert_eq!(
+            select_profile(
+                None,
+                env_of(&[("TASK_PROFILE", "default")]),
+                Some(("file", repo))
+            ),
+            None
+        );
+        assert_eq!(
+            select_profile(None, env_of(&[]), Some(("default", repo))),
+            None
+        );
+    }
+
+    /// プロファイルを選ぶと接続を丸ごとそこから取り、トップレベルの tenant_id を継がない。
+    #[test]
+    fn a_selected_profile_supplies_the_whole_connection() {
+        let (_home, store) = store();
+        save_with_profiles(
+            &store,
+            &[
+                (
+                    "work",
+                    profile(Some("https://b.invalid/"), Some("b-token"), None),
+                ),
+                (
+                    "pinned",
+                    profile(Some("https://c.invalid"), Some("c-token"), Some("c-tenant")),
+                ),
+            ],
+        );
+
+        let resolved = resolve_runtime_with(
+            &store,
+            env_of(&[]),
+            Some(&selected("work", ProfileOrigin::Flag)),
+        )
+        .unwrap();
+        assert_eq!(
+            resolved,
+            RuntimeConfig {
+                api_url: "https://b.invalid".into(),
+                token: "b-token".into(),
+                tenant: None,
+                profile: Some("work".into()),
+            }
+        );
+
+        let pinned = resolve_runtime_with(
+            &store,
+            env_of(&[]),
+            Some(&selected("pinned", ProfileOrigin::Env)),
+        )
+        .unwrap();
+        assert_eq!(
+            pinned.tenant,
+            Some(("c-tenant".into(), TenantSource::Config))
+        );
+
+        // TASK_TENANT はプロファイルの tenant_id に勝つ
+        let env_tenant = resolve_runtime_with(
+            &store,
+            env_of(&[("TASK_TENANT", "env-tenant")]),
+            Some(&selected("pinned", ProfileOrigin::Flag)),
+        )
+        .unwrap();
+        assert_eq!(
+            env_tenant.tenant,
+            Some(("env-tenant".into(), TenantSource::Env))
+        );
+        assert_eq!(env_tenant.api_url, "https://c.invalid");
+    }
+
+    /// 欠けた値をトップレベルから補わない（トップレベルが完全でも止める）。
+    #[test]
+    fn an_incomplete_profile_is_not_filled_from_the_top_level() {
+        let (_home, store) = store();
+        save_with_profiles(
+            &store,
+            &[
+                ("no-token", profile(Some("https://b.invalid"), None, None)),
+                ("no-url", profile(None, Some("b-token"), None)),
+            ],
+        );
+
+        for (name, missing) in [("no-token", "token"), ("no-url", "api_url")] {
+            let err = resolve_runtime_with(
+                &store,
+                env_of(&[]),
+                Some(&selected(name, ProfileOrigin::Flag)),
+            )
+            .unwrap_err();
+            assert_eq!(err.exit_code, 2, "{name}");
+            assert!(
+                err.message.contains(&format!(
+                    "Profile \"{name}\" (from --profile) is missing {missing} in"
+                )),
+                "{}",
+                err.message
+            );
+            assert!(
+                err.message.contains("not taken from the top level"),
+                "{}",
+                err.message
+            );
+        }
+    }
+
+    #[test]
+    fn an_undefined_profile_names_where_it_was_chosen() {
+        let (_home, store) = store();
+        save_with_profiles(&store, &[]);
+
+        for (origin, shown) in [
+            (ProfileOrigin::Flag, "--profile".to_string()),
+            (ProfileOrigin::Env, "TASK_PROFILE".to_string()),
+            (
+                ProfileOrigin::RepoFile("/repo/.koyori-task.yaml".into()),
+                "/repo/.koyori-task.yaml".to_string(),
+            ),
+        ] {
+            let err = resolve_runtime_with(&store, env_of(&[]), Some(&selected("gone", origin)))
+                .unwrap_err();
+            assert_eq!(err.exit_code, 2);
+            assert!(
+                err.message.starts_with(&format!(
+                    "Profile \"gone\" (from {shown}) is not defined in {}",
+                    store.path().display()
+                )),
+                "{}",
+                err.message
+            );
+        }
+    }
+
+    /// 両 env なら名前の存在も完全性も見ず、config が壊れていても動く。
+    #[test]
+    fn both_environment_values_ignore_the_profile_choice() {
+        let (_home, store) = store();
+        std::fs::create_dir_all(store.path().parent().unwrap()).unwrap();
+        std::fs::write(store.path(), "profiles: [broken\n").unwrap();
+
+        let resolved = resolve_runtime_with(
+            &store,
+            env_of(&[
+                ("TASK_API_URL", "https://env.invalid"),
+                ("TASK_TOKEN", "env-token"),
+            ]),
+            Some(&selected("missing", ProfileOrigin::Flag)),
+        )
+        .unwrap();
+        assert_eq!(resolved.api_url, "https://env.invalid");
+        assert_eq!(resolved.profile, None);
+    }
+
+    /// 片側 env のエラーはプロファイルの選択より先（プロファイルが完全でも止める）。
+    #[test]
+    fn one_sided_environment_values_fail_before_the_profile_is_used() {
+        let (_home, store) = store();
+        save_with_profiles(
+            &store,
+            &[("work", profile(Some("https://b.invalid"), Some("b"), None))],
+        );
+        let err = resolve_runtime_with(
+            &store,
+            env_of(&[("TASK_TOKEN", "env-token")]),
+            Some(&selected("work", ProfileOrigin::Flag)),
+        )
+        .unwrap_err();
+        assert_eq!(err.exit_code, 2);
+        assert!(
+            err.message
+                .starts_with("TASK_TOKEN is set without TASK_API_URL;"),
+            "{}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn set_value_touches_only_its_target() {
+        let path = Path::new("/home/me/.config/task/config.yaml");
+        let original = TaskConfig {
+            api_url: Some("https://top.invalid".into()),
+            token: Some("top-token".into()),
+            tenant_id: None,
+            profiles: [
+                (
+                    "work".to_string(),
+                    profile(Some("https://b.invalid"), Some("b"), None),
+                ),
+                (
+                    "other".to_string(),
+                    profile(Some("https://c.invalid"), Some("c"), None),
+                ),
+            ]
+            .into(),
+        };
+
+        let mut config = original.clone();
+        config
+            .set_value(Some("work"), "token", None, false, path)
+            .unwrap();
+        assert_eq!(config.token, original.token);
+        assert_eq!(config.profiles["other"], original.profiles["other"]);
+        assert_eq!(config.profiles["work"].token, None);
+        assert_eq!(
+            config.profiles["work"].api_url,
+            original.profiles["work"].api_url
+        );
+
+        let mut config = original.clone();
+        config.set_value(None, "token", None, false, path).unwrap();
+        assert_eq!(config.token, None);
+        assert_eq!(config.profiles, original.profiles);
+
+        let mut config = original.clone();
+        let err = config
+            .set_value(Some("new"), "token", Some("x".into()), false, path)
+            .unwrap_err();
+        assert_eq!(err.exit_code, 2);
+        assert!(
+            err.message.contains("Profile \"new\" is not defined"),
+            "{}",
+            err.message
+        );
+        assert_eq!(config, original);
+
+        config
+            .set_value(
+                Some("new"),
+                "api_url",
+                Some("https://d.invalid".into()),
+                true,
+                path,
+            )
+            .unwrap();
+        assert_eq!(
+            config.profiles["new"],
+            profile(Some("https://d.invalid"), None, None)
+        );
+
+        assert_eq!(
+            config
+                .value(Some("work"), "api_url", path)
+                .unwrap()
+                .map(String::as_str),
+            Some("https://b.invalid")
+        );
+        assert_eq!(
+            config
+                .value(Some("missing"), "api_url", path)
+                .unwrap_err()
+                .exit_code,
+            2
+        );
+    }
+
+    #[test]
+    fn checks_profile_names() {
+        let long = "a".repeat(64);
+        for name in ["work-1_a", long.as_str(), "A"] {
+            assert!(check_profile_name(name).is_ok(), "{name}");
+        }
+        let too_long = "a".repeat(65);
+        for name in ["", " ", "a b", "a/b", "é", too_long.as_str(), "default"] {
+            let err = check_profile_name(name).unwrap_err();
+            assert_eq!(err.exit_code, 2, "{name:?}");
+        }
+        // `--profile default` はトップレベル。作るのではなく対象を示す
+        assert_eq!(profile_target(Some("default")).unwrap(), None);
+        assert_eq!(profile_target(Some("work")).unwrap(), Some("work"));
+        assert_eq!(profile_target(Some("a/b")).unwrap_err().exit_code, 2);
+    }
+
+    #[test]
+    fn the_forbidden_hint_names_the_profile_to_unset() {
+        assert_eq!(
+            TenantSource::Config.forbidden_hint(None),
+            "tenant_id is set in config; if the token cannot be used in that tenant, run `task config unset tenant_id`"
+        );
+        assert!(
+            TenantSource::Config
+                .forbidden_hint(Some("work"))
+                .ends_with("run `task config unset --profile work tenant_id`")
+        );
+        assert_eq!(
+            TenantSource::Env.forbidden_hint(Some("work")),
+            TenantSource::Env.forbidden_hint(None)
+        );
     }
 }

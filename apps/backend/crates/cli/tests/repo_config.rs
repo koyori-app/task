@@ -69,6 +69,7 @@ async fn repo_harness(setup: Setup) -> RepoHarness {
                 api_url: Some(uri),
                 token: Some("token-1".into()),
                 tenant_id: setup.tenant.map(Into::into),
+                ..Default::default()
             })
             .unwrap();
         vec![]
@@ -324,16 +325,12 @@ async fn a_key_n_reference_ignores_the_project_in_the_file() {
     assert_eq!(harness.calls_to(&project_path("tasks/APP-7")).await, 1);
 }
 
-/// `profile` はまだ扱えない。要求を送るどの口でも、1 本も送らずに終了 2 で止まる。
+/// ファイルの `profile` が config に無ければ、要求を送るどの口でも 1 本も送らずに終了 2 で止まる。
+/// トップレベルへ落とさない（別のトークンで送るつもりの要求が既定のトークンで送られる）。
 #[tokio::test]
-async fn a_profile_stops_every_command_that_sends_before_sending() {
-    for env_only in [false, true] {
-        let harness = repo_harness(Setup {
-            file: Some("project: APP\nprofile: work\n"),
-            env_only,
-            ..Setup::default()
-        })
-        .await;
+async fn an_undefined_profile_in_the_file_stops_every_command_before_sending() {
+    {
+        let harness = repo_harness(with_file("project: APP\nprofile: work\n")).await;
         for args in [
             &["task", "tasks", "list", "--project", "APP"][..],
             &["task", "tasks", "list"],
@@ -345,11 +342,28 @@ async fn a_profile_stops_every_command_that_sends_before_sending() {
             &["task", "my", "list"],
         ] {
             let err = harness.run(args).await.unwrap_err();
-            assert_eq!(err.exit_code, 2, "{args:?} env_only={env_only}");
-            assert!(err.message.contains("`profile`"), "{}", err.message);
+            assert_eq!(err.exit_code, 2, "{args:?}");
+            assert!(
+                err.message.contains("Profile \"work\" (from ")
+                    && err
+                        .message
+                        .contains(".koyori-task.yaml) is not defined in "),
+                "{}",
+                err.message
+            );
         }
         assert!(harness.sent_nothing().await);
     }
+    // 両 env なら config を読まないので、プロファイルの名前も確かめない
+    let harness = repo_harness(Setup {
+        file: Some("project: APP\nprofile: work\n"),
+        env_only: true,
+        ..Setup::default()
+    })
+    .await;
+    harness.mount_task_list().await;
+    assert_eq!(harness.run(&["task", "tasks", "list"]).await.unwrap(), 0);
+    assert_eq!(harness.calls_to(&project_path("tasks")).await, 1);
 }
 
 /// ファイルを読まない口（設定と手元のトークン操作）は、`profile` や壊れたファイルがあっても動く。

@@ -39,6 +39,7 @@ pub async fn harness_with(
             api_url: Some(server.uri()),
             token: Some("token-1".into()),
             tenant_id: tenant_id.map(Into::into),
+            ..Default::default()
         })
         .unwrap();
 

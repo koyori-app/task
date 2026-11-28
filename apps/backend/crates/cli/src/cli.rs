@@ -32,6 +32,10 @@ pub struct Cli {
     )]
     pub json: Option<String>,
 
+    /// Connection profile from config.yaml. config and auth token/logout act on this profile, or on the top level when omitted (TASK_PROFILE and .koyori-task.yaml are not used for them)
+    #[arg(long, global = true, value_name = "NAME")]
+    pub profile: Option<String>,
+
     #[command(subcommand)]
     pub command: Command,
 }
@@ -55,12 +59,15 @@ const FIELD_COMMANDS: [[&str; 2]; 1] = [["tasks", "list"]];
 /// `task tasks show --json TASK-1` は今までどおり）。空白区切りは、位置引数の無い
 /// `FIELD_COMMANDS` に限り、ここで `=` 付きにまとめる。ほかは一切変えない。
 pub fn normalize_json_fields(args: Vec<String>) -> Vec<String> {
-    // `-` で始まらない最初の 2 語がコマンドの道筋（`task tasks list`）
+    // `-` で始まらない最初の 2 語がコマンドの道筋（`task tasks list`）。
+    // 値を空白で区切って取る global オプション（`--profile work`）の値は数えない
     let path: Vec<(usize, &String)> = args
         .iter()
         .enumerate()
         .skip(1)
-        .filter(|(_, arg)| !arg.starts_with('-'))
+        .filter(|(index, arg)| {
+            !arg.starts_with('-') && args.get(index - 1).is_none_or(|prev| prev != "--profile")
+        })
         .take(2)
         .collect();
     let [(_, first), (end, second)] = path[..] else {
@@ -187,18 +194,18 @@ pub enum TenantsCommand {
 pub enum AuthCommand {
     /// Show the personal access token in use and its holder (tenant_ids lists the tenants it can be used in)
     Whoami,
-    /// Save personal access token to config
+    /// Save personal access token to config (top level unless --profile is given)
     Token {
         /// Token value (omit to read from stdin)
         token: Option<String>,
     },
-    /// Remove token from local config
+    /// Remove token from local config (top level unless --profile is given)
     Logout,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum ConfigCommand {
-    /// List all config values
+    /// List top-level values and profile names (with --profile: that profile's values)
     List,
     /// Get a config value
     Get {
@@ -817,6 +824,18 @@ mod tests {
         }
     }
 
+    #[test]
+    fn accepts_the_profile_flag_before_or_after_the_subcommand() {
+        for argv in [
+            vec!["task", "--profile", "work", "projects", "list"],
+            vec!["task", "projects", "list", "--profile", "work"],
+            vec!["task", "projects", "--profile=work", "list"],
+        ] {
+            let cli = Cli::try_parse_from(&argv).unwrap();
+            assert_eq!(cli.profile.as_deref(), Some("work"), "{argv:?}");
+        }
+    }
+
     fn args(words: &[&str]) -> Vec<String> {
         words.iter().map(|word| word.to_string()).collect()
     }
@@ -887,6 +906,30 @@ mod tests {
             (
                 &["task", "projects", "list", "--json", "x"][..],
                 &["task", "projects", "list", "--json", "x"][..],
+            ),
+            // `--profile` の値はコマンドの道筋に数えない
+            (
+                &[
+                    "task",
+                    "--profile",
+                    "work",
+                    "tasks",
+                    "list",
+                    "--json",
+                    "key,title",
+                ][..],
+                &[
+                    "task",
+                    "--profile",
+                    "work",
+                    "tasks",
+                    "list",
+                    "--json=key,title",
+                ][..],
+            ),
+            (
+                &["task", "--profile=work", "tasks", "list", "--json", "key"][..],
+                &["task", "--profile=work", "tasks", "list", "--json=key"][..],
             ),
         ] {
             assert_eq!(

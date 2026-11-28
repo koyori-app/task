@@ -276,8 +276,8 @@ API の URL とトークンは組で決める。片方ずつ config から補う
 
 1. `TASK_API_URL` と `TASK_TOKEN` が両方あれば、両方とも環境変数を使う。config は `tenant_id` も含めて読まない
    （環境変数のトークンは別テナントのことが多いため。config が無くても壊れていても動く）。
-   テナントは `TASK_TENANT` があればそれ、無ければトークンから引く
-2. どちらも無ければ、両方とも config を使う
+   テナントは `TASK_TENANT` があればそれ、無ければトークンから引く。プロファイルの指定は見ない（無い名前でも止まらない）
+2. どちらも無ければ、両方とも config を使う。選ばれたプロファイル（[プロファイル](#プロファイル)）があればそこから、無ければトップレベルから取る
 3. 片方だけなら、config が揃っていても終了コード 2 で止まり、API には何も送らない
 
 空文字の環境変数（`TASK_TOKEN=` や `TASK_TENANT=`）は未設定として扱う。`config *` / `auth token` / `auth logout`
@@ -314,6 +314,37 @@ UUID のときは何も叩かない。
 `api`、読むだけなら `read_api` を付ける。資源ごとに絞るなら `read:task` / `write:review` の
 ように並べる（`write:*` は対の `read:*` を含む）。
 
+### プロファイル
+
+別のインスタンスやテナントのトークンは、名前付きのプロファイルとして `profiles` に置ける。
+
+```yaml
+api_url: https://task.example.com/api   # トップレベル（プロファイルを選ばないとき）
+token: ...
+profiles:
+  work:
+    api_url: https://task.work.example/api
+    token: ...
+    tenant_id: acme                      # 任意。複数テナントのトークンならここで選ぶ
+```
+
+```bash
+task config set --profile work api_url https://task.work.example/api   # 無ければ作る
+task auth token --profile work < work-token.txt
+task --profile work tasks list --project APP
+```
+
+- 選ぶ順は `--profile` > `TASK_PROFILE` > `.koyori-task.yaml` の `profile` > トップレベル。上位があれば下位の名前は確かめない。空文字の `TASK_PROFILE` は未設定として扱う
+- `default` はトップレベルを指す予約名。`--profile default` で、`TASK_PROFILE` や `.koyori-task.yaml` の指定を外してトップレベルを使う。`profiles.default` は作れない
+- プロファイルは丸ごと選ぶ。`api_url` / `token` / `tenant_id` をトップレベルから補わない。選んだ名前が無い、または `api_url` か `token` が欠けていれば、終了コード 2 で止まり、API には何も送らない
+- テナントは `TASK_TENANT` > プロファイルの `tenant_id` > トークンから引く、の順。トップレベルの `tenant_id` は使わない
+- `TASK_API_URL` と `TASK_TOKEN` が両方あれば、プロファイルの指定は見ない（[設定の優先順位](#設定の優先順位)）
+- `config set|get|unset|list` / `auth token` / `auth logout` の対象は `--profile` かトップレベルだけで、`TASK_PROFILE` と `.koyori-task.yaml` は見ない。`TASK_PROFILE=work` のまま引数なしで `task auth logout` すると、トップレベルのトークンが消える。対象は出力の末尾に `(profile: work)` / `(profile: default)` で出す
+- プロファイルを作れるのは `config set --profile` だけ。ほかの書く操作は、無い名前で終了コード 2 になり、ファイルを書かない。値を全部外してもプロファイルは `work: {}` として残る
+- `config list` はトップレベルの値と、プロファイルがあれば名前の一覧（`profiles`）を出す。`config list --profile work` はそのプロファイルの値を出す
+- 名前に使えるのは英数字・`_`・`-` の 1〜64 文字
+- プロファイルを知らない古い版の CLI で `config set` などを実行すると、`profiles` が消える
+
 ### リポジトリの既定のプロジェクト（.koyori-task.yaml）
 
 リポジトリの根に `.koyori-task.yaml` を置くと、`--project` を省いたときにその `project` を使う。
@@ -327,7 +358,7 @@ project: TASK   # キーか UUID
 - プロジェクトは `--project` > `.koyori-task.yaml` の `project` の順で決める。どちらも無ければ終了コード 2 で止まり、API には何も送らない
 - `KEY-N` の参照には使わない（参照内のキーを使う）。タスク UUID の参照には使う
 - ファイルの値を使ったときは、`project: TASK (from /path/.koyori-task.yaml)` を標準エラーに 1 行出す。`--json` の標準出力は変えない
-- `profile` はまだ扱えない。書いてあると、API を叩くコマンドは何も送らずに終了コード 2 で止まる
+- `profile: work` と書くと、接続にそのプロファイルを使う（`--profile` と `TASK_PROFILE` が優先。[プロファイル](#プロファイル)）。使ったときは `profile: work (from /path/.koyori-task.yaml)` を標準エラーに 1 行出す
 - 知らないキーは標準エラーに警告を出して無視する
 - 壊れたファイル（YAML として読めない・空の値）は、`--project` を明示していても API を叩くコマンドを終了コード 2 で止める。`config *` / `auth token` / `auth logout` / `self-update` はファイルを読まないので、壊れていても動く
 
