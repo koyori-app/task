@@ -118,6 +118,15 @@ describe('ProjectSettingsView', () => {
     deleteMutateAsync.mockReset();
     navigateMock.mockReset();
     document.body.innerHTML = '';
+    // IconPicker はパネルを開くと絵文字データを fetch で読む。単体テストから外へ要求を出さない
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new Error('fetch is disabled in unit tests'))),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('一般セクション: 既存値をプリフィルし、保存で PUT を送る', async () => {
