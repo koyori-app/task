@@ -287,7 +287,13 @@ export const MemberCannotEdit: Story = {
     const canvas = within(canvasElement);
     await expect(canvas.findByLabelText('テナント名')).resolves.toBeDisabled();
     await expect(canvas.getByLabelText('説明')).toBeDisabled();
-    await expect(canvas.findByRole('status')).resolves.toHaveTextContent('テナントオーナーだけ');
+    // IconPicker も空の role="status" を持つので、注記は文言で探す
+    await expect(canvas.findByText(/テナントオーナーだけ/)).resolves.toHaveAttribute(
+      'role',
+      'status',
+    );
+    // オーナーでなければアイコンのパネルは開かない
+    await expect(canvas.getByRole('button', { name: /^テナントアイコンを変更/ })).toBeDisabled();
     await expect(canvas.queryByRole('button', { name: '削除' })).not.toBeInTheDocument();
   },
 };
