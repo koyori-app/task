@@ -63,6 +63,9 @@ pub struct UpdateTenantRequest {
     /// 画像を持たないテナントのアイコン。projects.icon_emoji と同じ上限。
     #[validate(length(max = 8))]
     pub icon_emoji: Option<String>,
+    /// 絵文字を外して未設定に戻す。`icon_emoji` より優先する
+    #[serde(default)]
+    pub clear_icon_emoji: bool,
 }
 
 /// テナントとの関わり方（オーナー・メンバー・ゲスト）。テナント一覧では閲覧者の、プロフィールでは対象の利用者の関わり方を表す。

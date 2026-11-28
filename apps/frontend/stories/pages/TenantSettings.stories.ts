@@ -39,6 +39,8 @@ type MockOptions = {
   noTenant?: boolean;
   rejectWrite?: number;
   hangTenants?: boolean;
+  /** 一覧が返すテナントに上書きする欄 */
+  tenant?: { icon_emoji?: string | null; icon_url?: string };
 };
 
 let fetchSpy: ReturnType<typeof fn> | null = null;
@@ -49,14 +51,16 @@ function mockFetch(overrides: MockOptions = {}) {
   return () => {
     const original = globalThis.fetch;
     putBodies = [];
-    fetchSpy = fn().mockImplementation(async (req: Request | string) => {
-      const url = typeof req === 'string' ? req : req.url;
-      const method = typeof req === 'string' ? 'GET' : req.method;
+    fetchSpy = fn().mockImplementation(async (req: Request | string | URL, init?: RequestInit) => {
+      const url = req instanceof Request ? req.url : String(req);
+      const method = req instanceof Request ? req.method : 'GET';
       const pathname = new URL(url, 'http://localhost').pathname;
+      // API 以外（IconPicker が読む絵文字データなど）は本物の fetch に通す
+      if (!pathname.includes('/v1/')) return original(req, init);
 
       if (/\/v1\/tenants\/?$/.test(pathname) && method === 'GET') {
         if (overrides.hangTenants) return new Promise<Response>(() => {});
-        return jsonResponse(overrides.noTenant ? [] : [sampleTenant]);
+        return jsonResponse(overrides.noTenant ? [] : [{ ...sampleTenant, ...overrides.tenant }]);
       }
       if (pathname.includes('/v1/auth/me')) {
         return jsonResponse(overrides.me ?? { id: OWNER_ID, username: 'shadcn', avatar_url: null });
@@ -163,8 +167,18 @@ export const SaveBarAppearsOnEdit: Story = {
       .find((req) => req.method === 'PUT');
     await expect(put).toBeTruthy();
     await expect(put!.url).toContain(`/v1/tenants/${TENANT_UUID}`);
+    // 名前だけ直した保存は絵文字の欄を送らない（未設定の絵文字を書き換えない）
+    await expect(putBodies.at(-1)).not.toHaveProperty('icon_emoji');
+    await expect(putBodies.at(-1)).not.toHaveProperty('clear_icon_emoji');
   },
 };
+
+/** アイコンのトリガーを押し、開いたパネルを返す。 */
+async function openIconPanel(canvasElement: HTMLElement, user: ReturnType<typeof userEvent.setup>) {
+  const canvas = within(canvasElement);
+  await user.click(await canvas.findByRole('button', { name: /^テナントアイコンを変更/ }));
+  return canvas.findByRole('dialog', { name: 'テナントアイコンを変更' });
+}
 
 /**
  * 絵文字は選んでも保存対象に入っておらず、画面を離れると黙って消えていた。
@@ -177,17 +191,53 @@ export const EmojiSelectionIsSaved: Story = {
     const canvas = within(canvasElement);
     const user = userEvent.setup();
 
-    const picker = within(await canvas.findByRole('group', { name: 'テナントアイコンを変更' }));
-    await user.click(picker.getByRole('button', { name: '🚀' }));
-    await expect(picker.getByRole('button', { name: '🚀' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
+    const panel = await openIconPanel(canvasElement, user);
+    // 同じ絵文字がカテゴリにも出るので「おすすめ」の中で探す。名前はデータの読み込み後に付く
+    const suggested = within(await within(panel).findByRole('group', { name: 'おすすめ' }));
+    await user.click(await suggested.findByRole('button', { name: 'ロケット' }));
+    await waitFor(() => expect(panel).not.toBeVisible());
+    await expect(
+      canvas.getByRole('button', { name: 'テナントアイコンを変更: ロケット' }),
+    ).toBeInTheDocument();
 
     await expect(canvas.findByText('保存されていない変更があります')).resolves.toBeInTheDocument();
     await user.click(canvas.getByRole('button', { name: '変更を保存' }));
 
-    await expect(putBodies.at(-1)).toMatchObject({ icon_emoji: '🚀' });
+    await waitFor(() => expect(putBodies.at(-1)).toMatchObject({ icon_emoji: '🚀' }));
+    await expect(putBodies.at(-1)).not.toHaveProperty('clear_icon_emoji');
+  },
+};
+
+export const ClearIconIsSaved: Story = {
+  name: 'なしにする → PUT に clear_icon_emoji が載る',
+  beforeEach: mockFetch({ tenant: { icon_emoji: '🦊' } }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+
+    const panel = await openIconPanel(canvasElement, user);
+    await user.click(within(panel).getByRole('button', { name: 'なしにする' }));
+    await expect(
+      canvas.findByRole('button', { name: 'テナントアイコンを変更: 未設定' }),
+    ).resolves.toBeInTheDocument();
+
+    await expect(canvas.findByText('保存されていない変更があります')).resolves.toBeInTheDocument();
+    await user.click(canvas.getByRole('button', { name: '変更を保存' }));
+
+    await waitFor(() => expect(putBodies.at(-1)).toMatchObject({ clear_icon_emoji: true }));
+    await expect(putBodies.at(-1)).not.toHaveProperty('icon_emoji');
+  },
+};
+
+export const IconPanelHasNoImageTab: Story = {
+  name: 'アイコンのパネルに「画像」のタブは無い',
+  beforeEach: mockFetch(),
+  play: async ({ canvasElement }) => {
+    const user = userEvent.setup();
+    const panel = await openIconPanel(canvasElement, user);
+    await expect(within(panel).queryByRole('tab')).not.toBeInTheDocument();
+    // 絵文字も画像も無いので「なしにする」は押せない
+    await expect(within(panel).getByRole('button', { name: 'なしにする' })).toBeDisabled();
   },
 };
 
@@ -239,7 +289,13 @@ export const MemberCannotEdit: Story = {
     const canvas = within(canvasElement);
     await expect(canvas.findByLabelText('テナント名')).resolves.toBeDisabled();
     await expect(canvas.getByLabelText('説明')).toBeDisabled();
-    await expect(canvas.findByRole('status')).resolves.toHaveTextContent('テナントオーナーだけ');
+    // IconPicker も空の role="status" を持つので、注記は文言で探す
+    await expect(canvas.findByText(/テナントオーナーだけ/)).resolves.toHaveAttribute(
+      'role',
+      'status',
+    );
+    // オーナーでなければアイコンのパネルは開かない
+    await expect(canvas.getByRole('button', { name: /^テナントアイコンを変更/ })).toBeDisabled();
     await expect(canvas.queryByRole('button', { name: '削除' })).not.toBeInTheDocument();
   },
 };

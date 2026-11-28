@@ -94,12 +94,39 @@ function clickBodyButton(label: string) {
   button.click();
 }
 
+function iconTrigger() {
+  const trigger = document.body.querySelector<HTMLButtonElement>('button[aria-haspopup="dialog"]');
+  if (!trigger) throw new Error('icon picker trigger not found');
+  return trigger;
+}
+
+/** アイコンのパネルを開き、開いたパネルを返す。 */
+async function openIconPanel() {
+  iconTrigger().click();
+  const panel = await vi.waitFor(() => {
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
+    if (!dialog || dialog.hidden) throw new Error('icon panel is not open');
+    return dialog;
+  });
+  await flushPromises();
+  return panel;
+}
+
 describe('ProjectSettingsView', () => {
   beforeEach(() => {
     updateMutateAsync.mockReset();
     deleteMutateAsync.mockReset();
     navigateMock.mockReset();
     document.body.innerHTML = '';
+    // IconPicker はパネルを開くと絵文字データを fetch で読む。単体テストから外へ要求を出さない
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new Error('fetch is disabled in unit tests'))),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('一般セクション: 既存値をプリフィルし、保存で PUT を送る', async () => {
@@ -163,13 +190,14 @@ describe('ProjectSettingsView', () => {
     mountView();
     await flushPromises();
 
-    // アイコンの選択は開閉の無い格子。「アイコンなし」はその下にある
-    const clearButton = [...document.body.querySelectorAll('button')].find(
-      (b) => b.textContent?.trim() === 'アイコンなし',
+    const panel = await openIconPanel();
+    const clearButton = [...panel.querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === 'なしにする',
     );
     expect(clearButton).toBeTruthy();
     clearButton!.click();
     await flushPromises();
+    expect(iconTrigger().getAttribute('aria-label')).toBe('アイコンを選択: 未設定');
 
     await formEl().trigger('submit');
     await flushPromises();
@@ -178,6 +206,47 @@ describe('ProjectSettingsView', () => {
       params: { path: { tenant_id: TENANT_UUID, id: sampleProject.id } },
       body: { name: 'Team Alpha', description: 'Shared project', clear_icon_emoji: true },
     });
+  });
+
+  it('おすすめから選んで保存すると icon_emoji を送る', async () => {
+    updateMutateAsync.mockResolvedValue({ ...sampleProject, icon_emoji: '🚀' });
+    mountView();
+    await flushPromises();
+
+    const panel = await openIconPanel();
+    const heading = [...panel.querySelectorAll('[role="group"]')].find(
+      (group) =>
+        document.getElementById(group.getAttribute('aria-labelledby') ?? '')?.textContent ===
+        'おすすめ',
+    );
+    expect(heading).toBeTruthy();
+    // セルの名前はデータの読み込み前後で変わるので、中の文字（絵文字）で探す
+    const rocket = [...heading!.querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === '🚀',
+    );
+    expect(rocket).toBeTruthy();
+    rocket!.click();
+    await flushPromises();
+    expect(panel.hidden).toBe(true);
+
+    await formEl().trigger('submit');
+    await flushPromises();
+
+    expect(updateMutateAsync).toHaveBeenCalledWith({
+      params: { path: { tenant_id: TENANT_UUID, id: sampleProject.id } },
+      body: { name: 'Team Alpha', description: 'Shared project', icon_emoji: '🚀' },
+    });
+  });
+
+  it('外側の「アイコンなし」ボタンは無い（外す操作はパネルの「なしにする」）', async () => {
+    mountView();
+    await flushPromises();
+
+    const buttons = [...document.body.querySelectorAll('button')].filter(
+      (b) => b.textContent?.trim() === 'アイコンなし',
+    );
+    expect(buttons).toHaveLength(0);
+    expect(iconTrigger().getAttribute('aria-label')).toMatch(/^アイコンを選択: /);
   });
 
   it('キーは読み取り専用で表示される', async () => {

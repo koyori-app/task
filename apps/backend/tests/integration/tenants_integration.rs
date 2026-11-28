@@ -1,4 +1,4 @@
-use crate::common::TestApp;
+use crate::common::{TestApp, TestTenantProject, TestUser, ensure_tenant_member_for_project};
 use axum::http::StatusCode;
 use uuid::Uuid;
 
@@ -25,6 +25,110 @@ async fn updated_tenant_emoji_is_returned_in_the_tenant_list() {
         .unwrap();
     assert_eq!(tenant["icon_emoji"], "🦊");
     assert_eq!(tenant["membership"], "Owner");
+}
+
+/// 一覧から対象のテナントの `icon_emoji` を読む。
+async fn tenant_emoji_in_list(app: &TestApp, tenant_id: Uuid) -> serde_json::Value {
+    let response = app.get_with_session("/v1/tenants").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let tenants: Vec<serde_json::Value> = response.json().await.unwrap();
+    tenants
+        .iter()
+        .find(|tenant| tenant["id"] == tenant_id.to_string())
+        .expect("tenant is listed")["icon_emoji"]
+        .clone()
+}
+
+/// オーナーでログインし、絵文字 🦊 を持つテナントを用意する。
+async fn app_with_fox_tenant() -> (TestApp, TestUser, TestTenantProject) {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user_default().await;
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let response = app
+        .put_json_with_session(
+            &format!("/v1/tenants/{}", tp.tenant_id),
+            serde_json::json!({ "icon_emoji": "🦊" }),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    (app, owner, tp)
+}
+
+#[tokio::test]
+async fn clear_icon_emoji_removes_the_tenant_emoji() {
+    let (app, _owner, tp) = app_with_fox_tenant().await;
+    let response = app
+        .put_json_with_session(
+            &format!("/v1/tenants/{}", tp.tenant_id),
+            serde_json::json!({ "clear_icon_emoji": true }),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["icon_emoji"], serde_json::Value::Null);
+    assert_eq!(
+        tenant_emoji_in_list(&app, tp.tenant_id).await,
+        serde_json::Value::Null
+    );
+}
+
+/// `clear_icon_emoji: true` は同じ要求の `icon_emoji` より優先する。
+#[tokio::test]
+async fn clear_icon_emoji_wins_over_icon_emoji() {
+    let (app, _owner, tp) = app_with_fox_tenant().await;
+    let response = app
+        .put_json_with_session(
+            &format!("/v1/tenants/{}", tp.tenant_id),
+            serde_json::json!({ "icon_emoji": "🐱", "clear_icon_emoji": true }),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        tenant_emoji_in_list(&app, tp.tenant_id).await,
+        serde_json::Value::Null
+    );
+}
+
+/// 対照: `clear_icon_emoji` を省いた更新は絵文字に触れない。
+#[tokio::test]
+async fn update_without_clear_keeps_the_tenant_emoji() {
+    let (app, _owner, tp) = app_with_fox_tenant().await;
+    let response = app
+        .put_json_with_session(
+            &format!("/v1/tenants/{}", tp.tenant_id),
+            serde_json::json!({ "name": "Renamed" }),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["name"], "Renamed");
+    assert_eq!(tenant_emoji_in_list(&app, tp.tenant_id).await, "🦊");
+}
+
+/// 拒否: オーナーでないメンバーは絵文字を外せない。
+#[tokio::test]
+async fn non_owner_cannot_clear_the_tenant_emoji() {
+    let (mut app, owner, tp) = app_with_fox_tenant().await;
+    let member = app.insert_user_default().await;
+    ensure_tenant_member_for_project(&app.state.db, tp.project_id, member.id).await;
+
+    app.reset_session_client();
+    app.login_session_no_content(&member.email, &member.password)
+        .await;
+    let response = app
+        .put_json_with_session(
+            &format!("/v1/tenants/{}", tp.tenant_id),
+            serde_json::json!({ "clear_icon_emoji": true }),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    app.reset_session_client();
+    app.login_session_no_content(&owner.email, &owner.password)
+        .await;
+    assert_eq!(tenant_emoji_in_list(&app, tp.tenant_id).await, "🦊");
 }
 
 /// `POST /v1/tenants` が `display_id` 重複で 409 Conflict を返すこと。

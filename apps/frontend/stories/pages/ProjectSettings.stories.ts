@@ -103,15 +103,20 @@ type MockOptions = {
 };
 
 let fetchSpy: ReturnType<typeof fn> | null = null;
+/** プロジェクトの PUT の body。mock 側が Request を読み切るので、送った中身はここに控える。 */
+let putBodies: unknown[] = [];
 
 function mockFetch(overrides: MockOptions = {}) {
   return () => {
     const original = globalThis.fetch;
+    putBodies = [];
     let currentStatuses = structuredClone(overrides.statuses ?? sampleStatuses);
-    fetchSpy = fn().mockImplementation(async (req: Request | string) => {
-      const url = typeof req === 'string' ? req : req.url;
-      const method = typeof req === 'string' ? 'GET' : req.method;
+    fetchSpy = fn().mockImplementation(async (req: Request | string | URL, init?: RequestInit) => {
+      const url = req instanceof Request ? req.url : String(req);
+      const method = req instanceof Request ? req.method : 'GET';
       const pathname = new URL(url, 'http://localhost').pathname;
+      // API 以外（IconPicker が読む絵文字データなど）は本物の fetch に通す
+      if (!pathname.includes('/v1/')) return original(req, init);
       if (isListTenantsUrl(url)) {
         return jsonResponse(sampleTenants(mockContext.routeParams.tenant, overrides.viewer));
       }
@@ -159,6 +164,7 @@ function mockFetch(overrides: MockOptions = {}) {
         }
         if (method === 'DELETE') return new Response(null, { status: 204 });
         const body = await (req as Request).json();
+        putBodies.push(body);
         return jsonResponse({ ...sampleProject, ...body });
       }
       // プロジェクト一覧（useResolvedProjectId 用）
@@ -286,6 +292,55 @@ export const SaveFlow: Story = {
       .find((req) => req.method === 'PUT');
     await expect(put).toBeTruthy();
     await expect(put!.url).toContain(`/projects/${sampleProject.id}`);
+  },
+};
+
+export const IconSearchAndSave: Story = {
+  name: '絵文字を検索して選ぶ → PUT に icon_emoji が載る',
+  beforeEach: mockFetch(),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+
+    await user.click(await canvas.findByRole('button', { name: /^アイコンを選択/ }));
+    const panel = within(await canvas.findByRole('dialog', { name: 'アイコンを選択' }));
+    const search = panel.getByRole('searchbox', { name: '絵文字を検索' });
+    await user.type(search, 'ろけっと');
+    // 名前はデータの読み込み後に付く。おすすめと検索結果の両方に出ることがある
+    await waitFor(() =>
+      expect(panel.getAllByRole('button', { name: 'ロケット' }).length).toBeGreaterThan(0),
+    );
+    await user.type(search, '{Enter}');
+    await expect(
+      canvas.findByRole('button', { name: 'アイコンを選択: ロケット' }),
+    ).resolves.toBeInTheDocument();
+
+    await user.click(canvas.getByRole('button', { name: '変更を保存' }));
+    await waitFor(() => expect(putBodies.at(-1)).toMatchObject({ icon_emoji: '🚀' }));
+  },
+};
+
+/** 検索欄はフォームの中にある。Enter でフォームが送信されると、書きかけの内容が保存される */
+export const IconSearchEnterDoesNotSubmit: Story = {
+  name: 'アイコンの検索欄で Enter → フォームを送信しない',
+  beforeEach: mockFetch(),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+
+    await user.click(await canvas.findByRole('button', { name: /^アイコンを選択/ }));
+    const panel = within(await canvas.findByRole('dialog', { name: 'アイコンを選択' }));
+    const search = panel.getByRole('searchbox', { name: '絵文字を検索' });
+    const onSubmit = fn();
+    search.closest('form')!.addEventListener('submit', onSubmit);
+
+    // 検索語が空の Enter
+    await user.click(search);
+    await user.keyboard('{Enter}');
+    // 当たらない語の Enter
+    await user.type(search, 'zzzzzz{Enter}');
+
+    await expect(onSubmit).not.toHaveBeenCalled();
   },
 };
 

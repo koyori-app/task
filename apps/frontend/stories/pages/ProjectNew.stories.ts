@@ -52,9 +52,11 @@ let fetchSpy: ReturnType<typeof fn> | null = null;
 function mockFetch(overrides: MockOptions = {}) {
   return () => {
     const original = globalThis.fetch;
-    fetchSpy = fn().mockImplementation(async (req: Request | string) => {
-      const url = typeof req === 'string' ? req : req.url;
-      const method = typeof req === 'string' ? 'GET' : req.method;
+    fetchSpy = fn().mockImplementation(async (req: Request | string | URL, init?: RequestInit) => {
+      const url = req instanceof Request ? req.url : String(req);
+      const method = req instanceof Request ? req.method : 'GET';
+      // API 以外（IconPicker が読む絵文字データなど）は本物の fetch に通す
+      if (!new URL(url, 'http://localhost').pathname.includes('/v1/')) return original(req, init);
       if (isListTenantsUrl(url)) {
         return jsonResponse(sampleTenants(mockContext.routeParams.tenant, overrides.viewer));
       }
@@ -161,6 +163,31 @@ export const CreateFlow: Story = {
       .find((req) => req.method === 'POST');
     await expect(post).toBeTruthy();
     await expect(post!.url).toContain(`/v1/tenants/${TENANT_UUID}/projects`);
+  },
+};
+
+/** 検索欄はフォームの中にある。Enter でフォームが送信されると、選ぶ前にプロジェクトが作られる */
+export const IconSearchEnterDoesNotSubmit: Story = {
+  name: 'アイコンの検索欄で Enter → フォームを送信しない',
+  beforeEach: mockFetch(),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const user = userEvent.setup();
+    await user.type(await canvas.findByLabelText('名前'), 'New Project');
+
+    await user.click(canvas.getByRole('button', { name: 'アイコンを選択: 未設定' }));
+    const search = await within(await canvas.findByRole('dialog')).findByRole('searchbox');
+    // 送信は submit イベントで数える（POST は検証の後に遅れて出るので、直後には数えられない）
+    const onSubmit = fn();
+    search.closest('form')!.addEventListener('submit', onSubmit);
+
+    // 検索語が空の Enter
+    await user.click(search);
+    await user.keyboard('{Enter}');
+    // 当たらない語の Enter
+    await user.type(search, 'zzzzzz{Enter}');
+
+    await expect(onSubmit).not.toHaveBeenCalled();
   },
 };
 
