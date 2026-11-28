@@ -25,7 +25,7 @@
 # 手で上げる時は、三か所を揃えること。
 
 ########## builder 共通 ##########
-FROM rust:1.95-bookworm AS builder-base
+FROM rust:1.100-bookworm AS builder-base
 # .cargo/config.toml が Linux ビルドで mold リンカ（-fuse-ld=mold）を要求する
 RUN apt-get update \
     && apt-get install -y --no-install-recommends mold \
