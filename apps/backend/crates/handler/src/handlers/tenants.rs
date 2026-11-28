@@ -206,7 +206,9 @@ pub async fn update_tenant(
     if let Some(icon_url) = payload.icon_url {
         active.icon_url = Set(icon_url);
     }
-    if let Some(icon_emoji) = payload.icon_emoji {
+    if payload.clear_icon_emoji {
+        active.icon_emoji = Set(None);
+    } else if let Some(icon_emoji) = payload.icon_emoji {
         active.icon_emoji = Set(Some(icon_emoji));
     }
     let updated = active.update(&state.db).await?;
