@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useForm } from '@tanstack/vue-form';
 import { type } from 'arktype';
-import { ref } from 'vue';
+import { onMounted, ref } from 'vue';
 import EmailNotVerified from '@/components/auth/EmailNotVerified.vue';
 import OAuthButtons from '@/components/auth/OAuthButtons.vue';
 import PasswordStrengthBar from '@/components/auth/PasswordStrengthBar.vue';
@@ -9,6 +9,7 @@ import HydrationSafeForm from '@/components/HydrationSafeForm.vue';
 import { Button, Field, Input, PasswordInput } from '@koyori-app/ui-vue';
 import { usePasswordStrength } from '@/composables/usePasswordStrength';
 import { useRedirectAfter, withRedirectAfter } from '@/composables/useRedirectAfter';
+import { useSignedInRedirect } from '@/composables/useSignedInRedirect';
 import { useRegisterMutation } from '@/lib/api-vue-query';
 import { arkMessage } from '@/lib/auth-validation';
 
@@ -19,6 +20,11 @@ const schema = type({
 });
 
 const redirectAfter = useRedirectAfter();
+const { redirectIfSignedIn } = useSignedInRedirect();
+// ログイン中に共有された /signin?redirect_after=… を開いたら、サインインさせずに戻り先へ進める
+onMounted(() => {
+  void redirectIfSignedIn(redirectAfter);
+});
 const registerMutation = useRegisterMutation();
 const submitError = ref<string | null>(null);
 const registeredEmail = ref<string | null>(null);

@@ -251,6 +251,7 @@ describe('SignInForm のパスワード変更の案内', () => {
         b.textContent?.includes('GitHub'),
       );
       button!.click();
+      await flushPromises();
       const url = new URL(String(assignSpy.mock.calls[0]![0]), 'http://localhost');
       expect(url.searchParams.get('redirect_after')).toBe('/invitations/accept?token=abc');
     });
@@ -279,9 +280,45 @@ describe('SignInForm のパスワード変更の案内', () => {
       [...document.body.querySelectorAll('button')]
         .find((b) => b.textContent?.includes('GitHub'))!
         .click();
+      await flushPromises();
       const url = new URL(String(assignSpy.mock.calls[0]![0]), 'http://localhost');
       expect(url.searchParams.get('redirect_after')).toBe('/');
       expect(url.searchParams.get('error_redirect_after')).toBe('/signin');
+    });
+
+    it('ログイン中に開くと、サインインさせずに redirect_after へ進む', async () => {
+      window.history.replaceState(
+        {},
+        '',
+        '/signin?redirect_after=%2Facme%2Fprojects%2FAPP%2Freviews%2F10',
+      );
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (req: Request | string) => {
+          const url = typeof req === 'string' ? req : req.url;
+          const pathname = new URL(url, 'http://localhost').pathname;
+          if (pathname.endsWith('/v1/auth/me')) {
+            return jsonResponse({ id: 'u1', username: 'alice', email: 'alice@example.com' });
+          }
+          if (pathname.endsWith('/v1/auth/oauth/providers')) {
+            return jsonResponse({ providers: [] });
+          }
+          return jsonResponse({ message: 'not-found' }, 404);
+        }),
+      );
+      const replaceSpy = vi.spyOn(window.location, 'replace').mockImplementation(() => {});
+      await mountForm();
+
+      expect(replaceSpy).toHaveBeenCalledWith('/acme/projects/APP/reviews/10');
+    });
+
+    it('未ログインなら開いてもどこへも進まない', async () => {
+      window.history.replaceState({}, '', '/signin?redirect_after=%2Ft%2Fx');
+      stubLogin(200, {});
+      const replaceSpy = vi.spyOn(window.location, 'replace').mockImplementation(() => {});
+      await mountForm();
+
+      expect(replaceSpy).not.toHaveBeenCalled();
     });
 
     it('外部 URL は / にする', async () => {
