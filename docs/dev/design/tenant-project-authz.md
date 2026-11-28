@@ -1,7 +1,7 @@
 ---
 title: テナントとプロジェクトの認可
 description: 誰がどのテナント・プロジェクトに入れるかの判定と、継承・明示 ACE・招待の規則
-updated: 2026-11-25
+updated: 2026-11-28
 sidebar:
   order: 1
 ---
@@ -68,7 +68,7 @@ NTFS と同じく、継承を止めるのは明示の操作である。プロジ
 
 | エンドポイント | frontend の呼び元 | ゲストへの扱い |
 |---|---|---|
-| `GET /v1/tenants` | stores/tenant.ts（TenantSwitcher の一覧）・useResolvedTenantId（URL の display_id から UUID を解決） | `membership` を Guest にして返す。テナント設定の欄は null |
+| `GET /v1/tenants` | stores/tenant.ts（TenantRail の一覧）・useResolvedTenantId（URL の display_id から UUID を解決） | `membership` を Guest にして返す。テナント設定の欄は null |
 | `GET /v1/tenants/{id}/projects` | api-vue-query の useProjectsQuery（AppSidebar の NavProjects・useResolvedProjectId の projectKey から UUID を解決）、ProjectCreateForm / DeleteProjectDialog / ProjectSettingsView（cache 更新） | **自分の明示 member の project に絞って 200** |
 | `GET /v1/tenants/{id}/users/me/tasks` | pages/@tenant/my-tasks（テナント選択直後の着地） | **自分の project の分に絞って 200** |
 | `GET /v1/tenants/{id}/members` | ProjectSettingsView の MembersSection | 403 のまま。MembersSection は 403 を「権限なし」表示で受け、画面は壊れない |

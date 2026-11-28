@@ -1,7 +1,7 @@
 ---
 title: URL
 description: フロントエンドの URL と識別子、それを定義する Vike のページファイルの対応
-updated: 2026-11-22
+updated: 2026-11-28
 sidebar:
   order: 1
 ---
@@ -144,7 +144,7 @@ URL を持たないファイルは次のとおりである。
 
 | ファイル | 役割 |
 |---|---|
-| `+Layout.vue` | 共通レイアウト（認証ガード、ヘッダー、サイドバー、パンくず） |
+| `+Layout.vue` | 共通レイアウト（認証ガード、テナントのレール、サイドバー、パンくず） |
 | `+Head.vue` | head |
 | `+client.ts` | client 専用 entry |
 | `+config.ts` | Vike の設定 |
