@@ -4,7 +4,6 @@ import { computed, reactive, ref, watch } from 'vue';
 import { navigate } from 'vike/client/router';
 
 import TenantIconPicker from '@/components/tenants/TenantIconPicker.vue';
-import { DEFAULT_TENANT_EMOJI } from '@/components/tenants/tenant-icon';
 import { Button, Field, Input, Picker, Textarea } from '@koyori-app/ui-vue';
 import DeleteTenantDialog from '@/components/tenants/DeleteTenantDialog.vue';
 import { apiClient, useMeQuery } from '@/lib/api-vue-query';
@@ -39,7 +38,7 @@ const draft = reactive({
   name: props.tenant.name,
   description: props.tenant.description,
   iconUrl: props.tenant.icon_url,
-  emoji: props.tenant.icon_emoji ?? DEFAULT_TENANT_EMOJI,
+  emoji: props.tenant.icon_emoji ?? null,
 });
 
 /** テナントを切り替えたら編集中の値も差し替える（前のテナントの入力を持ち越さない）。 */
@@ -49,18 +48,15 @@ watch(
     draft.name = tenant.name;
     draft.description = tenant.description;
     draft.iconUrl = tenant.icon_url;
-    draft.emoji = tenant.icon_emoji ?? DEFAULT_TENANT_EMOJI;
+    draft.emoji = tenant.icon_emoji ?? null;
   },
 );
 
 /**
- * 絵文字は未設定（NULL）のとき既定値を表示するので、「表示されている値と同じ」なら
- * 変更として扱わない。名前だけ直した保存で既定の絵文字を焼き付けないためにも、
- * 変わったときだけ body に載せる。
+ * 絵文字は変わったときだけ body に載せる（名前だけ直した保存で絵文字を書き換えない）。
+ * 未設定は null で持つ。
  */
-const isEmojiChanged = computed(
-  () => draft.emoji !== (props.tenant.icon_emoji ?? DEFAULT_TENANT_EMOJI),
-);
+const isEmojiChanged = computed(() => draft.emoji !== (props.tenant.icon_emoji ?? null));
 
 const isDirty = computed(
   () =>
@@ -80,7 +76,7 @@ function discard() {
   draft.name = props.tenant.name;
   draft.description = props.tenant.description;
   draft.iconUrl = props.tenant.icon_url;
-  draft.emoji = props.tenant.icon_emoji ?? DEFAULT_TENANT_EMOJI;
+  draft.emoji = props.tenant.icon_emoji ?? null;
   submitError.value = null;
 }
 
@@ -94,7 +90,11 @@ async function save() {
         name: draft.name.trim(),
         description: draft.description,
         icon_url: draft.iconUrl,
-        ...(isEmojiChanged.value ? { icon_emoji: draft.emoji } : {}),
+        ...(isEmojiChanged.value
+          ? draft.emoji
+            ? { icon_emoji: draft.emoji }
+            : { clear_icon_emoji: true }
+          : {}),
       },
     });
     await queryClient.invalidateQueries({ queryKey: ['get', LIST_TENANTS_PATH] });

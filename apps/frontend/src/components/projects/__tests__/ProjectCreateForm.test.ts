@@ -91,6 +91,14 @@ describe('ProjectCreateForm', () => {
     expect(navigateMock).toHaveBeenCalledWith('/acme/projects/NEWPROJ/tasks');
   });
 
+  it('未設定のトリガーは「アイコンを選択: 未設定」', async () => {
+    mountForm();
+    await flushPromises();
+
+    const trigger = document.body.querySelector('button[aria-haspopup="dialog"]');
+    expect(trigger?.getAttribute('aria-label')).toBe('アイコンを選択: 未設定');
+  });
+
   it('キー空欄なら key を送らない（backend 自動生成に委ねる）', async () => {
     createMutateAsync.mockResolvedValue(createdProject);
     mountForm();
