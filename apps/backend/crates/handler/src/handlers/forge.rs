@@ -8,8 +8,7 @@ use axum::{
 use axum_valid::Valid;
 use chrono::{DateTime, Utc};
 use sea_orm::{
-    ColumnTrait, DatabaseConnection, EntityTrait, FromQueryResult, QueryFilter, QueryOrder,
-    Statement, prelude::Uuid,
+    ColumnTrait, EntityTrait, FromQueryResult, QueryFilter, QueryOrder, Statement, prelude::Uuid,
 };
 use std::collections::HashMap;
 
@@ -18,12 +17,11 @@ use crate::error::{AppError, ServerError};
 use crate::extractors::AuthUser;
 use crate::handlers::tasks::resolve_task;
 use crate::openapi::CrudErrors;
-use entity::{forge_branch_links, github_integrations, projects, tasks};
+use entity::{forge_branch_links, projects, tasks};
 use payload::forge::{
     LinkTaskPullRequestRequest, SetTaskPullRequestRoleRequest, TaskForgeBranch, TaskForgeCommit,
-    TaskForgePullRequest, TaskForgePullRequestRef, TaskForgeRepository, TaskForgeResponse,
+    TaskForgePullRequest, TaskForgePullRequestRef, TaskForgeResponse,
 };
-use service::forge::events::ForgeRepo;
 use service::forge::pull_requests::{PullRequestRole, pull_request_role};
 
 #[derive(FromQueryResult)]
@@ -177,15 +175,9 @@ pub async fn get_task_forge(
     })
     .collect();
 
-    let repository = project_repository(&state.db, project_id)
+    let repository = service::forge::repository::current(&state.db, project_id)
         .await?
-        .map(|repo| TaskForgeRepository {
-            html_url: format!("{}/{}/{}", repo.host_url, repo.repo_owner, repo.repo_name),
-            host: repo.host,
-            host_url: repo.host_url,
-            repo_owner: repo.repo_owner,
-            repo_name: repo.repo_name,
-        });
+        .map(service::forge::repository::to_response);
 
     Ok(Json(TaskForgeResponse {
         pull_requests,
@@ -237,23 +229,6 @@ async fn task_branches(state: &AppState, task_id: Uuid) -> Result<Vec<TaskForgeB
             pull_requests: pull_requests.remove(&row.id).unwrap_or_default(),
         })
         .collect())
-}
-
-/// プロジェクトの現在の連携先（GitHub だけ）
-async fn project_repository(
-    db: &DatabaseConnection,
-    project_id: Uuid,
-) -> Result<Option<ForgeRepo>, AppError> {
-    Ok(github_integrations::Entity::find()
-        .filter(github_integrations::Column::ProjectId.eq(project_id))
-        .one(db)
-        .await?
-        .map(|integration| ForgeRepo {
-            host: "github".into(),
-            host_url: "https://github.com".into(),
-            repo_owner: integration.repo_owner,
-            repo_name: integration.repo_name,
-        }))
 }
 
 /// タスクに結ばれた PR を参照元ごとの行からまとめる。`only` を渡すとその PR だけ
@@ -367,7 +342,7 @@ pub async fn link_task_pull_request(
         .await?;
     let task = resolve_task(&state, tenant_id, project_id, &id).await?;
 
-    let repo = project_repository(&state.db, project_id)
+    let repo = service::forge::repository::current(&state.db, project_id)
         .await?
         .ok_or_else(|| AppError::ConflictDetail("github-integration-missing".into()))?;
 

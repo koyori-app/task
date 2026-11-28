@@ -76,7 +76,7 @@ revoke-all（`DELETE /v1/personal_tokens/revoke-all`）は、テナント配下�
 | `read_api` | すべての `read:*` を満たす。`write:*` は満たさない |
 | `read:tenant` | テナントとメンバーの参照（テナント一覧・取得、メンバー一覧、明示 ACE の一覧、利用者のプロフィール） |
 | `write:tenant` | テナントの更新・削除、メンバーの追加・変更・削除、ドライブ容量の設定（`read:tenant` を含む） |
-| `read:project` | プロジェクトの参照 |
+| `read:project` | プロジェクトの参照（連携先のリポジトリ `repository` を含む） |
 | `write:project` | プロジェクトの作成・更新、プロジェクトメンバーと Webhook の管理（`read:project` を含む）。削除はセッション専用で PAT では通らない |
 | `read:<資源>` / `write:<資源>` | task / milestone / sprint / review / drive の参照・変更 |
 | `read:task`（補足） | スケジュール `GET /v1/tenants/{tenant_id}/schedule` もこれだけで読める。期間に重なるスプリント・マイルストーンも `read:sprint` / `read:milestone` なしで返す |

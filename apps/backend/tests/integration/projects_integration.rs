@@ -510,3 +510,287 @@ async fn tenant_admin_cannot_touch_personal_projects_and_guests_cannot_create() 
         app.cleanup_user(u.id).await;
     }
 }
+
+// プロジェクトの応答に載る連携先 `repository`（TASK-371）。
+// 修正前は欄が無いので、連携ありの応答の比較で fail する。
+
+use crate::forge_commit_links_integration::{REPO_NAME, REPO_OWNER, insert_integration};
+
+fn linked_repository() -> serde_json::Value {
+    serde_json::json!({
+        "host": "github",
+        "host_url": "https://github.com",
+        "repo_owner": REPO_OWNER,
+        "repo_name": REPO_NAME,
+        "html_url": format!("https://github.com/{REPO_OWNER}/{REPO_NAME}"),
+    })
+}
+
+fn find_project<'a>(list: &'a [serde_json::Value], id: &str) -> &'a serde_json::Value {
+    list.iter()
+        .find(|project| project["id"] == id)
+        .unwrap_or_else(|| panic!("project {id} in the list"))
+}
+
+/// 連携のあるプロジェクトは `repository` に連携先、無いプロジェクトは `null`。
+/// 一覧・単体・作成・更新・個人プロジェクト・ダッシュボードのどれも同じ意味で返す。
+#[tokio::test]
+async fn project_responses_carry_the_linked_repository() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user_default().await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    insert_integration(&app, tp.project_id, 4242, owner.id).await;
+    login(&mut app, &owner).await;
+    let projects_path = format!("/v1/tenants/{}/projects", tp.tenant_id);
+    let linked_id = tp.project_id.to_string();
+
+    let created = app
+        .post_json_with_session(
+            &projects_path,
+            serde_json::json!({"name": "unlinked", "key": unique_key("N")}),
+        )
+        .await;
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let created: serde_json::Value = created.json().await.unwrap();
+    assert!(
+        created.as_object().unwrap().contains_key("repository"),
+        "作成の応答に欄がある"
+    );
+    assert!(created["repository"].is_null(), "作成直後は連携なし");
+    let unlinked_id = created["id"].as_str().unwrap().to_string();
+
+    let list: Vec<serde_json::Value> = app
+        .get_with_session(&projects_path)
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        find_project(&list, &linked_id)["repository"],
+        linked_repository()
+    );
+    assert!(find_project(&list, &unlinked_id)["repository"].is_null());
+
+    let single: serde_json::Value = app
+        .get_with_session(&format!("{projects_path}/{linked_id}"))
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(single["repository"], linked_repository());
+    let single: serde_json::Value = app
+        .get_with_session(&format!("{projects_path}/{unlinked_id}"))
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert!(single["repository"].is_null());
+
+    let updated = app
+        .put_json_with_session(
+            &format!("{projects_path}/{linked_id}"),
+            serde_json::json!({"name": "renamed"}),
+        )
+        .await;
+    assert_eq!(updated.status(), StatusCode::OK);
+    let updated: serde_json::Value = updated.json().await.unwrap();
+    assert_eq!(updated["repository"], linked_repository());
+
+    let personal = app
+        .get_with_session(&format!(
+            "/v1/tenants/{}/users/me/personal-project",
+            tp.tenant_id
+        ))
+        .await;
+    assert_eq!(personal.status(), StatusCode::OK);
+    let personal: serde_json::Value = personal.json().await.unwrap();
+    assert!(personal.as_object().unwrap().contains_key("repository"));
+    assert!(personal["repository"].is_null());
+
+    let dashboard = app
+        .get_with_session(&format!("/v1/tenants/{}/users/me/dashboard", tp.tenant_id))
+        .await;
+    assert_eq!(dashboard.status(), StatusCode::OK);
+    let dashboard: serde_json::Value = dashboard.json().await.unwrap();
+    let dashboard_projects: Vec<serde_json::Value> = dashboard["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["project"].clone())
+        .collect();
+    assert_eq!(
+        find_project(&dashboard_projects, &linked_id)["repository"],
+        linked_repository()
+    );
+    assert!(find_project(&dashboard_projects, &unlinked_id)["repository"].is_null());
+
+    // トークン類は応答に出ない
+    let raw = app
+        .get_with_session(&projects_path)
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(!raw.contains("installation_id") && !raw.contains("access_token"));
+
+    app.cleanup_user(owner.id).await;
+}
+
+/// `read:project` だけの PAT で連携先を読める。scope の無い PAT・別テナントの PAT・
+/// 制限付き PAT の許可外は、プロジェクトと同じく読めない。
+#[tokio::test]
+async fn linked_repository_is_readable_only_where_the_project_is() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user_default().await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    let other = app.insert_tenant_project(owner.id).await;
+    insert_integration(&app, tp.project_id, 4243, owner.id).await;
+    login(&mut app, &owner).await;
+    let projects_path = format!("/v1/tenants/{}/projects", tp.tenant_id);
+    let linked_path = format!("{projects_path}/{}", tp.project_id);
+
+    let second = app
+        .post_json_with_session(
+            &projects_path,
+            serde_json::json!({"name": "second", "key": unique_key("S")}),
+        )
+        .await;
+    assert_eq!(second.status(), StatusCode::CREATED);
+    let second_id: Uuid = second.json::<serde_json::Value>().await.unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    insert_integration(&app, second_id, 4243, owner.id).await;
+    let second_path = format!("{projects_path}/{second_id}");
+    app.reset_session_client();
+
+    let read_project = app
+        .insert_pat(owner.id, tp.tenant_id, vec![Scope::ReadProject], None)
+        .await;
+    let list = app.get_with_bearer(&projects_path, &read_project).await;
+    assert_eq!(list.status(), StatusCode::OK);
+    let list: Vec<serde_json::Value> = list.json().await.unwrap();
+    assert_eq!(
+        find_project(&list, &tp.project_id.to_string())["repository"],
+        linked_repository(),
+        "read:project だけで一覧の連携先を読める"
+    );
+    let single = app.get_with_bearer(&linked_path, &read_project).await;
+    assert_eq!(single.status(), StatusCode::OK);
+    assert_eq!(
+        single.json::<serde_json::Value>().await.unwrap()["repository"],
+        linked_repository()
+    );
+
+    let no_scope = app
+        .insert_pat(owner.id, tp.tenant_id, vec![Scope::ReadTask], None)
+        .await;
+    assert_eq!(
+        app.get_with_bearer(&projects_path, &no_scope)
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        app.get_with_bearer(&linked_path, &no_scope).await.status(),
+        StatusCode::FORBIDDEN
+    );
+
+    let other_tenant = app
+        .insert_pat(owner.id, other.tenant_id, vec![Scope::ReadProject], None)
+        .await;
+    assert_eq!(
+        app.get_with_bearer(&projects_path, &other_tenant)
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        app.get_with_bearer(&linked_path, &other_tenant)
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+
+    let restricted = app
+        .insert_pat(
+            owner.id,
+            tp.tenant_id,
+            vec![Scope::ReadProject],
+            Some(vec![tp.project_id]),
+        )
+        .await;
+    assert_eq!(
+        app.get_with_bearer(&projects_path, &restricted)
+            .await
+            .status(),
+        StatusCode::FORBIDDEN,
+        "制限付き PAT は一覧を読めない"
+    );
+    assert_eq!(
+        app.get_with_bearer(&second_path, &restricted)
+            .await
+            .status(),
+        StatusCode::FORBIDDEN,
+        "許可外のプロジェクトは読めない"
+    );
+    let allowed = app.get_with_bearer(&linked_path, &restricted).await;
+    assert_eq!(allowed.status(), StatusCode::OK);
+    assert_eq!(
+        allowed.json::<serde_json::Value>().await.unwrap()["repository"],
+        linked_repository()
+    );
+
+    app.cleanup_user(owner.id).await;
+}
+
+/// 一覧で見えないプロジェクトの連携先は、応答のどこにも出ない。
+#[tokio::test]
+async fn hidden_project_does_not_leak_its_repository_into_the_list() {
+    let mut app = TestApp::new().await;
+    let owner = app.insert_user_default().await;
+    let alice = app.insert_user_default().await;
+    let bob = app.insert_user_default().await;
+    let tp = app.insert_tenant_project(owner.id).await;
+    insert_integration(&app, tp.project_id, 4244, owner.id).await;
+    add_tenant_member(&mut app, tp.tenant_id, &owner, &alice, "Member").await;
+    add_tenant_member(&mut app, tp.tenant_id, &owner, &bob, "Member").await;
+    let projects_path = format!("/v1/tenants/{}/projects", tp.tenant_id);
+
+    // alice だけが入れるプロジェクトにする
+    let closed = app
+        .post_json_with_session(
+            &format!("{projects_path}/{}/members", tp.project_id),
+            serde_json::json!({ "user_id": alice.id, "role": "Member" }),
+        )
+        .await;
+    assert_eq!(closed.status(), StatusCode::CREATED);
+    crate::common::stop_inheriting(&app.state.db, tp.project_id).await;
+
+    login(&mut app, &bob).await;
+    let hidden = app.get_with_session(&projects_path).await;
+    assert_eq!(hidden.status(), StatusCode::OK);
+    let hidden = hidden.text().await.unwrap();
+    assert!(
+        !hidden.contains(REPO_NAME) && !hidden.contains(&tp.project_id.to_string()),
+        "入れない人の一覧に連携先が出ない: {hidden}"
+    );
+
+    login(&mut app, &alice).await;
+    let visible: Vec<serde_json::Value> = app
+        .get_with_session(&projects_path)
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        find_project(&visible, &tp.project_id.to_string())["repository"],
+        linked_repository(),
+        "入れる人には出る"
+    );
+
+    for u in [&owner, &alice, &bob] {
+        app.cleanup_user(u.id).await;
+    }
+}

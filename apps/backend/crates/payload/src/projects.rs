@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
+use crate::forge::TaskForgeRepository;
 use entity::projects;
 
 #[derive(Debug, Clone, Serialize, ToSchema, serde::Deserialize)]
@@ -30,15 +31,23 @@ pub struct ProjectResponse {
     #[serde(default = "inherits_tenant_members_by_default")]
     #[schema(required = true)]
     pub inherit_tenant_members: bool,
+    /// 現在の連携先のリポジトリ。連携が無ければ `null`。
+    /// この欄を返さない旧いサーバーの応答は「連携なし」として読む
+    #[serde(default)]
+    #[schema(nullable)]
+    pub repository: Option<TaskForgeRepository>,
 }
 
 fn inherits_tenant_members_by_default() -> bool {
     true
 }
 
-impl From<projects::Model> for ProjectResponse {
-    fn from(model: projects::Model) -> Self {
+impl ProjectResponse {
+    /// 連携先は DB を引かないと分からないので、`From<projects::Model>` は置かない。
+    /// 組み立ては `service::project_responses` を通す
+    pub fn from_parts(model: projects::Model, repository: Option<TaskForgeRepository>) -> Self {
         Self {
+            repository,
             id: model.id,
             name: model.name,
             description: model.description,
@@ -104,5 +113,7 @@ mod tests {
         }))
         .expect("旧いサーバーの応答を読める");
         assert!(project.inherit_tenant_members);
+        // repository を返さない旧いサーバーの応答は「連携なし」
+        assert!(project.repository.is_none());
     }
 }

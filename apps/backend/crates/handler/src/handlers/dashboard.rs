@@ -205,18 +205,21 @@ ORDER BY a.created_at DESC, a.id DESC LIMIT 3
         "overdue" => counts.overdue,
         _ => counts.open,
     };
+    let project_responses =
+        service::project_responses::build_project_responses(&state.db, projects).await?;
     Ok(Json(DashboardResponse {
         counts,
         days,
         tasks: task_items,
         total,
         activities,
-        projects: projects
+        projects: project_responses
             .into_iter()
-            .map(|p| {
-                let (total, completed) = project_counts.get(&p.id).copied().unwrap_or_default();
+            .map(|project| {
+                let (total, completed) =
+                    project_counts.get(&project.id).copied().unwrap_or_default();
                 DashboardProject {
-                    project: p.into(),
+                    project,
                     total,
                     completed,
                 }
