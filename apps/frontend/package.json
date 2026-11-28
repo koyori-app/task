@@ -78,7 +78,7 @@
     "vue": "3.5.45"
   },
   "devDependencies": {
-    "@argos-ci/cli": "6.9.6",
+    "@argos-ci/cli": "6.16.0",
     "@argos-ci/playwright": "7.10.2",
     "@chromatic-com/storybook": "5.6.0",
     "@koyori-app/oxlint-plugin-api-path-params": "workspace:*",
