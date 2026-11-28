@@ -41,20 +41,25 @@ pub async fn run(context: &Context, args: InitArgs, output: OutputOptions) -> Re
     }
 
     // 2. 接続。足りない分だけを聞いて、確かめてから保存する
-    let identity = match context.connection_state()? {
+    //    `used_profile` は、実際に接続を取った名前付きプロファイル（トップレベルと env の組は `None`）
+    let (identity, used_profile) = match context.connection_state()? {
         ConnectionState::Ready(runtime) => {
             check_api_url_flag(
                 args.api_url.as_deref(),
                 &runtime.api_url,
                 runtime.profile.as_deref(),
             )?;
-            None
+            (None, runtime.profile)
         }
         ConnectionState::NeedsSetup {
             profile,
             api_url,
             has_token,
-        } => Some(setup_connection(context, &args, profile, api_url, has_token).await?),
+        } => {
+            let identity =
+                setup_connection(context, &args, profile.clone(), api_url, has_token).await?;
+            (Some(identity), profile)
+        }
     };
 
     // 3. トークンの素性（使えるテナントと、プロジェクトの制限）
@@ -102,8 +107,13 @@ pub async fn run(context: &Context, args: InitArgs, output: OutputOptions) -> Re
         } else {
             project.key.clone()
         },
-        // `--profile` を明示したときだけ書く（`default` はトップレベルなので書かない）
-        profile: context.profile_flag().map(str::to_owned),
+        // `--profile` を明示し、そのプロファイルから接続を取ったときだけ書く（`default` は
+        // トップレベルなので書かない）。env の組で接続したときは `--profile` を使っていないので、
+        // 書くと、確かめた接続と違う接続を指すファイルになる
+        profile: context
+            .profile_flag()
+            .filter(|flag| used_profile.as_deref() == Some(*flag))
+            .map(str::to_owned),
     };
     let path = repo_config::write_new(&root, &body)?;
     if output.json {

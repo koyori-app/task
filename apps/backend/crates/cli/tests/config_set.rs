@@ -256,6 +256,32 @@ async fn rejects_a_value_that_is_not_an_http_url_without_sending() {
     assert!(!local.config_file_exists());
 }
 
+/// ユーザー名やパスワードの付いた URL は送らない（reqwest が Basic 認証として送る）。
+/// エラーの文にも値を出さない。
+#[tokio::test]
+async fn rejects_a_url_with_credentials_without_sending() {
+    let local = Local::new().await;
+    answer_as_api(&local.server, "").await;
+    let uri = local.server.uri();
+    for userinfo in ["alice:secret@", "alice@", ":secret@"] {
+        let value = uri.replace("://", &format!("://{userinfo}"));
+        let err = local
+            .run(&["task", "config", "set", "api_url", &value])
+            .await
+            .unwrap_err();
+        assert_eq!(err.exit_code, 2, "{userinfo}");
+        assert!(
+            err.message.contains("username or password"),
+            "{}",
+            err.message
+        );
+        assert!(!err.message.contains("alice"), "{}", err.message);
+        assert!(!err.message.contains("secret"), "{}", err.message);
+    }
+    assert!(local.requests().await.is_empty());
+    assert!(!local.config_file_exists());
+}
+
 /// `--no-verify` は今までと同じく、値をそのまま保存して何も送らない。
 #[tokio::test]
 async fn no_verify_saves_the_value_as_given_without_sending() {

@@ -908,6 +908,69 @@ async fn an_environment_pair_is_used_without_saving() {
     assert!(!init.store().path().exists());
 }
 
+/// env の組で接続したら、`--profile` を付けても `.koyori-task.yaml` に `profile` を書かない。
+/// 書くと、プロジェクトを確かめた接続と違う接続を指すファイルになる。
+#[tokio::test]
+async fn an_environment_pair_does_not_write_the_profile_flag_into_the_file() {
+    let init = Init::unconfigured(Some(ORIGIN)).await;
+    let uri = init.server.uri();
+    // `work` は別のインスタンスを指す。env の組が勝つので、使われない
+    let config = TaskConfig {
+        profiles: [(
+            "work".to_string(),
+            Profile {
+                api_url: Some("https://work.invalid/api".into()),
+                token: Some("work-token".into()),
+                ..Default::default()
+            },
+        )]
+        .into(),
+        ..Default::default()
+    };
+    init.store().save(&config).unwrap();
+    let init = init.env(&[("TASK_API_URL", &uri), ("TASK_TOKEN", "token-1")]);
+    mount_me(&init.server, "", "token-1", token_identity_json()).await;
+    mount_projects(&init.server, "", TENANT, one_match()).await;
+
+    for name in ["work", "undefined"] {
+        assert_eq!(
+            init.run(&["task", "--profile", name, "init", "--yes"])
+                .await
+                .unwrap(),
+            0,
+            "{name}"
+        );
+        assert_eq!(init.written().as_deref(), Some("project: APP\n"), "{name}");
+        std::fs::remove_file(init.file()).unwrap();
+    }
+    assert_eq!(init.store().load().unwrap(), config);
+}
+
+/// ユーザー名やパスワードの付いた URL は、確かめる前に止める（reqwest が Basic 認証として送る）。
+#[tokio::test]
+async fn rejects_an_instance_url_with_credentials_without_sending() {
+    let init = Init::unconfigured(Some(ORIGIN))
+        .await
+        .prompt(ScriptedPrompt::piped(Some("good-token\n")));
+    let with_credentials = init.server.uri().replace("://", "://alice:secret@");
+    answer_as_api(&init.server, "").await;
+
+    let err = init
+        .run(&["task", "init", "--api-url", &with_credentials, "--yes"])
+        .await
+        .unwrap_err();
+    assert_eq!(err.exit_code, 2);
+    assert!(
+        err.message.contains("username or password"),
+        "{}",
+        err.message
+    );
+    assert!(!err.message.contains("secret"), "{}", err.message);
+    assert!(init.requests().await.is_empty());
+    assert!(!init.store().path().exists());
+    assert_eq!(init.written(), None);
+}
+
 /// 端末でないときは、`--api-url` と標準入力のトークンで進める。
 #[tokio::test]
 async fn takes_the_url_and_the_token_without_a_terminal() {

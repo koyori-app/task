@@ -24,11 +24,25 @@ pub struct ProbeAttempt {
 ///
 /// 前後の空白と末尾の `/` は落とす。`http` / `https` の URL として読めない入力と、
 /// query・fragment の付いた入力は終了コード 2。
+///
+/// ユーザー名やパスワードの付いた URL（`https://user:pass@host`）も終了コード 2。reqwest は
+/// URL の userinfo を `Authorization: Basic` にして送るので、通すと認証なしの確認にならない。
+/// `@` を含む入力は、エラーの文にも出さない。
 pub fn candidates(input: &str) -> Result<Vec<String>> {
-    let invalid =
-        || CliError::validation(format!("Invalid api_url {input}: expected an http(s) URL"));
+    let invalid = || {
+        if input.contains('@') {
+            CliError::validation("Invalid api_url: expected an http(s) URL")
+        } else {
+            CliError::validation(format!("Invalid api_url {input}: expected an http(s) URL"))
+        }
+    };
     let trimmed = input.trim().trim_end_matches('/');
     let url = Url::parse(trimmed).map_err(|_| invalid())?;
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(CliError::validation(
+            "Invalid api_url: a URL with a username or password is not supported",
+        ));
+    }
     if !matches!(url.scheme(), "http" | "https")
         || url.host_str().is_none_or(str::is_empty)
         || url.query().is_some()
@@ -183,5 +197,29 @@ mod tests {
             assert_eq!(err.exit_code, 2, "{input:?}");
             assert!(err.message.contains("expected an http(s) URL"), "{input:?}");
         }
+    }
+
+    #[test]
+    fn rejects_a_url_with_credentials_without_repeating_them() {
+        for input in [
+            "https://alice:secret@h/api",
+            "https://alice@h",
+            "https://:secret@h",
+            "http://alice:secret@127.0.0.1:8080/",
+            // http(s) として読めない入力も、`@` があれば文に出さない
+            "alice:secret@h",
+            "ftp://alice:secret@h",
+        ] {
+            let err = candidates(input).unwrap_err();
+            assert_eq!(err.exit_code, 2, "{input:?}");
+            assert!(err.message.starts_with("Invalid api_url: "), "{input:?}");
+            assert!(!err.message.contains("alice"), "{}", err.message);
+            assert!(!err.message.contains("secret"), "{}", err.message);
+        }
+        // `@` が path にあるだけなら userinfo ではない
+        assert_eq!(
+            candidates("https://h/@x/api").unwrap(),
+            ["https://h/@x/api"]
+        );
     }
 }

@@ -287,6 +287,7 @@ task init --api-url https://task.example.com --project TASK < token.txt   # 端�
 - 接続（`api_url` と `token`）が未設定なら、インスタンスの URL を聞いて `config set api_url` と同じ方法で確かめ、
   確かめた URL にだけトークンを送る。`GET /v1/personal_tokens/me` が通ってから、両方を 1 回で保存する。
   通らなければ何も保存しない。片方だけ設定済みなら足りない方だけを足し、既にある値は変えない
+- ユーザー名やパスワードの付いた URL（`https://user:pass@host`）は、`init` も `config set api_url` も送らずに終了コード 2 で止める
 - トークンの入力は画面に出ない
 - 書く先はトップレベルで、`--profile work` を付けるとそのプロファイル（無ければ作る）。
   `TASK_PROFILE` で選んだプロファイルの設定が足りないときと、環境変数を片方だけ渡した状態では、聞かずに終了コード 2 で止まる。
@@ -296,7 +297,8 @@ task init --api-url https://task.example.com --project TASK < token.txt   # 端�
 - git リポジトリの中なら、`origin` の remote（`github.com` の URL だけ）とプロジェクトの連携先を照合する。
   一致が 1 つならそれを確かめ（`--yes` で省ける）、0 個か複数なら一覧から番号かキーで選ぶ。
   `--project <キーか UUID>` を渡すと照合と選択を飛ばす
-- 決まったプロジェクトを、リポジトリの根の `.koyori-task.yaml` に書く。`--profile` を付けたときは `profile` も書く。
+- 決まったプロジェクトを、リポジトリの根の `.koyori-task.yaml` に書く。`--profile` を付けたときは `profile` も書く
+  （`TASK_API_URL` と `TASK_TOKEN` で接続したときは、プロファイルを使っていないので書かない）。
   カレントディレクトリから根までのどこかに既に `.koyori-task.yaml` があれば、作らずにその場所と中身を出して終わる
   （壊れたファイルでも上書きしない）。git の外では接続の設定だけを行う
 - 特定のプロジェクトに限ったトークンは一覧を引けないので、プロジェクトの UUID を聞く（または `--project <UUID>`）。
