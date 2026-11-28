@@ -1,6 +1,6 @@
 //! コマンド定義。引数と既定値は TypeScript 版の commander 定義をそのまま移した。
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
 // clap の help はコンパイル時のリテラルなので、entity の値をそのまま埋められない
 // （`concat!` はリテラルしか受け取らないため定数にもできない）。写しになるぶん、
@@ -134,6 +134,8 @@ impl Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Set up the connection and write .koyori-task.yaml for this repository
+    Init(InitArgs),
     /// Authentication commands
     Auth {
         #[command(subcommand)]
@@ -184,6 +186,19 @@ pub enum Command {
     SelfUpdate,
 }
 
+#[derive(Debug, Args)]
+pub struct InitArgs {
+    /// Instance URL or API URL. Used only when the connection is not set up yet
+    #[arg(long, value_name = "URL")]
+    pub api_url: Option<String>,
+    /// Project key or UUID to write, instead of matching the origin remote or choosing from the list
+    #[arg(long, value_name = "KEY|UUID")]
+    pub project: Option<String>,
+    /// Take the one project linked to the origin remote without asking
+    #[arg(long)]
+    pub yes: bool,
+}
+
 #[derive(Debug, Subcommand)]
 pub enum TenantsCommand {
     /// List the tenants this token can be used in (needs the read:tenant scope)
@@ -212,12 +227,15 @@ pub enum ConfigCommand {
         /// api_url | token | tenant_id
         key: String,
     },
-    /// Set a config value
+    /// Set a config value (api_url is checked against the server first)
     Set {
         /// api_url | token | tenant_id
         key: String,
         /// Value to store
         value: String,
+        /// Save api_url without checking that it answers (other keys are never checked)
+        #[arg(long)]
+        no_verify: bool,
     },
     /// Remove a config value
     Unset {
@@ -1173,5 +1191,66 @@ mod tests {
         };
         assert!(raw_of(&["task", "tasks", "show", "APP-1", "--raw"]));
         assert!(!raw_of(&["task", "tasks", "show", "APP-1"]));
+    }
+
+    #[test]
+    fn init_takes_its_options_and_the_profile_flag() {
+        let init_of = |argv: &[&str]| {
+            let cli = Cli::try_parse_from(argv).unwrap();
+            let Command::Init(args) = cli.command else {
+                panic!("expected init");
+            };
+            (cli.profile, args)
+        };
+        let (profile, args) = init_of(&["task", "init"]);
+        assert_eq!(profile, None);
+        assert_eq!((args.api_url, args.project, args.yes), (None, None, false));
+
+        let (_, args) = init_of(&[
+            "task",
+            "init",
+            "--api-url",
+            "https://task.example.com",
+            "--project",
+            "TASK",
+            "--yes",
+        ]);
+        assert_eq!(args.api_url.as_deref(), Some("https://task.example.com"));
+        assert_eq!(args.project.as_deref(), Some("TASK"));
+        assert!(args.yes);
+
+        let (profile, _) = init_of(&["task", "--profile", "work", "init"]);
+        assert_eq!(profile.as_deref(), Some("work"));
+    }
+
+    #[test]
+    fn config_set_takes_no_verify_before_or_after_the_key() {
+        let no_verify_of = |argv: &[&str]| {
+            let Command::Config {
+                command: ConfigCommand::Set { key, no_verify, .. },
+            } = Cli::try_parse_from(argv).unwrap().command
+            else {
+                panic!("expected config set");
+            };
+            assert_eq!(key, "api_url");
+            no_verify
+        };
+        assert!(no_verify_of(&[
+            "task",
+            "config",
+            "set",
+            "api_url",
+            "X",
+            "--no-verify"
+        ]));
+        assert!(no_verify_of(&[
+            "task",
+            "config",
+            "set",
+            "--no-verify",
+            "api_url",
+            "X"
+        ]));
+        assert!(!no_verify_of(&["task", "config", "set", "api_url", "X"]));
     }
 }

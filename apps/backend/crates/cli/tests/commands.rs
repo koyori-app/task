@@ -207,7 +207,8 @@ async fn a_url_or_token_alone_in_the_environment_stops_before_any_request() {
     }
 }
 
-/// 手元の設定だけを触るコマンドは接続を作らないので、片側 env でも動く。
+/// 手元の設定だけを触るコマンドは接続設定を読まないので、片側 env でも動く。
+/// `config set api_url` の疎通確認は `--no-verify` で止める（確認そのものは `tests/config_set.rs`）。
 #[tokio::test]
 async fn local_commands_work_with_a_url_or_token_alone_in_the_environment() {
     let one_sided: [&'static [(&str, &str)]; 2] = [
@@ -230,6 +231,15 @@ async fn local_commands_work_with_a_url_or_token_alone_in_the_environment() {
                 "work",
                 "api_url",
                 "http://127.0.0.1:9",
+                "--no-verify",
+            ],
+            &[
+                "task",
+                "config",
+                "set",
+                "api_url",
+                "http://127.0.0.1:9",
+                "--no-verify",
             ],
         ] {
             assert_eq!(harness.run(args).await.unwrap(), 0, "{env:?} {args:?}");

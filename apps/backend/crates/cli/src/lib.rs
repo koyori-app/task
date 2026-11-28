@@ -9,18 +9,24 @@ pub mod commands;
 pub mod config;
 pub mod error;
 pub mod output;
+pub mod probe;
+pub mod prompt;
+pub mod remote;
 pub mod repo_config;
 pub mod resolve;
 pub mod text_input;
 pub mod update;
 
 use std::cell::{Cell, OnceCell};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use api::ApiClient;
 use cli::{Cli, Command};
-use config::{ConfigStore, ProfileOrigin, RuntimeConfig, resolve_runtime_with, select_profile};
+use config::{
+    ConfigStore, ConnectionState, ProfileOrigin, RuntimeConfig, resolve_runtime_with,
+    select_profile,
+};
 use error::Result;
 use output::OutputOptions;
 use repo_config::RepoConfig;
@@ -48,6 +54,8 @@ pub struct Context {
     profile_target: Option<String>,
     /// `.koyori-task.yaml` 由来のプロファイルを標準エラーに出したか（1 回の実行で 1 回だけ出す）
     profile_announced: Cell<bool>,
+    /// 端末への問い合わせ（`task init`）。`Context::new` では「端末でなく、何も読めない」
+    prompt: Rc<dyn prompt::Prompt>,
 }
 
 impl Context {
@@ -56,6 +64,7 @@ impl Context {
         // cwd が取れない（消されたディレクトリなど）ときは git の外と同じに扱う。
         // ここで失敗させると `config set` まで動かなくなる
         context.repo_dir = std::env::current_dir().ok();
+        context.prompt = Rc::new(prompt::TerminalPrompt);
         context.updater = std::env::current_exe()
             .and_then(std::fs::canonicalize)
             .ok()
@@ -81,7 +90,43 @@ impl Context {
             profile_flag: None,
             profile_target: None,
             profile_announced: Cell::new(false),
+            prompt: Rc::new(prompt::NoPrompt),
         }
+    }
+
+    /// 端末への問い合わせを差し込む（テスト用。実プロセスは `from_process` が端末を入れる）。
+    pub fn with_prompt(mut self, prompt: Rc<dyn prompt::Prompt>) -> Self {
+        self.prompt = prompt;
+        self
+    }
+
+    pub(crate) fn prompt(&self) -> &dyn prompt::Prompt {
+        self.prompt.as_ref()
+    }
+
+    /// `.koyori-task.yaml` を探す起点。`None` は探さない
+    pub(crate) fn repo_dir(&self) -> Option<&Path> {
+        self.repo_dir.as_deref()
+    }
+
+    /// 接続の設定が揃っているか（`task init` 用）。
+    ///
+    /// `.koyori-task.yaml` は読まない。`init` は「探索経路にファイルが無い」と確かめた後にだけ
+    /// 呼ぶので、リポジトリの `profile` は無い
+    pub(crate) fn connection_state(&self) -> Result<ConnectionState> {
+        let selection = select_profile(self.profile_flag.as_deref(), |key| (self.env)(key), None);
+        config::connection_state(&self.store, |key| (self.env)(key), selection.as_ref())
+    }
+
+    /// `task init` がホームの設定（`tenant_id`）を書いてよいか。接続を env の組から取るときと、
+    /// プロファイルを `TASK_PROFILE` で選んだときは、読む層と書く層が食い違うので書かない
+    pub(crate) fn connection_is_writable(&self) -> bool {
+        let var = |key: &str| (self.env)(key).filter(|value| !value.is_empty());
+        if var("TASK_API_URL").is_some() || var("TASK_TOKEN").is_some() {
+            return false;
+        }
+        select_profile(self.profile_flag.as_deref(), |key| (self.env)(key), None)
+            .is_none_or(|selection| selection.origin == ProfileOrigin::Flag)
     }
 
     /// `.koyori-task.yaml` を探す起点を差し込む（テスト用。実プロセスは `from_process` が cwd を入れる）。
@@ -164,6 +209,7 @@ impl Context {
             profile_flag,
             profile_target,
             profile_announced: Cell::new(false),
+            prompt: Rc::clone(&self.prompt),
         }
     }
 
@@ -232,10 +278,12 @@ pub async fn run(cli: Cli, context: &Context) -> Result<i32> {
     let context = &base.for_run(cli.profile.clone(), profile_target);
 
     // 設定を要らないコマンド（`config` と手元のトークン操作）を、設定不足で落とさない。
-    // 落とすと、トークンを保存する前に何もできなくなる
+    // 落とすと、トークンを保存する前に何もできなくなる。外へ出るのは `config set api_url` の
+    // 疎通確認だけ（認証なし。トークンは送らない）
     match cli.command {
+        Command::Init(args) => commands::init::run(context, args, output).await,
         Command::Config { command } => {
-            commands::config::run(command, context.store(), context.profile_flag(), output)
+            commands::config::run(command, context.store(), context.profile_flag(), output).await
         }
         Command::Auth { command } => commands::auth::run(command, context, output).await,
         Command::Projects { command } => commands::projects::run(context, command, output).await,

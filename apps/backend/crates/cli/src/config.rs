@@ -430,6 +430,28 @@ pub fn select_profile(
     (name != DEFAULT_PROFILE).then_some(ProfileSelection { name, origin })
 }
 
+/// 接続の設定が揃っているか。`task init` が、足りない分を聞いてよいかを決めるのに使う。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConnectionState {
+    Ready(RuntimeConfig),
+    /// `task init` が書いてよい層（トップレベルか `--profile` のプロファイル）で、
+    /// `api_url` か `token` が足りない。`profile` が未定義のときも含む
+    NeedsSetup {
+        /// 書く対象。`None` はトップレベル
+        profile: Option<String>,
+        api_url: Option<String>,
+        has_token: bool,
+    },
+}
+
+/// 足りない設定と、`resolve_runtime_with` が返すエラー。
+struct Shortfall {
+    profile: Option<String>,
+    api_url: Option<String>,
+    has_token: bool,
+    error: CliError,
+}
+
 /// 環境変数を設定ファイルより優先して解決する。
 ///
 /// `TASK_API_URL` と `TASK_TOKEN` は組で扱う。項目ごとに上書きすると、config の
@@ -437,49 +459,94 @@ pub fn select_profile(
 /// （プロファイルの指定も見ない）。env が無ければ、選ばれたプロファイルか、無ければ
 /// トップレベルから `api_url` / `token` / `tenant_id` を丸ごと取る。層をまたいで補わない。
 /// `TASK_TENANT` は送り先を変えないので単独で効く。
-pub fn resolve_runtime_with(
+///
+/// `Ok(Err(..))` は「`task init` が書いてよい層で足りない」。それ以外の不足・不存在・
+/// 片側 env は `Err`（`init` も聞かずに止まる）。
+fn evaluate(
     store: &ConfigStore,
     env: impl Fn(&str) -> Option<String>,
     selection: Option<&ProfileSelection>,
-) -> Result<RuntimeConfig> {
+) -> Result<std::result::Result<RuntimeConfig, Box<Shortfall>>> {
     // 空文字は未設定として扱う（`TASK_TOKEN=` で外したつもりの値を拾わない）
     let var = |key: &str| env(key).filter(|value| !value.is_empty());
     let mut profile = None;
     let (api_url, token, file_tenant) = match (var("TASK_API_URL"), var("TASK_TOKEN")) {
         // config は tenant_id も含めて読まない。env のトークンは別テナントのことが多く、
         // config の tenant_id を残すと毎回 403 になる。壊れた config でも止めない
-        (Some(api_url), Some(token)) => (Some(api_url), Some(token), None),
+        (Some(api_url), Some(token)) => (api_url, token, None),
         (None, None) => {
             let file = store.load()?;
             match selection {
-                None => (file.api_url, file.token, file.tenant_id),
+                None => match (file.api_url, file.token) {
+                    (Some(api_url), Some(token)) => (api_url, token, file.tenant_id),
+                    (api_url, token) => {
+                        let missing: Vec<&str> = [
+                            api_url.is_none().then_some("api_url (TASK_API_URL)"),
+                            token.is_none().then_some("token (TASK_TOKEN)"),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .collect();
+                        return Ok(Err(Box::new(Shortfall {
+                            profile: None,
+                            has_token: token.is_some(),
+                            api_url,
+                            error: CliError::validation(format!(
+                                "Missing required configuration: {}. Set both TASK_API_URL and TASK_TOKEN, or both api_url and token in {}. Run `task init` to set them up.",
+                                missing.join(", "),
+                                store.path().display(),
+                            )),
+                        })));
+                    }
+                },
                 Some(selection) => {
                     let name = &selection.name;
-                    let Some(found) = file.profiles.get(name) else {
-                        return Err(CliError::validation(format!(
-                            "Profile \"{name}\" (from {}) is not defined in {}. Create it with `task config set --profile {name} api_url <url>` and `task auth token --profile {name}`.",
-                            selection.origin,
-                            store.path().display(),
-                        )));
+                    // 聞いて書いてよいのは `--profile` で選んだときだけ。`TASK_PROFILE` と
+                    // `.koyori-task.yaml` 由来の選択は、書く操作の対象にならない
+                    let shortfall = |api_url: Option<String>, has_token: bool, error: CliError| {
+                        if selection.origin == ProfileOrigin::Flag {
+                            Ok(Err(Box::new(Shortfall {
+                                profile: Some(name.clone()),
+                                api_url,
+                                has_token,
+                                error,
+                            })))
+                        } else {
+                            Err(error)
+                        }
                     };
-                    let missing: Vec<&str> = [
-                        found.api_url.is_none().then_some("api_url"),
-                        found.token.is_none().then_some("token"),
-                    ]
-                    .into_iter()
-                    .flatten()
-                    .collect();
-                    if !missing.is_empty() {
-                        return Err(CliError::validation(format!(
-                            "Profile \"{name}\" (from {}) is missing {} in {}. Set them with `task config set --profile {name} api_url <url>` and `task auth token --profile {name}`; they are not taken from the top level.",
-                            selection.origin,
-                            missing.join(", "),
-                            store.path().display(),
-                        )));
-                    }
+                    let Some(found) = file.profiles.get(name) else {
+                        return shortfall(
+                            None,
+                            false,
+                            CliError::validation(format!(
+                                "Profile \"{name}\" (from {}) is not defined in {}. Create it with `task config set --profile {name} api_url <url>` and `task auth token --profile {name}`. Or run `task --profile {name} init`.",
+                                selection.origin,
+                                store.path().display(),
+                            )),
+                        );
+                    };
+                    let (Some(api_url), Some(token)) = (&found.api_url, &found.token) else {
+                        let missing: Vec<&str> = [
+                            found.api_url.is_none().then_some("api_url"),
+                            found.token.is_none().then_some("token"),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .collect();
+                        return shortfall(
+                            found.api_url.clone(),
+                            found.token.is_some(),
+                            CliError::validation(format!(
+                                "Profile \"{name}\" (from {}) is missing {} in {}. Set them with `task config set --profile {name} api_url <url>` and `task auth token --profile {name}`; they are not taken from the top level. Or run `task --profile {name} init`.",
+                                selection.origin,
+                                missing.join(", "),
+                                store.path().display(),
+                            )),
+                        );
+                    };
                     profile = Some(name.clone());
-                    let found = found.clone();
-                    (found.api_url, found.token, found.tenant_id)
+                    (api_url.clone(), token.clone(), found.tenant_id.clone())
                 }
             }
         }
@@ -501,29 +568,39 @@ pub fn resolve_runtime_with(
         None => file_tenant.map(|id| (id, TenantSource::Config)),
     };
 
-    let missing: Vec<&str> = [
-        api_url.is_none().then_some("api_url (TASK_API_URL)"),
-        token.is_none().then_some("token (TASK_TOKEN)"),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-
-    if !missing.is_empty() {
-        return Err(CliError::validation(format!(
-            "Missing required configuration: {}. Set both TASK_API_URL and TASK_TOKEN, or both api_url and token in {}.",
-            missing.join(", "),
-            store.path().display(),
-        )));
-    }
-
-    Ok(RuntimeConfig {
+    Ok(Ok(RuntimeConfig {
         // 末尾の `/` を落とさないとパスを繋いだ URL が `//v1/...` になる
-        api_url: api_url.unwrap().trim_end_matches('/').to_string(),
-        token: token.unwrap(),
+        api_url: api_url.trim_end_matches('/').to_string(),
+        token,
         tenant,
         profile,
+    }))
+}
+
+/// 接続の設定を解決する。`task init` が書いてよい層で足りないときは、エラーにせず
+/// `NeedsSetup` を返す。
+pub fn connection_state(
+    store: &ConfigStore,
+    env: impl Fn(&str) -> Option<String>,
+    selection: Option<&ProfileSelection>,
+) -> Result<ConnectionState> {
+    Ok(match evaluate(store, env, selection)? {
+        Ok(runtime) => ConnectionState::Ready(runtime),
+        Err(shortfall) => ConnectionState::NeedsSetup {
+            profile: shortfall.profile,
+            api_url: shortfall.api_url,
+            has_token: shortfall.has_token,
+        },
     })
+}
+
+/// 接続の設定を解決する。足りなければ終了コード 2（規則は `evaluate` のとおり）。
+pub fn resolve_runtime_with(
+    store: &ConfigStore,
+    env: impl Fn(&str) -> Option<String>,
+    selection: Option<&ProfileSelection>,
+) -> Result<RuntimeConfig> {
+    evaluate(store, env, selection)?.map_err(|shortfall| shortfall.error)
 }
 
 #[cfg(test)]
@@ -1350,6 +1427,139 @@ mod tests {
         assert_eq!(
             TenantSource::Env.forbidden_hint(Some("work")),
             TenantSource::Env.forbidden_hint(None)
+        );
+    }
+
+    /// `task init` が聞いて書いてよいのは、トップレベルと `--profile` の層だけ。
+    #[test]
+    fn needs_setup_only_where_init_may_write() {
+        let (_home, store) = store();
+        let state = |env: &[(&str, &str)], selection: Option<ProfileSelection>| {
+            connection_state(&store, env_of(env), selection.as_ref())
+        };
+        let needs = |profile: Option<&str>, api_url: Option<&str>, has_token: bool| {
+            ConnectionState::NeedsSetup {
+                profile: profile.map(Into::into),
+                api_url: api_url.map(Into::into),
+                has_token,
+            }
+        };
+
+        // 設定なし
+        assert_eq!(state(&[], None).unwrap(), needs(None, None, false));
+        // `--profile` の未定義の名前
+        assert_eq!(
+            state(&[], Some(selected("work", ProfileOrigin::Flag))).unwrap(),
+            needs(Some("work"), None, false)
+        );
+
+        store
+            .save(&TaskConfig {
+                api_url: Some("https://top.invalid".into()),
+                profiles: [("work".to_string(), profile(None, Some("work-token"), None))].into(),
+                ..Default::default()
+            })
+            .unwrap();
+        // 片方だけある層は、ある方をそのまま返す
+        assert_eq!(
+            state(&[], None).unwrap(),
+            needs(None, Some("https://top.invalid"), false)
+        );
+        assert_eq!(
+            state(&[], Some(selected("work", ProfileOrigin::Flag))).unwrap(),
+            needs(Some("work"), None, true)
+        );
+
+        // `TASK_PROFILE` と `.koyori-task.yaml` 由来の不足・未定義は、聞かずに止まる
+        for origin in [
+            ProfileOrigin::Env,
+            ProfileOrigin::RepoFile("/repo/.koyori-task.yaml".into()),
+        ] {
+            for name in ["work", "gone"] {
+                let err = state(&[], Some(selected(name, origin.clone()))).unwrap_err();
+                assert_eq!(err.exit_code, 2, "{origin:?} {name}");
+            }
+        }
+        // 片側 env も止まる
+        for env in [
+            &[("TASK_API_URL", "https://env.invalid")][..],
+            &[("TASK_TOKEN", "env-token")],
+        ] {
+            let err = state(env, None).unwrap_err();
+            assert_eq!(err.exit_code, 2);
+            assert!(err.message.contains("is set without"), "{}", err.message);
+        }
+        // env の組は、config が足りなくても揃っている
+        let ready = state(
+            &[
+                ("TASK_API_URL", "https://env.invalid/"),
+                ("TASK_TOKEN", "env-token"),
+            ],
+            Some(selected("gone", ProfileOrigin::Flag)),
+        )
+        .unwrap();
+        assert_eq!(
+            ready,
+            ConnectionState::Ready(RuntimeConfig {
+                api_url: "https://env.invalid".into(),
+                token: "env-token".into(),
+                tenant: None,
+                profile: None,
+            })
+        );
+    }
+
+    /// 不足の文は、末尾に `task init` の案内が付くだけで変わらない。
+    #[test]
+    fn missing_settings_point_at_task_init() {
+        let (_home, store) = store();
+        let path = store.path();
+        let err = resolve_runtime_with(&store, env_of(&[]), None).unwrap_err();
+        assert_eq!(err.exit_code, 2);
+        assert_eq!(
+            err.message,
+            format!(
+                "Missing required configuration: api_url (TASK_API_URL), token (TASK_TOKEN). Set both TASK_API_URL and TASK_TOKEN, or both api_url and token in {}. Run `task init` to set them up.",
+                path.display()
+            )
+        );
+
+        let err = resolve_runtime_with(
+            &store,
+            env_of(&[]),
+            Some(&selected("work", ProfileOrigin::Env)),
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.message,
+            format!(
+                "Profile \"work\" (from TASK_PROFILE) is not defined in {}. Create it with `task config set --profile work api_url <url>` and `task auth token --profile work`. Or run `task --profile work init`.",
+                path.display()
+            )
+        );
+
+        store
+            .save(&TaskConfig {
+                profiles: [(
+                    "work".to_string(),
+                    profile(Some("https://b.invalid"), None, None),
+                )]
+                .into(),
+                ..Default::default()
+            })
+            .unwrap();
+        let err = resolve_runtime_with(
+            &store,
+            env_of(&[]),
+            Some(&selected("work", ProfileOrigin::Flag)),
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.message,
+            format!(
+                "Profile \"work\" (from --profile) is missing token in {}. Set them with `task config set --profile work api_url <url>` and `task auth token --profile work`; they are not taken from the top level. Or run `task --profile work init`.",
+                path.display()
+            )
         );
     }
 }

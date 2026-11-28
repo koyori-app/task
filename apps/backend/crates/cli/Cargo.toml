@@ -26,6 +26,8 @@ tar = "0.4"
 clap = { version = "4.5", features = ["derive"] }
 sea-orm = { workspace = true }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+# `task init` がトークンを、画面に出さずに端末から読むのに使う。
+rpassword = "7"
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml_ng = "0.10.0"

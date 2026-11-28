@@ -540,7 +540,8 @@ async fn writes_with_the_flag_target_only_that_profile() {
                 "--profile",
                 "new",
                 "api_url",
-                "http://x.invalid"
+                "http://x.invalid",
+                "--no-verify",
             ])
             .await
             .unwrap(),
