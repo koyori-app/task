@@ -177,6 +177,8 @@ stateDiagram-v2
 
 AI レビュワーの主経路は JSON 一括投入である。CLI（`apps/backend/crates/cli`）は Rust の単一バイナリで、実行にランタイムの用意が要らない。CI では置くだけで使える。`v*` タグの push で GitHub Release に添付され、導入手順は `apps/backend/crates/cli/README.md` にある。投入 JSON の検証と絞り込みの綴りは backend の型（`payload` / `entity` / `common::validation`）をそのまま使う。
 
+`--project` を省くと、リポジトリの根の `.koyori-task.yaml` に書いた `project` を使う（探し方と制約は `apps/backend/crates/cli/README.md` にある）。
+
 ```bash
 # レビュー 1 ラウンド分を一括起票（ファイル or `-` で標準入力）
 task review submit findings.json --project TASK
