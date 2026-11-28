@@ -23,6 +23,8 @@ pub struct ApiClient {
     /// トークンが特定のプロジェクトに限られているか。tenant を `/me` から引いたときだけ分かる
     /// （明示した経路は `/me` を読まないので `false` のまま）
     project_restricted: bool,
+    /// 接続を取った名前付きプロファイル。案内文で `--profile <名前>` を出すのに使う
+    profile: Option<String>,
 }
 
 impl ApiClient {
@@ -50,6 +52,7 @@ impl ApiClient {
             tenant_source,
             tenant_slug: None,
             project_restricted: false,
+            profile: config.profile,
         })
     }
 
@@ -100,8 +103,14 @@ impl ApiClient {
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
+                let config_hint = match &self.profile {
+                    Some(name) => format!(
+                        "run `task config set --profile {name} tenant_id <name or tenant_id>`"
+                    ),
+                    None => "run `task config set tenant_id <name or tenant_id>` when api_url and token also come from the config".to_string(),
+                };
                 return Err(CliError::validation(format!(
-                    "This token can be used in {} tenants: {candidates}. Choose one with TASK_TENANT=<name or tenant_id>, or run `task config set tenant_id <name or tenant_id>` when api_url and token also come from the config.",
+                    "This token can be used in {} tenants: {candidates}. Choose one with TASK_TENANT=<name or tenant_id>, or {config_hint}.",
                     many.len()
                 )));
             }
@@ -261,7 +270,11 @@ impl ApiClient {
     fn http_error(&self, status: StatusCode, body: &str) -> CliError {
         let mut err = CliError::http(status.as_u16(), body);
         if let (StatusCode::FORBIDDEN, Some(source)) = (status, self.tenant_source) {
-            err.message = format!("{}\n{}", err.message, source.forbidden_hint());
+            err.message = format!(
+                "{}\n{}",
+                err.message,
+                source.forbidden_hint(self.profile.as_deref())
+            );
         }
         err
     }
@@ -354,6 +367,7 @@ mod tests {
             api_url: api_url.into(),
             token: "token-1".into(),
             tenant: Some(("tenant-1".into(), TenantSource::Config)),
+            profile: None,
         })
         .unwrap()
     }

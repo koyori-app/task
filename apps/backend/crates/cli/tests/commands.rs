@@ -117,6 +117,7 @@ async fn auth_whoami_works_without_tenant_id() {
             api_url: Some(server.uri()),
             token: Some("token-1".into()),
             tenant_id: None,
+            ..Default::default()
         })
         .unwrap();
 

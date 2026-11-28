@@ -129,6 +129,7 @@ async fn the_env_url_and_token_ignore_the_config_tenant_and_resolve_it_from_the_
             api_url: Some("http://127.0.0.1:9".into()),
             token: Some("file-token".into()),
             tenant_id: Some("88888888-8888-4888-8888-888888888888".into()),
+            ..Default::default()
         })
         .unwrap();
 
