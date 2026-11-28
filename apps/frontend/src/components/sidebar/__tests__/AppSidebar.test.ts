@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { computed, type Ref } from 'vue';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 
-const { navigateSpy, pageContextStub, projectsControl, tenantStoreStub, meControl } = vi.hoisted(
-  () => ({
+const { navigateSpy, logoutSpy, pageContextStub, projectsControl, tenantStoreStub, meControl } =
+  vi.hoisted(() => ({
     navigateSpy: vi.fn(),
+    logoutSpy: vi.fn(),
     meControl: { isAdmin: false },
     pageContextStub: { routeParams: {} as Record<string, string>, urlPathname: '' },
     projectsControl: {
@@ -22,14 +23,15 @@ const { navigateSpy, pageContextStub, projectsControl, tenantStoreStub, meContro
       loadTenants: vi.fn(),
       selectTenant: vi.fn(),
     },
-  }),
-);
+  }));
 
 vi.mock('vike/client/router', () => ({ navigate: navigateSpy }));
 
 vi.mock('vike-vue/usePageContext', () => ({ usePageContext: () => pageContextStub }));
 
 vi.mock('@/stores/tenant', () => ({ useTenantStore: () => tenantStoreStub }));
+
+vi.mock('@/composables/useAuthSession', () => ({ useAuthSession: () => ({ logout: logoutSpy }) }));
 
 vi.mock('@/lib/api-vue-query', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api-vue-query')>();
@@ -49,6 +51,7 @@ vi.mock('@/lib/api-vue-query', async (importOriginal) => {
 });
 
 import { persistedPinia, seedSettings } from '@/components/settings/__tests__/test-pinia';
+import { useAuthStore } from '@/stores/auth';
 import AppSidebar from '../AppSidebar.vue';
 
 enableAutoUnmount(afterEach);
@@ -61,7 +64,10 @@ function mountSidebar(onClose: () => void) {
   return mount(AppSidebar, {
     props: { onClose },
     attachTo: document.body,
-    global: { plugins: [persistedPinia()], stubs: { SidebarTenantHeader: true } },
+    global: {
+      plugins: [persistedPinia()],
+      stubs: { SidebarTenantHeader: true, SidebarUserPanel: true },
+    },
   });
 }
 
@@ -361,5 +367,30 @@ describe('AppSidebar の上端', () => {
     const header = wrapper.findComponent({ name: 'SidebarTenantHeader' });
     expect(header.exists()).toBe(true);
     expect(header.props()).toMatchObject({ tenant: ACME, label: 'Acme' });
+  });
+});
+
+describe('AppSidebar の下端', () => {
+  it('ログイン中のユーザーのパネルを出し、ログアウトを渡す', async () => {
+    const wrapper = mountSidebar(vi.fn());
+    useAuthStore().setUser({
+      id: 'user-1',
+      email: 'alice@example.test',
+      username: 'alice',
+      avatar_url: 'https://example.test/a.png',
+      email_verified: true,
+      is_admin: false,
+      is_suspended: false,
+      totp_enabled: false,
+    });
+    await flushPromises();
+
+    const panel = wrapper.findComponent({ name: 'SidebarUserPanel' });
+    expect(panel.exists()).toBe(true);
+    expect(panel.props()).toMatchObject({
+      user: { name: 'alice', email: 'alice@example.test', avatar: 'https://example.test/a.png' },
+      onLogout: logoutSpy,
+      rail: false,
+    });
   });
 });

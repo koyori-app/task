@@ -4,6 +4,7 @@ import { usePageContext } from 'vike-vue/usePageContext';
 import { computed, ref, watch } from 'vue';
 
 import CreateTenantDialog from '@/components/tenant-rail/CreateTenantDialog.vue';
+import TenantRail from '@/components/tenant-rail/TenantRail.vue';
 import { useTenantMenu } from '@/composables/useTenantMenu';
 import { useTenantStore, type Tenant } from '@/stores/tenant';
 
@@ -54,17 +55,21 @@ function onMenuSelect(value: string) {
   if (value !== 'copy-id') emit('close');
   tenantMenu.onSelect(value);
 }
-
-/**
- * レールの表示（ui-vue 0.15.0 の IconRail を包む TenantRail）は公開を待っている。
- * それまでは配線だけを置き、検査からも呼べるように出しておく。
- */
-defineExpose({ selectTenant, retry, openCreateDialog, openMenu });
 </script>
 
 <template>
   <div class="flex h-full w-16 shrink-0 flex-col" data-slot="app-tenant-rail">
-    <!-- TenantRail（ui-vue 0.15.0 の公開後に置く） -->
+    <TenantRail
+      :tenants="tenantStore.tenants"
+      :selected-tenant-id="tenantStore.selectedTenantId"
+      :loading="tenantStore.isLoading"
+      :error="tenantStore.error"
+      :menu-tenant-id="menu?.tenant.id ?? null"
+      @select="selectTenant"
+      @retry="retry"
+      @create="openCreateDialog"
+      @menu="openMenu"
+    />
     <ContextMenu
       :open="menu !== null"
       :x="menu?.x ?? 0"

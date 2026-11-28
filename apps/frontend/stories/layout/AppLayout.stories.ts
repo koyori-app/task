@@ -9,6 +9,7 @@ import { PhSidebarSimple } from '@phosphor-icons/vue';
 
 import AppSidebar from '@/components/sidebar/AppSidebar.vue';
 import AppTenantRail from '@/components/tenant-rail/AppTenantRail.vue';
+import TenantIcon from '@/components/tenant-rail/TenantIcon.vue';
 import { tenantStatusLabel } from '@/lib/tenant-status-label';
 import { useAuthStore } from '@/stores/auth';
 import { useTenantStore, type Tenant } from '@/stores/tenant';
@@ -123,7 +124,7 @@ function realLayoutDecorator() {
  * `narrow` は狭い画面（レールとサイドバーをモーダルの Drawer に並べる）。
  */
 const renderLayout = (narrow: boolean) => () => ({
-  components: { AppSidebar, AppTenantRail, Button, Drawer, PhSidebarSimple, Toaster },
+  components: { AppSidebar, AppTenantRail, Button, Drawer, PhSidebarSimple, TenantIcon, Toaster },
   setup() {
     const rail = ref(false);
     const drawerOpen = ref(false);
@@ -144,7 +145,7 @@ const renderLayout = (narrow: boolean) => () => ({
     function stayOnPage(event: MouseEvent) {
       if ((event.target as Element).closest('a')) event.preventDefault();
     }
-    return { narrow, rail, drawerOpen, currentTenantLabel, toggle, stayOnPage };
+    return { narrow, rail, drawerOpen, tenantStore, currentTenantLabel, toggle, stayOnPage };
   },
   template: `
     <div class="flex h-svh overflow-hidden" @click="stayOnPage">
@@ -195,6 +196,7 @@ const renderLayout = (narrow: boolean) => () => ({
             data-slot="current-tenant"
             @click="drawerOpen = true"
           >
+            <TenantIcon :tenant="tenantStore.selectedTenant" :size="24" />
             <span class="truncate">{{ currentTenantLabel }}</span>
           </button>
         </header>
@@ -240,6 +242,25 @@ export const Default: Story = {
     await waitFor(() =>
       expect(canvas.getByRole('heading', { level: 2, name: 'Acme Inc' })).toBeInTheDocument(),
     );
+    // レールに所属テナントが並び、今のテナントだけが選択中
+    const tenantNav = canvas.getByRole('navigation', { name: 'テナント' });
+    await expect(within(tenantNav).getByRole('button', { name: 'Acme Inc' })).toHaveAttribute(
+      'aria-current',
+      'true',
+    );
+    await expect(within(tenantNav).getByRole('button', { name: 'Globex' })).not.toHaveAttribute(
+      'aria-current',
+    );
+    await expect(within(tenantNav).getByRole('button', { name: 'テナントを作成' })).toBeEnabled();
+    // サイドバーの下端にユーザーとアカウント設定の歯車
+    await expect(canvas.getByRole('button', { name: /yupix/ })).toHaveAttribute(
+      'aria-haspopup',
+      'dialog',
+    );
+    await expect(canvas.getByRole('link', { name: 'アカウント設定' })).toHaveAttribute(
+      'href',
+      '/settings/profile',
+    );
 
     // 境目の線は 1 本だけ。Sidebar 自身は枠を持たず、包む要素が左右の線を引く
     const sidebar = canvasElement.querySelector<HTMLElement>('#app-sidebar')!;
@@ -259,6 +280,9 @@ export const Default: Story = {
     await expect(canvas.getByRole('link', { name: 'My Tasks' })).toBeInTheDocument();
     // 畳んでもテナントのメニューには届く
     await expect(canvas.getByRole('button', { name: 'テナントのメニュー' })).toBeInTheDocument();
+    // 畳むと歯車は消え、アバターのボタンだけが残る（読み上げ名はユーザー名）
+    await expect(canvas.queryByRole('link', { name: 'アカウント設定' })).toBeNull();
+    await expect(canvas.getByRole('button', { name: 'yupix' })).toBeInTheDocument();
 
     // 端のつまみでも戻せる
     await userEvent.click(canvas.getByRole('button', { name: 'アイコンだけの表示' }));
@@ -324,6 +348,40 @@ export const Narrow: Story = {
     const frame = navigation.querySelector<HTMLElement>('[data-slot="sidebar-frame"]')!;
     await expect(rail.getBoundingClientRect().top).toBe(frame.getBoundingClientRect().top);
     await expect(rail.getBoundingClientRect().right).toBe(frame.getBoundingClientRect().left);
+
+    // Drawer の dialog の中から開くメニューとカードも、dialog に切られず前に出る
+    const page = within(canvasElement.ownerDocument.body);
+    const onTop = (element: HTMLElement) => {
+      const box = element.getBoundingClientRect();
+      const hit = element.ownerDocument.elementFromPoint(
+        box.left + box.width / 2,
+        box.top + box.height / 2,
+      );
+      return hit !== null && element.contains(hit);
+    };
+    const globex = within(rail).getByRole('button', { name: 'Globex' });
+    const globexBox = globex.getBoundingClientRect();
+    await userEvent.pointer({
+      keys: '[MouseRight]',
+      target: globex,
+      coords: { clientX: globexBox.right - 4, clientY: globexBox.top + 4 },
+    });
+    const globexMenu = await page.findByRole('menu', { name: 'Globex のメニュー' });
+    await waitFor(() => expect(globexMenu).toBeVisible());
+    await waitFor(() => expect(onTop(globexMenu)).toBe(true));
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(globexMenu).not.toBeVisible());
+
+    await userEvent.click(canvas.getByRole('button', { name: /yupix/ }));
+    const card = await page.findByRole('dialog', { name: 'アカウント' });
+    await waitFor(() => expect(card).toBeVisible());
+    await waitFor(() => expect(onTop(card)).toBe(true));
+    await expect(within(card).getByRole('link', { name: 'プロフィールを編集' })).toHaveAttribute(
+      'href',
+      '/settings/profile',
+    );
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(card).not.toBeVisible());
 
     await userEvent.click(await canvas.findByRole('link', { name: 'My Tasks' }));
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');

@@ -5,6 +5,7 @@ import AppSidebarSkeleton from '@/components/sidebar/AppSidebarSkeleton.vue';
 import AppBreadcrumbs from '@/components/AppBreadcrumbs.vue';
 import { useBreadcrumbs } from '@/composables/useBreadcrumbs';
 import AppTenantRail from '@/components/tenant-rail/AppTenantRail.vue';
+import TenantIcon from '@/components/tenant-rail/TenantIcon.vue';
 import { tenantStatusLabel } from '@/lib/tenant-status-label';
 import { useTenantStore } from '@/stores/tenant';
 import { Alert, Button, Drawer, Toaster } from '@koyori-app/ui-vue';
@@ -155,7 +156,7 @@ const AppSidebar = defineAsyncComponent(() => import('@/components/sidebar/AppSi
             data-slot="current-tenant"
             @click="drawerOpen = true"
           >
-            <!-- TenantIcon（ui-vue 0.15.0 の IconTile の公開後に 24px で置く） -->
+            <TenantIcon :tenant="tenantStore.selectedTenant" :size="24" />
             <span class="truncate">{{ currentTenantLabel }}</span>
           </button>
           <template v-else>

@@ -15,7 +15,10 @@ import NavAdmin from '@/components/sidebar/NavAdmin.vue';
 import NavProjects from '@/components/sidebar/NavProjects.vue';
 import { shouldCloseSidebarOnNavigate } from '@/components/sidebar/sidebar-navigation';
 import SidebarTenantHeader from '@/components/sidebar/SidebarTenantHeader.vue';
+import SidebarUserPanel from '@/components/sidebar/SidebarUserPanel.vue';
+import { useAuthSession } from '@/composables/useAuthSession';
 import { tenantStatusLabel } from '@/lib/tenant-status-label';
+import { useAuthStore } from '@/stores/auth';
 
 defineProps<{
   /** アイコンだけの表示（広い画面の畳んだ状態）。状態は呼び出し側が持つ */
@@ -68,6 +71,14 @@ const tenantLabel = computed(() =>
     selected: tenantStore.selectedTenant,
   }),
 );
+
+const authStore = useAuthStore();
+const { logout } = useAuthSession();
+const user = computed(() => ({
+  name: authStore.user?.username ?? 'User',
+  email: authStore.user?.email ?? '',
+  avatar: authStore.user?.avatar_url ?? '',
+}));
 
 const navProjects = computed(() => projectsQuery.data.value ?? []);
 
@@ -145,7 +156,10 @@ function closeOnNavigate(event: MouseEvent) {
     <template #header>
       <SidebarTenantHeader :tenant="tenantStore.selectedTenant" :label="tenantLabel" :rail="rail" />
     </template>
-    <!-- #footer のユーザーパネル（SidebarUserPanel）は ui-vue 0.15.0 の UserPanel の公開後に置く -->
+    <!-- カードのリンクも Sidebar の中の <a> なので、closeOnNavigate が狭い画面の Drawer を閉じる -->
+    <template #footer>
+      <SidebarUserPanel :user="user" :on-logout="logout" :rail="rail" />
+    </template>
     <!-- テナントが決まらない（読み込み中・所属テナントが無い）うちはリンク先も一覧も作れないので、
            テナント依存のナビ自体を出さない。 -->
     <NavMain v-if="tenantSlug" :items="data.navMain" />

@@ -5,6 +5,7 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { useAuthStore } from '@/stores/auth';
 import type { Tenant } from '@/stores/tenant';
 import AppTenantRail from '../AppTenantRail.vue';
+import TenantRail from '../TenantRail.vue';
 
 const { tenantStoreStub } = vi.hoisted(() => ({
   tenantStoreStub: {
@@ -44,17 +45,7 @@ const beta: Tenant = {
   membership: 'Guest',
 };
 
-/**
- * レールの表示（TenantRail）は ui-vue 0.15.0 の公開を待っているので、
- * 配線は defineExpose した関数から呼ぶ。
- */
-type RailApi = {
-  selectTenant: (tenant: Tenant) => void;
-  retry: () => void;
-  openCreateDialog: () => void;
-  openMenu: (tenant: Tenant, position: { x: number; y: number }) => void;
-};
-
+/** レールの表示（TenantRail）は stub にし、出た出来事の配線だけを見る */
 function mountRail(routeTenant = 'alpha') {
   const pinia = createPinia();
   setActivePinia(pinia);
@@ -83,10 +74,11 @@ function mountRail(routeTenant = 'alpha') {
           routeParams: routeTenant ? { tenant: routeTenant } : {},
         },
       },
-      stubs: { CreateTenantDialog: true },
+      stubs: { CreateTenantDialog: true, TenantRail: true },
     },
   });
-  return { wrapper, api: wrapper.vm as unknown as RailApi };
+  const rail = wrapper.findComponent(TenantRail);
+  return { wrapper, rail };
 }
 
 describe('AppTenantRail', () => {
@@ -105,17 +97,24 @@ describe('AppTenantRail', () => {
     vi.restoreAllMocks();
   });
 
-  it('loads the tenants of the URL', () => {
-    mountRail('alpha');
+  it('loads the tenants of the URL and passes the store state to the rail', () => {
+    const { rail } = mountRail('alpha');
 
     expect(tenantStoreStub.loadTenants).toHaveBeenCalledExactlyOnceWith('alpha');
+    expect(rail.props()).toMatchObject({
+      tenants: [alpha, beta],
+      selectedTenantId: alpha.id,
+      loading: false,
+      error: null,
+      menuTenantId: null,
+    });
   });
 
   it('switches to another tenant with a full page load', () => {
     const assign = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
-    const { wrapper, api } = mountRail('alpha');
+    const { wrapper, rail } = mountRail('alpha');
 
-    api.selectTenant(beta);
+    rail.vm.$emit('select', beta);
 
     expect(tenantStoreStub.selectTenant).toHaveBeenCalledWith(beta);
     expect(assign).toHaveBeenCalledWith('/beta');
@@ -125,29 +124,29 @@ describe('AppTenantRail', () => {
 
   it('does not reload the page for the current tenant', () => {
     const assign = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
-    const { api } = mountRail('alpha');
+    const { rail } = mountRail('alpha');
 
-    api.selectTenant(alpha);
+    rail.vm.$emit('select', alpha);
 
     expect(tenantStoreStub.selectTenant).toHaveBeenCalledWith(alpha);
     expect(assign).not.toHaveBeenCalled();
   });
 
   it('retries loading the tenants of the URL', () => {
-    const { api } = mountRail('alpha');
+    const { rail } = mountRail('alpha');
     tenantStoreStub.loadTenants.mockClear();
 
-    api.retry();
+    rail.vm.$emit('retry');
 
     expect(tenantStoreStub.loadTenants).toHaveBeenCalledExactlyOnceWith('alpha');
   });
 
   it('opens the create dialog after closing the drawer', async () => {
-    const { wrapper, api } = mountRail('alpha');
+    const { wrapper, rail } = mountRail('alpha');
     const dialog = wrapper.findComponent({ name: 'CreateTenantDialog' });
     expect(dialog.props('open')).toBe(false);
 
-    api.openCreateDialog();
+    rail.vm.$emit('create');
     await flushPromises();
 
     expect(wrapper.emitted('close')).toHaveLength(1);
@@ -155,9 +154,9 @@ describe('AppTenantRail', () => {
   });
 
   it('opens the menu of the tenant with the items it allows', async () => {
-    const { api } = mountRail('alpha');
+    const { rail } = mountRail('alpha');
 
-    api.openMenu(alpha, { x: 10, y: 20 });
+    rail.vm.$emit('menu', alpha, { x: 10, y: 20 });
     await flushPromises();
     const alphaMenu = document.body.querySelector('[role="menu"][aria-label="Alpha のメニュー"]');
     expect(alphaMenu).not.toBeNull();
@@ -166,9 +165,11 @@ describe('AppTenantRail', () => {
         i.textContent?.trim(),
       ),
     ).toEqual(['テナント設定', 'メンバー', '表示 ID をコピー']);
+    // メニューを開いている項目のツールチップを止める
+    expect(rail.props('menuTenantId')).toBe(alpha.id);
 
     // Guest のテナントにはメンバーへの導線を出さない。持ち主でもないので設定も出さない
-    api.openMenu({ ...beta, owner_id: 'someone-else' }, { x: 10, y: 20 });
+    rail.vm.$emit('menu', { ...beta, owner_id: 'someone-else' }, { x: 10, y: 20 });
     await flushPromises();
     const betaMenu = document.body.querySelector('[role="menu"][aria-label="Beta のメニュー"]');
     expect(
