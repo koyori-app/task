@@ -51,10 +51,12 @@ function mockFetch(overrides: MockOptions = {}) {
   return () => {
     const original = globalThis.fetch;
     putBodies = [];
-    fetchSpy = fn().mockImplementation(async (req: Request | string) => {
-      const url = typeof req === 'string' ? req : req.url;
-      const method = typeof req === 'string' ? 'GET' : req.method;
+    fetchSpy = fn().mockImplementation(async (req: Request | string | URL, init?: RequestInit) => {
+      const url = req instanceof Request ? req.url : String(req);
+      const method = req instanceof Request ? req.method : 'GET';
       const pathname = new URL(url, 'http://localhost').pathname;
+      // API 以外（IconPicker が読む絵文字データなど）は本物の fetch に通す
+      if (!pathname.includes('/v1/')) return original(req, init);
 
       if (/\/v1\/tenants\/?$/.test(pathname) && method === 'GET') {
         if (overrides.hangTenants) return new Promise<Response>(() => {});
