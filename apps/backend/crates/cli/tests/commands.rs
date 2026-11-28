@@ -222,6 +222,15 @@ async fn local_commands_work_with_a_url_or_token_alone_in_the_environment() {
             &["task", "config", "get", "api_url"],
             &["task", "auth", "token", "token-3"],
             &["task", "auth", "logout"],
+            &[
+                "task",
+                "config",
+                "set",
+                "--profile",
+                "work",
+                "api_url",
+                "http://127.0.0.1:9",
+            ],
         ] {
             assert_eq!(harness.run(args).await.unwrap(), 0, "{env:?} {args:?}");
         }

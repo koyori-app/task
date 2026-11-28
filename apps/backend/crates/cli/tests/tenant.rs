@@ -489,6 +489,16 @@ async fn local_commands_work_without_any_connection_settings() {
         &["task", "config", "unset", "tenant_id"],
         &["task", "auth", "token", "token-1"],
         &["task", "auth", "logout"],
+        &[
+            "task",
+            "config",
+            "set",
+            "--profile",
+            "work",
+            "api_url",
+            "http://127.0.0.1:9",
+        ],
+        &["task", "config", "get", "--profile", "work", "api_url"],
     ] {
         let code = task_cli::run(parse(args), &context).await.unwrap();
         assert_eq!(code, 0, "{args:?}");
