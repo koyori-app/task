@@ -20,6 +20,9 @@ pub struct ApiClient {
     tenant_source: Option<TenantSource>,
     /// テナントを名前（slug）で指したときの、その slug。ID に直した結果と並べて持つ
     tenant_slug: Option<String>,
+    /// トークンが特定のプロジェクトに限られているか。tenant を `/me` から引いたときだけ分かる
+    /// （明示した経路は `/me` を読まないので `false` のまま）
+    project_restricted: bool,
 }
 
 impl ApiClient {
@@ -46,6 +49,7 @@ impl ApiClient {
             tenant_id: tenant_id.unwrap_or_default(),
             tenant_source,
             tenant_slug: None,
+            project_restricted: false,
         })
     }
 
@@ -80,6 +84,7 @@ impl ApiClient {
         }
         let identity: PersonalTokenTenants =
             self.get(&["v1", "personal_tokens", "me"], &[]).await?;
+        self.project_restricted = identity.allowed_project_ids.is_some();
         self.tenant_id = match identity.bound_tenant_ids().as_slice() {
             [only] => only.to_string(),
             [] => return Err(CliError::new("The token is not bound to any tenant")),
@@ -102,6 +107,11 @@ impl ApiClient {
             }
         };
         Ok(self)
+    }
+
+    /// トークンが特定のプロジェクトに限られていると分かっているか（`resolve_tenant` が `/me` を読んだときだけ）。
+    pub(crate) fn project_restricted(&self) -> bool {
+        self.project_restricted
     }
 
     /// 画面の URL。`api_url` が `<画面の URL>/api` の形のときだけ分かる（API は画面の URL を返さない）。

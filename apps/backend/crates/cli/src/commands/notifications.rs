@@ -53,6 +53,7 @@ pub async fn run(
             // 応答から読み取りにくい（`review` の絞り込みと同じ流儀）
             let in_app = parse_event_types(in_app.as_deref(), "--in-app")?;
             let email = parse_event_types(email.as_deref(), "--email")?;
+            let project = context.project(project)?;
             // UUID はプロジェクト API（`read:project`）を経ずにそのまま渡す。
             // 設定 API は `read:task` / `write:task` だけで通るので、キーを引くときだけ余計に要る。
             // 接続前に分けるのは、UUID ならテナントも要らず `/me` を叩かずに済むため

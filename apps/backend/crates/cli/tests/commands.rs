@@ -302,7 +302,20 @@ async fn run_binary_full(
     args: &[&str],
     stdin: Option<&str>,
 ) -> (bool, String, String) {
+    run_binary_in(server, prefix, args, stdin, None).await
+}
+
+/// `run_binary_full` の cwd を選べる形。`None` は一時の HOME で走らせる（このリポジトリの
+/// `.koyori-task.yaml` を拾わないため）。
+async fn run_binary_in(
+    server: &MockServer,
+    prefix: &str,
+    args: &[&str],
+    stdin: Option<&str>,
+    cwd: Option<std::path::PathBuf>,
+) -> (bool, String, String) {
     let home = tempfile::tempdir().unwrap();
+    let cwd = cwd.unwrap_or_else(|| home.path().to_path_buf());
     let uri = format!("{}{prefix}", server.uri());
     let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
     let stdin = stdin.map(str::to_string);
@@ -311,6 +324,7 @@ async fn run_binary_full(
         let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_task"));
         command
             .args(&args[1..])
+            .current_dir(cwd)
             .env_clear()
             .env("HOME", home.path())
             .env("TASK_API_URL", uri)
@@ -1726,6 +1740,47 @@ async fn tasks_needs_a_project_when_the_reference_is_a_uuid() {
         err.message
     );
     assert!(harness.sent_nothing().await);
+}
+
+/// 実プロセスは cwd から `.koyori-task.yaml` を探す。既定値の由来は標準エラーにだけ出し、
+/// `--json` の標準出力は JSON のまま変えない。
+#[tokio::test]
+async fn the_binary_reads_the_project_from_the_file_in_the_current_directory() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/tenants/{TENANT}/projects")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([project_json()])))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(project_path("statuses")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(project_path("tasks")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "tasks": [], "total": 0 })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let repo = tempfile::tempdir().unwrap();
+    std::fs::create_dir(repo.path().join(".git")).unwrap();
+    std::fs::write(repo.path().join(".koyori-task.yaml"), "project: APP\n").unwrap();
+    let cwd = repo.path().join("sub");
+    std::fs::create_dir(&cwd).unwrap();
+
+    let (ok, stdout, stderr) = run_binary_in(
+        &server,
+        "",
+        &["task", "--json", "tasks", "list"],
+        None,
+        Some(cwd),
+    )
+    .await;
+
+    assert!(ok, "stderr: {stderr}");
+    assert!(stderr.contains("project: APP (from "), "{stderr}");
+    serde_json::from_str::<serde_json::Value>(&stdout).expect("stdout stays JSON");
 }
 
 #[tokio::test]

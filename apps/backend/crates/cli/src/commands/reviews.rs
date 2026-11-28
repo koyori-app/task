@@ -33,6 +33,7 @@ pub async fn run(context: &Context, command: ReviewCommand, output: OutputOption
             let pr = pr.as_deref().map(parse_pr_number).transpose()?;
             let payload = parse_submit_payload(&read_json_input(&file)?, pr)?;
             // 検証を終えてから接続する。設定不足で、直せる誤りの指摘を隠さない
+            let project = context.project(project)?;
             let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let created: ReviewDetailResponse = api
@@ -67,6 +68,7 @@ pub async fn run(context: &Context, command: ReviewCommand, output: OutputOption
                 ));
             }
             // 検証を終えてから接続する。設定不足で、直せる誤りの指摘を隠さない
+            let project = context.project(project)?;
             let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let carried: CarryOverReviewResponse = api
@@ -109,6 +111,7 @@ pub async fn run(context: &Context, command: ReviewCommand, output: OutputOption
                 "severity",
             )?;
             // 検証を終えてから接続する。設定不足で、直せる誤りの指摘を隠さない
+            let project = context.project(project)?;
             let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
 
@@ -142,6 +145,7 @@ pub async fn run(context: &Context, command: ReviewCommand, output: OutputOption
             let pr = parse_pr_number(&pr)?;
             let repo = validate_repo(repo.as_deref())?;
             // 検証を終えてから接続する。設定不足で、直せる誤りの指摘を隠さない
+            let project = context.project(project)?;
             let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
 
@@ -177,6 +181,7 @@ pub async fn run(context: &Context, command: ReviewCommand, output: OutputOption
         } => {
             let state = parse_state(&state)?;
             // 検証を終えてから接続する。設定不足で、直せる誤りの指摘を隠さない
+            let project = context.project(project)?;
             let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let updated: FindingResponse = api
@@ -227,6 +232,7 @@ pub async fn run(context: &Context, command: ReviewCommand, output: OutputOption
             };
             check_content_rules(&request)?;
             // 検証を終えてから接続する。設定不足で、直せる誤りの指摘を隠さない
+            let project = context.project(project)?;
             let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let updated: FindingResponse = api
@@ -257,6 +263,7 @@ pub async fn run(context: &Context, command: ReviewCommand, output: OutputOption
             let pr = parse_pr_number(&pr)?;
             let repo = validate_repo(repo.as_deref())?;
             // 検証を終えてから接続する。設定不足で、直せる誤りの指摘を隠さない
+            let project = context.project(project)?;
             let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
 
