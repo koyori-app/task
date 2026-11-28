@@ -32,10 +32,13 @@ describe('tenantStatusLabel', () => {
     ).toBe('Alpha');
   });
 
-  it('says there is no tenant when the list is empty or failed', () => {
+  it('says there is no tenant when the list is empty', () => {
     expect(tenantStatusLabel({ loading: false, error: null, tenants: [], selected: null })).toBe(
       '所属テナントなし',
     );
+  });
+
+  it('shows the error when the list failed to load', () => {
     expect(
       tenantStatusLabel({
         loading: false,
@@ -43,6 +46,6 @@ describe('tenantStatusLabel', () => {
         tenants: [],
         selected: null,
       }),
-    ).toBe('所属テナントなし');
+    ).toBe('テナント一覧を取得できませんでした');
   });
 });
