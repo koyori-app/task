@@ -152,7 +152,7 @@ pub async fn list_tenant_projects(
         .all(&state.db)
         .await?;
     Ok(Json(AdminProjectListResponse {
-        projects: projects.into_iter().map(Into::into).collect(),
+        projects: service::project_responses::build_project_responses(&state.db, projects).await?,
     }))
 }
 

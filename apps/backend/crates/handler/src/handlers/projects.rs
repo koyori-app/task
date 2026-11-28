@@ -146,7 +146,8 @@ pub async fn create_project(
     service::task_types::seed_default_task_types(&txn, model.id).await?;
     txn.commit().await?;
 
-    Ok((StatusCode::CREATED, Json(model.into())))
+    let response = service::project_responses::build_project_response(&state.db, model).await?;
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 /// 新規プロジェクトに既定のワークフローステータスを seed する（#368）。
@@ -212,7 +213,9 @@ pub async fn list_projects(
             .filter(projects::Column::Id.is_in(guest_project_ids.into_iter().collect::<Vec<_>>()))
             .all(&state.db)
             .await?;
-        return Ok(Json(list.into_iter().map(Into::into).collect()));
+        return Ok(Json(
+            service::project_responses::build_project_responses(&state.db, list).await?,
+        ));
     }
     if is_tenant_owner(&state.db, tenant_id, auth.user_id).await? {
         let list = projects::Entity::find()
@@ -220,7 +223,9 @@ pub async fn list_projects(
             .filter(projects::Column::IsPersonal.eq(false))
             .all(&state.db)
             .await?;
-        return Ok(Json(list.into_iter().map(Into::into).collect()));
+        return Ok(Json(
+            service::project_responses::build_project_responses(&state.db, list).await?,
+        ));
     }
 
     // テナントメンバーには、メンバーを 1 人も指定していないプロジェクトと
@@ -241,7 +246,9 @@ pub async fn list_projects(
         .into_iter()
         .filter(|p| visible_ids.contains(&p.id))
         .collect();
-    Ok(Json(visible.into_iter().map(Into::into).collect()))
+    Ok(Json(
+        service::project_responses::build_project_responses(&state.db, visible).await?,
+    ))
 }
 
 #[axum::debug_handler]
@@ -272,7 +279,9 @@ pub async fn get_project(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
-    Ok(Json(project.into()))
+    Ok(Json(
+        service::project_responses::build_project_response(&state.db, project).await?,
+    ))
 }
 
 #[axum::debug_handler]
@@ -361,7 +370,9 @@ pub async fn update_project(
     }
     let updated = active.update(&txn).await?;
     txn.commit().await?;
-    Ok(Json(updated.into()))
+    Ok(Json(
+        service::project_responses::build_project_response(&state.db, updated).await?,
+    ))
 }
 
 #[axum::debug_handler]

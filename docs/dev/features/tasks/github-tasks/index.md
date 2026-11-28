@@ -370,7 +370,7 @@ webhook の受信記録である。`UNIQUE (host, host_url, delivery_id)` を張
 
 `branches[]` は `forge_branch_links` の `id` / `host` / `host_url` / `repo_owner` / `repo_name` / `branch` / `html_url` / `created_at` で、新しい順である。`id` は `DELETE .../forge/branches/{link_id}` に使い、他タスクの `link_id` は 404 を返す。`pull_requests` は、同じ連携のプロジェクトの同じリポジトリで、そのブランチを `head_branch` に持ち、head のリポジトリ（`head_repo_owner` / `head_repo_name`）もブランチと同じ PR である。フォークの同名ブランチからの PR は入らない。形と並びはコミットのものと同じである。
 
-`repository` はタスクのプロジェクトの現在の連携先で、連携が無ければ `null` である。手動リンクの可否と対象リポジトリの表示に使う。連携の管理 API（`GET .../github/integration`）はテナントオーナー専用なので、タスクを読める人なら誰でも読めるここに出す。
+`repository` はタスクのプロジェクトの現在の連携先で、連携が無ければ `null` である。手動リンクの可否と対象リポジトリの表示に使う。連携の状態（`GET .../github/integration`）はセッションでしか読めないので、`read:task` の PAT でも読めるここに出す。プロジェクトの応答（`GET /v1/tenants/{tenant_id}/projects` と `GET .../projects/{id}` など `ProjectResponse` を返すエンドポイント）にも同じ形の `repository` が載り、こちらは `read:project` で読める。
 
 `issue` は取り込み元の GitHub Issue（`github_issue_links` の行）である。Issue から取り込んでいない、または連携を解除してリンクが消えたタスクでは `null` になる。
 
@@ -663,3 +663,4 @@ PR 詳細 API の設計は次のとおりである。
 | 2026-11-24 | 役割の自動の判定は保存せず、応答のたびにタイトルとリンクの行から決める。実装はタイトルの末尾の `(KEY-N)`、クローズキーワード、手動リンクの「マージしたら完了」のどれかである | 保存すると、既存の行の書き換えと、PR の編集のたびの追従が要る。タイトルの末尾の `(KEY-N)` はこのリポジトリの PR の題の決まりである |
 | 2026-11-24 | 役割の手の入れ替えは `forge_pull_request_roles` に持ち、PR イベントでは戻さず、リンクを外す操作で一緒に消す | 自動の判定で戻ると、利用者が直した分類が PR の更新のたびに消える。手で外した後まで残すと、自動リンクが戻ったときに前の入れ替えが生き返る。PR イベントがリンクを消したときは残る |
 | 2026-11-24 | 役割は表示だけに使い、マージ時の自動完了は変えない | 1 つのタスクにタイトルの末尾が `(KEY-N)` の PR が複数あると（スタック PR）、最初のマージでタスクが完了してしまう |
+| 2026-11-28 | プロジェクトの応答（一覧・単体・作成・更新・個人プロジェクト・ダッシュボード）に現在の連携先 `repository` を載せ、`read:project` の PAT でも読めるようにする（TASK-371） | CLI が git remote からプロジェクトを引くために要る。連携先は PR のリンクで、プロジェクトに入れる人には既に見えている |

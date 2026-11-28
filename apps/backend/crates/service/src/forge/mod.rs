@@ -11,4 +11,5 @@ pub mod issue_source;
 pub mod merge_effects;
 pub mod pull_request_commits;
 pub mod pull_requests;
+pub mod repository;
 pub mod task_refs;

@@ -125,18 +125,7 @@ impl ApiClient {
 
     /// 画面の URL。`api_url` が `<画面の URL>/api` の形のときだけ分かる（API は画面の URL を返さない）。
     pub(crate) fn web_base(&self) -> Option<Url> {
-        let mut url = self.base.clone();
-        url.set_query(None);
-        url.set_fragment(None);
-        {
-            let mut path = url.path_segments_mut().ok()?;
-            path.pop_if_empty();
-        }
-        if url.path_segments()?.next_back()? != "api" {
-            return None;
-        }
-        url.path_segments_mut().ok()?.pop();
-        Some(url)
+        web_base_of(&self.base)
     }
 
     /// タスクの画面の URL を組み立てるのに要るもの。作る前に引いておく
@@ -325,6 +314,22 @@ impl WebLocation {
 
 /// 名前（slug）に合うテナント。完全一致を優先し、無ければ大文字小文字を無視して照合する
 /// （プロジェクトや状態の名前解決と同じ優先）。無視した照合で複数に合うなら、選ばずに候補を示す。
+/// `api_url` から画面の URL を引く。`<画面の URL>/api` の形でなければ `None`。
+pub(crate) fn web_base_of(api_url: &Url) -> Option<Url> {
+    let mut url = api_url.clone();
+    url.set_query(None);
+    url.set_fragment(None);
+    {
+        let mut path = url.path_segments_mut().ok()?;
+        path.pop_if_empty();
+    }
+    if url.path_segments()?.next_back()? != "api" {
+        return None;
+    }
+    url.path_segments_mut().ok()?.pop();
+    Some(url)
+}
+
 fn pick_tenant<'a>(tenants: &'a [TenantRef], name: &str) -> Result<&'a TenantRef> {
     let describe = |list: Vec<&TenantRef>| {
         list.iter()

@@ -53,6 +53,17 @@ pub async fn list_projects(api: &ApiClient) -> Result<Vec<ProjectResponse>> {
         .await
 }
 
+/// 制限付きの PAT でプロジェクトのキーを引けないときの案内。`task init` も同じ文を出す。
+pub(crate) const RESTRICTED_TOKEN_HINT: &str = "This token is limited to specific projects, so project keys and KEY-N task references cannot be looked up. Use the project UUID (--project, or `project` in .koyori-task.yaml) and task UUIDs. The token also needs the read:project scope.";
+
+/// 終了コードは一覧の 403 と同じ 4。
+pub(crate) fn restricted_token_error() -> CliError {
+    CliError {
+        exit_code: 4,
+        message: RESTRICTED_TOKEN_HINT.to_string(),
+    }
+}
+
 pub async fn resolve_project(api: &ApiClient, key_or_id: &str) -> Result<ProjectResponse> {
     if is_uuid(key_or_id) {
         return api
@@ -65,13 +76,7 @@ pub async fn resolve_project(api: &ApiClient, key_or_id: &str) -> Result<Project
     // 制限付きの PAT ではプロジェクトの一覧が 403 になり、権限不足の文だけでは何を直せばよいか
     // 読めない。分かっているときは送る前に止め、UUID を使うよう案内する（終了コードは 403 と同じ 4）
     if api.project_restricted() {
-        return Err(CliError {
-            exit_code: 4,
-            message: format!(
-                "This token is limited to specific projects, so project keys and KEY-N task references cannot be looked up. Use the project UUID (--project, or `project` in {}) and task UUIDs. The token also needs the read:project scope.",
-                crate::repo_config::FILE_NAME
-            ),
-        });
+        return Err(restricted_token_error());
     }
     list_projects(api)
         .await?
@@ -575,5 +580,11 @@ mod tests {
         let err = not_found_with_candidates("Sprint", "week-1", vec![]);
 
         assert!(err.message.contains("none"), "{}", err.message);
+    }
+
+    #[test]
+    fn the_restricted_token_hint_names_the_repository_file() {
+        assert!(RESTRICTED_TOKEN_HINT.contains(crate::repo_config::FILE_NAME));
+        assert_eq!(restricted_token_error().exit_code, 4);
     }
 }

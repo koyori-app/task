@@ -32375,6 +32375,17 @@
             "type": ["string", "null"],
             "format": "uuid"
           },
+          "repository": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TaskForgeRepository",
+                "description": "現在の連携先のリポジトリ。連携が無ければ `null`。\nこの欄を返さない旧いサーバーの応答は「連携なし」として読む"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "tenant_id": {
             "type": "string",
             "format": "uuid"

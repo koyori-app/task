@@ -497,6 +497,15 @@ async fn local_commands_work_without_any_connection_settings() {
             "work",
             "api_url",
             "http://127.0.0.1:9",
+            "--no-verify",
+        ],
+        &[
+            "task",
+            "config",
+            "set",
+            "api_url",
+            "http://127.0.0.1:9",
+            "--no-verify",
         ],
         &["task", "config", "get", "--profile", "work", "api_url"],
     ] {

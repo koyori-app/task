@@ -281,7 +281,9 @@ pub async fn get_personal_project(
     auth.require_scope(Scope::ReadProject)?;
     auth.ensure_tenant_access(&state, tenant_id, None).await?;
     let project = get_or_create_personal_project(&state, tenant_id, auth.user_id).await?;
-    Ok(Json(project.into()))
+    Ok(Json(
+        service::project_responses::build_project_response(&state.db, project).await?,
+    ))
 }
 
 #[axum::debug_handler]

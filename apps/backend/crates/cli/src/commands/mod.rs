@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod config;
+pub mod init;
 pub mod my;
 pub mod notifications;
 pub mod projects;

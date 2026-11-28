@@ -257,3 +257,85 @@ impl wiremock::Respond for Changing {
 pub fn project_path(suffix: &str) -> String {
     format!("/v1/tenants/{TENANT}/projects/{PROJECT_ID}/{suffix}")
 }
+
+/// 台本どおりに答える問い合わせ（`task init` のテスト用）。答えが尽きたら EOF（`None`）。
+/// 何を聞かれたかを `asked` に残す。
+pub struct ScriptedPrompt {
+    interactive: bool,
+    lines: std::cell::RefCell<std::collections::VecDeque<String>>,
+    secrets: std::cell::RefCell<std::collections::VecDeque<String>>,
+    piped: std::cell::RefCell<Option<String>>,
+    asked: std::cell::RefCell<Vec<String>>,
+}
+
+impl ScriptedPrompt {
+    /// 端末。`lines` は 1 行の問いへの答え、`secrets` はトークンの問いへの答え。
+    pub fn terminal(lines: &[&str], secrets: &[&str]) -> std::rc::Rc<Self> {
+        std::rc::Rc::new(Self {
+            interactive: true,
+            lines: std::cell::RefCell::new(lines.iter().map(|s| s.to_string()).collect()),
+            secrets: std::cell::RefCell::new(secrets.iter().map(|s| s.to_string()).collect()),
+            piped: std::cell::RefCell::new(None),
+            asked: std::cell::RefCell::new(Vec::new()),
+        })
+    }
+
+    /// 端末でない標準入力。`piped` は繋がっている中身（無ければ何も繋がっていない）。
+    pub fn piped(piped: Option<&str>) -> std::rc::Rc<Self> {
+        std::rc::Rc::new(Self {
+            interactive: false,
+            lines: Default::default(),
+            secrets: Default::default(),
+            piped: std::cell::RefCell::new(piped.map(str::to_string)),
+            asked: std::cell::RefCell::new(Vec::new()),
+        })
+    }
+
+    /// 聞かれた問い（`line:<文>` / `secret:<文>` / `piped:<対象>`）。
+    pub fn asked(&self) -> Vec<String> {
+        self.asked.borrow().clone()
+    }
+}
+
+impl task_cli::prompt::Prompt for ScriptedPrompt {
+    fn interactive(&self) -> bool {
+        self.interactive
+    }
+
+    fn line(&self, label: &str) -> Result<Option<String>> {
+        self.asked.borrow_mut().push(format!("line:{label}"));
+        Ok(self.lines.borrow_mut().pop_front())
+    }
+
+    fn secret(&self, label: &str) -> Result<Option<String>> {
+        self.asked.borrow_mut().push(format!("secret:{label}"));
+        Ok(self.secrets.borrow_mut().pop_front())
+    }
+
+    fn piped(&self, what: &str) -> Result<Option<String>> {
+        self.asked.borrow_mut().push(format!("piped:{what}"));
+        Ok(self.piped.borrow_mut().take())
+    }
+}
+
+fn git(dir: &std::path::Path, args: &[&str]) {
+    let status = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .expect("git is installed");
+    assert!(status.success(), "git {args:?}");
+}
+
+/// 一時ディレクトリに git リポジトリを作る。`origin` を渡すとその URL を remote に足す。
+pub fn git_repo(origin: Option<&str>) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    git(dir.path(), &["init", "-q"]);
+    if let Some(url) = origin {
+        git(dir.path(), &["remote", "add", "origin", url]);
+    }
+    dir
+}
