@@ -62,6 +62,17 @@ pub async fn resolve_project(api: &ApiClient, key_or_id: &str) -> Result<Project
             )
             .await;
     }
+    // 制限付きの PAT ではプロジェクトの一覧が 403 になり、権限不足の文だけでは何を直せばよいか
+    // 読めない。分かっているときは送る前に止め、UUID を使うよう案内する（終了コードは 403 と同じ 4）
+    if api.project_restricted() {
+        return Err(CliError {
+            exit_code: 4,
+            message: format!(
+                "This token is limited to specific projects, so project keys and KEY-N task references cannot be looked up. Use the project UUID (--project, or `project` in {}) and task UUIDs. The token also needs the read:project scope.",
+                crate::repo_config::FILE_NAME
+            ),
+        });
+    }
     list_projects(api)
         .await?
         .into_iter()

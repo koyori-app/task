@@ -21,9 +21,9 @@ pub async fn run(
     command: ProjectsCommand,
     output: OutputOptions,
 ) -> Result<i32> {
-    let api = &context.connect().await?;
     match command {
         ProjectsCommand::List => {
+            let api = &context.connect().await?;
             let projects = list_projects(api).await?;
             if output.json {
                 print(&projects, output);
@@ -39,6 +39,8 @@ pub async fn run(
         // `--status` に何を渡せるかは、プロジェクトごとに違ううえ画面を見ないと分からない。
         // CLI だけで完結できるよう並び順（position 昇順）のまま出す
         ProjectsCommand::Statuses { project } => {
+            let project = context.project(project)?;
+            let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let mut statuses = list_statuses(api, project.id).await?;
             statuses.sort_by_key(|status| status.position);
@@ -55,6 +57,8 @@ pub async fn run(
         // `--label` に渡せる名前を CLI だけで調べられるようにする。API は並び順を保証しないので
         // 名前の昇順に揃え、出力を安定させる
         ProjectsCommand::Labels { project } => {
+            let project = context.project(project)?;
+            let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let mut labels = list_labels(api, project.id).await?;
             // `--label` の名前の照合は大文字小文字を区別しないので、並びも同じ基準にする
@@ -75,6 +79,8 @@ pub async fn run(
         }
         // `--type` に渡せる名前を CLI だけで調べられるようにする。画面の並び（position 昇順）のまま出す
         ProjectsCommand::Types { project } => {
+            let project = context.project(project)?;
+            let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let mut types = list_task_types(api, project.id).await?;
             types.sort_by_key(|task_type| task_type.position);
@@ -86,7 +92,10 @@ pub async fn run(
                 print(&lines, output);
             }
         }
-        ProjectsCommand::Show { key } => print(&resolve_project(api, &key).await?, output),
+        ProjectsCommand::Show { key } => {
+            let api = &context.connect().await?;
+            print(&resolve_project(api, &key).await?, output)
+        }
     }
     Ok(0)
 }

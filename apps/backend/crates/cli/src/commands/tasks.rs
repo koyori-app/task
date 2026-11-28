@@ -107,6 +107,8 @@ pub async fn run(
                 check_list_fields(fields)?;
             }
 
+            let project = context.project(project)?;
+
             let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             // 状態の一覧は 1 回だけ取る。`--status` の名前の解決と、表と `status` 項目の表示に使う
@@ -206,6 +208,8 @@ pub async fn run(
             let limit = check_limit(limit, MAX_SEARCH_LIMIT)?;
             let offset = offset_for(page, limit)?;
 
+            let project = context.project(project)?;
+
             let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let mut segments = tasks_path(api, project.id);
@@ -243,6 +247,7 @@ pub async fn run(
                 description.as_deref(),
                 "Omit --description / --description-file to create a task without one.",
             )?;
+            let project = context.project(project)?;
             let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let status_id = match status {
@@ -302,6 +307,7 @@ pub async fn run(
                 .enumerate()
                 .map(|(i, item)| prepare_bulk_item(i, item, status.as_deref()))
                 .collect::<Result<Vec<_>>>()?;
+            let project = context.project(project)?;
             let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let body = resolve_bulk_request(api, &project, prepared).await?;
@@ -330,7 +336,7 @@ pub async fn run(
             project,
             raw,
         } => {
-            let target = check_task_target(&task_ref, project.as_deref())?;
+            let target = check_task_target(context, &task_ref, project)?;
             let api = &context.connect().await?;
             let (project, task_id) = resolve_task_target(api, target).await?;
             let task: TaskDetailResponse = api
@@ -357,7 +363,7 @@ pub async fn run(
                 description.as_deref(),
                 "To remove the description, use --clear-description.",
             )?;
-            let target = check_task_target(&task_ref, project.as_deref())?;
+            let target = check_task_target(context, &task_ref, project)?;
             let api = &context.connect().await?;
             let (project, task_id) = resolve_task_target(api, target).await?;
             let status_id = match status {
@@ -387,7 +393,7 @@ pub async fn run(
             print(&task_for_display(updated), output);
         }
         TasksCommand::Complete { task_ref, project } => {
-            let target = check_task_target(&task_ref, project.as_deref())?;
+            let target = check_task_target(context, &task_ref, project)?;
             let api = &context.connect().await?;
             let (project, task_id) = resolve_task_target(api, target).await?;
             let status_id = find_done_status_id(api, project.id).await?;
@@ -415,7 +421,7 @@ pub async fn run(
                 // 引数・投入の検証エラーは 2（README の終了コード表）
                 return Err(CliError::validation("Comment body is required"));
             }
-            let target = check_task_target(&task_ref, project.as_deref())?;
+            let target = check_task_target(context, &task_ref, project)?;
             let api = &context.connect().await?;
             let (project, task_id) = resolve_task_target(api, target).await?;
             let mut segments = task_path(api, project.id, &task_id);
@@ -432,7 +438,7 @@ pub async fn run(
             print(&comment_for_display(comment), output);
         }
         TasksCommand::Comments { task_ref, project } => {
-            let target = check_task_target(&task_ref, project.as_deref())?;
+            let target = check_task_target(context, &task_ref, project)?;
             let api = &context.connect().await?;
             let (project, task_id) = resolve_task_target(api, target).await?;
             let list = comments_for_display(fetch_comments(api, project.id, &task_id).await?);
@@ -445,7 +451,7 @@ pub async fn run(
             }
         }
         TasksCommand::Delete { task_ref, project } => {
-            let target = check_task_target(&task_ref, project.as_deref())?;
+            let target = check_task_target(context, &task_ref, project)?;
             let api = &context.connect().await?;
             let (project, task_id) = resolve_task_target(api, target).await?;
             api.delete(&borrow(&task_path(api, project.id, &task_id)))
@@ -469,7 +475,7 @@ async fn run_pull_requests(
 ) -> Result<()> {
     match command {
         TaskPrCommand::List { task_ref, project } => {
-            let target = check_task_target(&task_ref, project.as_deref())?;
+            let target = check_task_target(context, &task_ref, project)?;
             let api = &context.connect().await?;
             let (project, task_id) = resolve_task_target(api, target).await?;
             let forge = task_forge(api, project.id, &task_id).await?;
@@ -485,7 +491,7 @@ async fn run_pull_requests(
             closes,
             project,
         } => {
-            let target = check_task_target(&task_ref, project.as_deref())?;
+            let target = check_task_target(context, &task_ref, project)?;
             let api = &context.connect().await?;
             let (project, task_id) = resolve_task_target(api, target).await?;
             let mut segments = task_forge_path(api, project.id, &task_id);
@@ -507,7 +513,7 @@ async fn run_pull_requests(
             number,
             project,
         } => {
-            let target = check_task_target(&task_ref, project.as_deref())?;
+            let target = check_task_target(context, &task_ref, project)?;
             let api = &context.connect().await?;
             let (project, task_id) = resolve_task_target(api, target).await?;
             // API は PR の ID で外すので、一覧から番号で引く
@@ -1516,15 +1522,23 @@ fn borrow(segments: &[String]) -> Vec<&str> {
 
 /// 参照から「どのプロジェクトのどのタスクか」を、API を呼ばずに決められる範囲で決める。
 ///
-/// UUID 指定は所属プロジェクトを含まないので `--project` が要る。ここで弾かないと、
-/// 直せる誤りが接続や設定の失敗に隠れる。
-fn check_task_target(task_ref: &str, project_key: Option<&str>) -> Result<(String, String)> {
+/// UUID 指定は所属プロジェクトを含まないので `--project`（か `.koyori-task.yaml` の `project`）が
+/// 要る。ここで弾かないと、直せる誤りが接続や設定の失敗に隠れる。`KEY-N` は参照内のキーを使い、
+/// 既定値を見ない（別のプロジェクトのタスクを指せなくなるため）。
+fn check_task_target(
+    context: &Context,
+    task_ref: &str,
+    project: Option<String>,
+) -> Result<(String, String)> {
     match parse_task_ref(task_ref)? {
         TaskRef::Uuid(uuid) => {
-            let project_key = project_key.ok_or_else(|| {
-                CliError::validation("--project is required when using a task UUID")
+            let project_key = context.project_or_default(project)?.ok_or_else(|| {
+                CliError::validation(format!(
+                    "--project is required when using a task UUID (or put `project` in {})",
+                    crate::repo_config::FILE_NAME
+                ))
             })?;
-            Ok((project_key.to_string(), uuid.to_string()))
+            Ok((project_key, uuid.to_string()))
         }
         TaskRef::Seq {
             project_key,

@@ -225,21 +225,21 @@ pub enum ProjectsCommand {
     List,
     /// List the statuses a project's tasks can be in
     Statuses {
-        /// Project key or UUID
+        /// Project key or UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
-        project: String,
+        project: Option<String>,
     },
     /// List the labels a project's tasks can have (name, color, description)
     Labels {
-        /// Project key or UUID
+        /// Project key or UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
-        project: String,
+        project: Option<String>,
     },
     /// List the types a project's tasks can have (name, color)
     Types {
-        /// Project key or UUID
+        /// Project key or UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
-        project: String,
+        project: Option<String>,
     },
     /// Show a project by key or UUID
     Show {
@@ -252,9 +252,9 @@ pub enum ProjectsCommand {
 pub enum TasksCommand {
     /// List tasks in a project
     List {
-        /// Project key or UUID
+        /// Project key or UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
-        project: String,
+        project: Option<String>,
         #[arg(long, help = concat!("Filter by priority (", priority_hint!(), ")"))]
         priority: Option<String>,
         /// Filter by status name
@@ -304,9 +304,9 @@ pub enum TasksCommand {
     Search {
         /// Search query
         query: String,
-        /// Project key or UUID
+        /// Project key or UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
-        project: String,
+        project: Option<String>,
         /// Hits per page (1-100)
         #[arg(long, default_value_t = 20)]
         limit: u64,
@@ -316,9 +316,9 @@ pub enum TasksCommand {
     },
     /// Create a task
     Create {
-        /// Project key or UUID
+        /// Project key or UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
-        project: String,
+        project: Option<String>,
         /// Task title
         #[arg(long)]
         title: String,
@@ -344,9 +344,9 @@ pub enum TasksCommand {
     /// anything is sent; the first one that cannot be resolved stops the command with
     /// `tasks[i]: ...` (i is 0-based).
     BulkCreate {
-        /// Project key or UUID
+        /// Project key or UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
-        project: String,
+        project: Option<String>,
         /// JSON file with an array of tasks, or - for stdin
         file: String,
         /// Status name for elements without `status` (default: the project's default status)
@@ -357,7 +357,7 @@ pub enum TasksCommand {
     Show {
         /// Task ref (KEY-N or UUID)
         task_ref: String,
-        /// Project key when using UUID
+        /// Project key when using UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
         project: Option<String>,
         /// Print the description as stored, keeping mention markers (`<@user-id>`) instead of
@@ -369,7 +369,7 @@ pub enum TasksCommand {
     Update {
         /// Task ref (KEY-N or UUID)
         task_ref: String,
-        /// Project key when using UUID
+        /// Project key when using UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
         project: Option<String>,
         /// New title
@@ -401,7 +401,7 @@ pub enum TasksCommand {
     Complete {
         /// Task ref (KEY-N or UUID)
         task_ref: String,
-        /// Project key when using UUID
+        /// Project key when using UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
         project: Option<String>,
     },
@@ -414,7 +414,7 @@ pub enum TasksCommand {
         /// Read the comment body from a file (`-` for stdin)
         #[arg(long, conflicts_with = "body")]
         body_file: Option<String>,
-        /// Project key when using UUID
+        /// Project key when using UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
         project: Option<String>,
     },
@@ -422,7 +422,7 @@ pub enum TasksCommand {
     Comments {
         /// Task ref (KEY-N or UUID)
         task_ref: String,
-        /// Project key when using UUID
+        /// Project key when using UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
         project: Option<String>,
     },
@@ -430,7 +430,7 @@ pub enum TasksCommand {
     Delete {
         /// Task ref (KEY-N or UUID)
         task_ref: String,
-        /// Project key when using UUID
+        /// Project key when using UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
         project: Option<String>,
     },
@@ -447,7 +447,7 @@ pub enum TaskPrCommand {
     List {
         /// Task ref (KEY-N or UUID)
         task_ref: String,
-        /// Project key when using UUID
+        /// Project key when using UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
         project: Option<String>,
     },
@@ -461,7 +461,7 @@ pub enum TaskPrCommand {
         /// Complete the task when the pull request is merged
         #[arg(long)]
         closes: bool,
-        /// Project key when using UUID
+        /// Project key when using UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
         project: Option<String>,
     },
@@ -472,7 +472,7 @@ pub enum TaskPrCommand {
         /// Pull request number
         #[arg(value_parser = clap::value_parser!(i32).range(1..))]
         number: i32,
-        /// Project key when using UUID
+        /// Project key when using UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
         project: Option<String>,
     },
@@ -585,9 +585,9 @@ pub enum MyCommand {
 pub enum SprintsCommand {
     /// List sprints
     List {
-        /// Project key or UUID
+        /// Project key or UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
-        project: String,
+        project: Option<String>,
         #[arg(long, help = concat!("Filter by sprint status (", sprint_status_hint!(), ")"))]
         status: Option<String>,
     },
@@ -595,25 +595,25 @@ pub enum SprintsCommand {
     Show {
         /// Sprint UUID
         id: String,
-        /// Project key or UUID
+        /// Project key or UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
-        project: String,
+        project: Option<String>,
     },
     /// Start a sprint
     Start {
         /// Sprint UUID
         id: String,
-        /// Project key or UUID
+        /// Project key or UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
-        project: String,
+        project: Option<String>,
     },
     /// Complete a sprint
     Complete {
         /// Sprint UUID
         id: String,
-        /// Project key or UUID
+        /// Project key or UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
-        project: String,
+        project: Option<String>,
         /// Move incomplete tasks to backlog
         #[arg(long)]
         backlog: bool,
@@ -622,9 +622,9 @@ pub enum SprintsCommand {
     Burndown {
         /// Sprint UUID or name
         id: String,
-        /// Project key or UUID
+        /// Project key or UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
-        project: String,
+        project: Option<String>,
     },
 }
 
@@ -648,9 +648,9 @@ pub enum NotificationsCommand {
     ReadAll,
     /// Show or update the notification settings of a project
     Settings {
-        /// Project key or UUID (a key also needs read:project to look up)
+        /// Project key or UUID (a key also needs read:project to look up; default: `project` in .koyori-task.yaml)
         #[arg(long)]
-        project: String,
+        project: Option<String>,
         /// In-app event types, comma separated (replaces the current list)
         #[arg(long = "in-app", value_name = "types")]
         in_app: Option<String>,
@@ -666,18 +666,18 @@ pub enum ReviewCommand {
     Submit {
         /// JSON file with the round, or - for stdin
         file: String,
-        /// Project key or UUID
+        /// Project key or UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
-        project: String,
+        project: Option<String>,
         /// PR number (overrides `pr` in the JSON)
         #[arg(long)]
         pr: Option<String>,
     },
     /// Carry unresolved findings over from another PR (e.g. after re-opening a merged PR)
     CarryOver {
-        /// Project key or UUID
+        /// Project key or UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
-        project: String,
+        project: Option<String>,
         /// PR number to carry findings from
         #[arg(long = "from-pr")]
         from_pr: String,
@@ -690,9 +690,9 @@ pub enum ReviewCommand {
     },
     /// List findings for a PR
     List {
-        /// Project key or UUID
+        /// Project key or UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
-        project: String,
+        project: Option<String>,
         /// PR number
         #[arg(long)]
         pr: String,
@@ -708,9 +708,9 @@ pub enum ReviewCommand {
     },
     /// List review rounds for a PR
     Rounds {
-        /// Project key or UUID
+        /// Project key or UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
-        project: String,
+        project: Option<String>,
         /// PR number
         #[arg(long)]
         pr: String,
@@ -722,9 +722,9 @@ pub enum ReviewCommand {
     Resolve {
         /// Finding UUID
         id: String,
-        /// Project key or UUID
+        /// Project key or UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
-        project: String,
+        project: Option<String>,
         /// New state (open,fixing,fixed,verified,deferred,rejected)
         #[arg(long)]
         state: String,
@@ -737,9 +737,9 @@ pub enum ReviewCommand {
     Edit {
         /// Finding UUID
         id: String,
-        /// Project key or UUID
+        /// Project key or UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
-        project: String,
+        project: Option<String>,
         /// New title
         #[arg(long)]
         title: Option<String>,
@@ -764,9 +764,9 @@ pub enum ReviewCommand {
     },
     /// Show the merge verdict for a PR (exits 1 unless it is reviewed, clean, and up to date)
     Summary {
-        /// Project key or UUID
+        /// Project key or UUID (default: `project` in .koyori-task.yaml)
         #[arg(long)]
-        project: String,
+        project: Option<String>,
         /// PR number
         #[arg(long)]
         pr: String,
@@ -988,8 +988,9 @@ mod tests {
     }
 
     #[test]
-    fn requires_the_project_and_pr_options_the_read_commands_are_documented_with() {
-        assert!(Cli::try_parse_from(["task", "review", "list", "--pr", "1"]).is_err());
+    fn requires_the_pr_option_and_accepts_a_missing_project() {
+        // `--project` は `.koyori-task.yaml` から補えるので解析では求めない（無ければ実行時に終了 2）
+        assert!(Cli::try_parse_from(["task", "review", "list", "--pr", "1"]).is_ok());
         assert!(Cli::try_parse_from(["task", "review", "list", "--project", "APP"]).is_err());
     }
 

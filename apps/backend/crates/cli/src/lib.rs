@@ -9,15 +9,20 @@ pub mod commands;
 pub mod config;
 pub mod error;
 pub mod output;
+pub mod repo_config;
 pub mod resolve;
 pub mod text_input;
 pub mod update;
+
+use std::cell::OnceCell;
+use std::path::PathBuf;
 
 use api::ApiClient;
 use cli::{Cli, Command};
 use config::{ConfigStore, RuntimeConfig, resolve_runtime_with};
 use error::Result;
 use output::OutputOptions;
+use repo_config::RepoConfig;
 
 /// 環境変数の読み取り。テストは実プロセスの環境を見ない実装を差し込む。
 type EnvLookup = Box<dyn Fn(&str) -> Option<String>>;
@@ -31,11 +36,19 @@ pub struct Context {
     /// 新しい版の確認と `self-update` の相手。`Context::new` では `None`（外へ出る経路が無い）。
     /// 実プロセスだけが `from_process` で入れる
     updater: Option<update::Updater>,
+    /// `.koyori-task.yaml` を探す起点。`None` は探さない（`Context::new` の既定。
+    /// テストがこのリポジトリ自身のファイルに左右されないため）
+    repo_dir: Option<PathBuf>,
+    /// 読んだ `.koyori-task.yaml`。1 プロセスで 1 回だけ読み、以降は同じ内容を使う
+    repo: OnceCell<Option<RepoConfig>>,
 }
 
 impl Context {
     pub fn from_process() -> Result<Self> {
         let mut context = Self::new(ConfigStore::discover()?, |key| std::env::var(key).ok());
+        // cwd が取れない（消されたディレクトリなど）ときは git の外と同じに扱う。
+        // ここで失敗させると `config set` まで動かなくなる
+        context.repo_dir = std::env::current_dir().ok();
         context.updater = std::env::current_exe()
             .and_then(std::fs::canonicalize)
             .ok()
@@ -56,7 +69,71 @@ impl Context {
             store,
             env: Box::new(env),
             updater: None,
+            repo_dir: None,
+            repo: OnceCell::new(),
         }
+    }
+
+    /// `.koyori-task.yaml` を探す起点を差し込む（テスト用。実プロセスは `from_process` が cwd を入れる）。
+    pub fn with_repo_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.repo_dir = Some(dir.into());
+        self
+    }
+
+    /// `.koyori-task.yaml` を（まだなら）読む。失敗は覚えずに返す。
+    ///
+    /// `profile` はまだ扱えない。黙って無視すると、別のトークンで送るつもりの要求が
+    /// 既定のトークンで送られるので、要求を送る前に止める
+    fn repo_config(&self) -> Result<Option<&RepoConfig>> {
+        if let Some(config) = self.repo.get() {
+            return Ok(config.as_ref());
+        }
+        let config = match &self.repo_dir {
+            None => None,
+            Some(dir) => repo_config::load(dir)?,
+        };
+        if let Some(config) = &config {
+            for key in &config.unknown_keys {
+                eprintln!(
+                    "warning: unknown key \"{key}\" in {} (ignored)",
+                    config.path.display()
+                );
+            }
+            if config.profile.is_some() {
+                return Err(error::CliError::validation(format!(
+                    "`profile` in {} is not supported by this version of the CLI; remove it or update the CLI",
+                    config.path.display()
+                )));
+            }
+        }
+        Ok(self.repo.get_or_init(|| config).as_ref())
+    }
+
+    /// 明示が無ければ `.koyori-task.yaml` の `project`。どちらも無ければ `None`。
+    /// 既定値を使ったときだけ、由来を標準エラーに 1 行出す（`--json` の出力は変えない）
+    pub(crate) fn project_or_default(&self, explicit: Option<String>) -> Result<Option<String>> {
+        if explicit.is_some() {
+            // ファイルはここでは読まない。接続（`runtime`）が必ず読む
+            return Ok(explicit);
+        }
+        let Some(config) = self.repo_config()? else {
+            return Ok(None);
+        };
+        let Some(project) = config.project.clone() else {
+            return Ok(None);
+        };
+        eprintln!("{}", config.project_source_line(&project));
+        Ok(Some(project))
+    }
+
+    /// `--project` を省ける口のプロジェクト。明示 > `.koyori-task.yaml` > エラー。
+    pub(crate) fn project(&self, explicit: Option<String>) -> Result<String> {
+        self.project_or_default(explicit)?.ok_or_else(|| {
+            error::CliError::validation(format!(
+                "--project is required: pass --project <key or UUID>, or put `project: <key or UUID>` in {} at the repository root",
+                repo_config::FILE_NAME
+            ))
+        })
     }
 
     /// 新しい版の確認と `self-update` の相手を差し込む（テスト用。実プロセスは `from_process`）。
@@ -70,6 +147,9 @@ impl Context {
     }
 
     fn runtime(&self) -> Result<RuntimeConfig> {
+        // 要求を送る口は全部ここを通る。`--project` の明示や env の指定があっても、
+        // 壊れたファイルや未対応の `profile` を見逃さないよう、設定の判定より先に読む
+        self.repo_config()?;
         resolve_runtime_with(&self.store, |key| (self.env)(key))
     }
 

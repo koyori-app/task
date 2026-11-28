@@ -14,11 +14,12 @@ use crate::output::{OutputOptions, print};
 use crate::resolve::{is_uuid, resolve_project};
 
 pub async fn run(context: &Context, command: SprintsCommand, output: OutputOptions) -> Result<i32> {
-    let api = &context.connect().await?;
     match command {
         SprintsCommand::List { project, status } => {
             // 検証せず素通しすると、綴りを外したまま絞り込みが効かない結果が返る
             let status = status.as_deref().map(parse_sprint_status).transpose()?;
+            let project = context.project(project)?;
+            let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let query = status
                 .map(|status| vec![("status", status)])
@@ -29,6 +30,8 @@ pub async fn run(context: &Context, command: SprintsCommand, output: OutputOptio
             print(&sprints, output);
         }
         SprintsCommand::Show { id, project } => {
+            let project = context.project(project)?;
+            let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let detail: SprintDetail = api
                 .get(&borrow(&sprint_path(api, project.id, &id)), &[])
@@ -36,6 +39,8 @@ pub async fn run(context: &Context, command: SprintsCommand, output: OutputOptio
             print(&detail, output);
         }
         SprintsCommand::Start { id, project } => {
+            let project = context.project(project)?;
+            let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let mut segments = sprint_path(api, project.id, &id);
             segments.push("start".into());
@@ -47,6 +52,8 @@ pub async fn run(context: &Context, command: SprintsCommand, output: OutputOptio
             project,
             backlog,
         } => {
+            let project = context.project(project)?;
+            let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let mut segments = sprint_path(api, project.id, &id);
             segments.push("complete".into());
@@ -58,6 +65,8 @@ pub async fn run(context: &Context, command: SprintsCommand, output: OutputOptio
             print(&sprint, output);
         }
         SprintsCommand::Burndown { id, project } => {
+            let project = context.project(project)?;
+            let api = &context.connect().await?;
             let project = resolve_project(api, &project).await?;
             let sprint_id = resolve_sprint_id(api, project.id, &id).await?;
             let detail: SprintDetail = api

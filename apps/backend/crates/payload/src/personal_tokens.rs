@@ -106,12 +106,17 @@ fn bound(tenant_ids: &[Uuid], tenant_id: Option<Uuid>) -> Vec<Uuid> {
 /// ほとんどのコマンドの前段で読む応答は、使う項目だけの型で読む。応答の全体
 /// （`PersonalTokenIdentityResponse`）で読むと、CLI が使わない項目の増減で、無関係な
 /// コマンドまで止まる。元の応答を直列化したものが読めることはテストで固定する。
+///
+/// `allowed_project_ids` はプロジェクトの制限の有無（`Some` なら制限付き）。制限付きの PAT は
+/// プロジェクトの一覧を引けないので、CLI はキーを引く前に UUID を使うよう案内する。
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct PersonalTokenTenants {
     #[serde(default)]
     pub tenant_ids: Vec<Uuid>,
     #[serde(default)]
     pub tenant_id: Option<Uuid>,
+    #[serde(default)]
+    pub allowed_project_ids: Option<Vec<Uuid>>,
 }
 
 impl PersonalTokenTenants {
@@ -267,12 +272,29 @@ mod tests {
         }
     }
 
+    /// プロジェクトの制限（`allowed_project_ids`）も、全体の応答と同じに読める。
+    #[test]
+    fn the_narrow_type_reads_the_project_restriction_of_the_full_response() {
+        let a = Uuid::from_u128(10);
+        let project = Uuid::from_u128(20);
+        for allowed in [Some(vec![project]), Some(vec![]), None] {
+            let full = PersonalTokenIdentityResponse {
+                allowed_project_ids: allowed.clone(),
+                ..identity(vec![a], Some(a))
+            };
+            let narrow: PersonalTokenTenants =
+                serde_json::from_value(serde_json::to_value(&full).unwrap()).unwrap();
+            assert_eq!(narrow.allowed_project_ids, allowed);
+        }
+    }
+
     #[test]
     fn the_narrow_type_reads_a_response_without_the_other_fields() {
         let a = Uuid::from_u128(10);
         let narrow: PersonalTokenTenants =
             serde_json::from_value(serde_json::json!({ "tenant_ids": [a] })).unwrap();
         assert_eq!(narrow.bound_tenant_ids(), vec![a]);
+        assert_eq!(narrow.allowed_project_ids, None);
         let none: PersonalTokenTenants = serde_json::from_value(serde_json::json!({})).unwrap();
         assert!(none.bound_tenant_ids().is_empty());
     }
