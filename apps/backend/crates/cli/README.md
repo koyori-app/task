@@ -269,6 +269,42 @@ task auth whoami                   # 使用中の鍵と持ち主・scope・有�
 task tenants list                  # 使えるテナントの ID・名前（slug）・表示名（read:tenant が要る）
 ```
 
+`task config set api_url` は、保存の前に API が答えるかを確かめる。送るのは認証なしの要求 1 種類
+（`GET <URL>/v1/personal_tokens/me`）で、トークンは送らない。`https://task.example.com` と書けば
+`/api` を足した形も試し、答えた方を保存して、保存した値を出力に出す。どちらも答えなければ終了コード 2 で
+止まり、config は変えない。届かない環境で先に書いておくなら `--no-verify` を付ける（値をそのまま保存し、何も送らない）。
+`api_url` 以外のキーは確かめない。
+
+### 初期設定（task init）
+
+`task init` は、接続の設定とリポジトリの `.koyori-task.yaml` をまとめて用意する。
+
+```bash
+task init                          # 端末で、足りないものだけを聞く
+task init --api-url https://task.example.com --project TASK < token.txt   # 端末でないとき
+```
+
+- 接続（`api_url` と `token`）が未設定なら、インスタンスの URL を聞いて `config set api_url` と同じ方法で確かめ、
+  確かめた URL にだけトークンを送る。`GET /v1/personal_tokens/me` が通ってから、両方を 1 回で保存する。
+  通らなければ何も保存しない。片方だけ設定済みなら足りない方だけを足し、既にある値は変えない
+- トークンの入力は画面に出ない
+- 書く先はトップレベルで、`--profile work` を付けるとそのプロファイル（無ければ作る）。
+  `TASK_PROFILE` で選んだプロファイルの設定が足りないときと、環境変数を片方だけ渡した状態では、聞かずに終了コード 2 で止まる。
+  `TASK_API_URL` と `TASK_TOKEN` を両方渡したときは、それを接続に使い、config には書かない
+- 複数のテナントで使えるトークンは、端末でテナントを選ばせて `tenant_id` を同じ層へ保存する。
+  端末でないときと、接続を環境変数か `TASK_PROFILE` から取るときは、選ばせずに終了コード 2 で止まる
+- git リポジトリの中なら、`origin` の remote（`github.com` の URL だけ）とプロジェクトの連携先を照合する。
+  一致が 1 つならそれを確かめ（`--yes` で省ける）、0 個か複数なら一覧から番号かキーで選ぶ。
+  `--project <キーか UUID>` を渡すと照合と選択を飛ばす
+- 決まったプロジェクトを、リポジトリの根の `.koyori-task.yaml` に書く。`--profile` を付けたときは `profile` も書く。
+  カレントディレクトリから根までのどこかに既に `.koyori-task.yaml` があれば、作らずにその場所と中身を出して終わる
+  （壊れたファイルでも上書きしない）。git の外では接続の設定だけを行う
+- 特定のプロジェクトに限ったトークンは一覧を引けないので、プロジェクトの UUID を聞く（または `--project <UUID>`）。
+  ファイルにも UUID を書く
+- 端末でないときは 1 つも聞かない。足りない入力（`--api-url`、標準入力のトークン、`--project` か `--yes`）があれば
+  終了コード 2 で止まる。選ばずに終えたとき・API が失敗したときは `.koyori-task.yaml` を作らない
+- 問いと案内は標準エラーに出す。`--json` の標準出力は結果の JSON 1 つ
+
 ### 設定の優先順位
 
 API の URL とトークンは組で決める。片方ずつ config から補うと、あるインスタンスの
@@ -281,7 +317,8 @@ API の URL とトークンは組で決める。片方ずつ config から補う
 3. 片方だけなら、config が揃っていても終了コード 2 で止まり、API には何も送らない
 
 空文字の環境変数（`TASK_TOKEN=` や `TASK_TENANT=`）は未設定として扱う。`config *` / `auth token` / `auth logout`
-は接続しないので、片方だけの状態でも動く。
+は接続設定を読まないので、片方だけの状態でも動く。外へ出るのは `config set api_url` の確認だけで、
+トークンは送らない（`--no-verify` を付ければ何も送らない）。
 
 以前は項目ごとに環境変数が優先されたので、`TASK_TOKEN` だけを渡して URL は config から
 読ませる使い方ができた。今はエラーになるので、次のどちらかに揃える。
@@ -348,6 +385,7 @@ task --profile work tasks list --project APP
 ### リポジトリの既定のプロジェクト（.koyori-task.yaml）
 
 リポジトリの根に `.koyori-task.yaml` を置くと、`--project` を省いたときにその `project` を使う。
+`task init` で作れる（[初期設定](#初期設定task-init)）。
 
 ```yaml
 project: TASK   # キーか UUID
