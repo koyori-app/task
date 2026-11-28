@@ -1,7 +1,7 @@
 ---
 title: PWA
 description: Web の task を standalone のウィンドウで開くための manifest、service worker、install の案内
-updated: 2026-11-04
+updated: 2026-11-28
 sidebar:
   order: 5
 ---
@@ -19,7 +19,7 @@ sidebar:
 | service worker | `apps/frontend/public/sw.js` | [service worker](#service-worker)の節を参照 |
 | `/sw.js` のヘッダー | `apps/frontend/server/pwa.ts`（`pwaStaticHeaders`）、`+server.ts` の `prod.middleware` | [配信のヘッダー](#配信のヘッダー)の節を参照 |
 | 登録 | `apps/frontend/src/lib/pwa/register-service-worker.ts`、`src/pages/+client.ts` | client の entry から一度だけ行う |
-| install の案内 | `apps/frontend/src/lib/pwa/install-prompt.ts`、`src/components/header/NavUser.vue` | 利用者メニューの「Install app」 |
+| install の案内 | `apps/frontend/src/lib/pwa/install-prompt.ts`、`src/components/sidebar/SidebarUserPanel.vue` | プロフィールカードの「アプリをインストール」 |
 | install 条件の確認 | `apps/frontend/scripts/pwa-installability.mjs` | [確かめ方](#確かめ方)の節を参照 |
 
 ## manifest
@@ -34,7 +34,7 @@ sidebar:
 | `name` と `short_name` | `task` | |
 | `display` | `standalone` | |
 | `lang` | `ja` | |
-| `theme_color` | `#fafafa`（仮） | ヘッダーの `--sidebar`（oklch(0.985 0 0)）に合わせる |
+| `theme_color` | `#fafafa`（仮） | サイドバーの `--sidebar`（oklch(0.985 0 0)）に合わせる |
 | `background_color` | `#ffffff`（仮） | `--background`（oklch(1 0 0)）に合わせる |
 | `icons` | 192、512、maskable 512 | 元絵（`design/app-icon/source.png`）から生成する（TASK-299、仮の絵）。不透明で、透明部分は白で埋める |
 
@@ -86,7 +86,7 @@ sidebar:
 
 ブラウザの既定の案内を残すため、`beforeinstallprompt` で `preventDefault()` を呼ばない。デスクトップのアドレスバーの install のアイコンは、どちらでも出る。
 
-独自のボタンは利用者メニュー（`NavUser.vue`）の「Install app」である。`beforeinstallprompt` を受け取ったときだけ出し、押すと保持していたイベントの `prompt()` を呼ぶ。イベントは一度しか使えないので、押した後は消える。
+独自のボタンはサイドバー下端のプロフィールカード（`SidebarUserPanel.vue`）の「アプリをインストール」である。`beforeinstallprompt` を受け取ったときだけ出し、押すと保持していたイベントの `prompt()` を呼ぶ。イベントは一度しか使えないので、押した後は消える。
 
 install 済みではボタンを出さない。standalone のウィンドウで開いているとき（`display-mode: standalone`、iOS は `navigator.standalone`）と、`appinstalled` の後がこれに当たる。
 
@@ -94,7 +94,7 @@ iOS と iPadOS の Safari には `beforeinstallprompt` が無いので、ボタ�
 
 ## 確かめ方
 
-ユニットテストは `server/__tests__/pwa.test.ts`、`pwa-app.test.ts`、`src/lib/pwa/__tests__/`、`src/components/header/__tests__/NavUser.test.ts` にある。
+ユニットテストは `server/__tests__/pwa.test.ts`、`pwa-app.test.ts`、`src/lib/pwa/__tests__/`、`src/components/sidebar/__tests__/SidebarUserPanel.test.ts` にある。
 
 ビルド成果物での install 条件は次の手順で確かめる。
 

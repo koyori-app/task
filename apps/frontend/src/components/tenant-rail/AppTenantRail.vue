@@ -1,0 +1,87 @@
+<script setup lang="ts">
+import { ContextMenu } from '@koyori-app/ui-vue';
+import { usePageContext } from 'vike-vue/usePageContext';
+import { computed, ref, watch } from 'vue';
+
+import CreateTenantDialog from '@/components/tenant-rail/CreateTenantDialog.vue';
+import TenantRail from '@/components/tenant-rail/TenantRail.vue';
+import { useTenantMenu } from '@/composables/useTenantMenu';
+import { useTenantStore, type Tenant } from '@/stores/tenant';
+
+const emit = defineEmits<{
+  /** 切り替え・遷移・ダイアログを開く前に出す。狭い画面では Drawer を閉じる */
+  close: [];
+}>();
+
+const pageContext = usePageContext();
+const tenantStore = useTenantStore();
+
+const tenantSlug = computed(() => {
+  const { tenant } = pageContext.routeParams;
+  return typeof tenant === 'string' ? tenant : '';
+});
+
+watch(tenantSlug, (slug) => void tenantStore.loadTenants(slug || undefined), { immediate: true });
+
+function selectTenant(tenant: Tenant) {
+  emit('close');
+  tenantStore.selectTenant(tenant);
+  if (tenant.display_id !== tenantSlug.value) {
+    // テナントに紐づく状態を残さないためフルページ遷移にする
+    window.location.assign(`/${tenant.display_id}`);
+  }
+}
+
+function retry() {
+  void tenantStore.loadTenants(tenantSlug.value || undefined);
+}
+
+const createDialogOpen = ref(false);
+function openCreateDialog() {
+  // Drawer の dialog を閉じてから開き、作成ダイアログを入れ子にしない
+  emit('close');
+  createDialogOpen.value = true;
+}
+
+// ---- アイコンの右クリック・長押しで出すテナントのメニュー ----
+const menu = ref<{ tenant: Tenant; x: number; y: number } | null>(null);
+const tenantMenu = useTenantMenu(() => menu.value?.tenant ?? null);
+
+function openMenu(tenant: Tenant, position: { x: number; y: number }) {
+  menu.value = { tenant, ...position };
+}
+
+function onMenuSelect(value: string) {
+  // コピーでも閉じる。Toaster は Drawer より先に top layer へ入るので、開いたままだと toast が裏に隠れる
+  emit('close');
+  tenantMenu.onSelect(value);
+}
+</script>
+
+<template>
+  <div class="flex h-full w-16 shrink-0 flex-col" data-slot="app-tenant-rail">
+    <TenantRail
+      :tenants="tenantStore.tenants"
+      :selected-tenant-id="tenantStore.selectedTenantId"
+      :loading="tenantStore.isLoading"
+      :error="tenantStore.error"
+      :menu-tenant-id="menu?.tenant.id ?? null"
+      @select="selectTenant"
+      @retry="retry"
+      @create="openCreateDialog"
+      @menu="openMenu"
+    />
+    <ContextMenu
+      :open="menu !== null"
+      :x="menu?.x ?? 0"
+      :y="menu?.y ?? 0"
+      :label="menu ? `${menu.tenant.name} のメニュー` : 'テナントのメニュー'"
+      :items="tenantMenu.items.value"
+      :on-select="onMenuSelect"
+      :on-close="() => (menu = null)"
+    />
+    <Teleport to="body">
+      <CreateTenantDialog v-model:open="createDialogOpen" />
+    </Teleport>
+  </div>
+</template>

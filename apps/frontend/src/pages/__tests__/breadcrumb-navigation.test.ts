@@ -8,11 +8,6 @@ import TaskPage from '../@tenant/projects/@projectKey/tasks/@taskId/+Page.vue';
 import ProjectPage from '../@tenant/projects/@projectKey/tasks/+Page.vue';
 import HomePage from '../@tenant/+Page.vue';
 
-vi.mock('@/components/header/AppHeader.vue', () => ({
-  default: { template: '<div />' },
-  __isKeepAlive: false,
-  __isTeleport: false,
-}));
 vi.mock('vike/client/router', () => ({ navigate: vi.fn() }));
 enableAutoUnmount(afterEach);
 afterEach(() => vi.unstubAllGlobals());
@@ -164,7 +159,7 @@ function mountPage(pathname: string) {
         },
         'vike-vue:useData': { descriptionHtml: null, descriptionSource: null },
       },
-      stubs: { ClientOnly: true, AppHeader: true, AppSidebar: true, AppSidebarSkeleton: true },
+      stubs: { ClientOnly: true, AppTenantRail: true, AppSidebar: true, AppSidebarSkeleton: true },
     },
   });
 }

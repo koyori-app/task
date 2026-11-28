@@ -4,7 +4,11 @@
 import AppSidebarSkeleton from '@/components/sidebar/AppSidebarSkeleton.vue';
 import AppBreadcrumbs from '@/components/AppBreadcrumbs.vue';
 import { useBreadcrumbs } from '@/composables/useBreadcrumbs';
-import { Alert, Button, Drawer } from '@koyori-app/ui-vue';
+import AppTenantRail from '@/components/tenant-rail/AppTenantRail.vue';
+import TenantIcon from '@/components/tenant-rail/TenantIcon.vue';
+import { tenantStatusLabel } from '@/lib/tenant-status-label';
+import { useTenantStore } from '@/stores/tenant';
+import { Alert, Button, Drawer, Toaster } from '@koyori-app/ui-vue';
 import { PhSidebarSimple } from '@phosphor-icons/vue';
 import { defaultDocument, useEventListener, useMediaQuery } from '@vueuse/core';
 import EmailNotVerified from '@/components/auth/EmailNotVerified.vue';
@@ -58,8 +62,18 @@ useEventListener('keydown', (event: KeyboardEvent) => {
   }
 });
 
+// 狭い画面の本文の上の帯に出す今のテナント。文言はサイドバーの見出しと揃える
+const tenantStore = useTenantStore();
+const currentTenantLabel = computed(() =>
+  tenantStatusLabel({
+    loading: tenantStore.isLoading,
+    error: tenantStore.error,
+    tenants: tenantStore.tenants,
+    selected: tenantStore.selectedTenant,
+  }),
+);
+
 const AppSidebar = defineAsyncComponent(() => import('@/components/sidebar/AppSidebar.vue'));
-const AppHeader = defineAsyncComponent(() => import('@/components/header/AppHeader.vue'));
 </script>
 
 <template>
@@ -87,12 +101,11 @@ const AppHeader = defineAsyncComponent(() => import('@/components/header/AppHead
     @logout="logout"
   />
   <!--
-    テナントとアカウントは全幅のヘッダーに置く（サイドバーの上下ではなく）。
-    1 段目をヘッダー、2 段目をサイドバー + 本文にし、スクロールは本文だけにする。
+    ヘッダーは置かない。左からテナントのレール、サイドバー、本文を横に並べ、スクロールは本文だけにする。
+    狭い画面ではレールとサイドバーを Drawer に入れて横に並べる（幅 320px）。
   -->
-  <div v-else-if="meQuery.data.value" class="flex h-svh flex-col overflow-hidden">
-    <AppHeader />
-    <div class="flex min-h-0 flex-1">
+  <div v-else-if="meQuery.data.value" class="flex h-svh overflow-hidden">
+    <div class="flex shrink-0 [--koyori-drawer-width:20rem]">
       <Drawer
         label="ナビゲーション"
         placement="left"
@@ -100,34 +113,63 @@ const AppHeader = defineAsyncComponent(() => import('@/components/header/AppHead
         :open="drawerOpen"
         @close="drawerOpen = false"
       >
-        <Suspense>
-          <AppSidebar :rail="sidebarRail" @update:rail="setRail" @close="drawerOpen = false" />
-          <template #fallback>
-            <AppSidebarSkeleton :rail="sidebarRail" />
-          </template>
-        </Suspense>
+        <!-- modal の dialog は縦並びなので、横並びはこの入れ物が持つ。
+             Sidebar 自身の枠と角丸は消し、境目の線は包む要素が 1 本だけ引く -->
+        <div
+          class="flex h-full min-h-0 [--koyori-sidebar-border:0] [--koyori-sidebar-radius:0]"
+          data-slot="app-navigation"
+        >
+          <AppTenantRail @close="drawerOpen = false" />
+          <div
+            class="flex min-h-0"
+            :class="isMobile ? 'min-w-0 flex-1 border-l' : 'shrink-0 border-x'"
+          >
+            <Suspense>
+              <AppSidebar :rail="sidebarRail" @update:rail="setRail" @close="drawerOpen = false" />
+              <template #fallback>
+                <AppSidebarSkeleton :rail="sidebarRail" />
+              </template>
+            </Suspense>
+          </div>
+        </div>
       </Drawer>
-      <main class="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
-        <header class="flex h-16 shrink-0 items-center gap-2">
-          <div class="flex w-full min-w-0 items-center gap-2 px-4">
-            <Button
-              variant="ghost"
-              ariaLabel="サイドバーを開閉"
-              :ariaExpanded="isMobile ? drawerOpen : !rail"
-              ariaControls="app-sidebar"
-              @click="toggleSidebar"
-            >
-              <template #icon><PhSidebarSimple /></template>
-            </Button>
+    </div>
+    <main class="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+      <header class="flex shrink-0 items-center gap-2" :class="isMobile ? 'h-12' : 'h-16'">
+        <div class="flex w-full min-w-0 items-center gap-2 px-4">
+          <Button
+            variant="ghost"
+            ariaLabel="サイドバーを開閉"
+            :ariaExpanded="isMobile ? drawerOpen : !rail"
+            ariaControls="app-sidebar"
+            @click="toggleSidebar"
+          >
+            <template #icon><PhSidebarSimple /></template>
+          </Button>
+          <!-- 狭い画面はパンくずの代わりに今のテナントを出す。押すと Drawer を開く -->
+          <button
+            v-if="isMobile"
+            type="button"
+            class="flex min-w-0 items-center gap-2 rounded-md px-1 py-1 font-medium text-sm hover:bg-accent"
+            aria-haspopup="dialog"
+            aria-controls="app-sidebar"
+            data-slot="current-tenant"
+            @click="drawerOpen = true"
+          >
+            <TenantIcon :tenant="tenantStore.selectedTenant" :size="24" />
+            <span class="truncate">{{ currentTenantLabel }}</span>
+          </button>
+          <template v-else>
             <!-- koyori の縦線は左右に余白を持ち高さいっぱいに伸びるため、右だけ空けて高さ 1rem で中央に置く -->
             <hr aria-orientation="vertical" class="koyori-separator ml-0 mr-2 h-4 self-center" />
             <AppBreadcrumbs v-bind="breadcrumbs" />
-          </div>
-        </header>
-        <div class="flex flex-1 flex-col gap-4 p-4 pt-0">
-          <slot />
+          </template>
         </div>
-      </main>
-    </div>
+      </header>
+      <div class="flex flex-1 flex-col gap-4 p-4 pt-0">
+        <slot />
+      </div>
+    </main>
   </div>
+  <Toaster />
 </template>

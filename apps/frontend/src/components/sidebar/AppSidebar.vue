@@ -14,6 +14,11 @@ import NavMain from '@/components/sidebar/NavMain.vue';
 import NavAdmin from '@/components/sidebar/NavAdmin.vue';
 import NavProjects from '@/components/sidebar/NavProjects.vue';
 import { shouldCloseSidebarOnNavigate } from '@/components/sidebar/sidebar-navigation';
+import SidebarTenantHeader from '@/components/sidebar/SidebarTenantHeader.vue';
+import SidebarUserPanel from '@/components/sidebar/SidebarUserPanel.vue';
+import { useAuthSession } from '@/composables/useAuthSession';
+import { tenantStatusLabel } from '@/lib/tenant-status-label';
+import { useAuthStore } from '@/stores/auth';
 
 defineProps<{
   /** アイコンだけの表示（広い画面の畳んだ状態）。状態は呼び出し側が持つ */
@@ -35,7 +40,7 @@ const routeTenantSlug = computed(() => {
   return typeof tenant === 'string' ? tenant : '';
 });
 
-// テナント外のページ（/settings/... など）では、ヘッダーのテナント切り替えが選んでいるテナントのナビを出す
+// テナント外のページ（/settings/... など）では、レールで選んでいるテナントのナビを出す
 const tenantSlug = computed(
   () => routeTenantSlug.value || (tenantStore.selectedTenant?.display_id ?? ''),
 );
@@ -57,6 +62,23 @@ const canCreateProject = computed(() =>
   isTenantAdmin(tenantStore.tenants.find((tenant) => tenant.id === routeAlignedTenantId.value)),
 );
 const isAdmin = computed(() => meQuery.data.value?.is_admin === true);
+
+const tenantLabel = computed(() =>
+  tenantStatusLabel({
+    loading: tenantStore.isLoading,
+    error: tenantStore.error,
+    tenants: tenantStore.tenants,
+    selected: tenantStore.selectedTenant,
+  }),
+);
+
+const authStore = useAuthStore();
+const { logout } = useAuthSession();
+const user = computed(() => ({
+  name: authStore.user?.username ?? 'User',
+  email: authStore.user?.email ?? '',
+  avatar: authStore.user?.avatar_url ?? '',
+}));
 
 const navProjects = computed(() => projectsQuery.data.value ?? []);
 
@@ -131,6 +153,18 @@ function closeOnNavigate(event: MouseEvent) {
     @rail-change="emit('update:rail', $event)"
     @click="closeOnNavigate"
   >
+    <template #header>
+      <SidebarTenantHeader
+        :tenant="tenantStore.selectedTenant"
+        :label="tenantLabel"
+        :rail="rail"
+        @close="emit('close')"
+      />
+    </template>
+    <!-- カードのリンクも Sidebar の中の <a> なので、closeOnNavigate が狭い画面の Drawer を閉じる -->
+    <template #footer>
+      <SidebarUserPanel :user="user" :on-logout="logout" :rail="rail" />
+    </template>
     <!-- テナントが決まらない（読み込み中・所属テナントが無い）うちはリンク先も一覧も作れないので、
            テナント依存のナビ自体を出さない。 -->
     <NavMain v-if="tenantSlug" :items="data.navMain" />

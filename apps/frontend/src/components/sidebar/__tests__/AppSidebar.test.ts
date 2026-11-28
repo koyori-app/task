@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { computed, type Ref } from 'vue';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 
-const { navigateSpy, pageContextStub, projectsControl, tenantStoreStub, meControl } = vi.hoisted(
-  () => ({
+const { navigateSpy, logoutSpy, pageContextStub, projectsControl, tenantStoreStub, meControl } =
+  vi.hoisted(() => ({
     navigateSpy: vi.fn(),
+    logoutSpy: vi.fn(),
     meControl: { isAdmin: false },
     pageContextStub: { routeParams: {} as Record<string, string>, urlPathname: '' },
     projectsControl: {
@@ -22,14 +23,15 @@ const { navigateSpy, pageContextStub, projectsControl, tenantStoreStub, meContro
       loadTenants: vi.fn(),
       selectTenant: vi.fn(),
     },
-  }),
-);
+  }));
 
 vi.mock('vike/client/router', () => ({ navigate: navigateSpy }));
 
 vi.mock('vike-vue/usePageContext', () => ({ usePageContext: () => pageContextStub }));
 
 vi.mock('@/stores/tenant', () => ({ useTenantStore: () => tenantStoreStub }));
+
+vi.mock('@/composables/useAuthSession', () => ({ useAuthSession: () => ({ logout: logoutSpy }) }));
 
 vi.mock('@/lib/api-vue-query', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api-vue-query')>();
@@ -49,6 +51,7 @@ vi.mock('@/lib/api-vue-query', async (importOriginal) => {
 });
 
 import { persistedPinia, seedSettings } from '@/components/settings/__tests__/test-pinia';
+import { useAuthStore } from '@/stores/auth';
 import AppSidebar from '../AppSidebar.vue';
 
 enableAutoUnmount(afterEach);
@@ -61,7 +64,10 @@ function mountSidebar(onClose: () => void) {
   return mount(AppSidebar, {
     props: { onClose },
     attachTo: document.body,
-    global: { plugins: [persistedPinia()] },
+    global: {
+      plugins: [persistedPinia()],
+      stubs: { SidebarTenantHeader: true, SidebarUserPanel: true },
+    },
   });
 }
 
@@ -121,7 +127,7 @@ beforeEach(() => {
 
 /**
  * アカウント設定（/settings/...）はテナントの外に置いたページで、URL からテナントが
- * 決まらない。そこでもヘッダーのテナント切り替えが選んでいるテナントのナビを出し、
+ * 決まらない。そこでもレールで選んでいるテナントのナビを出し、
  * プロジェクトへ直接移れるようにする。
  */
 describe('AppSidebar のテナント外のページ', () => {
@@ -351,5 +357,49 @@ describe('AppSidebar のプロジェクトのガントの導き', () => {
     expect(findLink('/acme/projects/ALPHA/tasks').getAttribute('aria-current')).toBeNull();
     // テナントのガントとは別の口なので、テナントのガントは現在地にしない
     expect(findLink('/acme/gantt').getAttribute('aria-current')).toBeNull();
+  });
+});
+
+describe('AppSidebar の上端', () => {
+  it('今のテナントの名前を見出しとして出す', () => {
+    const wrapper = mountSidebar(vi.fn());
+
+    const header = wrapper.findComponent({ name: 'SidebarTenantHeader' });
+    expect(header.exists()).toBe(true);
+    expect(header.props()).toMatchObject({ tenant: ACME, label: 'Acme' });
+  });
+
+  it('見出しのメニューで項目を選ぶと、狭い画面のサイドバーを閉じる', () => {
+    const onClose = vi.fn();
+    const wrapper = mountSidebar(onClose);
+
+    wrapper.findComponent({ name: 'SidebarTenantHeader' }).vm.$emit('close');
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('AppSidebar の下端', () => {
+  it('ログイン中のユーザーのパネルを出し、ログアウトを渡す', async () => {
+    const wrapper = mountSidebar(vi.fn());
+    useAuthStore().setUser({
+      id: 'user-1',
+      email: 'alice@example.test',
+      username: 'alice',
+      avatar_url: 'https://example.test/a.png',
+      email_verified: true,
+      is_admin: false,
+      is_suspended: false,
+      totp_enabled: false,
+    });
+    await flushPromises();
+
+    const panel = wrapper.findComponent({ name: 'SidebarUserPanel' });
+    expect(panel.exists()).toBe(true);
+    expect(panel.props()).toMatchObject({
+      user: { name: 'alice', email: 'alice@example.test', avatar: 'https://example.test/a.png' },
+      onLogout: logoutSpy,
+      rail: false,
+    });
   });
 });
