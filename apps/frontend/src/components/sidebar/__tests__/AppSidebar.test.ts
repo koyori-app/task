@@ -61,7 +61,7 @@ function mountSidebar(onClose: () => void) {
   return mount(AppSidebar, {
     props: { onClose },
     attachTo: document.body,
-    global: { plugins: [persistedPinia()] },
+    global: { plugins: [persistedPinia()], stubs: { SidebarTenantHeader: true } },
   });
 }
 
@@ -121,7 +121,7 @@ beforeEach(() => {
 
 /**
  * アカウント設定（/settings/...）はテナントの外に置いたページで、URL からテナントが
- * 決まらない。そこでもヘッダーのテナント切り替えが選んでいるテナントのナビを出し、
+ * 決まらない。そこでもレールで選んでいるテナントのナビを出し、
  * プロジェクトへ直接移れるようにする。
  */
 describe('AppSidebar のテナント外のページ', () => {
@@ -351,5 +351,15 @@ describe('AppSidebar のプロジェクトのガントの導き', () => {
     expect(findLink('/acme/projects/ALPHA/tasks').getAttribute('aria-current')).toBeNull();
     // テナントのガントとは別の口なので、テナントのガントは現在地にしない
     expect(findLink('/acme/gantt').getAttribute('aria-current')).toBeNull();
+  });
+});
+
+describe('AppSidebar の上端', () => {
+  it('今のテナントの名前を見出しとして出す', () => {
+    const wrapper = mountSidebar(vi.fn());
+
+    const header = wrapper.findComponent({ name: 'SidebarTenantHeader' });
+    expect(header.exists()).toBe(true);
+    expect(header.props()).toMatchObject({ tenant: ACME, label: 'Acme' });
   });
 });

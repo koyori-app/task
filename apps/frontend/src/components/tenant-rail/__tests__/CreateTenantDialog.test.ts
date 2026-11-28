@@ -53,9 +53,9 @@ function mountDialog() {
   return wrapper;
 }
 
-// テナント未所属のホームでは、ヘッダーの閉じたダイアログが本文のダイアログより先に DOM にある。
+// テナント未所属のホームでは、レールの閉じたダイアログが本文のダイアログより先に DOM にある。
 // useId はアプリごとに数えるので、実際の画面と同じく 1 つのアプリに並べ、本文側の dialog を返す
-async function mountBehindHeaderInstance() {
+async function mountBehindRailInstance() {
   mount(
     {
       render: () => [h(CreateTenantDialog, { open: false }), h(CreateTenantDialog, { open: true })],
@@ -209,7 +209,7 @@ describe('CreateTenantDialog', () => {
       response: new Response(null, { status: 201 }),
     });
     vi.spyOn(window.location, 'assign').mockImplementation(() => undefined);
-    const dialog = await mountBehindHeaderInstance();
+    const dialog = await mountBehindRailInstance();
     // 最初の入力欄が「名前」
     const name = dialog.querySelector<HTMLInputElement>('input')!;
     name.value = 'New Tenant';
@@ -224,7 +224,7 @@ describe('CreateTenantDialog', () => {
   });
 
   it('links labels and descriptions to its own inputs when another instance precedes it', async () => {
-    const dialog = await mountBehindHeaderInstance();
+    const dialog = await mountBehindRailInstance();
 
     for (const label of ['名前', '表示ID', '説明（任意）', 'アイコンURL（任意）']) {
       expect(dialog.contains(input(label, dialog)), label).toBe(true);

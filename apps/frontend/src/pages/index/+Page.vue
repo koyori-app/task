@@ -4,7 +4,7 @@ import { navigate } from 'vike/client/router';
 import { useTenantsQuery } from '@/lib/api-vue-query';
 import { useTenantStore } from '@/stores/tenant';
 import { useHydrated } from '@/composables/useHydrated';
-import CreateTenantDialog from '@/components/header/CreateTenantDialog.vue';
+import CreateTenantDialog from '@/components/tenant-rail/CreateTenantDialog.vue';
 import { Button } from '@koyori-app/ui-vue';
 
 const store = useTenantStore();

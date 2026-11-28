@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/vue-query';
 import { navigate } from 'vike/client/router';
 import { computed, ref } from 'vue';
 
-import CreateTenantDialog from './CreateTenantDialog.vue';
+import CreateTenantDialog from '@/components/tenant-rail/CreateTenantDialog.vue';
 import type { Tenant } from '@/stores/tenant';
 import { Dropdown, type DropdownItem, type DropdownSection } from '@koyori-app/ui-vue';
 import { apiClient, useMeQuery } from '@/lib/api-vue-query';
